@@ -45,6 +45,18 @@ VOD_PACKS=core,collect python3 -m vod_mcp.server   # packs 裁剪
 测试：20 用例（方案 A 收敛后）（单元+护栏+packs+真进程 stdio 回环+**协议级真 HTTP 服务器**
 锁定认证头/双后端路径——E1/E2 的永久回归门）。决策闭环见 docs/decisions.md。
 
+## 质量门禁
+
+GitCode Actions 平台侧当前对本账号不可用（运行 0ms FAILED 零 job、
+公开实验仓同样不触发，平台问题非代码问题，已实测隔离）。期间的机器
+门禁=pre-push 钩子（pytest+pyflakes，红了禁推）：
+
+```bash
+git config core.hooksPath .githooks   # clone 后执行一次
+```
+
+`.gitcode/workflows/ci.yml` 已就位，平台恢复后自动叠加服务端门禁。
+
 ## 测试
 
 零第三方运行时依赖；测试需 pytest。真进程 stdio 回环覆盖握手、工具

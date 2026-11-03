@@ -1,0 +1,10 @@
+#!/bin/bash
+# pre-push 质量门：push 前强制 pytest+pyflakes（GitCode Actions 平台不可用期间的本地机器门禁）
+PY=$(ls /root/.hermes/tools/python-3.14.7*/bin/python3 2>/dev/null || command -v python3)
+LIBS=/root/.hermes/cache/scratch/pylibs
+if [ -d "$LIBS" ]; then export PYTHONPATH="$LIBS:$PYTHONPATH"; fi
+echo "[pre-push] lint..."
+"$PY" -m pyflakes vod_mcp/*.py tests/*.py || { echo "[pre-push] FAIL: lint 未过，禁止推送"; exit 1; }
+echo "[pre-push] pytest..."
+"$PY" -m pytest tests/ -q || { echo "[pre-push] FAIL: 测试未过，禁止推送"; exit 1; }
+echo "[pre-push] OK"
