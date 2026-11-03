@@ -1,0 +1,25 @@
+name: vod-devkit CI
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装依赖
+        run: python3 -m pip install pytest pyflakes
+      - name: lint（pyflakes）
+        run: python3 -m pyflakes vod_mcp/*.py tests/*.py
+      - name: 测试（25 用例：单元+护栏+packs+协议级+回环+meta+账本）
+        run: python3 -m pytest tests/ -q
+      - name: 安装器烟雾
+        run: |
+          python3 bin/vod-devkit build-info
+          python3 -c "import ast; ast.parse(open('bin/vod-devkit').read()); print('bin 语法 OK')"
