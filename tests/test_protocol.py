@@ -33,7 +33,7 @@ class _Recorder(BaseHTTPRequestHandler):
         responses = {
             "/api/vod/analyze/json": {"task_id": "wf001", "status": "pending"},
             "/api/vod/status/wf001": {"status": "running"},
-            "/external/voice/submit":
+            "/rest/developer/manager/hdvodmngservice/v1/external/voice/submit":
                 {"code": 200, "data": {"taskId": 9, "voiceId": "x", "status": "PENDING"}},
         }
         out = responses.get(self.path, {})
