@@ -132,7 +132,7 @@ def test_submit_voices_injects_host_source(monkeypatch):
          "source": "fake-host"},  # 调用方自带 source 应被忽略
         client_info={"name": "test-host", "version": "1.0"})
     assert out["accepted"] == 1 and len(out["voiceIds"]) == 1
-    assert calls["req"][1] == "/external/voice/submit"
+    assert calls["req"][1].endswith("/external/voice/submit")
     assert calls["req"][2]["source"] == "test-host", "来源必须取握手身份而非调用方参数"
     assert calls["req"][2]["voiceId"].startswith("ext_test-host_")
 

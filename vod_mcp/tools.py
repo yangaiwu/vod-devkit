@@ -24,11 +24,25 @@ from vod_mcp import provenance
 
 _CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract" / "tools.schema.json"
 
-# 双后端配置（E2）
-WF_BASE = os.environ.get("VOD_API_BASE", "http://127.0.0.1:8000")
-WF_KEY = os.environ.get("VOD_API_KEY", "")            # nginx R0 Bearer
-JAVA_BASE = os.environ.get("VOD_JAVA_API_BASE", "http://127.0.0.1:8090")
-JAVA_KEY = os.environ.get("VOD_JAVA_API_KEY", "")     # ExternalApiKeyFilter Bearer
+# 双后端配置（E2）：env 优先，runtime.json 兜底——不依赖宿主 env 透传
+# （实测部分 MCP 宿主对子进程 env 过滤/丢失，如 Hermes 多 --env 只存活一个）
+
+
+def _runtime_cfg() -> dict:
+    p = Path(__file__).resolve().parent.parent / "vod_mcp" / "runtime.json"
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+_RT = _runtime_cfg()
+WF_BASE = os.environ.get("VOD_API_BASE") or _RT.get("workflow_base") or "http://127.0.0.1:8000"
+WF_KEY = os.environ.get("VOD_API_KEY", "") or _RT.get("workflow_key", "")            # nginx R0 Bearer
+JAVA_BASE = os.environ.get("VOD_JAVA_API_BASE") or _RT.get("java_base") or "http://127.0.0.1:8090"
+JAVA_KEY = os.environ.get("VOD_JAVA_API_KEY", "") or _RT.get("java_key", "")     # ExternalApiKeyFilter Bearer
 _JAVA_EXTERNAL = "/rest/developer/manager/hdvodmngservice/v1/external/voices"
 
 
@@ -68,6 +82,11 @@ def _http(method: str, path: str, body: dict | None = None,
     base = base if base is not None else WF_BASE
     key = key if key is not None else WF_KEY
     url = base.rstrip("/") + path
+    try:
+        with open("/tmp/vod_mcp_server.log", "a", encoding="utf-8") as _f:
+            _f.write(f"http {method} {url} key={'yes' if key else 'no'}\n")
+    except Exception:
+        pass
     data = json.dumps(body).encode() if body is not None else None
     headers = {"Content-Type": "application/json"}
     if key:
@@ -122,7 +141,7 @@ _PRODUCT_MAP = {  # 插件白名单值 -> 引擎 product 枚举名（ExternalVoi
     "agentarts": "AgentArts", "codearts": "CodeArts", "dataarts": "DataArts",
     "maas": "MaaS", "obs": "OBS", "officeclaw": "OfficeClaw",
 }
-_EXISTING_SUBMIT = "/external/voice/submit"
+_EXISTING_SUBMIT = "/rest/developer/manager/hdvodmngservice/v1/external/voice/submit"
 
 
 def _deterministic_voice_id(source: str, content: str) -> str:
