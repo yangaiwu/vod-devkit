@@ -183,17 +183,18 @@ def cmd_install(args):
         print(f"不支持目标: {target}（可选 hermes|opencode|codex|auto）", file=sys.stderr)
         sys.exit(2)
     packs = args.packs or PRESETS.get(args.preset, "")
-    # 归因绑定：装插件的人声明本 agent 服务的产品（三层归因的第一层）
-    if args.product:
-        rt = ROOT / "vod_mcp" / "runtime.json"
-        cfg = {}
-        if rt.exists():
-            try:
-                cfg = json.loads(rt.read_text(encoding="utf-8"))
-            except Exception:
-                cfg = {}
-        cfg["product"] = args.product
-        rt.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 归因绑定（「宿主即产品」口径，2026-11-03 拍板）：显式 --product 优先；
+    # 缺省=宿主名（装在 hermes 就归 hermes——用户不说产品，锚点=当前工具）
+    bound_product = args.product or target
+    rt = ROOT / "vod_mcp" / "runtime.json"
+    cfg = {}
+    if rt.exists():
+        try:
+            cfg = json.loads(rt.read_text(encoding="utf-8"))
+        except Exception:
+            cfg = {}
+    cfg["product"] = bound_product
+    rt.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
     mcp_conf = installer(args, packs)
 
@@ -224,7 +225,7 @@ def cmd_install(args):
         "target": target,
         "installedAt": datetime.datetime.now().isoformat(timespec="seconds"),
         "preset": args.preset,
-        "product": args.product or None,
+        "product": bound_product,
         "packs": packs,
         "mcpConfig": str(mcp_conf),
         "skillsDir": str(HERMES_SKILLS_DIR),

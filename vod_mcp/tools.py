@@ -138,30 +138,16 @@ _PRODUCT_MAP = {
 }
 
 
-def _resolve_product(params: dict) -> str:
-    """归因三层：①安装绑定（runtime.json product，装插件的人声明）
-    ②调用方显式传参 ③都没有→报错引导（禁止静默默认——错误归因
-    比报错更糟，会污染目标产品数据）。"""
-    raw = params.get("product") or _RT.get("product")
+def _resolve_product(params: dict) -> str | None:
+    """归因（「宿主即产品」口径，2026-11-03 拍板·不设白名单）：
+    ①调用方显式传参 ②安装绑定（runtime.json product——安装器默认写入宿主名，
+    hermes/opencode/codex 装在哪就归哪）③都没有 → 返回 None（body 不带
+    product，引擎落 UNKNOWN 档人工归因解析，V19）——不再 -32013 本地拦截。
+    白名单校验已废除：宿主工具自报产品原样上送，由引擎宽松归一收编。"""
+    raw = str(params.get("product") or _RT.get("product") or "").strip()
     if not raw:
-        meta = _load_meta()
-        valid = "/".join(meta["products"][:8])
-        raise ToolError(
-            "product 未归因：本机未绑定默认产品且调用未显式指定。"
-            "三种解法：安装时 bin/vod-devkit install --product <p> 绑定；"
-            "调用时传 product；或询问用户该反馈关于哪个产品"
-            f"（当前有效值：{valid}"
-            + ("；[stale] 引擎 meta 不可达，白名单为本地快照，可能过期" if meta["stale"] else "")
-            + "）",
-            code=-32013)
-    raw = str(raw).strip().lower()
-    meta = _load_meta()
-    if meta["products"] and raw not in meta["products"]:
-        raise ToolError(
-            f"product '{raw}' 不在白名单（{'/'.join(meta['products'][:8])}"
-            + ("，[stale] 本地快照可能过期" if meta["stale"] else "") + "）",
-            code=-32013)
-    return _PRODUCT_MAP.get(raw, raw)
+        return None
+    return _PRODUCT_MAP.get(raw.lower(), raw)
 _EXISTING_SUBMIT = "/rest/developer/manager/hdvodmngservice/v1/external/voice/submit"
 _TOKEN_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/token"
 
@@ -211,10 +197,11 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
             "voiceId": vid,
             "title": content[:128],
             "description": desc,
-            "product": product,
             "source": host,
             "customer": v.get("userType"),
         }
+        if product:  # 无归因不带 product（引擎 UNKNOWN 档），不本地拦截
+            body["product"] = product
         if scene:
             body["scene"] = scene
         try:

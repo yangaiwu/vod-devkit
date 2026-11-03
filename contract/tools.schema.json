@@ -46,16 +46,7 @@
           },
           "product": {
             "type": "string",
-            "enum": [
-              "agentarts",
-              "codearts",
-              "dataarts",
-              "maas",
-              "obs",
-              "officeclaw",
-              "modelarts"
-            ],
-            "description": "反馈关于的产品。归因三层：安装绑定默认（install --product）> 本参数显式指定 > 询问用户。禁止静默猜默认（归因错误污染目标产品数据）。"
+            "description": "反馈关于的产品（宿主即产品，不设白名单）。归因顺序：本参数显式指定 > 安装绑定默认（install --product，缺省=宿主名，装在 hermes 归 hermes/dsh 归 DSH）> 不带（引擎落 UNKNOWN 档人工归因）。宿主工具自报产品名原样上送，引擎宽松归一（折叠空白+别名收编）。"
           }
         },
         "required": [

@@ -157,7 +157,8 @@ export function apply(ctx, config) {
             name: 'vod_submit_voices',
             description: '[VOD-unique] Submit agent-product user feedback voices to VOD (write). ' +
                 'Each voice = one user feedback (content ≤2000 chars, scene optional). ' +
-                'Product attribution: config product → explicit arg → error with guidance (never silently defaults). ' +
+                'Product attribution ("host-is-product", no whitelist): explicit arg → config product → ' +
+                'host identity (DSH). Host-reported products pass through as-is. ' +
                 'Batch ≤50. Returns voiceIds (reconciliation key) + taskIds.',
             parameters: buildParameters({
                 voices: {
@@ -174,16 +175,11 @@ export function apply(ctx, config) {
                 const voices = Array.isArray(args.voices) ? args.voices : [];
                 if (!voices.length) return textResult({ error: 'voices 为空', code: -32001 });
                 if (voices.length > 50) return textResult({ error: '单批上限 50 条', code: -32001 });
-                // 归因三层：显式传参 → 配置绑定 → 报错引导（绝不静默默认）
-                let product = String(args.product || c.product || '').trim().toLowerCase();
-                if (!product) {
-                    return textResult({
-                        error: 'product 未归因：dsh 插件配置 product 为空且调用未显式指定。' +
-                            '解法：dsh 插件设置里填 product，或调用时传 product 参数',
-                        code: -32013,
-                    });
-                }
-                product = PRODUCT_MAP[product] || product;
+                // 归因（「宿主即产品」口径，2026-11-03 拍板·不设白名单）：显式传参 > 配置绑定
+                // （安装时默认=宿主名）> 缺省 DSH（本插件就装在 dsh 里）；白名单废除，
+                // 宿主自报产品原样上送（引擎宽松归一），不再 -32013 本地拦截
+                let product = String(args.product || c.product || 'DSH').trim();
+                product = PRODUCT_MAP[product.toLowerCase()] || product;
                 const source = 'dsh';
                 const accepted = [], taskIds = [], rejected = [];
                 let key = c.key;

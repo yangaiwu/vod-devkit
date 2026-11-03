@@ -124,23 +124,27 @@ def test_voice_volume_preserved_across_calls(monkeypatch):
 
 
 def test_product_attribution_layers(monkeypatch):
-    """归因三层：绑定默认 > 显式传参 > 报错引导（禁止静默猜）。"""
-    # ③ 无绑定无传参 → 引导错误
+    """归因（宿主即产品·不设白名单，2026-11-03 拍板）：显式传参 > 安装绑定 >
+    无归因（不再 -32013 本地拦截，body 不带 product → 引擎 UNKNOWN 档）。"""
+    # ③ 无绑定无传参 → 不拦截：body 不带 product（引擎落 UNKNOWN 档人工归因）
     monkeypatch.setattr(tools, "_RT", {})
-    monkeypatch.setattr(tools, "_load_meta",
-                        lambda force=False: {"products": ["codearts", "aishell"],
-                                             "stale": False, "source": "meta"})
     monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    with pytest.raises(tools.ToolError) as ei:
-        tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
-                             "confirmed": True}, client_info={"name": "t"})
-    assert ei.value.code == -32013 and "install --product" in str(ei.value)
+    captured = {}
+    monkeypatch.setattr(tools, "_http",
+                        lambda m, p, body=None, timeout=30, base=None, key=None:
+                        captured.update(body=body) or {"code": 200, "data": {"taskId": 1}})
+    out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
+                                "confirmed": True}, client_info={"name": "t"})
+    assert out["accepted"] == 1 and "product" not in captured["body"]
+
+    # ③' 宿主自报产品（不在任何白名单）原样上送，不拒收
+    out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
+                                "product": "hermes", "confirmed": True},
+                              client_info={"name": "t"})
+    assert out["accepted"] == 1 and captured["body"]["product"] == "hermes"
 
     # ① 绑定生效（无传参取 runtime 绑定）
     monkeypatch.setattr(tools, "_RT", {"product": "aishell"})
-    monkeypatch.setattr(tools, "_load_meta",
-                        lambda force=False: {"products": ["codearts", "aishell"],
-                                             "stale": False, "source": "meta"})
     monkeypatch.setattr(tools, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         {"code": 200, "data": {"taskId": 1}})

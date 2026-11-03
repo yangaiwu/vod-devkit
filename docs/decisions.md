@@ -74,3 +74,20 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
       confirm（dsh 宿主审批通道语义，管理员责任边界）；账本读改写无锁（影响=
       对账缺行，不做分布式锁）；timeoutSec 可配无上界（运维自律）；401 重取令牌
       仅首条（中途令牌失效由下一调用兜底）。均为对账/体验面，无安全洞。
+
+## 归因口径变更：「宿主即产品」不设白名单（2026-11-03 深夜拍板，用户原话"都不限制，如果是hermes就是hermes"）
+
+- [x] **决策**：归因锚点=用户当前工具。显式传参 > 安装绑定（install --product
+      缺省改为宿主名：装 hermes 归 hermes/dsh 归 DSH）> 无归因（body 不带
+      product，引擎落 UNKNOWN 档 V19）。**-32013 本地拦截与白名单校验废除**
+      （Product attribution error 改为"放行+引擎宽松归一"）。
+- [x] **插件侧已落**（26 用例绿+node 真调验证）：tools.py 归因改两级+None；
+      install 缺省绑宿主名；contract/tools.schema.json 去掉 product enum；
+      dsh 缺省 DSH+passthrough。
+- [x] **引擎侧已落**（feat/kb-query-auth）：VodExternalProducts.normalizeLoose
+      （折叠+别名收编+未知原样收+64 截断）供 /external/voices；老链
+      /external/voice/submit 保持 normalizeOrThrow 严格（legacy GTD 兼容，
+      禁新接入）——两口径勿混用。
+- 理由：宿主识别是可信来源（插件装在谁家=用户在用谁），错误归因场景从
+  "静默猜默认"变成"锚定当前工具"，白名单反而制造 AIShell 式拒收。
+- 脏值防线：引擎 64 字符截断+UNKNOWN 档人工归因解析兜底，运营侧治理。
