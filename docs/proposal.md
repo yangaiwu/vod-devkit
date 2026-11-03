@@ -4,7 +4,7 @@
 - 版本：v0.1（2026-11-03）
 - 状态：待评审
 - 仓址修订（2026-11-03，已决策）：直接于独立新仓开发（本仓）；原「P0 先在 VOD-Project 验证、触发条件后剥离」作废。当前暂住 xiaowu2119/vod-devkit，VodTeam org 建仓/转移需组织管理员权限（API 已试：403/transfer 需 admin），有权限后一步转移，仓内容零改动。
-- 引擎前置缺口（实测 api.py 路由）：vod_kb_search 依赖 POST /api/vod/knowledge/query，api.py 尚无此路由——U6 验收前须引擎侧补端点。analyze/json、status、result 已按真实路由对接。
+- 引擎前置缺口（2026-11-03 复核）：~~vod_kb_search 依赖 KB 查询端点~~ 已随方案 A 删除该工具；现存前置=POST /external/token 匿名令牌端点未实现（VOD-KEY），灰度期以共用 key 过渡。
 
 ---
 
@@ -61,18 +61,23 @@ token 整块删除；双后端→单 Java 上游；护栏剩采集语义一套�
 
 | 能力 | 类型 | 工具/载体 | 权限级别 |
 |---|---|---|---|
-| 发起分析任务 | 写 | vod_run_analysis | confirm + 条数上限 |
-| 任务状态查询 | 读 | vod_task_status | 放行 |
-| 任务结果获取 | 读 | vod_task_result | 放行 |
-| KB 精准检索 | 读 | vod_kb_search | 放行 |
+| ~~发起分析任务~~ | ~~写~~ | ~~vod_run_analysis~~ | 已随方案 A 删除（f1103df，2026-11-03 拍板：运营归 vod-system 前端） |
+| ~~任务状态查询~~ | ~~读~~ | ~~vod_task_status~~ | 同上 |
+| ~~任务结果获取~~ | ~~读~~ | ~~vod_task_result~~ | 同上 |
+| ~~KB 精准检索~~ | ~~读~~ | ~~vod_kb_search~~ | 同上（零真实使用+受众耦合） |
+| 用户反馈声音采集 | 写 | vod_submit_voices + vod-feedback-collect 技能 | confirm 逐次+单批≤50+source 取握手身份 |
+| 本机提交记录查询 | 读 | vod_list_submitted（本地账本，cap 200） | 放行（scope=local-machine 明示） |
+| 认证自检 | 读 | vod_auth_status（key 指纹化，无 key 给三步引导） | 放行 |
 | 分类匹配规则 | 知识 | 技能 vod-category-matching | 只读 |
 | 问题分类规则 | 知识 | 技能 vod-problem-classification | 只读 |
 | 评分规则 | 知识 | 技能 vod-scoring-rules | 只读 |
 | 插件路由入口 | 知识 | 元技能 vod-core | 只读 |
 | 安装溯源与宿主感知 | 元信息 | install-manifest + vod_devkit_info 工具 | 只读 |
-| 用户反馈声音采集 | 写 | vod_submit_voices + vod-feedback-collect 技能 | confirm 逐次+单批≤50+source 取握手身份 |
+| dsh 宿主采集 | 写/读 | dsh/ 薄壳（cordis 插件，同语义 3 工具） | 同 MCP 形态（审批走 dsh tools/pre-execute） |
 
 明确不暴露：Excel 批量导入、数据库直连、任何 DB 写操作。
+（表内删除行保留是为对账——历史文档曾宣传 5 工具面，实际收敛纯采集后
+为 4 工具；删除决策见决策台账「方案 A 纯采集」，git 留档 f1103df。）
 
 ---
 
@@ -325,16 +330,54 @@ S10 滥用处置
   某令牌异常高频 → 引擎侧限流告警 → 管理台吊销 → 该令牌后续提交
   401（错误带引导，不是死胡同）→ 本机可重新取新令牌（重新限频）
 
+### dsh 形态场景（S11-S16，2026-11-03 真机验证新增）
+
+S11 dsh 宿主安装与激活（实测链）
+  `dsh plugin --profile web add <tarball/npm包>` 装入依赖 → profile 层
+  cordis.patch.yml `- insert: [{id: vod-devkit, name: 'dsh-vod-devkit'}]`
+  激活 → `dsh --profile web` 启动日志出现
+  `[dsh-vod-devkit] Registered 3 tools`（缺 insert=只装不激活）
+
+S12 dsh 对话式提交与审批门禁（真机回放，taskId=427）
+  用户对 agent 说"提交一个 codearts 问题：速度慢，联系杨爱武" →
+  agent 归因 product=codearts → 调 vod_submit_voices → dsh 弹审批卡
+  （tools/pre-execute kind:'ask'）→ 用户点 Allow once → 提交入库，
+  回执 voiceId/taskId（会话日志 approval/asked→allowed-once 全程留痕）
+
+S13 product 枚举归一（引擎大小写敏感实测）
+  引擎 VALID_PRODUCTS 大小写敏感：小写 codearts → 400 且响应体为空
+  （排障黑洞）；CodeArts → 201。dsh 壳与 Python 壳各自维护同款
+  PRODUCT_MAP 归一映射（agentarts→AgentArts 等）；根治靠引擎侧
+  大小写不敏感+错误体非空（已入 VOD-KEY M1-M3 meta 端点范围）
+
+S14 无 key 兜底降级（灰度态真机踩实）
+  插件未配 key → 提交 401 → 自动 POST /external/token（零字段匿名
+  令牌）→ 引擎端点未实现（401）→ 降级返回 -32012 结构化三步引导
+  （不是崩溃也不是裸 404）。灰度正确姿势=配置共用 key（profile
+  cordis.patch.yml config 段）；引擎端点上线后该兜底即转主路径
+
+S15 本地账本对账与边界（dsh/MCP 同构）
+  dsh 侧 data/runtime.json 账本（cap 200 环形，读改写只动目标键）→
+  vod_list_submitted 查本机已提交（scope=local-machine 明示换机不保
+  留）；权威跨机查询等引擎侧 GET /external/voices（VOD-VOI V10-V11）
+
+S16 双形态语义一致（架构约束回归）
+  dsh 薄壳与 vod_mcp 服务器对同一引擎契约实现：voiceId 同构
+  （f(source,content,nonce)、同调用幂等跨调用保声量）、归因三层同构
+  （配置绑定>显式传参>报错引导，禁止静默默认）、护栏同构（写须审批/
+  单批≤50/content≤2000 逐条拒）。契约变更必须双形态同步——此为
+  contract/tools.schema.json 单一事实源纪律在宿主适配层的延伸
+
 ## 四、验收用例清单（在目标环境执行，工具不入库）
 
 | # | 用例 | 预期 |
 |---|---|---|
 | U1 | agent 配置 mcpServers 指向 vod-devkit-mcp，重启会话 | 工具 4 个全部可列举 |
-| U2 | 调用 vod_run_analysis（白名单 profile，≤上限条数）【内部形态 preset full】 | 返回 taskId；任务表新增记录 |
-| U3 | 未经用户确认调用 vod_run_analysis | 被 confirm 规则拦截，零副作用 |
-| U4 | vod_task_status(taskId) 轮询 U2 任务 | 状态与引擎侧一致 |
-| U5 | vod_task_result(taskId) | 与 vod-system 前端同任务结果一致 |
-| U6 | vod_kb_search("评分规则") | 命中评分规则卡片，含出处 |
+| U2 | ~~调用 vod_run_analysis（白名单 profile，≤上限条数）【内部形态 preset full】~~ | 已随方案 A 删除（运营归 vod-system 前端） |
+| U3 | ~~未经用户确认调用 vod_run_analysis~~ | 同上（confirm 规则现由 vod_submit_voices 承载，见 U30） |
+| U4 | ~~vod_task_status(taskId) 轮询 U2 任务~~ | 已删除 |
+| U5 | ~~vod_task_result(taskId)~~ | 已删除 |
+| U6 | ~~vod_kb_search("评分规则")~~ | 已删除（知识以 skills 形态本地分发，不走 HTTP 查询） |
 | U7 | 提示词含 mysql/jdbc/t_vod_ 直连意图 | 被 deny 规则拦截 |
 | U8 | VOD_PACKS=core 只装路由技能 | kb/工作流工具不出现 |
 | U9 | vod-devkit install --target hermes | 落 MCP 配置+skills，doctor 全绿 |

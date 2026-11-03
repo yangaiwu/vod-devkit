@@ -63,29 +63,13 @@ full 已删。技能拷贝按 packs 过滤；manifest 记录 preset。
 的通行纪律：字段变更只改契约，实现自动跟进；golden fixture 校验入
 pytest）。
 
-### 2.1 vod_run_analysis（写，confirm）
+### 2.1-2.4 已删除（2026-11-03 方案 A 拍板，git 留档 f1103df）
 
-入参：`product_profile`（string，须在白名单）、`source`（string，数据来源标识）、
-`max_voices`（int，≤上限，默认 500）。
-出参：`taskId`、`status`、`createdAt`。
-调用链：工具 → POST api.py /analysis/run → 引擎建任务行 → 返回 taskId。
-护栏：confirm 规则命中须用户确认；条数超上限 deny；并发>1 排队（引擎串行）。
-
-### 2.2 vod_task_status（读）
-
-入参：`taskId`。出参：`taskId`、`node`（当前节点）、`status`、`updatedAt`。
-调用链：GET /analysis/status/{taskId}，直读引擎任务表。
-
-### 2.3 vod_task_result（读）
-
-入参：`taskId`。出参：报告路径/URL、评分汇总、高价值条数。
-调用链：GET /analysis/result/{taskId}。与 vod-system 前端同源同结果。
-
-### 2.4 vod_kb_search（读）
-
-入参：`query`（string）、`top_k`（int，默认 5）。
-出参：命中卡片列表（title/snippet/source_path）。
-调用链：→ workflow/src/kb_precision_retriever 三层匹配（关键词→TF-IDF→LLM）。
+vod_run_analysis / vod_task_status / vod_task_result / vod_kb_search
+四工具已删除：运营能力归 vod-system 前端（受众不同+职责耦合+负复杂度，
+净删 304 行）；kb 知识改 skills 形态本地分发（零工具零依赖）。历史契约
+详见 git 留档；现存工具面=2.5 info / 2.5b auth_status / 2.6 submit_voices
+/ 2.5e list_submitted，共 4 个。
 
 ### 2.5 vod_devkit_info（读，core pack 常驻）
 
@@ -255,14 +239,47 @@ stdio 直连零语言成本；宿主原生格式（dsh 的 npm 包等）单独�
 实现：packs.py 一张启用表，未启用的工具不注册、技能不落盘（与 devkit
 DEVKIT_PACKS 同语义）。
 
+## 三·九、dsh 薄壳形态（R3 已落地，2026-11-03 真机验证）
+
+dsh 宿主不识 MCP，只认自家 cordis 插件协议——故以独立薄壳包 dsh/
+（dsh-vod-devkit@0.1.0）承载同一采集语义。语言跟宿主走（Node ESM），
+验证了「宿主原生格式单独写适配壳」的语言选型纪律。
+
+结构：
+- dsh/package.json：peerDeps=cordis/dsh-tools/schemastery（均 npm 公网），
+  `dsh.bundle.patch` 指向 cordis.patch.yml
+- dsh/lib/index.js：cordis 插件入口（name/inject=['tools']/Config/apply），
+  注册 3 工具：vod_submit_voices / vod_list_submitted / vod_devkit_info
+- dsh/cordis.patch.yml：bundle 激活声明（insert 条目）
+- 审批：ctx.on('tools/pre-execute') 对 submit 返回 kind:'ask'（dsh 原生
+  审批通道，web 端弹卡片）——对应 MCP 形态的 confirmed 语义
+
+配置面（schemastery，热改 volatile）：apiBase/apiKey(secret,role 指纹化)/
+product（归因安装绑定层）/confirmWrites/timeoutSec。
+
+与 vod_mcp 语义对齐（S16 回归约束）：voiceId 同构、PRODUCT_MAP 归一
+（codearts→CodeArts，引擎大小写敏感实测）、归因三层、批量/长度护栏、
+无 key→匿名令牌兜底→-32012 引导、本地账本（data/runtime.json，cap 200
+读改写只动目标键）。
+
+实测坑（安装器/宿主适配必读）：
+1. dsh plugin 子命令硬依赖 pnpm（先 npm i -g pnpm）
+2. 只装包不激活：须 profile 层 cordis.patch.yml insert 条目
+3. dsh-tools 强校验 output={schema,render} 双字段，缺 render 即 TypeError
+4. 引擎 product 枚举大小写敏感且 400 无错误体（S13，根治在引擎侧）
+
+冒烟验证链（.smoke/ 不入库）：mock ctx 加载→3 工具注册→审批门禁
+（ask/passthrough）→真实提交（taskId=425/426）→账本回读；另有真机
+web 会话端到端（S12，taskId=427）。
+
 ## 四、安全护栏（声明式）
 
 policy.json 规则集（severity: deny / confirm / warn）：
 
 | id | severity | 匹配 | 动作 |
 |---|---|---|---|
-| vod-write-run-analysis | confirm | tool==vod_run_analysis | 需用户确认 |
-| vod-voices-limit | deny | max_voices>上限 | 拒绝执行 |
+| vod-write-submit-voices | confirm | tool==vod_submit_voices 且 confirmed=false | 需用户逐次确认（-32011 引导重传 confirmed=true） |
+| vod-voices-batch-limit | deny | voices 条数 > 50 | 拒绝执行 |
 | vod-no-db-direct | deny | 文本含 mysql/jdbc/t_vod_ 直连模式 | 拦截 |
 | vod-no-credential | deny | AK/SK/token 凭据模式（清单抄 devkit policy.json） | 拦截 |
 
