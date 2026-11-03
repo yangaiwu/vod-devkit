@@ -144,9 +144,14 @@ _PRODUCT_MAP = {  # 插件白名单值 -> 引擎 product 枚举名（ExternalVoi
 _EXISTING_SUBMIT = "/rest/developer/manager/hdvodmngservice/v1/external/voice/submit"
 
 
-def _deterministic_voice_id(source: str, content: str) -> str:
+def _voice_id(source: str, content: str, nonce: str) -> str:
+    """voiceId = f(source, content, 调用级nonce)。
+
+    R1 修正（声量保真）：跨调用不去重——不同用户提交同款反馈必须各占
+    一行（声量是分析核心信号）；同调用内重试复用同 nonce 保幂等。
+    """
     import hashlib
-    return f"ext_{source}_{hashlib.sha1(content.encode('utf-8')).hexdigest()[:12]}"
+    return f"ext_{source}_{hashlib.sha1((content + nonce).encode('utf-8')).hexdigest()[:12]}"
 
 
 def submit_voices(params: dict, client_info: dict | None = None) -> dict:
@@ -157,6 +162,7 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
     - description 引擎校验 ≥10 字：短反馈自动补场景说明
     - 提交即分析（现有链路语义）；囤积端点 VOD-VOI 上线后切换
     """
+    import uuid
     host = (client_info or {}).get("name") or "unknown-host"
     product = _PRODUCT_MAP.get(str(params.get("product", "codearts")).lower(), "CodeArts")
     accepted, voice_ids, task_ids, rejected = 0, [], [], []
@@ -165,9 +171,12 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
         if not content:
             rejected.append({"index": i, "reason": "content 为空"})
             continue
-        vid = _deterministic_voice_id(host, content)
+        nonce = uuid.uuid4().hex[:8]  # 调用级：重试复用（见 _voice_id 重试路径），跨调用不重复
+        vid = _voice_id(host, content, nonce)
+        # R3 修正：title=用户原文（分析消费原话）；description 仅满足引擎
+        # ≥10 字校验时才追加采集后缀，且后缀固定为可识别标记
         desc = content if len(content) >= 10 else \
-            f"{content}（agent 产品用户反馈，经 vod-devkit 采集，场景：{v.get('scene', '未提供')}）"
+            f"{content} [vod-devkit]"
         body = {
             "voiceId": vid,
             "title": content[:128],

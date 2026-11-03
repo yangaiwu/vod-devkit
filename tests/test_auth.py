@@ -79,3 +79,35 @@ def test_submit_voices_token_unreachable_gives_guidance(monkeypatch):
             client_info={"name": "t"})
     assert "引导" in str(ei.value) and "自动" in str(ei.value), \
         "令牌不可用时错误必须带引导步骤"
+
+
+def test_voice_volume_preserved_across_calls(monkeypatch):
+    """R1 声量保真：不同调用提交同款反馈 → 不同 voiceId，各占一行。
+
+    （曾为缺陷：确定性 voiceId 使第二个用户同款反馈被去重吞掉，
+    声量统计失真——此测试为永久回归锁。）
+    """
+    seen = []
+
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        if path.endswith("/external/voice/submit"):
+            seen.append(body["voiceId"])
+            return {"code": 200, "data": {"taskId": len(seen)}}
+        return {}
+
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    monkeypatch.setattr(tools, "_http", fake_http)
+    voice = {"content": "补全响应有点慢，希望优化一下"}
+    for _ in range(2):
+        out = tools.submit_voices({"voices": [voice], "confirmed": True},
+                                  client_info={"name": "mcp"})
+        assert out["accepted"] == 1
+    assert len(set(seen)) == 2, "同款反馈跨调用必须不去重（声量保真）"
+
+    # title 必须是用户原文（R3：分析消费原话，后缀只允许出现在 description）
+    def fake2(method, path, body=None, timeout=30, base=None, key=None):
+        assert body["title"] == voice["content"], "title=用户原文，禁止模板污染"
+        return {"code": 200, "data": {"taskId": 1}}
+    monkeypatch.setattr(tools, "_http", fake2)
+    tools.submit_voices({"voices": [voice], "confirmed": True},
+                        client_info={"name": "mcp"})

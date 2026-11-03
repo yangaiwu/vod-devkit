@@ -164,7 +164,7 @@
       "backend": "workflow(VOD_API_BASE+VOD_API_KEY)；引擎侧前置 R1"
     },
     "vod_submit_voices": {
-      "description": "提交 agent 产品用户反馈声音（写，需确认）。对接 Java 现有 POST /external/voice/submit（提交即分析，现有链路语义；囤积端点 VOD-VOI 上线后切换）。voiceId=确定性生成（同源同内容幂等，重复映射为已收录）。source 取握手宿主身份。",
+      "description": "提交 agent 产品用户反馈声音（写，需确认）。对接 Java 现有 POST /external/voice/submit（提交即分析）。voiceId=调用级唯一（跨调用不去重保声量，R1）；title=用户原文（R3）。缺 key 时自动获取零字段匿名令牌。",
       "input": {
         "type": "object",
         "properties": {
