@@ -1,0 +1,10 @@
+# dsh-vod-devkit bundle patch — applied when this plugin is installed.
+# Registers 3 VOD user-voice collection tools on ctx.tools:
+#   vod_submit_voices / vod_list_submitted / vod_devkit_info
+#
+# Transport: HTTPS to the VOD external API (no local CLI subprocess needed).
+# Config (dsh settings): apiBase / apiKey(secret) / product / confirmWrites.
+# No key → automatic zero-field anonymous token on first submit (VOD-KEY).
+- insert:
+    - id: vod-devkit
+      name: 'dsh-vod-devkit'
