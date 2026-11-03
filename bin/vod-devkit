@@ -29,6 +29,12 @@ def git_sha(strict: bool) -> str | None:
     return sha or None
 
 
+def _safe_remote(url: str) -> str:
+    """凭据脱敏：oauth2:xxx@ / https://user:pass@ 一律剥离。"""
+    import re as _re
+    return _re.sub(r"(https?://)([^@/]+@)", r"\1", url)
+
+
 def build_info(strict: bool = False) -> dict:
     from vod_mcp import __version__
     remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=ROOT,
@@ -37,7 +43,7 @@ def build_info(strict: bool = False) -> dict:
         "version": __version__,
         "commitSha": git_sha(strict),
         "builtAt": datetime.datetime.now().isoformat(timespec="seconds"),
-        "sourceRemote": remote or None,
+        "sourceRemote": _safe_remote(remote) if remote else None,
     }
 
 
