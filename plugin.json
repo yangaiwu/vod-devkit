@@ -1,0 +1,33 @@
+{
+  "name": "vod-devkit",
+  "version": "0.1.0",
+  "displayName": "VOD 用户声音采集",
+  "description": "把 AI agent 产品的用户反馈安全送进 VOD 声音分析平台：MCP server + 领域技能 + 声明式护栏。首次提交自动申请零字段匿名令牌，无需注册。",
+  "author": { "name": "VOD Team" },
+  "license": "MIT",
+  "repository": "https://github.com/yangaiwu/vod-devkit",
+  "keywords": ["vod", "feedback", "voice-of-customer", "mcp", "collect"],
+  "mcpServers": {
+    "vod-devkit": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["${PLUGIN_DIR}/vod_mcp/server.py"],
+      "env": {
+        "VOD_JAVA_API_BASE": "https://vod-dev.topxtopx.com",
+        "VOD_JAVA_API_KEY": "",
+        "VOD_PACKS": "core,collect,knowledge"
+      }
+    }
+  },
+  "skills": [
+    "skills/vod-core",
+    "skills/vod-feedback-collect",
+    "skills/vod-problem-classification-rules",
+    "skills/vod-category-matching-rules",
+    "skills/vod-scoring-rules"
+  ],
+  "capabilities": ["submit-voices", "list-submitted", "auth-status", "plugin-info"],
+  "permissions": {
+    "notes": "唯一写口为用户确认后的反馈提交；本地账本与自述为只读；无遥测。"
+  }
+}

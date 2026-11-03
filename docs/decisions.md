@@ -24,7 +24,7 @@
 
 ## 进行中
 - [ ] npm 发布：包已构建（npm pack 27 files 通过，引导器 node→python 实测通）；**卡 token 类型**（需 Granular+勾选 bypass 2FA）
-- [ ] GitHub 镜像：仓 yangaiwu/vod-devkit 已建（API 验证）；**卡 PAT 缺 Contents:write**——补权限后 git push github main --tags 即完成
+- [x] GitHub 镜像：已推送完成（main+v0.1.0 tag，head a8c8372 验证）+plugin.json 市场清单（WorkBuddy/CodeBuddy marketplace add yangaiwu/vod-devkit 即接入）
 - [x] 宿主适配层：hermes（实测）/opencode（JSON 合并）/codex（TOML env 子表）+ auto 0/1/N 探测——真机回归待首批用户
 - [x] 发版自动化 scripts/release.sh（质量门→三处版本同步→CHANGELOG 生成→tag→双远端推送）
 
