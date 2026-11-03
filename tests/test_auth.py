@@ -180,3 +180,20 @@ def test_meta_unreachable_falls_back_snapshot(monkeypatch):
     m = tools._load_meta(force=True)
     assert m["source"] == "snapshot" and m["stale"] is True
     assert "codearts" in m["products"]
+
+
+def test_content_boundary_rejects_oversize(monkeypatch):
+    """内容边界：超 2000 字的反馈逐条拒绝（契约 maxLength 落到代码）。"""
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts"],
+                                             "stale": False, "source": "meta"})
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    monkeypatch.setattr(tools, "_http",
+                        lambda m, p, body=None, timeout=30, base=None, key=None:
+                        {"code": 200, "data": {"taskId": 1}})
+    out = tools.submit_voices(
+        {"voices": [{"content": "x" * 2001}, {"content": "正常长度的一条反馈"}],
+         "product": "codearts", "confirmed": True},
+        client_info={"name": "t"})
+    assert out["accepted"] == 1
+    assert out["rejected"][0]["reason"].startswith("content 超 2000")

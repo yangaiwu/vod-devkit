@@ -138,6 +138,16 @@ GET /external/meta → {products:[...]}；缓存 runtime.json meta_cache
 +白名单常量为实证）；/external/products 是报告侧全集不可用作
 submit 源——meta 必须以 submit 校验常量为源（引擎侧 VOD-KEY 交付）。
 
+### 2.5d 身份模型（归属/认证分离）
+
+归属（谁提的）=数据字段：voices[].userType/customer 随声音入库，
+引擎侧不建用户体系；授权（谁在调）=接入方 key 三档（匿名令牌/
+正式/宿主）。工具 Schema 零身份参数（模型不可伪造归属）；可信层
+注入仅作用于 key/product（env>runtime>快照）。失败关闭：无 key 且
+令牌不可达→拒写。内容边界：content ≤2000（逐条校验落码），
+scene ≤128。签名回执记 P2 前置（用户自助查询/撤回的前置条件，
+见 proposal 三·四e）。
+
 ### 2.5c 产品归因（_resolve_product）
 
 三层：runtime.json product（安装绑定）> 调用方显式 > 报错 -32013
