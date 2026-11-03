@@ -33,8 +33,8 @@ class _Recorder(BaseHTTPRequestHandler):
         responses = {
             "/api/vod/analyze/json": {"task_id": "wf001", "status": "pending"},
             "/api/vod/status/wf001": {"status": "running"},
-            "/rest/developer/manager/hdvodmngservice/v1/external/voices":
-                {"accepted": 1, "voiceIds": ["v_1"], "rejected": []},
+            "/external/voice/submit":
+                {"code": 200, "data": {"taskId": 9, "voiceId": "x", "status": "PENDING"}},
         }
         out = responses.get(self.path, {})
         payload = json.dumps(out).encode()
@@ -68,15 +68,19 @@ def rec_server(monkeypatch):
 def test_protocol_auth_header_and_paths(rec_server):
     """E1+E2：所有调用带正确 Bearer；workflow 工具走 WF 配置，提交走 Java 前缀路径。"""
     tools.run_analysis({"product": "codearts", "data": [{"voice": 1}], "confirmed": True})
-    tools.submit_voices({"voices": [{"content": "太慢"}], "confirmed": True},
-                        client_info={"name": "aishell"})
+    out = tools.submit_voices({"voices": [{"content": "太慢了，希望优化补全速度"}],
+                               "product": "codearts", "confirmed": True},
+                              client_info={"name": "aishell"})
+    assert out["accepted"] == 1 and out["taskIds"] == [9]
     assert len(_Recorder.requests) == 2
     wf_req, java_req = _Recorder.requests
     assert wf_req["path"] == "/api/vod/analyze/json"
     assert wf_req["auth"] == "Bearer wf-key-123", "workflow 调用必须带 VOD_API_KEY（E1）"
-    assert java_req["path"] == "/rest/developer/manager/hdvodmngservice/v1/external/voices"
+    assert java_req["path"].endswith("/external/voice/submit"), java_req["path"]
     assert java_req["auth"] == "Bearer java-key-456", "Java 调用必须带 VOD_JAVA_API_KEY（E1/E2）"
-    assert json.loads(java_req["body"])["source"] == "aishell"
+    jb = json.loads(java_req["body"])
+    assert jb["source"] == "aishell" and jb["product"] == "CodeArts"
+    assert jb["voiceId"].startswith("ext_aishell_"), "voiceId 必须确定性生成"
 
 
 def test_protocol_401_surfaces_key_hint(rec_server, monkeypatch):

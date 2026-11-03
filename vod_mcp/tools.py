@@ -118,14 +118,61 @@ def kb_search(params: dict) -> dict:
     return {"hits": out.get("hits", out)}
 
 
+_PRODUCT_MAP = {  # 插件白名单值 -> 引擎 product 枚举名（ExternalVoiceController 实测）
+    "agentarts": "AgentArts", "codearts": "CodeArts", "dataarts": "DataArts",
+    "maas": "MaaS", "obs": "OBS", "officeclaw": "OfficeClaw",
+}
+_EXISTING_SUBMIT = "/external/voice/submit"
+
+
+def _deterministic_voice_id(source: str, content: str) -> str:
+    import hashlib
+    return f"ext_{source}_{hashlib.sha1(content.encode('utf-8')).hexdigest()[:12]}"
+
+
 def submit_voices(params: dict, client_info: dict | None = None) -> dict:
-    """走 Java backend；source 由握手宿主身份注入（服务端最终以签发 key 为准）。"""
+    """走 Java 现有 POST /external/voice/submit（Bearer；单条循环提交）。
+
+    - voiceId=确定性生成 f(source, content-hash)：同源同内容天然幂等
+      （DB uk_voice_id 兜底；Duplicate 映射为 already-accepted 回执）
+    - description 引擎校验 ≥10 字：短反馈自动补场景说明
+    - 提交即分析（现有链路语义）；囤积端点 VOD-VOI 上线后切换
+    """
     host = (client_info or {}).get("name") or "unknown-host"
-    payload = {"source": host, "voices": params["voices"]}
-    out = _http("POST", _JAVA_EXTERNAL, payload, base=JAVA_BASE, key=JAVA_KEY)
-    return {"accepted": out.get("accepted", 0),
-            "voiceIds": out.get("voiceIds", []),
-            "rejected": out.get("rejected", [])}
+    product = _PRODUCT_MAP.get(str(params.get("product", "codearts")).lower(), "CodeArts")
+    accepted, voice_ids, task_ids, rejected = 0, [], [], []
+    for i, v in enumerate(params.get("voices", [])):
+        content = str(v.get("content", "")).strip()
+        if not content:
+            rejected.append({"index": i, "reason": "content 为空"})
+            continue
+        vid = _deterministic_voice_id(host, content)
+        desc = content if len(content) >= 10 else \
+            f"{content}（agent 产品用户反馈，经 vod-devkit 采集，场景：{v.get('scene', '未提供')}）"
+        body = {
+            "voiceId": vid,
+            "title": content[:128],
+            "description": desc,
+            "product": product,
+            "source": host,
+            "customer": v.get("userType"),
+        }
+        try:
+            out = _http("POST", _EXISTING_SUBMIT, body, base=JAVA_BASE, key=JAVA_KEY)
+            accepted += 1
+            voice_ids.append(vid)
+            data = out.get("data") or {}
+            task_ids.append(data.get("taskId"))
+        except ToolError as e:
+            msg = str(e)
+            if "Duplicate entry" in msg:  # 同源同内容已提交过 → 幂等回执
+                accepted += 1
+                voice_ids.append(vid)
+                task_ids.append(None)
+            else:
+                rejected.append({"index": i, "reason": msg[:120]})
+    return {"accepted": accepted, "voiceIds": voice_ids,
+            "taskIds": task_ids, "rejected": rejected}
 
 
 def devkit_info(params: dict, client_info: dict | None = None) -> dict:

@@ -123,16 +123,18 @@ def test_submit_voices_injects_host_source(monkeypatch):
 
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
         calls["req"] = (method, path, body)
-        return {"accepted": 1, "voiceIds": ["v_abc123"], "rejected": []}
+        return {"code": 200, "data": {"taskId": 9, "voiceId": body["voiceId"],
+                                       "status": "PENDING"}}
 
     monkeypatch.setattr(tools, "_http", fake_http)
     out = tools.submit_voices(
-        {"voices": [{"content": "补全太慢"}], "confirmed": True,
+        {"voices": [{"content": "补全太慢，生成质量不稳定"}], "confirmed": True,
          "source": "fake-host"},  # 调用方自带 source 应被忽略
         client_info={"name": "test-host", "version": "1.0"})
-    assert out["voiceIds"] == ["v_abc123"]
-    assert calls["req"][1] == "/rest/developer/manager/hdvodmngservice/v1/external/voices"
+    assert out["accepted"] == 1 and len(out["voiceIds"]) == 1
+    assert calls["req"][1] == "/external/voice/submit"
     assert calls["req"][2]["source"] == "test-host", "来源必须取握手身份而非调用方参数"
+    assert calls["req"][2]["voiceId"].startswith("ext_test-host_")
 
 
 def test_stdio_roundtrip(tmp_path):

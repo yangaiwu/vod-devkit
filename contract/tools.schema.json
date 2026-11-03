@@ -164,7 +164,7 @@
       "backend": "workflow(VOD_API_BASE+VOD_API_KEY)；引擎侧前置 R1"
     },
     "vod_submit_voices": {
-      "description": "提交 agent 产品用户反馈声音（写操作，需确认；入库不触发分析，囤积-择机分析）。调用引擎 POST /api/vod/voices。source 由服务端取握手宿主身份注入，调用方不可指定。",
+      "description": "提交 agent 产品用户反馈声音（写，需确认）。对接 Java 现有 POST /external/voice/submit（提交即分析，现有链路语义；囤积端点 VOD-VOI 上线后切换）。voiceId=确定性生成（同源同内容幂等，重复映射为已收录）。source 取握手宿主身份。",
       "input": {
         "type": "object",
         "properties": {
@@ -203,6 +203,19 @@
             "type": "boolean",
             "default": false,
             "description": "用户已确认为 true 才执行（confirm 护栏，逐次同意）"
+          },
+          "product": {
+            "type": "string",
+            "enum": [
+              "agentarts",
+              "codearts",
+              "dataarts",
+              "maas",
+              "obs",
+              "officeclaw"
+            ],
+            "default": "codearts",
+            "description": "反馈针对的产品（插件白名单值，映射引擎枚举名）"
           }
         },
         "required": [
@@ -223,6 +236,16 @@
           },
           "rejected": {
             "type": "array"
+          },
+          "taskIds": {
+            "type": "array",
+            "items": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "description": "引擎分析任务 ID（与 voiceIds 对位；幂等重发为 null）"
           }
         },
         "required": [
@@ -230,7 +253,7 @@
           "voiceIds"
         ]
       },
-      "backend": "java(VOD_JAVA_API_BASE+VOD_JAVA_API_KEY)"
+      "backend": "java(VOD_JAVA_API_BASE+VOD_JAVA_API_KEY)；现有 /external/voice/submit"
     },
     "vod_devkit_info": {
       "description": "插件自述（只读，core pack 常驻）：版本/commitSHA/宿主身份/安装信息。",
