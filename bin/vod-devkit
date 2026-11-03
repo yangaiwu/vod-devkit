@@ -6,6 +6,7 @@
 """
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -58,12 +59,21 @@ def manifest_path() -> Path:
     return ROOT / "install-manifest.json"
 
 
+PRESETS = {
+    # 对外默认：开发者=反馈采集者（workflow 不进对外默认集）
+    "collect": "core,collect",
+    # 内部：运营/可信第三方全量（含分析发起）
+    "full": "core,workflow,kb,collect",
+}
+
+
 def cmd_install(args):
     write_build_info(strict=False)
     target = args.target
     if target != "hermes":
         print(f"暂不支持目标: {target}（当前仅 hermes）", file=sys.stderr)
         sys.exit(2)
+    packs = args.packs or PRESETS.get(args.preset, "")
     HERMES_MCP_DIR.mkdir(parents=True, exist_ok=True)
     mcp_conf = HERMES_MCP_DIR / "vod-devkit.json"
     server_entry = str(ROOT / "vod_mcp" / "server.py")
@@ -71,17 +81,33 @@ def cmd_install(args):
         "name": "vod-devkit",
         "command": sys.executable,
         "args": [server_entry],
-        "env": {"VOD_API_BASE": args.api_base, "VOD_PACKS": args.packs or ""},
+        "env": {
+            "VOD_API_BASE": args.api_base,
+            "VOD_API_KEY": os.environ.get("VOD_API_KEY", ""),
+            "VOD_JAVA_API_BASE": args.java_api_base,
+            "VOD_JAVA_API_KEY": os.environ.get("VOD_JAVA_API_KEY", ""),
+            "VOD_PACKS": packs,
+        },
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # G1 修复：技能全量拷贝（目录型技能+平铺规则文档），按 packs 过滤
     HERMES_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
-    for skill in ("vod-core",):
-        src = ROOT / "skills" / skill
-        if src.exists():
+    pack_set = set(p for p in packs.split(",") if p)
+    for entry in sorted((ROOT / "skills").iterdir()):
+        if entry.is_dir():  # vod-core / vod-feedback-collect
+            skill = entry.name
+            if skill == "vod-core" and "core" not in pack_set:
+                continue
+            if skill == "vod-feedback-collect" and "collect" not in pack_set:
+                continue
             dst = HERMES_SKILLS_DIR / skill
             if dst.exists():
                 shutil.rmtree(dst)
-            shutil.copytree(src, dst)
+            shutil.copytree(entry, dst)
+        elif entry.suffix == ".md":  # vendored 领域规则（kb pack）
+            if "kb" not in pack_set:
+                continue
+            shutil.copy2(entry, HERMES_SKILLS_DIR / entry.name)
 
     bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
     manifest = {
@@ -93,7 +119,8 @@ def cmd_install(args):
                    "commitSha": bi["commitSha"]},
         "target": target,
         "installedAt": datetime.datetime.now().isoformat(timespec="seconds"),
-        "packs": args.packs,
+        "preset": args.preset,
+        "packs": packs,
         "mcpConfig": str(mcp_conf),
         "skillsDir": str(HERMES_SKILLS_DIR),
     }
@@ -101,6 +128,10 @@ def cmd_install(args):
                                encoding="utf-8")
     print("installed:", json.dumps(manifest, ensure_ascii=False, indent=2))
     print(f"提示：请把 {mcp_conf} 的内容并入 Hermes 的 MCP 配置后重启会话")
+    missing = [k for k, v in (("VOD_API_KEY", mcp_conf), ) if
+               not json.loads(mcp_conf.read_text(encoding="utf-8"))["env"][k]]
+    if missing:
+        print(f"警告：{missing} 未配置，网关上线后所有调用将 401（E1 纪律）")
 
 
 def cmd_status(_args):
@@ -173,8 +204,11 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("install")
     sp.add_argument("--target", required=True)
+    sp.add_argument("--preset", default="collect", choices=list(PRESETS),
+                    help="collect=对外默认（采集者）；full=内部全量")
     sp.add_argument("--api-base", default="http://127.0.0.1:8000")
-    sp.add_argument("--packs", default="")
+    sp.add_argument("--java-api-base", default="http://127.0.0.1:8090")
+    sp.add_argument("--packs", default="", help="显式覆盖 preset（逗号分隔）")
     sp.set_defaults(fn=cmd_install)
     for name, fn in (("status", cmd_status), ("doctor", cmd_doctor),
                      ("verify", cmd_verify), ("uninstall", cmd_uninstall)):

@@ -38,11 +38,17 @@ VOD 的分析引擎、领域规则和知识库检索——每次都需要人转�
 
 ---
 
-## 二、目标用户
+## 二、目标用户（2026-11-03 修订：分层定位）
 
-1. 使用 AI coding agent 的开发者/运营（配置一条 mcpServers 即集成）
-2. 外部业务系统（继续走既有 HTTP API 契约，零改动）
-3. 平台运维（插件安装/诊断/升级）
+1. **外部开发者=反馈采集者**（主目标）：把插件装进自己的 agent/应用，
+   采集其产品的用户反馈进 VOD——默认 preset=collect（不含分析发起）
+2. **内部运营/可信第三方=分析发起者**：经 preset full 发起/查询分析任务；
+   外放前置条件=任务级 token（P1）
+3. 外部业务系统（继续走既有 HTTP API 契约，零改动）
+4. 平台运维（插件安装/诊断/升级）
+
+> 分层依据：分析是运营成本（LLM+共享任务表），不能交给不可信调用方；
+> 开发者的角色是"反馈的采集者"不是"分析的发起者"。
 
 ---
 
@@ -105,12 +111,43 @@ VOD 的分析引擎、领域规则和知识库检索——每次都需要人转�
 
 ---
 
+## 三·八、端到端场景用例（S 系列）
+
+S1 采集闭环（外部开发者主路径）
+  开发者装 preset collect 到其 agent → 用户说"补全太慢" → 采集技能识别
+  → 逐次征得同意（confirm）→ vod_submit_voices → Java /external/voices
+  （Bearer VOD_JAVA_API_KEY）→ voiceId 回执告知用户已收录
+
+S2 来源真实性（恶意场景）
+  恶意方冒充其他产品提交：source 由插件握手身份注入 + 引擎侧以签发
+  key 身份为准（覆盖 body.source）→ 冒充数据可按 key 圈出打标隔离
+
+S3 恶意灌库
+  某方高频提交：网关按 key 限流 429+告警 → 吊销秒级失效 → 已入库
+  可疑数据"待复核"标，人工管理台处置（不自动删）
+
+S4 护栏不误杀（E4 修复验证）
+  用户反馈原文"系统把我的 password = abc 明文显示了" → content 不进
+  文本规则 → 正常入库；scene 字段含 jdbc 直连意图 → 仍 deny
+
+S5 库存消费闭环（内部）
+  运营触发增量分析（Java 增量链路：analyzedVoiceIds 差集 →
+  analyze/json）→ 采集进来的声音被分析 → 报告/看板 → 产品改进
+
+S6 溯源与信任
+  任何宿主调 vod_devkit_info → 版本+commitSHA+宿主身份；
+  verify 到 origin 核 commit → 被改包告警
+
+S7 分析发起（内部，preset full）
+  内部 agent 确认后 run_analysis → taskId → status 轮询 → result
+  → 与 vod-system 前端同源一致
+
 ## 四、验收用例清单（在目标环境执行，工具不入库）
 
 | # | 用例 | 预期 |
 |---|---|---|
 | U1 | agent 配置 mcpServers 指向 vod-devkit-mcp，重启会话 | 工具 4 个全部可列举 |
-| U2 | 调用 vod_run_analysis（白名单 profile，≤上限条数） | 返回 taskId；任务表新增记录 |
+| U2 | 调用 vod_run_analysis（白名单 profile，≤上限条数）【内部形态 preset full】 | 返回 taskId；任务表新增记录 |
 | U3 | 未经用户确认调用 vod_run_analysis | 被 confirm 规则拦截，零副作用 |
 | U4 | vod_task_status(taskId) 轮询 U2 任务 | 状态与引擎侧一致 |
 | U5 | vod_task_result(taskId) | 与 vod-system 前端同任务结果一致 |
@@ -125,6 +162,10 @@ VOD 的分析引擎、领域规则和知识库检索——每次都需要人转�
 | U14 | git show <manifest.SHA> 于 origin | 与已装包内容一致（版本可复现） |
 | U15 | 改 contract/tools.schema.json 后跑 CI | 实现侧 schema 未同步跟随契约即测试失败（单一事实源生效） |
 | U16 | AIShell/CodeArts 等 MCP 客户端直连 vod-mcp | 不改 Python 核心即可列举并调用全部工具（宿主矩阵分流验证） |
+| U21 | 协议级：所有上游调用抓包 | Authorization: Bearer 头必在（E1 回归锁） |
+| U22 | 协议级：submit_voices 抓包 | 路径=Java 前缀 /rest/.../external/voices，用 VOD_JAVA_API_KEY（E2 回归锁） |
+| U23 | 反馈 content 含凭据字样（password = abc） | 不被文本规则误杀，正常提交（E4/S4） |
+| U24 | install --preset collect 后 tools/list | 无 workflow 工具（外部分层生效） |
 | U17 | 未确认调用 vod_submit_voices | confirm 拦截（逐次同意），零入库 |
 | U18 | 单批 51 条声音提交 | deny（上限 50） |
 | U19 | 调用方伪造 source=fake-host 提交 | 引擎收到的 source=握手 clientInfo.name，伪造无效 |

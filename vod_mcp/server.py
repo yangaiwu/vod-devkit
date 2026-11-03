@@ -51,7 +51,8 @@ def handle(message: dict) -> dict | None:
             return _error(req_id, -32010, f"[guard:deny] {msg}")
         if verdict == "confirm":
             return _error(req_id, -32011, f"[guard:confirm] {msg}")
-        text_hits = policy_mod.check_text(pol, json.dumps(args, ensure_ascii=False))
+        text_hits = policy_mod.check_text(
+            pol, json.dumps(policy_mod.guard_scope(args), ensure_ascii=False))
         if text_hits:
             return _error(req_id, -32010,
                           f"[guard:deny] {policy_mod.decide(text_hits)[1]}")

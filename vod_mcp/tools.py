@@ -1,11 +1,18 @@
-"""工具实现：唯一事实源=contract/tools.schema.json；HTTP 直调 workflow/api.py。
+"""工具实现：唯一事实源=contract/tools.schema.json；HTTP 直调 VOD 两个后端。
+
+双后端拓扑（E2 修复：单 base 寻址不了两个后端）：
+  workflow 引擎（FastAPI api.py :8000）——analyze/status/result/kb
+    base=VOD_API_BASE，key=VOD_API_KEY（nginx R0 Bearer）
+  Java backend——声音提交，base=VOD_JAVA_API_BASE，key=VOD_JAVA_API_KEY
+    （ExternalApiKeyFilter Bearer）
 
 引擎端点（api.py 实测路由）：
   POST /api/vod/analyze/json   {data, product, limit, workers} -> {task_id, status}
   GET  /api/vod/status/{task_id}
   GET  /api/vod/result/{task_id}
   POST /api/vod/knowledge/query  <- 引擎侧前置缺口（api.py 尚无此路由）
-  POST /external/voices            <- VOD-VOI：Java backend（复用 saveCollectRecord），走 ExternalApiKeyFilter 鉴权
+Java 端点（external-api-contract.md 实测前缀）：
+  POST /rest/developer/manager/hdvodmngservice/v1/external/voices（VOD-VOI）
 """
 import json
 import os
@@ -16,7 +23,13 @@ from pathlib import Path
 from vod_mcp import provenance
 
 _CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract" / "tools.schema.json"
-_API_BASE = os.environ.get("VOD_API_BASE", "http://127.0.0.1:8000")
+
+# 双后端配置（E2）
+WF_BASE = os.environ.get("VOD_API_BASE", "http://127.0.0.1:8000")
+WF_KEY = os.environ.get("VOD_API_KEY", "")            # nginx R0 Bearer
+JAVA_BASE = os.environ.get("VOD_JAVA_API_BASE", "http://127.0.0.1:8090")
+JAVA_KEY = os.environ.get("VOD_JAVA_API_KEY", "")     # ExternalApiKeyFilter Bearer
+_JAVA_EXTERNAL = "/rest/developer/manager/hdvodmngservice/v1/external/voices"
 
 
 class ToolError(Exception):
@@ -45,18 +58,33 @@ def tool_specs(only: list) -> list:
     return specs
 
 
-def _http(method: str, path: str, body: dict | None = None, timeout: int = 30) -> dict:
-    url = _API_BASE.rstrip("/") + path
+def _http(method: str, path: str, body: dict | None = None,
+          base: str | None = None, key: str | None = None, timeout: int = 30) -> dict:
+    """统一出口：一律携带 Authorization Bearer（E1 修复：认证头缺失）。
+
+    base/key 缺省在调用时解析模块级配置（不能用函数默认值——定义时即冻结，
+    环境变更/测试 monkeypatch 均无法生效）。
+    """
+    base = base if base is not None else WF_BASE
+    key = key if key is not None else WF_KEY
+    url = base.rstrip("/") + path
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
-        raise ToolError(f"引擎返回 {e.code}: {e.read().decode()[:200]}") from e
+        detail = e.read().decode()[:200]
+        if e.code == 401:
+            raise ToolError(
+                f"鉴权失败（{base}）：检查 VOD_API_KEY/VOD_JAVA_API_KEY 配置",
+                code=-32012) from e
+        raise ToolError(f"上游返回 {e.code}: {detail}") from e
     except urllib.error.URLError as e:
-        raise ToolError(f"引擎不可达（{_API_BASE}）: {e.reason}", code=-32001) from e
+        raise ToolError(f"上游不可达（{base}）: {e.reason}", code=-32001) from e
 
 
 def run_analysis(params: dict, client_info: dict | None = None) -> dict:
@@ -91,10 +119,10 @@ def kb_search(params: dict) -> dict:
 
 
 def submit_voices(params: dict, client_info: dict | None = None) -> dict:
-    """source 由服务端取握手宿主身份注入，忽略调用方自带 source（防伪造）。"""
+    """走 Java backend；source 由握手宿主身份注入（服务端最终以签发 key 为准）。"""
     host = (client_info or {}).get("name") or "unknown-host"
     payload = {"source": host, "voices": params["voices"]}
-    out = _http("POST", "/api/vod/voices", payload)
+    out = _http("POST", _JAVA_EXTERNAL, payload, base=JAVA_BASE, key=JAVA_KEY)
     return {"accepted": out.get("accepted", 0),
             "voiceIds": out.get("voiceIds", []),
             "rejected": out.get("rejected", [])}

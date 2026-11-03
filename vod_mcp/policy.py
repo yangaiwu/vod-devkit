@@ -61,6 +61,22 @@ def check_tool_call(policy: dict, tool: str, params: dict) -> list:
     return hits
 
 
+def guard_scope(params: dict) -> dict:
+    """文本规则的扫描面（E4 修复）：剔除用户内容字段——拦"凭据读取意图"
+    不误杀"反馈内容里引用凭据"。voices[].content 与 data 是用户原话，
+    不进文本规则；scene/tags/query/product 等结构性字段仍扫描。"""
+    scope = {}
+    for k, v in (params or {}).items():
+        if k in ("data",):           # run_analysis 的声音数据=用户原话
+            scope[k] = "<%d records>" % len(v) if isinstance(v, list) else "..."
+        elif k == "voices":          # 采集的反馈内容=用户原话，仅扫非 content 字段
+            scope[k] = [{kk: vv for kk, vv in (item or {}).items() if kk != "content"}
+                        for item in v] if isinstance(v, list) else v
+        else:
+            scope[k] = v
+    return scope
+
+
 def check_text(policy: dict, text: str) -> list:
     """文本类 deny 规则（DB 直连/凭据模式），供 hook 与参数串调用。"""
     hits = []

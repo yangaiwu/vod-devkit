@@ -72,7 +72,7 @@ def test_text_rules_deny(text):
 def test_run_analysis_calls_engine(monkeypatch):
     calls = {}
 
-    def fake_http(method, path, body=None, timeout=30):
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
         calls["req"] = (method, path, body)
         return {"task_id": "ab12cd34", "status": "pending"}
 
@@ -121,7 +121,7 @@ def test_submit_voices_batch_limit_denied():
 def test_submit_voices_injects_host_source(monkeypatch):
     calls = {}
 
-    def fake_http(method, path, body=None, timeout=30):
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
         calls["req"] = (method, path, body)
         return {"accepted": 1, "voiceIds": ["v_abc123"], "rejected": []}
 
@@ -131,7 +131,7 @@ def test_submit_voices_injects_host_source(monkeypatch):
          "source": "fake-host"},  # 调用方自带 source 应被忽略
         client_info={"name": "test-host", "version": "1.0"})
     assert out["voiceIds"] == ["v_abc123"]
-    assert calls["req"][1] == "/api/vod/voices"
+    assert calls["req"][1] == "/rest/developer/manager/hdvodmngservice/v1/external/voices"
     assert calls["req"][2]["source"] == "test-host", "来源必须取握手身份而非调用方参数"
 
 

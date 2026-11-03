@@ -14,7 +14,7 @@
 ```
 vod-devkit（可分发插件包，目录随本设计落仓）
 ├── bin/vod-devkit            # 安装器 CLI
-├── vod_mcp/                  # MCP server（stdio，薄壳）
+├── vod_mcp/                  # MCP server（stdio，薄壳；双后端出口见下）
 │   ├── server.py             # 工具注册与调度（握手时记录 clientInfo）
 │   ├── tools.py              # 5 个工具 → api.py 调用链
 │   ├── packs.py              # VOD_PACKS 裁剪：core/workflow/kb
@@ -34,6 +34,22 @@ vod-devkit（可分发插件包，目录随本设计落仓）
     ├── hermes/               # manifest + hooks（首个目标）
     └── opencode/ codex/      # 有真实消费者再补
 ```
+
+双后端出口（E2 修复）：
+  workflow：VOD_API_BASE + VOD_API_KEY（nginx R0 Bearer）→ analyze/status/result/kb
+  java：VOD_JAVA_API_BASE + VOD_JAVA_API_KEY（ExternalApiKeyFilter Bearer）
+        → POST /rest/developer/manager/hdvodmngservice/v1/external/voices
+  统一出口 _http() 一律携带 Authorization（E1 修复：此前 15 个绿测试全 mock，
+  测不出缺头；协议级测试 tests/test_protocol.py 以真 HTTP 服务器锁死
+  头/路径/双 key，是 E1/E2 的永久回归门）
+
+护栏作用域（E4 修复）：文本 deny 规则只扫结构性字段（scene/tags/query/
+product…）；voices[].content 与 data 是用户原话，不进文本规则——
+拦"凭据读取意图"不误杀"反馈内容引用凭据"（S4/U23 锁定）。
+
+安装预置（分层落档）：install --preset collect（对外默认：core+collect，
+无分析发起）/ full（内部全量）；技能拷贝按 packs 过滤（目录型技能+
+vendored 规则文档全量，G1 修复）；manifest 记录 preset。
 
 依赖边界铁律：
 1. vod_mcp 只允许 import workflow/api.py 的 HTTP 客户端，禁止 import 引擎内部模块
@@ -110,6 +126,10 @@ devkit 元技能常驻语义）。
 已装版本可复现 = `git show <SHA>` 即该份插件全部源码。
 
 ### 2.6 vod_submit_voices（写，confirm，collect pack）
+
+后端=java（契约 backends 标注）。E3 修正待落引擎侧文档：查重依赖提交方
+外部去重键或内容 hash——服务端生成 voice_id 使 saveCollectRecord 的
+voice_id 查重不生效（详见 VOD-VOI 文档修正）。
 
 入参：`voices[]`（content 必填 ≤2000、scene/userType/tags 可选）、
 `confirmed`（逐次同意护栏）。
