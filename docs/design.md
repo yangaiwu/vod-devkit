@@ -155,6 +155,15 @@ scene ≤128。签名回执记 P2 前置（用户自助查询/撤回的前置条
 别名归一对齐引擎（modelarts→MaaS）；白名单经 meta 动态校验
 （快照兜底时容忍提交并标 stale——引擎侧最终校验为准）。
 
+### 2.5e 提交账本与查询（层级①）
+
+_ledger_append：submit 成功后落 runtime.json submissions（cap 200
+环形截断）；纪律=文件读改写+只动 submissions 键（防陈旧配置整体
+回写覆盖其他键——该缺陷曾被测试实锤并修正）。vod_list_submitted
+（只读，collect pack）：limit 1-100，最新在前，scope 字段明示
+"本机记录（换机不保留）"。层级②引擎级（GET /external/voices，按
+key 过滤）随 VOD-VOI；层级③用户自助维持 P2（签名回执）。
+
 ### 2.6 vod_submit_voices（写，confirm，collect pack）
 
 后端=java（契约 backends 标注）。

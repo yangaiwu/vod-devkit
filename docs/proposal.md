@@ -206,6 +206,37 @@ S16 回执凭证（P2 未来态，当前不做）
   用户要求"查我提过的反馈/撤回" → 需签名回执改造（UUID+HMAC，
   服务端生成与声音同库）→ 未实现前该诉求引导走管理台人工
 
+## 三·四f、提交记录查询（两级设计，层级①已实现）
+
+用户提交后追问"我提的反馈呢/提交成功了吗"是采集闭环的自然需求。
+三级拆解：
+
+- **层级① 本地账本（已实现）**：submit 成功落 runtime.json submissions
+  账本（voiceId/taskId/title 摘要/product/时间，cap 200 环形截断）；
+  新只读工具 vod_list_submitted（limit 1-100，最新在前）——agent 凭
+  账本替用户回答进度。实现纪律：账本每次文件读改写、只动 submissions
+  键（不从内存合并整体回写——曾把陈旧配置泄入调用方，被测试抓住）
+- **层级② 引擎级查询（随 VOD-VOI）**：GET /external/voices?since=，按
+  key/source 过滤返回该方提交列表——权威跨机；层级③ 终端用户自助
+  查询维持 P2（签名回执前置）
+- 边界：查的是"已提交记录"非"分析结果"（后者归运营前端）——
+  只读工具入 collect pack，不破坏单写口架构
+
+场景用例 S17-S19：
+
+S17 提交后对账（主路径）
+  用户："我上次那条提交了吗" → agent 调 vod_list_submitted →
+  账本返回最新记录（voiceId+时间+摘要）→ agent 回答
+  "已收录，11-03 15:02 那条"，用户全程不见编号
+
+S18 换机/重装边界
+  新机器装插件 → 账本为空 → vod_list_submitted 明示
+  "本机提交记录（换机不保留）" → 引导理解范围（层级②上线后消除）
+
+S19 引擎级查询（层级②未来态）
+  开发者换机后要权威列表 → GET /external/voices?since= 按 key 过滤
+  → 跨机一致（随 VOD-VOI 评审落地）
+
 ## 三·五、安装溯源与宿主感知（新增需求）
 
 ### 背景与语义
@@ -322,6 +353,9 @@ S10 滥用处置
 | U32 | 提交 2001 字反馈 | 逐条 rejected（content 超 2000），同批合法条照常提交 |
 | U33 | 工具 Schema 审计 | 无任何身份参数（user_id/receipt_id 等） |
 | U34 | userType/customer 填写 | 仅作数据字段入库，不作鉴权依据 |
+| U35 | 提交 3 条后调 vod_list_submitted(limit=2) | total=3，返回最新 2 条（最新在前），含 voiceId/taskId/摘要 |
+| U36 | 账本落盘审计 | runtime.json 只新增 submissions 键，其他配置（key/meta）零触碰 |
+| U37 | 用户问"提交了吗"（会话内） | agent 经账本回答时间+内容摘要，编号不展示给用户（F2 纪律） |
 | U17 | 未确认调用 vod_submit_voices | confirm 拦截（逐次同意），零入库 |
 | U18 | 单批 51 条声音提交 | deny（上限 50） |
 | U19 | 调用方伪造 source=fake-host 提交 | 引擎收到的 source=握手 clientInfo.name，伪造无效 |

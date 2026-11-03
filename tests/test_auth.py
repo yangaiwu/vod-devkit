@@ -1,4 +1,5 @@
 """认证与令牌链路测试：auth_status 指纹化（明文永不输出）+ 零字段令牌自动获取。"""
+import json
 import sys
 from pathlib import Path
 
@@ -197,3 +198,38 @@ def test_content_boundary_rejects_oversize(monkeypatch):
         client_info={"name": "t"})
     assert out["accepted"] == 1
     assert out["rejected"][0]["reason"].startswith("content 超 2000")
+
+
+def test_ledger_and_list_submitted(monkeypatch, tmp_path):
+    """层级①查询闭环：提交落账→list_submitted 读回（最新在前）；只动 submissions 键。"""
+    rt_file = tmp_path / "runtime.json"
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts"],
+                                             "stale": False, "source": "meta"})
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    monkeypatch.setattr(tools, "_http",
+                        lambda m, p, body=None, timeout=30, base=None, key=None:
+                        {"code": 200, "data": {"taskId": 5}})
+    # 重定向 runtime 文件到 tmp（_save_runtime/_runtime_cfg 按模块常量路径）
+    import vod_mcp.tools as T
+    monkeypatch.setattr(T, "_runtime_cfg", lambda: (
+        json.loads(rt_file.read_text()) if rt_file.exists() else {}))
+    def _fake_save(upd):
+        cfg = json.loads(rt_file.read_text()) if rt_file.exists() else {}
+        cfg.update(upd)
+        rt_file.write_text(json.dumps(cfg))
+        return None
+
+    monkeypatch.setattr(T, "_save_runtime", _fake_save)
+    T.submit_voices({"voices": [{"content": "第一条反馈内容足够长"},
+                                 {"content": "第二条反馈内容足够长"}],
+                     "product": "codearts", "confirmed": True},
+                    client_info={"name": "t"})
+    T.submit_voices({"voices": [{"content": "第三条反馈内容足够长"}],
+                     "product": "codearts", "confirmed": True},
+                    client_info={"name": "t"})
+    out = T.list_submitted({"limit": 2})
+    assert out["total"] == 3
+    assert [s["title"][:3] for s in out["submissions"]] == ["第三条", "第二条"], "最新在前"
+    cfg = json.loads(rt_file.read_text())
+    assert set(cfg) == {"submissions"}, "账本只动 submissions 键，不得触碰其他配置"

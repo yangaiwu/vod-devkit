@@ -8,7 +8,7 @@ ALL_PACKS = ("core", "collect", "knowledge")
 
 PACK_TOOLS = {
     "core": ["vod_devkit_info", "vod_auth_status"],
-    "collect": ["vod_submit_voices"],
+    "collect": ["vod_submit_voices", "vod_list_submitted"],
     "knowledge": [],  # 纯技能包：3 个领域规则技能，零工具零依赖
 }
 

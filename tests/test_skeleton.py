@@ -178,7 +178,8 @@ def test_stdio_roundtrip():
         assert init["result"]["serverInfo"]["name"] == "vod-devkit"
         listing = _rpc(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = [t["name"] for t in listing["result"]["tools"]]
-        assert set(names) == {"vod_submit_voices", "vod_devkit_info", "vod_auth_status"}
+        assert set(names) == {"vod_submit_voices", "vod_list_submitted",
+                              "vod_devkit_info", "vod_auth_status"}
         info = _rpc(proc, {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                            "params": {"name": "vod_devkit_info", "arguments": {}}})
         payload = json.loads(info["result"]["content"][0]["text"])

@@ -238,6 +238,17 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
                         "；".join(g["label"] for g in _KEY_GUIDANCE), code=-32012)
             else:
                 rejected.append({"index": i, "reason": msg[:120]})
+    # 本地账本落账（层级①查询的源）
+    import time as _time
+    _contents = [str(v.get("content", ""))[:40]
+                 for v in params.get("voices", []) if str(v.get("content", "")).strip()]
+    ledger_entries = [
+        {"voiceId": vid, "taskId": tid,
+         "title": (_contents[i] if i < len(_contents) else ""),
+         "product": product, "at": _time.strftime("%Y-%m-%dT%H:%M:%S")}
+        for i, (vid, tid) in enumerate(zip(voice_ids, task_ids))
+    ]
+    _ledger_append(ledger_entries)
     return {"accepted": accepted, "voiceIds": voice_ids,
             "taskIds": task_ids, "rejected": rejected}
 
@@ -266,6 +277,37 @@ def auth_status(params: dict, client_info: dict | None = None) -> dict:
         out["guidance"] = _KEY_GUIDANCE
         out["tokenReady"] = "首次提交时将自动申请匿名令牌（零字段，日限额低）"
     return out
+
+
+_LEDGER_KEY = "submissions"
+_LEDGER_CAP = 200
+
+
+def _ledger_append(entries: list) -> None:
+    """本地提交账本（层级①）：本机提交记录，供 vod_list_submitted 对账。
+    cap 200 条（环形截断，防 runtime.json 膨胀）。
+    实现纪律：每次从文件读改写、只动 submissions 键——不从内存 _RT
+    合并（陈旧配置会整体回写，覆盖其他键，且把无关配置泄入调用方）。"""
+    if not entries:
+        return
+    fresh = _runtime_cfg()
+    ledger = (fresh.get(_LEDGER_KEY) or [])[-_LEDGER_CAP:]
+    ledger.extend(entries)
+    _save_runtime({_LEDGER_KEY: ledger[-_LEDGER_CAP:]})
+
+
+def list_submitted(params: dict, client_info: dict | None = None) -> dict:
+    """查询本机已提交的声音（只读，采集者对账闭环）。
+    引擎级跨机查询随 VOD-VOI 列表端点；终端用户自助查询维持 P2（签名回执）。"""
+    limit = params.get("limit", 20)
+    try:
+        limit = max(1, min(int(limit), 100))
+    except (TypeError, ValueError):
+        limit = 20
+    ledger = _runtime_cfg().get(_LEDGER_KEY) or []  # 文件现读（进程内账本可能刚更新）
+    return {"total": len(ledger),
+            "submissions": ledger[-limit:][::-1],  # 最新在前
+            "scope": "本机提交记录（换机/重装不保留；引擎级查询随 VOD-VOI）"}
 
 
 def _save_runtime(update: dict) -> None:
@@ -299,6 +341,7 @@ def devkit_info(params: dict, client_info: dict | None = None) -> dict:
 # 工具名 → 处理器（是否接收 client_info）
 _HANDLERS = {
     "vod_submit_voices": submit_voices,
+    "vod_list_submitted": list_submitted,
     "vod_devkit_info": devkit_info,
     "vod_auth_status": auth_status,
 }

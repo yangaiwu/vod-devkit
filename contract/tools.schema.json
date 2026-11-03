@@ -149,6 +149,39 @@
         ]
       },
       "backend": "local(无上游；探测时轻量 ping)"
+    },
+    "vod_list_submitted": {
+      "description": "查询本机已提交的声音（只读）。本地账本（cap 200），最新在前；跨机/权威查询随引擎端点（VOD-VOI）。终端用户进度追问由 agent 凭此对账回答。",
+      "input": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "submissions": {
+            "type": "array"
+          },
+          "scope": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "total",
+          "submissions"
+        ]
+      },
+      "backend": "local(无上游；读本机 runtime.json 账本)"
     }
   },
   "backends": {
