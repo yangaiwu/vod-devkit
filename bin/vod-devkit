@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""vod-devkit 安装器 CLI（骨架）：install / status / doctor / verify / uninstall。
+
+当前支持目标：hermes。install 做三件事：落 MCP 配置片段、拷 skills、
+写 install-manifest（commitSHA 来源主键）。
+"""
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+import datetime
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+HERMES_MCP_DIR = Path.home() / ".hermes" / "mcp"  # 约定：写入前打印供确认
+HERMES_SKILLS_DIR = Path.home() / ".hermes" / "skills" / "devops" / "vod-devkit"
+
+
+def git_sha(strict: bool) -> str | None:
+    dirty = bool(subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
+                                capture_output=True).stdout.strip())
+    if strict and dirty:
+        print("工作区不干净，拒绝构建（构建纪律）", file=sys.stderr)
+        sys.exit(1)
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
+                         capture_output=True, text=True).stdout.strip()
+    return sha or None
+
+
+def build_info(strict: bool = False) -> dict:
+    from vod_mcp import __version__
+    remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=ROOT,
+                            capture_output=True, text=True).stdout.strip()
+    return {
+        "version": __version__,
+        "commitSha": git_sha(strict),
+        "builtAt": datetime.datetime.now().isoformat(timespec="seconds"),
+        "sourceRemote": remote or None,
+    }
+
+
+def write_build_info(strict: bool):
+    info = build_info(strict)
+    (ROOT / "build-info.json").write_text(
+        json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
+    print("build-info.json:", json.dumps(info, ensure_ascii=False))
+
+
+def manifest_path() -> Path:
+    return ROOT / "install-manifest.json"
+
+
+def cmd_install(args):
+    write_build_info(strict=False)
+    target = args.target
+    if target != "hermes":
+        print(f"暂不支持目标: {target}（当前仅 hermes）", file=sys.stderr)
+        sys.exit(2)
+    HERMES_MCP_DIR.mkdir(parents=True, exist_ok=True)
+    mcp_conf = HERMES_MCP_DIR / "vod-devkit.json"
+    server_entry = str(ROOT / "vod_mcp" / "server.py")
+    mcp_conf.write_text(json.dumps({
+        "name": "vod-devkit",
+        "command": sys.executable,
+        "args": [server_entry],
+        "env": {"VOD_API_BASE": args.api_base, "VOD_PACKS": args.packs or ""},
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    HERMES_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    for skill in ("vod-core",):
+        src = ROOT / "skills" / skill
+        if src.exists():
+            dst = HERMES_SKILLS_DIR / skill
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst)
+
+    bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
+    manifest = {
+        "product": "vod-devkit",
+        "version": bi["version"],
+        "source": {"type": "git", "remote": bi["sourceRemote"],
+                   "ref": subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                                         cwd=ROOT, capture_output=True, text=True).stdout.strip(),
+                   "commitSha": bi["commitSha"]},
+        "target": target,
+        "installedAt": datetime.datetime.now().isoformat(timespec="seconds"),
+        "packs": args.packs,
+        "mcpConfig": str(mcp_conf),
+        "skillsDir": str(HERMES_SKILLS_DIR),
+    }
+    manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
+                               encoding="utf-8")
+    print("installed:", json.dumps(manifest, ensure_ascii=False, indent=2))
+    print(f"提示：请把 {mcp_conf} 的内容并入 Hermes 的 MCP 配置后重启会话")
+
+
+def cmd_status(_args):
+    p = manifest_path()
+    if not p.exists():
+        print("未安装（无 install-manifest）")
+        sys.exit(1)
+    print(p.read_text(encoding="utf-8"))
+
+
+def cmd_doctor(_args):
+    problems = []
+    p = manifest_path()
+    if not p.exists():
+        problems.append("无 install-manifest.json（未 install？）")
+    else:
+        mf = json.loads(p.read_text(encoding="utf-8"))
+        bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
+        if mf["source"]["commitSha"] != bi.get("commitSha"):
+            problems.append("install-manifest 与 build-info 的 commitSHA 不一致")
+        if not Path(mf["mcpConfig"]).exists():
+            problems.append("MCP 配置文件缺失")
+        if not Path(mf["skillsDir"]).exists():
+            problems.append("skills 目录缺失")
+    if problems:
+        for x in problems:
+            print("FAIL:", x)
+        sys.exit(1)
+    print("doctor: OK")
+
+
+def cmd_verify(_args):
+    p = manifest_path()
+    if not p.exists():
+        print("未安装")
+        sys.exit(1)
+    sha = json.loads(p.read_text(encoding="utf-8"))["source"]["commitSha"]
+    if not sha:
+        print("manifest 无 commitSha（dev 构建无法核验）")
+        sys.exit(1)
+    r = subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+                       cwd=ROOT, capture_output=True)
+    if r.returncode != 0:
+        subprocess.run(["git", "fetch", "origin"], cwd=ROOT)
+        r = subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+                           cwd=ROOT, capture_output=True)
+    if r.returncode != 0:
+        print(f"FAIL: commit {sha} 不存在于 origin（被改写或非本仓产物）")
+        sys.exit(1)
+    print(f"verify: OK（commit {sha[:12]} 存在于本仓/origin）")
+
+
+def cmd_uninstall(_args):
+    p = manifest_path()
+    if p.exists():
+        mf = json.loads(p.read_text(encoding="utf-8"))
+        for key in ("mcpConfig", "skillsDir"):
+            path = Path(mf[key])
+            if path.exists():
+                shutil.rmtree(path) if path.is_dir() else path.unlink()
+                print("removed:", path)
+        p.unlink()
+        print("removed:", p)
+    else:
+        print("未安装")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="vod-devkit")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sp = sub.add_parser("install")
+    sp.add_argument("--target", required=True)
+    sp.add_argument("--api-base", default="http://127.0.0.1:8000")
+    sp.add_argument("--packs", default="")
+    sp.set_defaults(fn=cmd_install)
+    for name, fn in (("status", cmd_status), ("doctor", cmd_doctor),
+                     ("verify", cmd_verify), ("uninstall", cmd_uninstall)):
+        s = sub.add_parser(name)
+        s.set_defaults(fn=fn)
+    sub.add_parser("build-info").set_defaults(fn=lambda a: write_build_info(strict=False))
+    args = ap.parse_args()
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    main()
