@@ -115,8 +115,10 @@ devkit 元技能常驻语义）。
 `confirmed`（逐次同意护栏）。
 出参：`accepted`、`voiceIds[]`（引擎生成，第二类对账主键）、`rejected[]`。
 调用链：工具 → 服务端注入 source=握手 clientInfo.name（忽略调用方参数，
-防来源伪造）→ POST api.py /api/vod/voices（VOD-VOI 引擎侧需求，
-入库不触发分析）→ 逐条回执。
+防来源伪造）→ POST Java /external/voices（VOD-VOI 实测修正后落点：
+复用 DataCollectService.saveCollectRecord 入库+查重，voiceId 用既有
+voice_id 体系；鉴权走 ExternalApiKeyFilter Bearer，多 key 防线 P1）
+→ 逐条回执（1=新增/0=跳过均回执，voiceId 对账）。
 护栏：confirm 逐次 + 单批 ≤50（maxVoicesPerSubmit）+ 凭据/PII 文本规则。
 配套技能 vod-feedback-collect：识别用户反馈意图→征得同意→结构化提交→
 voiceId 回执对账。

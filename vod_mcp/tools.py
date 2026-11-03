@@ -5,6 +5,7 @@
   GET  /api/vod/status/{task_id}
   GET  /api/vod/result/{task_id}
   POST /api/vod/knowledge/query  <- 引擎侧前置缺口（api.py 尚无此路由）
+  POST /external/voices            <- VOD-VOI：Java backend（复用 saveCollectRecord），走 ExternalApiKeyFilter 鉴权
 """
 import json
 import os
