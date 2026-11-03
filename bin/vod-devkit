@@ -67,11 +67,113 @@ PRESETS = {
 }
 
 
+def _server_entry() -> str:
+    return str(ROOT / "vod_mcp" / "server.py")
+
+
+def _server_env(args, packs: str) -> dict:
+    return {"VOD_PACKS": packs,
+            "VOD_JAVA_API_BASE": args.java_api_base,
+            "VOD_JAVA_API_KEY": os.environ.get("VOD_JAVA_API_KEY", "")}
+
+
+def _install_hermes(args, packs: str) -> Path:
+    """Hermes：官方途径 hermes mcp add（config.yaml mcp_servers）。"""
+    conf = HERMES_MCP_DIR / "vod-devkit.json"
+    conf.parent.mkdir(parents=True, exist_ok=True)
+    conf.write_text(json.dumps({
+        "name": "vod-devkit", "command": sys.executable,
+        "args": [_server_entry()], "env": _server_env(args, packs),
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    env_args = []
+    for k, v in _server_env(args, packs).items():
+        env_args.extend([k + "=" + v])
+    r = subprocess.run(
+        ["hermes", "mcp", "add", "vod-devkit", "--command", sys.executable,
+         *["--env"] + env_args, "--args", _server_entry()],
+        input="y\ny\n", capture_output=True, text=True)
+    if r.returncode == 0:
+        print("已注册 Hermes MCP（hermes mcp list 可见；重启会话生效）")
+    else:
+        print(f"提示：hermes mcp add 未成功（{r.stderr.strip()[:150]}）；"
+              f"可将 {conf} 内容并入 Hermes 配置")
+    return conf
+
+
+def _install_opencode(args, packs: str) -> Path:
+    """OpenCode：~/.config/opencode/opencode.json 的 mcp 段（JSON 合并）。"""
+    import platform
+    base = Path.home() / (".config/opencode" if platform.system() != "Windows"
+                          else "AppData/Local/opencode")
+    conf = base / "opencode.json"
+    conf.parent.mkdir(parents=True, exist_ok=True)
+    cfg = {}
+    if conf.exists():
+        try:
+            cfg = json.loads(conf.read_text(encoding="utf-8"))
+        except Exception:
+            cfg = {}
+    cfg.setdefault("mcp", {})["vod-devkit"] = {
+        "type": "local", "command": sys.executable,
+        "args": [_server_entry()], "env": _server_env(args, packs)}
+    conf.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"已写入 OpenCode 配置：{conf}（重启 OpenCode 会话生效）")
+    return conf
+
+
+def _install_codex(args, packs: str) -> Path:
+    """Codex：~/.codex/config.toml 的 [mcp_servers.vod-devkit] 表（幂等重写）。"""
+    conf = Path.home() / ".codex" / "config.toml"
+    conf.parent.mkdir(parents=True, exist_ok=True)
+    text = conf.read_text(encoding="utf-8") if conf.exists() else ""
+    # 幂等：先剥离旧段再追加
+    import re
+    text = re.sub(r'\n?\[mcp_servers\.vod-devkit\]\n[^\n\[]*(?:\n[^\n\[]*)*', '', text)
+    env = _server_env(args, packs)
+    env_lines = "\n".join(f'{k} = "{v}"' for k, v in env.items())
+    block = (f'\n[mcp_servers.vod-devkit]\n'
+             f'command = "{sys.executable}"\n'
+             f'args = ["{_server_entry()}"]\n'
+             f'\n[mcp_servers.vod-devkit.env]\n{env_lines}\n')
+    conf.write_text(text.rstrip() + "\n" + block, encoding="utf-8")
+    print(f"已写入 Codex 配置：{conf}（重启 Codex 会话生效）")
+    return conf
+
+
+_INSTALLERS = {"hermes": _install_hermes, "opencode": _install_opencode,
+               "codex": _install_codex}
+
+
+def detect_targets() -> list:
+    """0/1/N 探测：按各家配置目录存在性判断已装宿主。"""
+    found = []
+    if shutil.which("hermes"):
+        found.append("hermes")
+    if (Path.home() / ".config/opencode").exists():
+        found.append("opencode")
+    if (Path.home() / ".codex").exists():
+        found.append("codex")
+    return found
+
+
 def cmd_install(args):
     write_build_info(strict=False)
     target = args.target
-    if target != "hermes":
-        print(f"暂不支持目标: {target}（当前仅 hermes）", file=sys.stderr)
+    if target == "auto":
+        found = detect_targets()
+        if len(found) == 1:
+            target = found[0]
+        elif not found:
+            print("未探测到任何宿主；用 --target hermes|opencode|codex 显式指定",
+                  file=sys.stderr)
+            sys.exit(2)
+        else:
+            print(f"探测到多个宿主: {found}；请 --target 显式指定其一", file=sys.stderr)
+            sys.exit(2)
+        print(f"探测到宿主: {target}")
+    installer = _INSTALLERS.get(target)
+    if installer is None:
+        print(f"不支持目标: {target}（可选 hermes|opencode|codex|auto）", file=sys.stderr)
         sys.exit(2)
     packs = args.packs or PRESETS.get(args.preset, "")
     # 归因绑定：装插件的人声明本 agent 服务的产品（三层归因的第一层）
@@ -86,21 +188,7 @@ def cmd_install(args):
         cfg["product"] = args.product
         rt.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    HERMES_MCP_DIR.mkdir(parents=True, exist_ok=True)
-    mcp_conf = HERMES_MCP_DIR / "vod-devkit.json"
-    server_entry = str(ROOT / "vod_mcp" / "server.py")
-    mcp_conf.write_text(json.dumps({
-        "name": "vod-devkit",
-        "command": sys.executable,
-        "args": [server_entry],
-        "env": {
-            "VOD_API_BASE": args.api_base,
-            "VOD_API_KEY": os.environ.get("VOD_API_KEY", ""),
-            "VOD_JAVA_API_BASE": args.java_api_base,
-            "VOD_JAVA_API_KEY": os.environ.get("VOD_JAVA_API_KEY", ""),
-            "VOD_PACKS": packs,
-        },
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    mcp_conf = installer(args, packs)
 
     # G1 修复：技能全量拷贝（目录型技能+平铺规则文档），按 packs 过滤
     HERMES_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
@@ -137,28 +225,21 @@ def cmd_install(args):
     manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
                                encoding="utf-8")
     print("installed:", json.dumps(manifest, ensure_ascii=False, indent=2))
-    # Hermes 真实接入机制：hermes mcp add（写 config.yaml mcp_servers，非手编文件）
-    env_args = []
-    for k in ("VOD_API_BASE", "VOD_API_KEY", "VOD_JAVA_API_BASE",
-              "VOD_JAVA_API_KEY", "VOD_PACKS"):
-        v = json.loads(mcp_conf.read_text(encoding="utf-8"))["env"].get(k, "")
-        env_args.extend(["--env", f"{k}={v}"])
-    server_entry = str(ROOT / "vod_mcp" / "server.py")  # 脚本绝对路径（非 -m：宿主 cwd 下 -m 找不到包）
-    r = subprocess.run(
-        ["hermes", "mcp", "add", "vod-devkit",
-         "--command", sys.executable,
-         *env_args,
-         "--args", server_entry],
-        input="y\ny\n", capture_output=True, text=True)
-    if r.returncode == 0:
-        print("已注册到 Hermes MCP（hermes mcp list 可见；重启会话生效）")
-    else:
-        print(f"警告：hermes mcp add 失败（{r.stderr.strip()[:200]}）——"
-              f"请手动执行上述命令")
-    missing = [k for k in ("VOD_API_KEY", "VOD_JAVA_API_KEY") if
-               not json.loads(mcp_conf.read_text(encoding="utf-8"))["env"].get(k)]
+    missing = [k for k in ("VOD_JAVA_API_KEY",) if
+               not os.environ.get(k) and not _runtime_cfg_read().get("java_key")]
     if missing:
-        print(f"警告：{missing} 未配置，网关上线后所有调用将 401（E1 纪律）")
+        print(f"提示：{missing} 未配置——首次提交将自动申请零字段匿名令牌（无需配置）")
+
+
+def _runtime_cfg_read() -> dict:
+    p = ROOT / "vod_mcp" / "runtime.json"
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
 
 
 def cmd_status(_args):
@@ -252,7 +333,7 @@ def main():
     ap = argparse.ArgumentParser(prog="vod-devkit")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("install")
-    sp.add_argument("--target", required=True)
+    sp.add_argument("--target", default="auto", help="hermes|opencode|codex|auto（默认探测）")
     sp.add_argument("--preset", default="collect", choices=list(PRESETS),
                     help="collect=对外默认（采集者）；full=内部全量")
     sp.add_argument("--api-base", default="http://127.0.0.1:8000")

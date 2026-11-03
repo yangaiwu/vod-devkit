@@ -23,6 +23,10 @@
 - [x] 审计修复 E1/E2（认证头+双后端，协议级测试锁定）、E4（护栏作用域）、G1（安装器技能全量+双 key 配置+preset）
 
 ## 进行中
+- [ ] npm 发布：包已构建（npm pack 27 files 通过，引导器 node→python 实测通）；**卡 token 类型**（需 Granular+勾选 bypass 2FA）
+- [ ] GitHub 镜像：仓 yangaiwu/vod-devkit 已建（API 验证）；**卡 PAT 缺 Contents:write**——补权限后 git push github main --tags 即完成
+- [x] 宿主适配层：hermes（实测）/opencode（JSON 合并）/codex（TOML env 子表）+ auto 0/1/N 探测——真机回归待首批用户
+- [x] 发版自动化 scripts/release.sh（质量门→三处版本同步→CHANGELOG 生成→tag→双远端推送）
 
 - [ ] **公开上架时机（2026-11-03 拍板）**：等 VOD key 签发制落地后再公开；
       业务窗口急则白名单灰度（邀请制，不算完全公开，不阻塞验证）

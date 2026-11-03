@@ -24,7 +24,22 @@ bin/vod-devkit install --target hermes --preset collect --product <你的产品>
 # 重启 Hermes 会话，工具以 mcp_vod_devkit_* 出现
 ```
 
-## 方式二：任意 MCP 客户端（手动配置）
+## 方式二：OpenCode / Codex（自动安装，2026-11-03 起支持）
+
+```bash
+git clone <repo-url> vod-devkit && cd vod-devkit
+bin/vod-devkit install --target opencode --product <你的产品>   # 或 codex
+# install --target auto 会探测已装宿主（0/1/N 三分支）
+```
+> opencode/codex 适配层已过配置写出验证（真实宿主回归待首个用户反馈）。
+
+## 方式三：npm（npx 一条命令，包已就绪待发布）
+
+```bash
+npx vod-devkit install --target <hermes|opencode|codex> --product <你的产品>
+```
+
+## 方式四：任意 MCP 客户端（手动配置）
 
 把以下片段并入你宿主的 mcpServers 配置：
 

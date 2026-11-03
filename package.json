@@ -1,0 +1,30 @@
+{
+  "name": "vod-devkit",
+  "version": "0.1.0",
+  "description": "VOD 用户声音采集插件——MCP server + 技能 + 声明式护栏，把 agent 产品的用户反馈安全送进 VOD 平台",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "vod-devkit": "./npm/cli.js"
+  },
+  "files": [
+    "npm/cli.js",
+    "bin/vod-devkit",
+    "vod_mcp/",
+    "skills/",
+    "contract/",
+    "safety/",
+    "QUICKSTART.md",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE.txt"
+  ],
+  "keywords": ["mcp", "vod", "feedback", "voice-of-customer", "agent", "plugin"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yangaiwu/vod-devkit.git"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
