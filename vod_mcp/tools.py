@@ -176,6 +176,7 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
             "source": host,
             "customer": v.get("userType"),
         }
+        global JAVA_KEY
         try:
             out = _http("POST", _EXISTING_SUBMIT, body, base=JAVA_BASE, key=JAVA_KEY)
             accepted += 1
@@ -188,10 +189,81 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
                 accepted += 1
                 voice_ids.append(vid)
                 task_ids.append(None)
+            elif (not JAVA_KEY or e.code == -32012) and i == 0:
+                # 零字段匿名令牌：缺 key/401 → 自动取令牌 → 落 runtime.json → 重试一次
+                token = _fetch_anon_token()
+                if token:
+                    JAVA_KEY = token
+                    _save_runtime({"java_key": token, "token_tier": "anonymous"})
+                    out = _http("POST", _EXISTING_SUBMIT, body, base=JAVA_BASE, key=JAVA_KEY)
+                    accepted += 1
+                    voice_ids.append(vid)
+                    task_ids.append((out.get("data") or {}).get("taskId"))
+                else:
+                    raise ToolError(
+                        "未配置接入 key 且匿名令牌端点不可用。引导：" +
+                        "；".join(g["label"] for g in _KEY_GUIDANCE), code=-32012)
             else:
                 rejected.append({"index": i, "reason": msg[:120]})
     return {"accepted": accepted, "voiceIds": voice_ids,
             "taskIds": task_ids, "rejected": rejected}
+
+
+def _fingerprint(key: str) -> str | None:
+    import hashlib
+    return hashlib.sha1(key.encode()).hexdigest()[:8] if key else None
+
+
+_TOKEN_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/token"
+
+# 结构化引导（devkit error-table 模式：步骤=可执行动作，不是"参考文档"）
+_KEY_GUIDANCE = [
+    {"order": 1, "action": "auto-token", "label": "首次提交时插件自动申请零字段匿名令牌（默认路径，无需注册）"},
+    {"order": 2, "action": "upgrade", "label": "提交量达上限后升级正式 key：联系 VOD 运营（低信任档→正式档）"},
+    {"order": 3, "action": "host", "label": "宿主平台整体对接可获宿主 key：由宿主运维持有（高信任档）"},
+]
+
+
+def _key_state(name: str, key: str, base: str) -> dict:
+    return {"configured": bool(key), "fingerprint": _fingerprint(key),
+            "base": base, "note": f"{'已配置' if key else '未配置（' + name + '）'}"}
+
+
+def auth_status(params: dict, client_info: dict | None = None) -> dict:
+    """认证自检：指纹化输出（明文永不出现），无 key 也跑并给引导。"""
+    out = {
+        "javaKey": _key_state("VOD_JAVA_API_KEY", JAVA_KEY, JAVA_BASE),
+        "workflowKey": _key_state("VOD_API_KEY", WF_KEY, WF_BASE),
+        "packs": sorted(__import__("vod_mcp.packs", fromlist=["enabled_packs"]).enabled_packs()),
+    }
+    if not JAVA_KEY:
+        out["guidance"] = _KEY_GUIDANCE
+        out["tokenReady"] = "首次提交时将自动申请匿名令牌（零字段，日限额低）"
+    return out
+
+
+def _save_runtime(update: dict) -> None:
+    p = Path(__file__).resolve().parent / "runtime.json"
+    cfg = {}
+    if p.exists():
+        try:
+            cfg = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            cfg = {}
+    cfg.update(update)
+    p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _fetch_anon_token() -> str | None:
+    """零字段匿名令牌：不问任何信息，POST 空 body，引擎侧 IP 限频。"""
+    try:
+        out = _http("POST", _TOKEN_PATH, {}, base=JAVA_BASE, key="", timeout=15)
+        token = out.get("token")
+        if isinstance(token, str) and token:
+            return token
+    except ToolError:
+        return None
+    return None
 
 
 def devkit_info(params: dict, client_info: dict | None = None) -> dict:
@@ -206,6 +278,7 @@ _HANDLERS = {
     "vod_kb_search": kb_search,
     "vod_submit_voices": submit_voices,
     "vod_devkit_info": devkit_info,
+    "vod_auth_status": auth_status,
 }
 
 
@@ -213,5 +286,5 @@ def dispatch(name: str, params: dict, client_info: dict | None = None) -> dict:
     handler = _HANDLERS.get(name)
     if handler is None:
         raise ToolError(f"未知工具: {name}", code=-32601)
-    needs_host = handler in (devkit_info, submit_voices)
+    needs_host = handler in (devkit_info, submit_voices, auth_status)
     return handler(params, client_info) if needs_host else handler(params)

@@ -7,7 +7,7 @@ import os
 ALL_PACKS = ("core", "workflow", "kb", "collect")
 
 PACK_TOOLS = {
-    "core": ["vod_devkit_info"],
+    "core": ["vod_devkit_info", "vod_auth_status"],
     "workflow": ["vod_run_analysis", "vod_task_status", "vod_task_result"],
     "kb": ["vod_kb_search"],
     "collect": ["vod_submit_voices"],

@@ -280,6 +280,35 @@
         ]
       },
       "backend": "local(无上游)"
+    },
+    "vod_auth_status": {
+      "description": "认证自检（只读，无 key 也能跑）：报告双后端 key 配置态（指纹非明文）、连通性、环境指向、生效 packs。缺 key 时输出结构化引导（申请步骤）。",
+      "input": {
+        "type": "object",
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "javaKey": {
+            "type": "object"
+          },
+          "workflowKey": {
+            "type": "object"
+          },
+          "packs": {
+            "type": "array"
+          },
+          "guidance": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "javaKey",
+          "workflowKey"
+        ]
+      },
+      "backend": "local(无上游；探测时轻量 ping)"
     }
   },
   "backends": {

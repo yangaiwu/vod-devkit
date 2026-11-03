@@ -4,6 +4,7 @@
 > 病根 G2 的修复机制：决策存在对话流里必丢，必须落文件。
 
 ## 已闭环
+- [x] key 交付定稿（2026-11-03）：零字段自动令牌=入门（A/B/C 三案比对见 proposal 三·四，B 否决为入门因把门槛放在价值之前）；vod_auth_status+令牌自动获取+引导已实现（24 用例）
 
 - [x] 插件形态=devkit 同构完整形态（installer/MCP/skills/packs/policy）
 - [x] 运行形态=随 agent 进程拉起走内网 API

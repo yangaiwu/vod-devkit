@@ -38,11 +38,12 @@ VOD_PACKS=core,workflow python3 -m vod_mcp.server   # packs 裁剪
 | vod_kb_search | 读 | 引擎侧前置：/api/vod/knowledge/query 待补（VOD-KBQ R1） |
 | vod_submit_voices | 写 | confirm 逐次同意 + 单批≤50 + source 取握手宿主身份；走 Java /external/voices |
 | vod_devkit_info | 只读常驻 | 返回版本/commitSHA/宿主 clientInfo |
+| vod_auth_status | 只读常驻 | key 指纹化自检+三步引导（无 key 可跑） |
 
 安全：deny 拦 DB 直连意图与凭据读取（safety/policy.json 声明式规则；
 文本规则只扫结构性字段，不误杀反馈内容里的凭据引用）。
 
-测试：20 用例（单元+护栏+packs+真进程 stdio 回环+**协议级真 HTTP 服务器**
+测试：24 用例（单元+护栏+packs+真进程 stdio 回环+**协议级真 HTTP 服务器**
 锁定认证头/双后端路径——E1/E2 的永久回归门）。决策闭环见 docs/decisions.md。
 
 ## 测试

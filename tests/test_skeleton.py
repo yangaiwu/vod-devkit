@@ -31,7 +31,7 @@ def test_contract_covers_pack_tools():
 def test_tool_specs_follow_packs(monkeypatch):
     monkeypatch.setenv("VOD_PACKS", "core")
     specs = tools.tool_specs(packs.enabled_tools())
-    assert [s["name"] for s in specs] == ["vod_devkit_info"]
+    assert [s["name"] for s in specs] == ["vod_devkit_info", "vod_auth_status"]
 
 
 # ---------- 护栏（U3/U7） ----------
@@ -151,7 +151,8 @@ def test_stdio_roundtrip(tmp_path):
         names = [t["name"] for t in listing["result"]["tools"]]
         assert set(names) == {"vod_run_analysis", "vod_task_status",
                               "vod_task_result", "vod_kb_search",
-                              "vod_submit_voices", "vod_devkit_info"}
+                              "vod_submit_voices", "vod_devkit_info",
+                              "vod_auth_status"}
         info = _rpc(proc, {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                            "params": {"name": "vod_devkit_info", "arguments": {}}})
         payload = json.loads(info["result"]["content"][0]["text"])

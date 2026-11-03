@@ -125,9 +125,23 @@ devkit 元技能常驻语义）。
 防漂移：分发锁定 --ref/--version（默认跟踪 git tag），不用浮动拉取；
 已装版本可复现 = `git show <SHA>` 即该份插件全部源码。
 
+### 2.5b vod_auth_status（读，core pack 常驻）
+
+入参：无。出参：javaKey/workflowKey 各自 {configured, fingerprint(8位),
+base}（明文禁止）+ packs + 缺 key 时三步引导（令牌/升级/宿主，
+对齐 devkit error-table"步骤=可执行动作"纪律）。
+调用链：纯本地读+运行时状态，探测上游时轻量 ping。
+
 ### 2.6 vod_submit_voices（写，confirm，collect pack）
 
-后端=java（契约 backends 标注）。E3 修正待落引擎侧文档：查重依赖提交方
+后端=java（契约 backends 标注）。
+
+**零字段令牌链（缺 key/401 时，仅首条触发一次）**：
+无 VOD_JAVA_API_KEY 或收到 401(-32012) → POST /external/token
+（空 body，引擎侧 IP 限频，VOD-KEY 端点）→ 令牌回填运行时 +
+落 runtime.json（token_tier=anonymous）→ 重试提交 → 成功。
+令牌端点不可用 → 结构化引导错误（三步），不裸 404。
+设计依据见 proposal 三·四节方案比对：进门零摩擦，问责靠档位。E3 修正待落引擎侧文档：查重依赖提交方
 外部去重键或内容 hash——服务端生成 voice_id 使 saveCollectRecord 的
 voice_id 查重不生效（详见 VOD-VOI 文档修正）。
 
@@ -142,6 +156,26 @@ voice_id 体系；鉴权走 ExternalApiKeyFilter Bearer，多 key 防线 P1）
 护栏：confirm 逐次 + 单批 ≤50（maxVoicesPerSubmit）+ 凭据/PII 文本规则。
 配套技能 vod-feedback-collect：识别用户反馈意图→征得同意→结构化提交→
 voiceId 回执对账。
+
+## 二·八、认证与 key 交付（含方案比对结论）
+
+方案演进：A 宿主代管制（户口=宿主数，但只覆盖被集成宿主）→
+B 自助注册制（会把人跑掉，否决为入门方案）→ **C 零字段自动令牌
+（定稿入门）**。完整比对表见 proposal 三·四节。
+
+实现件：
+1. 令牌签发端点（引擎侧 VOD-KEY）：POST /external/token 空 body，
+   IP 限频，返回 {token, dailyLimit}；落 t_vod_api_keys（tier=anonymous）
+2. 令牌回填链（插件侧已实现）：_fetch_anon_token → JAVA_KEY 回填 →
+   _save_runtime 持久化（token_tier=anonymous）
+3. vod_auth_status（插件侧已实现）：指纹化输出+引导
+4. 升级/宿主档：同一张 key 表不同 tier，管理台处置（吊销/调配额）
+5. fingerprint 纪律：所有 key 输出点（status/doctor/manifest）一律
+   sha1(key)[:8]，明文禁止
+
+错误引导（devkit error-table 模式，已实现）：
+- 令牌不可用：code -32012 + 三步引导文案（自动令牌/升级/宿主）
+- 步骤=可执行动作，禁止"请参考文档"式死链接
 
 ## 三、语言选型（vod_mcp 用 Python，依据与推翻条件）
 
