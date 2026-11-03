@@ -22,7 +22,7 @@ const PKG_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const DATA_DIR = join(PKG_DIR, 'data');
 const RUNTIME = join(DATA_DIR, 'runtime.json');
 const API_PREFIX = '/rest/developer/manager/hdvodmngservice/v1';
-const SUBMIT_PATH = `${API_PREFIX}/external/voice/submit`;
+const SUBMIT_PATH = `${API_PREFIX}/external/voice/submit`; // TODO(引擎VOD-VOI上线)：切换为 `${API_PREFIX}/external/voices`（囤积入库、批量、不触发LLM分析、逐条结构化回执）——切换点仅此一行+body 字段核对，见 docs/decisions.md D-dsh-4
 const TOKEN_PATH = `${API_PREFIX}/external/token`;
 const LEDGER_CAP = 200;
 
@@ -63,7 +63,25 @@ function ledgerAppend(entries) {
 }
 
 // ── HTTP ──
+// ── 传输守卫（与 vod_mcp tools.py -32014 同构）：Bearer key/匿名令牌不得明文过公网 ──
+function transportError(base) {
+    if (!base) return null;
+    let u; try { u = new URL(base); } catch { return { error: `apiBase 非法 URL: ${base}`, code: -32014 }; }
+    const host = u.hostname;
+    const loopback = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+    if (u.protocol !== 'https:' && !loopback) {
+        return {
+            error: `上游 ${u.protocol}//${host} 非 https 且非本机回环——Bearer key 明文外发被拒` +
+                '（插件配置 apiBase 改为 https:// 地址）',
+            code: -32014,
+        };
+    }
+    return null;
+}
+
 async function http(method, path, body, { base, key, timeoutSec, signal }) {
+    const guard = transportError(base);
+    if (guard) throw new Error(`[${guard.code}] ${guard.error}`); // backstop：守卫在工具入口已拦截，此处兜底
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), (timeoutSec || 30) * 1000);
     const onOuterAbort = () => ctrl.abort();
@@ -97,6 +115,9 @@ async function fetchAnonToken(cfg) {
 }
 
 const PRODUCT_MAP = { // 引擎枚举归一（实测：小写 codearts → 400 空响应；Python 侧同款映射）
+    // 已知差距（M2/M3 不适用于 dsh 形态）：本表硬编码，不拉 GET /external/meta——
+    // 引擎 VodExternalProducts 变更时需同步此表（含 kb-query-auth 合入后的 AISHELL/nameAliases）。
+    // 详见 docs/decisions.md D-dsh-3。
     agentarts: 'AgentArts', codearts: 'CodeArts', dataarts: 'DataArts',
     maas: 'MaaS', obs: 'OBS', officeclaw: 'OfficeClaw',
     modelarts: 'MaaS',
@@ -148,6 +169,8 @@ export function apply(ctx, config) {
             output: { schema: { type: 'object', additionalProperties: true }, render: renderText },
             async execute(args, exec) {
                 const c = cfg();
+                const guard = transportError(c.base); // 传输守卫：非 https 且非回环 → 拒绝（-32014，对齐 vod_mcp）
+                if (guard) return textResult(guard);
                 const voices = Array.isArray(args.voices) ? args.voices : [];
                 if (!voices.length) return textResult({ error: 'voices 为空', code: -32001 });
                 if (voices.length > 50) return textResult({ error: '单批上限 50 条', code: -32001 });

@@ -50,3 +50,27 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - [x] vendored 规则改技能目录结构 skills/<name>/SKILL.md（vendor_rules.py+仓内迁移）
 - [ ] U1-U20 真引擎端到端（等引擎侧上线）
 - [ ] VodTeam 仓转移（等管理员权限，不阻塞）
+
+## dsh 薄壳深审裁处（2026-11-03 深夜，外部评审 8 项）
+
+- [x] **D-dsh-1（高）传输守卫已落码**：`transportError()`（工具入口拦截 + http() 兜底
+      throw），非 https 且非 localhost/127.0.0.1/::1 → 拒绝 -32014，与 vod_mcp
+      tools.py 同语义同文案。S16「双形态一致」自此真正兑现。
+- [x] **D-dsh-2（中）voiceId 分层语义记档（非分叉）**：实测核对——Python 插件侧
+      本就是调用级 nonce（R1 声量保真修正，回归锁 test_voice_volume_preserved
+      _across_calls），dsh 与 Python **同构**；「确定性」是**引擎端** VOD-VOI E3
+      口径且 /external/voices 忽略 body.voiceId、服务端自算确定性键查重（V9）。
+      分层：客户端键=本地对账主键+同调用重试幂等；引擎键=跨请求查重。两层各司
+      其职，互不冲突。旧链 submit 消费客户端键，nonce 恰好保护「重试不烧 LLM、
+      重放保留声量」。design.md S16 措辞按此修正。
+- [x] **D-dsh-3（中）PRODUCT_MAP 硬编码记档**：dsh 形态不拉 /external/meta
+      （meta 消费仅 Python 形态有），引擎 VodExternalProducts 变更需手工同步
+      PRODUCT_MAP——已在代码注释标注 M2/M3 不适用 dsh。引擎 !152 合入后需把
+      AISHELL/nameAliases 补进此表（一次 2 行改动）。
+- [x] **D-dsh-4（中）囤积端点切换计划已标注**：SUBMIT_PATH 定义处 TODO——引擎
+      /external/voices 上线时改一行 + body 字段核对（批量/逐条回执/Duplicate
+      字符串匹配自然消亡）。
+- [x] **D-dsh-5..8（低）已知取舍记档不修**：confirmWrites 配置级开关弱于逐调用
+      confirm（dsh 宿主审批通道语义，管理员责任边界）；账本读改写无锁（影响=
+      对账缺行，不做分布式锁）；timeoutSec 可配无上界（运维自律）；401 重取令牌
+      仅首条（中途令牌失效由下一调用兜底）。均为对账/体验面，无安全洞。

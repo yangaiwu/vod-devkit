@@ -257,8 +257,14 @@ dsh 宿主不识 MCP，只认自家 cordis 插件协议——故以独立薄壳�
 配置面（schemastery，热改 volatile）：apiBase/apiKey(secret,role 指纹化)/
 product（归因安装绑定层）/confirmWrites/timeoutSec。
 
-与 vod_mcp 语义对齐（S16 回归约束）：voiceId 同构、PRODUCT_MAP 归一
-（codearts→CodeArts，引擎大小写敏感实测）、归因三层、批量/长度护栏、
+与 vod_mcp 语义对齐（S16 回归约束）：voiceId 同构（f(source,content,nonce)，
+同调用幂等跨调用保声量——与引擎端 VOD-VOI 确定性键是**分层而非分叉**：客户端
+键=本地对账主键+重试幂等，引擎 /external/voices 忽略 body.voiceId 自算确定性
+键查重 V9）、传输守卫同构（-32014：非 https 且非本机回环拒绝，Bearer 不得明
+文过公网，2026-11-03 深审 D-dsh-1 落码）、PRODUCT_MAP 归一
+（codearts→CodeArts，引擎大小写敏感实测；注：dsh 形态不拉 /external/meta，
+PRODUCT_MAP 硬编码需随引擎 VodExternalProducts 手工同步——D-dsh-3）、归因三
+层、批量/长度护栏、
 无 key→匿名令牌兜底→-32012 引导、本地账本（data/runtime.json，cap 200
 读改写只动目标键）。
 
