@@ -101,7 +101,11 @@ def _install_hermes(args, packs: str) -> Path:
 
 
 def _install_opencode(args, packs: str) -> Path:
-    """OpenCode：~/.config/opencode/opencode.json 的 mcp 段（JSON 合并）。"""
+    """OpenCode：~/.config/opencode/opencode.json 的 mcp 段无损合并。
+
+    schema 实测要求：command=数组、enabled 必填；既有内容（provider 等）
+    原样保留（读改写，只动 mcp.vod-devkit 键）。
+    """
     import platform
     base = Path.home() / (".config/opencode" if platform.system() != "Windows"
                           else "AppData/Local/opencode")
@@ -114,8 +118,11 @@ def _install_opencode(args, packs: str) -> Path:
         except Exception:
             cfg = {}
     cfg.setdefault("mcp", {})["vod-devkit"] = {
-        "type": "local", "command": sys.executable,
-        "args": [_server_entry()], "env": _server_env(args, packs)}
+        "type": "local",
+        "command": [sys.executable, _server_entry()],
+        "enabled": True,
+        "environment": _server_env(args, packs),
+    }
     conf.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"已写入 OpenCode 配置：{conf}（重启 OpenCode 会话生效）")
     return conf

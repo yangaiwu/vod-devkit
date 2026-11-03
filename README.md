@@ -1,5 +1,7 @@
 # vod-devkit
 
+[English](README.en.md) | 中文
+
 VOD 用户声音采集插件（方案 A 纯采集形态）：MCP server + 技能 +
 声明式护栏，把 agent 产品的用户反馈安全送进 VOD。运营能力归
 vod-system 前端，不在本插件。对齐 huaweicloud-devkit v2 的工程骨架（installer /
