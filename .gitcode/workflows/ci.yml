@@ -5,15 +5,17 @@ on:
   pull_request:
     branches: ["main"]
 
-jobs:
+stages:
   test:
-    name: pytest 门禁
-    runs-on: euleros-2.10.1
-    steps:
-      - uses: checkout-action@0.0.1
-      - name: 安装 pytest
-        run: python3 -m pip install pytest
-      - name: 跑测试（20 用例：单元+护栏+packs+stdio 回环+协议级）
-        run: |
-          cd repo_workspace 2>/dev/null || cd .
-          python3 -m pytest tests/ -q
+    name: pytest 质量门禁
+    jobs:
+      Test:
+        name: pytest
+        runs-on: [ubuntu-latest, x64, small]
+        steps:
+          - name: checkout
+            uses: checkout-action@0.0.1
+          - name: install pytest
+            run: python3 -m pip install pytest
+          - name: run tests
+            run: cd repo_workspace 2>/dev/null || true; python3 -m pytest tests/ -q
