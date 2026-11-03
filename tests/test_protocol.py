@@ -76,7 +76,7 @@ def test_protocol_auth_header_and_paths(rec_server):
     wf_req, java_req = _Recorder.requests
     assert wf_req["path"] == "/api/vod/analyze/json"
     assert wf_req["auth"] == "Bearer wf-key-123", "workflow 调用必须带 VOD_API_KEY（E1）"
-    assert java_req["path"].endswith("/external/voice/submit"), java_req["path"]
+    assert java_req["path"].endswith("/rest/developer/manager/hdvodmngservice/v1/external/voice/submit"), java_req["path"]
     assert java_req["auth"] == "Bearer java-key-456", "Java 调用必须带 VOD_JAVA_API_KEY（E1/E2）"
     jb = json.loads(java_req["body"])
     assert jb["source"] == "aishell" and jb["product"] == "CodeArts"
