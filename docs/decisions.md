@@ -23,7 +23,14 @@
 - [x] 外部/内部分层：外部=反馈采集者（preset collect），分析发起=内部（preset full）
 - [x] 审计修复 E1/E2（认证头+双后端，协议级测试锁定）、E4（护栏作用域）、G1（安装器技能全量+双 key 配置+preset）
 
-## 进行中
+## 运维注意：双远端历史分叉（2026-11-03）
+
+GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不同的
+提交（GitCode=本地 git 历史，GitHub=API 拼装历史）。当前两远端内容
+一致（GitCode 454af49 ≙ GitHub 832ff5c）。后续处理：github.com 直连
+恢复时一次性 `git push github main --force`（内容一致，仅对齐历史）；
+持续超时则继续 /tmp/apipush2.py 模式（按 HEAD~1..HEAD 文件集推送）。
+
 - [x] 替代路线四件（2026-11-03）：GitHub Actions CI 首跑 success（镜像仓跑服务端门禁）；OpenCode 真机 connected（schema 修正：command=数组+enabled 必填+既有配置无损合并）；Codex CLI 真机识别（TOML env 子表）；nightly E2E 本机 cron（每日 03:30，首跑 taskId=420 通）；README.en.md 双语
 - [ ] npm registry 发布（锦上添花）：npx github:yangaiwu/vod-devkit 为现行替代（npx 原生支持 git 装包）；direct-capable token 到手后补 registry 版
 - [x] GitHub 镜像：已推送完成（main+v0.1.0 tag，head a8c8372 验证）+plugin.json 市场清单（WorkBuddy/CodeBuddy marketplace add yangaiwu/vod-devkit 即接入）

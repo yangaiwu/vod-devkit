@@ -138,6 +138,14 @@ GET /external/meta → {products:[...]}；缓存 runtime.json meta_cache
 +白名单常量为实证）；/external/products 是报告侧全集不可用作
 submit 源——meta 必须以 submit 校验常量为源（引擎侧 VOD-KEY 交付）。
 
+### 2.5f 传输协议守卫（_http 前置）
+
+http 仅限本机回环（127.0.0.1/localhost/::1——recorder 测试与同机引擎）；
+非回环 http 拒绝（-32014，引导 https 配置）——Bearer key 不得明文过公网。
+https 全场景放行（测试环境 TLS 链路已实测：taskId=419/420）。
+双向测试锁死（U38）：http 公网必须拒、http 回环必须放行（报 -32001
+而非协议拒绝）。
+
 ### 2.5d 身份模型（归属/认证分离）
 
 归属（谁提的）=数据字段：voices[].userType/customer 随声音入库，
