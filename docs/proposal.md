@@ -356,6 +356,7 @@ S10 滥用处置
 | U35 | 提交 3 条后调 vod_list_submitted(limit=2) | total=3，返回最新 2 条（最新在前），含 voiceId/taskId/摘要 |
 | U36 | 账本落盘审计 | runtime.json 只新增 submissions 键，其他配置（key/meta）零触碰 |
 | U37 | 用户问"提交了吗"（会话内） | agent 经账本回答时间+内容摘要，编号不展示给用户（F2 纪律） |
+| U38 | JAVA_BASE 配成 http://公网地址 | 拒绝（-32014），引导改 https；127.0.0.1/localhost 的 http 放行（回环） |
 | U17 | 未确认调用 vod_submit_voices | confirm 拦截（逐次同意），零入库 |
 | U18 | 单批 51 条声音提交 | deny（上限 50） |
 | U19 | 调用方伪造 source=fake-host 提交 | 引擎收到的 source=握手 clientInfo.name，伪造无效 |

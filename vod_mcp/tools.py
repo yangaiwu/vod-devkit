@@ -98,6 +98,12 @@ def _http(method: str, path: str, body: dict | None = None,
     """
     base = base if base is not None else JAVA_BASE
     key = key if key is not None else JAVA_KEY
+    # 传输协议守卫：非本机回环一律要求 https（Bearer 不得明文过公网）
+    _host = base.split("//", 1)[-1].split("/", 1)[0].split(":")[0]
+    if not base.startswith("https://") and _host not in ("127.0.0.1", "localhost", "::1"):
+        raise ToolError(
+            f"上游 {base} 非 https 且非本机回环——Bearer key 明文外发被拒"
+            "（配置 VOD_JAVA_API_BASE 为 https:// 地址）", code=-32014)
     url = base.rstrip("/") + path
     try:
         with open("/tmp/vod_mcp_server.log", "a", encoding="utf-8") as _f:

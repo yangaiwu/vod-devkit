@@ -233,3 +233,19 @@ def test_ledger_and_list_submitted(monkeypatch, tmp_path):
     assert [s["title"][:3] for s in out["submissions"]] == ["第三条", "第二条"], "最新在前"
     cfg = json.loads(rt_file.read_text())
     assert set(cfg) == {"submissions"}, "账本只动 submissions 键，不得触碰其他配置"
+
+
+def test_transport_guard_rejects_http_public(monkeypatch):
+    """传输守卫：http 只许本机回环，公网 http 拒绝（-32014）。"""
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    monkeypatch.setattr(tools, "JAVA_BASE", "http://vod-dev.topxtopx.com")
+    with pytest.raises(tools.ToolError) as ei:
+        tools._http("POST", "/x", {})
+    assert ei.value.code == -32014 and "https" in str(ei.value)
+    # 本机回环 http 允许（recorder/同机引擎场景）
+    monkeypatch.setattr(tools, "JAVA_BASE", "http://127.0.0.1:9")
+    try:
+        tools._http("GET", "/health")
+        assert False, "不可达但应报 -32001 而非协议拒绝"
+    except tools.ToolError as e:
+        assert e.code == -32001
