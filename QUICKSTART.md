@@ -20,7 +20,7 @@
 
 ```bash
 git clone <repo-url> vod-devkit && cd vod-devkit
-bin/vod-devkit install --target hermes --preset collect
+bin/vod-devkit install --target hermes --preset collect --product <你的产品>
 # 重启 Hermes 会话，工具以 mcp_vod_devkit_* 出现
 ```
 

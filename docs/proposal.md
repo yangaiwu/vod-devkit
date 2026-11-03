@@ -121,6 +121,26 @@ collect_source 过滤匿名档"——过滤落地前匿名/正式混在同一分
 F1 外发 QUICKSTART（排期，一页纸）：含任意 MCP 客户端手动配置片段。
 F3 采集技能观测（排期）：识别准确率/确认时机需一次真实用户观测后定稿。
 
+## 三·四c、产品归因与可漂移值（2026-11-03 实测修正）
+
+**归因三层（已实现）**：反馈关于哪个产品不能猜——
+①安装绑定（install --product，装插件的人声明，落 runtime.json+manifest）
+②反馈内容/调用显式指定 ③询问用户。静默默认已删除（曾为 codearts，
+会把 AIShell 反馈错误归因到 CodeArts——归因错误污染目标产品数据，
+比报错更糟；护栏 -32013 引导三种解法）。
+**实测发现的引擎缺口**：submit 白名单=代码常量 VALID_PRODUCTS
+（六值，无 AIShell）——AIShell/AI shell 类产品反馈当前会被引擎拒收，
+需引擎侧扩白名单（挂 VOD-KEY/meta 端点一并解决）。
+**可漂移值经接口取最新（设计定稿）**：product 白名单/分类六类定义/
+功能子类词典都是引擎侧会漂移的枚举字典（本次技能过期即实证），
+静态嵌入必漂移。方案=引擎新增只读 meta 端点（GET /external/meta/*：
+products 白名单+归一规则、problem-types 六类、dictionaries），
+插件安装/首次调用拉取+缓存（runtime.json，TTL 24h）+快照兜底+
+stale 标记。/external/products 实测存在但属报告侧全集，与 submit
+白名单不是一个集合——meta 端点须以 submit 校验常量为源。
+三个技能已按引擎代码重写（真源=n01_classify/workflow_v2/
+category_matcher @2bb3fc82；vendor 源 skills md 已过期停用）。
+
 ## 三·五、安装溯源与宿主感知（新增需求）
 
 ### 背景与语义

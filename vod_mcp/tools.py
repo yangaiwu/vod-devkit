@@ -97,10 +97,28 @@ def _http(method: str, path: str, body: dict | None = None,
         raise ToolError(f"上游不可达（{base}）: {e.reason}", code=-32001) from e
 
 
-_PRODUCT_MAP = {  # 插件白名单值 -> 引擎 product 枚举名（ExternalVoiceController 实测）
+# 引擎 submit 校验白名单（ExternalVoiceServiceImpl.VALID_PRODUCTS 实测：
+# CODEARTS/AGENTARTS/OFFICECLAW/DATAARTS/MAAS/OBS + 别名归一 MODELARTS→MAAS）
+_PRODUCT_MAP = {
     "agentarts": "AgentArts", "codearts": "CodeArts", "dataarts": "DataArts",
     "maas": "MaaS", "obs": "OBS", "officeclaw": "OfficeClaw",
+    "modelarts": "MaaS",  # 引擎别名归一实测
 }
+
+
+def _resolve_product(params: dict) -> str:
+    """归因三层：①安装绑定（runtime.json product，装插件的人声明）
+    ②调用方显式传参 ③都没有→报错引导（禁止静默默认——错误归因
+    比报错更糟，会污染目标产品数据）。"""
+    raw = params.get("product") or _RT.get("product")
+    if not raw:
+        raise ToolError(
+            "product 未归因：本机未绑定默认产品且调用未显式指定。"
+            "三种解法：安装时 bin/vod-devkit install --product <p> 绑定；"
+            "调用时传 product；或询问用户该反馈关于哪个产品"
+            "（有效值：codearts/agentarts/dataarts/maas/obs/officeclaw）",
+            code=-32013)
+    return _PRODUCT_MAP.get(str(raw).strip().lower(), str(raw).strip())
 _EXISTING_SUBMIT = "/rest/developer/manager/hdvodmngservice/v1/external/voice/submit"
 _TOKEN_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/token"
 
@@ -131,7 +149,7 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
     """
     import uuid
     host = (client_info or {}).get("name") or "unknown-host"
-    product = _PRODUCT_MAP.get(str(params.get("product", "codearts")).lower(), "CodeArts")
+    product = _resolve_product(params)
     accepted, voice_ids, task_ids, rejected = 0, [], [], []
     global JAVA_KEY
     for i, v in enumerate(params.get("voices", [])):

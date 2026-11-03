@@ -52,10 +52,10 @@
               "dataarts",
               "maas",
               "obs",
-              "officeclaw"
+              "officeclaw",
+              "modelarts"
             ],
-            "default": "codearts",
-            "description": "反馈针对的产品（插件白名单值，映射引擎枚举名）"
+            "description": "反馈关于的产品。归因三层：安装绑定默认（install --product）> 本参数显式指定 > 询问用户。禁止静默猜默认（归因错误污染目标产品数据）。"
           }
         },
         "required": [

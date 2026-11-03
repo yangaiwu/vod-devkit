@@ -76,7 +76,8 @@ def test_submit_voices_token_unreachable_gives_guidance(monkeypatch):
     monkeypatch.setattr(tools, "_http", fake_http)
     with pytest.raises(tools.ToolError) as ei:
         tools.submit_voices(
-            {"voices": [{"content": "反馈内容足够长的一条意见"}], "confirmed": True},
+            {"voices": [{"content": "反馈内容足够长的一条意见"}],
+             "product": "codearts", "confirmed": True},
             client_info={"name": "t"})
     assert "引导" in str(ei.value) and "自动" in str(ei.value), \
         "令牌不可用时错误必须带引导步骤"
@@ -100,7 +101,8 @@ def test_voice_volume_preserved_across_calls(monkeypatch):
     monkeypatch.setattr(tools, "_http", fake_http)
     voice = {"content": "补全响应有点慢，希望优化一下"}
     for _ in range(2):
-        out = tools.submit_voices({"voices": [voice], "confirmed": True},
+        out = tools.submit_voices({"voices": [voice], "product": "codearts",
+                                   "confirmed": True},
                                   client_info={"name": "mcp"})
         assert out["accepted"] == 1
     assert len(set(seen)) == 2, "同款反馈跨调用必须不去重（声量保真）"
@@ -110,5 +112,25 @@ def test_voice_volume_preserved_across_calls(monkeypatch):
         assert body["title"] == voice["content"], "title=用户原文，禁止模板污染"
         return {"code": 200, "data": {"taskId": 1}}
     monkeypatch.setattr(tools, "_http", fake2)
-    tools.submit_voices({"voices": [voice], "confirmed": True},
+    tools.submit_voices({"voices": [voice], "product": "codearts", "confirmed": True},
                         client_info={"name": "mcp"})
+
+
+def test_product_attribution_layers(monkeypatch):
+    """归因三层：绑定默认 > 显式传参 > 报错引导（禁止静默猜）。"""
+    # ③ 无绑定无传参 → 引导错误
+    monkeypatch.setattr(tools, "_RT", {})
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    with pytest.raises(tools.ToolError) as ei:
+        tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
+                             "confirmed": True}, client_info={"name": "t"})
+    assert ei.value.code == -32013 and "install --product" in str(ei.value)
+
+    # ① 绑定生效（无传参取 runtime 绑定）
+    monkeypatch.setattr(tools, "_RT", {"product": "aishell"})
+    monkeypatch.setattr(tools, "_http",
+                        lambda m, p, body=None, timeout=30, base=None, key=None:
+                        {"code": 200, "data": {"taskId": 1}})
+    out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
+                               "confirmed": True}, client_info={"name": "t"})
+    assert out["accepted"] == 1

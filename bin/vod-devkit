@@ -74,6 +74,18 @@ def cmd_install(args):
         print(f"暂不支持目标: {target}（当前仅 hermes）", file=sys.stderr)
         sys.exit(2)
     packs = args.packs or PRESETS.get(args.preset, "")
+    # 归因绑定：装插件的人声明本 agent 服务的产品（三层归因的第一层）
+    if args.product:
+        rt = ROOT / "vod_mcp" / "runtime.json"
+        cfg = {}
+        if rt.exists():
+            try:
+                cfg = json.loads(rt.read_text(encoding="utf-8"))
+            except Exception:
+                cfg = {}
+        cfg["product"] = args.product
+        rt.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+
     HERMES_MCP_DIR.mkdir(parents=True, exist_ok=True)
     mcp_conf = HERMES_MCP_DIR / "vod-devkit.json"
     server_entry = str(ROOT / "vod_mcp" / "server.py")
@@ -117,6 +129,7 @@ def cmd_install(args):
         "target": target,
         "installedAt": datetime.datetime.now().isoformat(timespec="seconds"),
         "preset": args.preset,
+        "product": args.product or None,
         "packs": packs,
         "mcpConfig": str(mcp_conf),
         "skillsDir": str(HERMES_SKILLS_DIR),
@@ -223,6 +236,8 @@ def main():
     sp.add_argument("--api-base", default="http://127.0.0.1:8000")
     sp.add_argument("--java-api-base", default="http://127.0.0.1:8090")
     sp.add_argument("--packs", default="", help="显式覆盖 preset（逗号分隔）")
+    sp.add_argument("--product", default="",
+                    help="归因绑定：本 agent 服务的产品（codearts/aishell 等；采集反馈默认归属）")
     sp.set_defaults(fn=cmd_install)
     for name, fn in (("status", cmd_status), ("doctor", cmd_doctor),
                      ("verify", cmd_verify), ("uninstall", cmd_uninstall)):

@@ -130,6 +130,12 @@ base}（明文禁止）+ packs + 缺 key 时三步引导（令牌/升级/宿主�
 对齐 devkit error-table"步骤=可执行动作"纪律）。
 调用链：纯本地读+运行时状态，探测上游时轻量 ping。
 
+### 2.5c 产品归因（_resolve_product）
+
+三层：runtime.json product（安装绑定）> 调用方显式 > 报错 -32013
+（引导 install --product / 传参 / 问用户）。静默默认禁止。
+别名归一对齐引擎（modelarts→MaaS）。
+
 ### 2.6 vod_submit_voices（写，confirm，collect pack）
 
 后端=java（契约 backends 标注）。
