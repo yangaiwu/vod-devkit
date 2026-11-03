@@ -4,6 +4,7 @@
 > 病根 G2 的修复机制：决策存在对话流里必丢，必须落文件。
 
 ## 已闭环
+- [x] 方案 A（2026-11-03）：插件收敛为纯采集——workflow 三工具+kb_search 删除（git 留档），运营归 vod-system 前端；知识技能留 knowledge pack；P1 任务级 token 取消；单上游单写口
 - [x] key 交付定稿（2026-11-03）：零字段自动令牌=入门（A/B/C 三案比对见 proposal 三·四，B 否决为入门因把门槛放在价值之前）；vod_auth_status+令牌自动获取+引导已实现（24 用例）
 
 - [x] 插件形态=devkit 同构完整形态（installer/MCP/skills/packs/policy）

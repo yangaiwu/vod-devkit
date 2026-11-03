@@ -38,17 +38,22 @@ VOD 的分析引擎、领域规则和知识库检索——每次都需要人转�
 
 ---
 
-## 二、目标用户（2026-11-03 修订：分层定位）
+## 二、目标用户（2026-11-03 方案 A 定稿：纯采集插件）
 
-1. **外部开发者=反馈采集者**（主目标）：把插件装进自己的 agent/应用，
-   采集其产品的用户反馈进 VOD——默认 preset=collect（不含分析发起）
-2. **内部运营/可信第三方=分析发起者**：经 preset full 发起/查询分析任务；
-   外放前置条件=任务级 token（P1）
-3. 外部业务系统（继续走既有 HTTP API 契约，零改动）
-4. 平台运维（插件安装/诊断/升级）
+**插件只服务一种受众：反馈采集者。**
 
-> 分层依据：分析是运营成本（LLM+共享任务表），不能交给不可信调用方；
-> 开发者的角色是"反馈的采集者"不是"分析的发起者"。
+1. 外部开发者（主目标）：把插件装进自己的 agent/应用，采集用户反馈进 VOD
+2. 终端用户：在 agent 里被采集反馈的人（无 VOD 感知，回执说人话）
+3. 平台运维：插件安装/诊断/升级
+
+**运营不在受众内**（2026-11-03 拍板方案 A）：运营的分析/看板/任务管理
+归 vod-system 前端（既有唯一工作台）；插件中 workflow 三工具与
+kb_search 已删除（git 历史可查）。依据：受众耦合（外部安装携带运营
+代码路径=攻击面放大）、双信任模型挤一份护栏、且 workflow pack 真实
+使用为零。将来"运营 agent 化"若立项=独立内部工具，永不外发。
+
+删除的连锁简化（负复杂度）：preset 双形态→单一采集形态；P1 任务级
+token 整块删除；双后端→单 Java 上游；护栏剩采集语义一套。
 
 ---
 
@@ -183,9 +188,7 @@ S6 溯源与信任
   任何宿主调 vod_devkit_info → 版本+commitSHA+宿主身份；
   verify 到 origin 核 commit → 被改包告警
 
-S7 分析发起（内部，preset full）
-  内部 agent 确认后 run_analysis → taskId → status 轮询 → result
-  → 与 vod-system 前端同源一致
+S7（已随方案 A 删除）分析发起归 vod-system 前端，插件不再承载
 
 S8 零字段令牌首次提交（主路径）
   新用户 clone+install → 说"报反馈" → confirm → 插件发现无 key →
@@ -224,7 +227,7 @@ S10 滥用处置
 | U22 | 协议级：submit_voices 抓包 | 路径=Java 前缀 /rest/.../external/voices，用 VOD_JAVA_API_KEY（E2 回归锁） |
 | U23 | 反馈 content 含凭据字样（password = abc） | 不被文本规则误杀，正常提交（E4/S4） |
 | U24 | install --preset collect 后 tools/list | 无 workflow 工具（外部分层生效） |
-| U25 | vod_auth_status 输出 | key 只以 8 位指纹出现，明文禁止；无 key 时输出三步引导 |
+| U25 | vod_auth_status 输出 | 单 javaKey 指纹（无 workflowKey）；无 key 时输出三步引导 |
 | U26 | 无 key 首次提交（令牌端点在线） | 自动取令牌→落 runtime→重试成功，taskIds 正常返回 |
 | U27 | 令牌端点不可用 | 结构化引导错误（含令牌/升级/宿主三步），不是裸 404 |
 | U28 | auth_status 在 hermes 会话内调用 | 7 工具含 vod_auth_status，指纹正确显示 |
@@ -279,6 +282,7 @@ S10 滥用处置
 | 来源溯源与宿主感知 | P0 交付：install-manifest（commitSHA 主键）+ verify 子命令 + vod_devkit_info 工具；不做遥测回传 |
 | 独立成仓 | 终态独立仓 VodTeam/vod-devkit；P0 先在 VOD-Project 验证，触发条件=P0 验收通过且首个外部消费者出现前完成剥离；规则真源留 VOD-Project，构建期按 SHA vendor（方案 A，已拍板） |
 | 核心语言 | vod_mcp 用 Python。判定如实记录：5 工具均为 I/O 型（HTTP 转发），名义默认偏 TS；仍选 Python 的主依据=宿主 hook（Hermes .py）+团队栈（49 个 Python 模块）+MCP 窄腰下决策低风险可逆；"贴引擎同语言"降级为弱依据。推翻条件三项见 design.md 第三节 |
+| 插件定位（2026-11-03 方案 A） | 纯采集：workflow 三工具+kb_search 删除（git 历史留档）；运营归 vod-system 前端；知识技能留作可选 knowledge pack（零工具）；P1 任务级 token 取消 |
 | 工具契约 | JSON Schema 契约文件为唯一事实源，实现侧生成/校验，跨语言边界不做双边手写（含将来 TS 适配壳） |
 | key 交付（2026-11-03 定稿） | 零字段自动令牌为默认入门（C 案）；B 自助注册降级为升级档；A 宿主代管为企业通道。比对分析见三·四节 |
 | 反馈采集（2026-11-03 拍板） | agent 产品用户反馈进 VOD 闭环。两项均选 A：独立囤积端点（入库不触发分析，引擎侧 VOD-VOI 立项，复用 R0 网关）；插件侧逐次 confirm。source 以握手宿主身份为准不可手填；voiceId 为第二类对账主键 |

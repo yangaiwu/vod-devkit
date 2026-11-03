@@ -1,18 +1,13 @@
-"""工具实现：唯一事实源=contract/tools.schema.json；HTTP 直调 VOD 两个后端。
+"""工具实现：唯一事实源=contract/tools.schema.json；单上游（纯采集插件）。
 
-双后端拓扑（E2 修复：单 base 寻址不了两个后端）：
-  workflow 引擎（FastAPI api.py :8000）——analyze/status/result/kb
-    base=VOD_API_BASE，key=VOD_API_KEY（nginx R0 Bearer）
-  Java backend——声音提交，base=VOD_JAVA_API_BASE，key=VOD_JAVA_API_KEY
-    （ExternalApiKeyFilter Bearer）
+方案 A 收敛（2026-11-03 拍板）：插件只做用户声音采集，运营能力归
+vod-system 前端（既有工作台）。workflow 三工具与 kb_search 已删除
+（git 历史可查；删除依据=零真实使用+受众耦合，负复杂度决策）。
 
-引擎端点（api.py 实测路由）：
-  POST /api/vod/analyze/json   {data, product, limit, workers} -> {task_id, status}
-  GET  /api/vod/status/{task_id}
-  GET  /api/vod/result/{task_id}
-  POST /api/vod/knowledge/query  <- 引擎侧前置缺口（api.py 尚无此路由）
-Java 端点（external-api-contract.md 实测前缀）：
-  POST /rest/developer/manager/hdvodmngservice/v1/external/voices（VOD-VOI）
+唯一上游：Java backend（VOD_JAVA_API_BASE + VOD_JAVA_API_KEY，
+ExternalApiKeyFilter Bearer）。
+  POST …/external/voice/submit（现有接口，提交即分析）
+  POST …/external/token（VOD-KEY，零字段匿名令牌）
 """
 import json
 import os
@@ -23,9 +18,6 @@ from pathlib import Path
 from vod_mcp import provenance
 
 _CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract" / "tools.schema.json"
-
-# 双后端配置（E2）：env 优先，runtime.json 兜底——不依赖宿主 env 透传
-# （实测部分 MCP 宿主对子进程 env 过滤/丢失，如 Hermes 多 --env 只存活一个）
 
 
 def _runtime_cfg() -> dict:
@@ -38,12 +30,11 @@ def _runtime_cfg() -> dict:
     return {}
 
 
+# 上游配置：env 优先，runtime.json 兜底——不依赖宿主 env 透传
+# （实测部分 MCP 宿主对子进程 env 过滤/丢失，如 Hermes 多 --env 只存活一个）
 _RT = _runtime_cfg()
-WF_BASE = os.environ.get("VOD_API_BASE") or _RT.get("workflow_base") or "http://127.0.0.1:8000"
-WF_KEY = os.environ.get("VOD_API_KEY", "") or _RT.get("workflow_key", "")            # nginx R0 Bearer
 JAVA_BASE = os.environ.get("VOD_JAVA_API_BASE") or _RT.get("java_base") or "http://127.0.0.1:8090"
-JAVA_KEY = os.environ.get("VOD_JAVA_API_KEY", "") or _RT.get("java_key", "")     # ExternalApiKeyFilter Bearer
-_JAVA_EXTERNAL = "/rest/developer/manager/hdvodmngservice/v1/external/voices"
+JAVA_KEY = os.environ.get("VOD_JAVA_API_KEY", "") or _RT.get("java_key", "")   # ExternalApiKeyFilter Bearer
 
 
 class ToolError(Exception):
@@ -79,8 +70,8 @@ def _http(method: str, path: str, body: dict | None = None,
     base/key 缺省在调用时解析模块级配置（不能用函数默认值——定义时即冻结，
     环境变更/测试 monkeypatch 均无法生效）。
     """
-    base = base if base is not None else WF_BASE
-    key = key if key is not None else WF_KEY
+    base = base if base is not None else JAVA_BASE
+    key = key if key is not None else JAVA_KEY
     url = base.rstrip("/") + path
     try:
         with open("/tmp/vod_mcp_server.log", "a", encoding="utf-8") as _f:
@@ -99,42 +90,11 @@ def _http(method: str, path: str, body: dict | None = None,
         detail = e.read().decode()[:200]
         if e.code == 401:
             raise ToolError(
-                f"鉴权失败（{base}）：检查 VOD_API_KEY/VOD_JAVA_API_KEY 配置",
+                f"鉴权失败（{base}）：检查 VOD_JAVA_API_KEY 配置",
                 code=-32012) from e
         raise ToolError(f"上游返回 {e.code}: {detail}") from e
     except urllib.error.URLError as e:
         raise ToolError(f"上游不可达（{base}）: {e.reason}", code=-32001) from e
-
-
-def run_analysis(params: dict, client_info: dict | None = None) -> dict:
-    payload = {
-        "data": params["data"],
-        "product": params["product"],
-        "limit": params.get("max_voices", 500),
-    }
-    out = _http("POST", "/api/vod/analyze/json", payload)
-    return {"taskId": out["task_id"], "status": out.get("status", "pending")}
-
-
-def task_status(params: dict) -> dict:
-    out = _http("GET", f"/api/vod/status/{params['taskId']}")
-    return {
-        "taskId": params["taskId"],
-        "status": out.get("status"),
-        "current_step": out.get("current_step"),
-        "updatedAt": out.get("updated_at") or out.get("created_at"),
-    }
-
-
-def task_result(params: dict) -> dict:
-    out = _http("GET", f"/api/vod/result/{params['taskId']}")
-    return {"taskId": params["taskId"], "results": out.get("results", out)}
-
-
-def kb_search(params: dict) -> dict:
-    out = _http("POST", "/api/vod/knowledge/query",
-                {"query": params["query"], "top_k": params.get("top_k", 5)})
-    return {"hits": out.get("hits", out)}
 
 
 _PRODUCT_MAP = {  # 插件白名单值 -> 引擎 product 枚举名（ExternalVoiceController 实测）
@@ -142,6 +102,14 @@ _PRODUCT_MAP = {  # 插件白名单值 -> 引擎 product 枚举名（ExternalVoi
     "maas": "MaaS", "obs": "OBS", "officeclaw": "OfficeClaw",
 }
 _EXISTING_SUBMIT = "/rest/developer/manager/hdvodmngservice/v1/external/voice/submit"
+_TOKEN_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/token"
+
+# 结构化引导（devkit error-table 模式：步骤=可执行动作，不是"参考文档"）
+_KEY_GUIDANCE = [
+    {"order": 1, "action": "auto-token", "label": "首次提交时插件自动申请零字段匿名令牌（默认路径，无需注册）"},
+    {"order": 2, "action": "upgrade", "label": "提交量达上限后升级正式 key：联系 VOD 运营（低信任档→正式档）"},
+    {"order": 3, "action": "host", "label": "宿主平台整体对接可获宿主 key：由宿主运维持有（高信任档）"},
+]
 
 
 def _voice_id(source: str, content: str, nonce: str) -> str:
@@ -157,26 +125,23 @@ def _voice_id(source: str, content: str, nonce: str) -> str:
 def submit_voices(params: dict, client_info: dict | None = None) -> dict:
     """走 Java 现有 POST /external/voice/submit（Bearer；单条循环提交）。
 
-    - voiceId=确定性生成 f(source, content-hash)：同源同内容天然幂等
-      （DB uk_voice_id 兜底；Duplicate 映射为 already-accepted 回执）
-    - description 引擎校验 ≥10 字：短反馈自动补场景说明
+    - voiceId=调用级唯一（R1 声量保真；同调用内重试幂等）
+    - title=用户原文（R3：分析消费原话，模板只允许出现在 description）
     - 提交即分析（现有链路语义）；囤积端点 VOD-VOI 上线后切换
     """
     import uuid
     host = (client_info or {}).get("name") or "unknown-host"
     product = _PRODUCT_MAP.get(str(params.get("product", "codearts")).lower(), "CodeArts")
     accepted, voice_ids, task_ids, rejected = 0, [], [], []
+    global JAVA_KEY
     for i, v in enumerate(params.get("voices", [])):
         content = str(v.get("content", "")).strip()
         if not content:
             rejected.append({"index": i, "reason": "content 为空"})
             continue
-        nonce = uuid.uuid4().hex[:8]  # 调用级：重试复用（见 _voice_id 重试路径），跨调用不重复
+        nonce = uuid.uuid4().hex[:8]  # 调用级：重试复用，跨调用不重复
         vid = _voice_id(host, content, nonce)
-        # R3 修正：title=用户原文（分析消费原话）；description 仅满足引擎
-        # ≥10 字校验时才追加采集后缀，且后缀固定为可识别标记
-        desc = content if len(content) >= 10 else \
-            f"{content} [vod-devkit]"
+        desc = content if len(content) >= 10 else f"{content} [vod-devkit]"
         body = {
             "voiceId": vid,
             "title": content[:128],
@@ -185,16 +150,14 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
             "source": host,
             "customer": v.get("userType"),
         }
-        global JAVA_KEY
         try:
             out = _http("POST", _EXISTING_SUBMIT, body, base=JAVA_BASE, key=JAVA_KEY)
             accepted += 1
             voice_ids.append(vid)
-            data = out.get("data") or {}
-            task_ids.append(data.get("taskId"))
+            task_ids.append((out.get("data") or {}).get("taskId"))
         except ToolError as e:
             msg = str(e)
-            if "Duplicate entry" in msg:  # 同源同内容已提交过 → 幂等回执
+            if "Duplicate entry" in msg:  # 极端重放场景：DB 唯一键兜底
                 accepted += 1
                 voice_ids.append(vid)
                 task_ids.append(None)
@@ -223,26 +186,16 @@ def _fingerprint(key: str) -> str | None:
     return hashlib.sha1(key.encode()).hexdigest()[:8] if key else None
 
 
-_TOKEN_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/token"
-
-# 结构化引导（devkit error-table 模式：步骤=可执行动作，不是"参考文档"）
-_KEY_GUIDANCE = [
-    {"order": 1, "action": "auto-token", "label": "首次提交时插件自动申请零字段匿名令牌（默认路径，无需注册）"},
-    {"order": 2, "action": "upgrade", "label": "提交量达上限后升级正式 key：联系 VOD 运营（低信任档→正式档）"},
-    {"order": 3, "action": "host", "label": "宿主平台整体对接可获宿主 key：由宿主运维持有（高信任档）"},
-]
-
-
-def _key_state(name: str, key: str, base: str) -> dict:
-    return {"configured": bool(key), "fingerprint": _fingerprint(key),
-            "base": base, "note": f"{'已配置' if key else '未配置（' + name + '）'}"}
+def _key_state() -> dict:
+    return {"configured": bool(JAVA_KEY), "fingerprint": _fingerprint(JAVA_KEY),
+            "base": JAVA_BASE,
+            "note": "已配置" if JAVA_KEY else "未配置（首次提交自动取匿名令牌）"}
 
 
 def auth_status(params: dict, client_info: dict | None = None) -> dict:
     """认证自检：指纹化输出（明文永不出现），无 key 也跑并给引导。"""
     out = {
-        "javaKey": _key_state("VOD_JAVA_API_KEY", JAVA_KEY, JAVA_BASE),
-        "workflowKey": _key_state("VOD_API_KEY", WF_KEY, WF_BASE),
+        "javaKey": _key_state(),
         "packs": sorted(__import__("vod_mcp.packs", fromlist=["enabled_packs"]).enabled_packs()),
     }
     if not JAVA_KEY:
@@ -281,10 +234,6 @@ def devkit_info(params: dict, client_info: dict | None = None) -> dict:
 
 # 工具名 → 处理器（是否接收 client_info）
 _HANDLERS = {
-    "vod_run_analysis": run_analysis,
-    "vod_task_status": task_status,
-    "vod_task_result": task_result,
-    "vod_kb_search": kb_search,
     "vod_submit_voices": submit_voices,
     "vod_devkit_info": devkit_info,
     "vod_auth_status": auth_status,

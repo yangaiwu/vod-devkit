@@ -35,21 +35,19 @@ vod-devkit（可分发插件包，目录随本设计落仓）
     └── opencode/ codex/      # 有真实消费者再补
 ```
 
-双后端出口（E2 修复）：
-  workflow：VOD_API_BASE + VOD_API_KEY（nginx R0 Bearer）→ analyze/status/result/kb
+单上游出口（方案 A 收敛后）：
   java：VOD_JAVA_API_BASE + VOD_JAVA_API_KEY（ExternalApiKeyFilter Bearer）
-        → POST /rest/developer/manager/hdvodmngservice/v1/external/voices
-  统一出口 _http() 一律携带 Authorization（E1 修复：此前 15 个绿测试全 mock，
-  测不出缺头；协议级测试 tests/test_protocol.py 以真 HTTP 服务器锁死
-  头/路径/双 key，是 E1/E2 的永久回归门）
+        → POST …/external/voice/submit（提交）+ …/external/token（令牌）
+  统一出口 _http() 一律携带 Authorization（E1 修复；协议级测试以真
+  HTTP 服务器锁死头/路径，永久回归门）。
+  workflow 后端已随方案 A 删除（E2 的双后端拓扑成为历史，git 可查）
 
 护栏作用域（E4 修复）：文本 deny 规则只扫结构性字段（scene/tags/query/
 product…）；voices[].content 与 data 是用户原话，不进文本规则——
 拦"凭据读取意图"不误杀"反馈内容引用凭据"（S4/U23 锁定）。
 
-安装预置（分层落档）：install --preset collect（对外默认：core+collect，
-无分析发起）/ full（内部全量）；技能拷贝按 packs 过滤（目录型技能+
-vendored 规则文档全量，G1 修复）；manifest 记录 preset。
+安装预置（方案 A 后）：preset=collect（core+collect+knowledge 可选）；
+full 已删。技能拷贝按 packs 过滤；manifest 记录 preset。
 
 依赖边界铁律：
 1. vod_mcp 只允许 import workflow/api.py 的 HTTP 客户端，禁止 import 引擎内部模块
@@ -209,8 +207,7 @@ stdio 直连零语言成本；宿主原生格式（dsh 的 npm 包等）单独�
 | pack | 内容 | 启用工具/技能 |
 |---|---|---|
 | core | 路由元技能 + 护栏 | vod-core |
-| workflow | 任务四工具 | run/status/result |
-| kb | 知识库检索 | vod_kb_search + kb 三件套技能 |
+| knowledge | 纯技能零工具 | 3 个领域规则技能（采集预分类，零依赖） |
 | collect | 反馈采集 | vod_submit_voices + vod-feedback-collect 技能 |
 
 实现：packs.py 一张启用表，未启用的工具不注册、技能不落盘（与 devkit

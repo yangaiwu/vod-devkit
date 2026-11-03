@@ -4,13 +4,12 @@ core 常驻（vod_devkit_info + vod-core 技能）；未启用的 pack 工具不
 """
 import os
 
-ALL_PACKS = ("core", "workflow", "kb", "collect")
+ALL_PACKS = ("core", "collect", "knowledge")
 
 PACK_TOOLS = {
     "core": ["vod_devkit_info", "vod_auth_status"],
-    "workflow": ["vod_run_analysis", "vod_task_status", "vod_task_result"],
-    "kb": ["vod_kb_search"],
     "collect": ["vod_submit_voices"],
+    "knowledge": [],  # 纯技能包：3 个领域规则技能，零工具零依赖
 }
 
 

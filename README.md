@@ -1,7 +1,8 @@
 # vod-devkit
 
-VOD 插件包：MCP server + 技能 + 声明式护栏，供 AI agent / 外部应用集成
-VOD 用户声音分析能力。对齐 huaweicloud-devkit v2 的工程骨架（installer /
+VOD 用户声音采集插件（方案 A 纯采集形态）：MCP server + 技能 +
+声明式护栏，把 agent 产品的用户反馈安全送进 VOD。运营能力归
+vod-system 前端，不在本插件。对齐 huaweicloud-devkit v2 的工程骨架（installer /
 MCP / skills / packs / policy），面向"服务面插件"的护栏更保守。
 
 - 需求/设计：docs/proposal.md、docs/design.md（VOD-PLUGIN）
@@ -15,9 +16,8 @@ MCP / skills / packs / policy），面向"服务面插件"的护栏更保守。
 ```bash
 # 安装到 Hermes（写 MCP 配置+skills+install-manifest）
 bin/vod-devkit install --target hermes --preset collect   # 对外默认（采集者）
-bin/vod-devkit install --target hermes --preset full     # 内部全量（含分析发起）
 # 双后端+双 key（网关上线后必配，否则 401）：
-VOD_API_BASE / VOD_API_KEY（workflow） VOD_JAVA_API_BASE / VOD_JAVA_API_KEY（Java）
+VOD_JAVA_API_BASE / VOD_JAVA_API_KEY（唯一上游 Java）
 
 bin/vod-devkit status   # 看 install-manifest（版本+来源+宿主+packs）
 bin/vod-devkit verify   # commitSHA 到 origin 核验（篡改/改写告警）
@@ -26,16 +26,14 @@ bin/vod-devkit uninstall
 
 # 直接以 MCP server 运行（任意 MCP 客户端可连）
 python3 -m vod_mcp.server          # stdio，JSON-RPC
-VOD_PACKS=core,workflow python3 -m vod_mcp.server   # packs 裁剪
+VOD_PACKS=core,collect python3 -m vod_mcp.server   # packs 裁剪
 ```
 
 ## 工具面（契约唯一事实源：contract/tools.schema.json）
 
 | 工具 | 类型 | 护栏 |
 |---|---|---|
-| vod_run_analysis | 写 | confirm（confirmed=true 才执行）+ 条数上限 500 + product 白名单 |
-| vod_task_status / vod_task_result | 读 | 放行 |
-| vod_kb_search | 读 | 引擎侧前置：/api/vod/knowledge/query 待补（VOD-KBQ R1） |
+
 | vod_submit_voices | 写 | confirm 逐次同意 + 单批≤50 + source 取握手宿主身份；走 Java /external/voices |
 | vod_devkit_info | 只读常驻 | 返回版本/commitSHA/宿主 clientInfo |
 | vod_auth_status | 只读常驻 | key 指纹化自检+三步引导（无 key 可跑） |
@@ -43,7 +41,7 @@ VOD_PACKS=core,workflow python3 -m vod_mcp.server   # packs 裁剪
 安全：deny 拦 DB 直连意图与凭据读取（safety/policy.json 声明式规则；
 文本规则只扫结构性字段，不误杀反馈内容里的凭据引用）。
 
-测试：24 用例（单元+护栏+packs+真进程 stdio 回环+**协议级真 HTTP 服务器**
+测试：20 用例（方案 A 收敛后）（单元+护栏+packs+真进程 stdio 回环+**协议级真 HTTP 服务器**
 锁定认证头/双后端路径——E1/E2 的永久回归门）。决策闭环见 docs/decisions.md。
 
 ## 测试

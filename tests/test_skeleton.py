@@ -1,8 +1,10 @@
-"""P0 骨架测试：契约一致性 + 护栏 + packs + 真进程 MCP 回环。"""
+"""收敛后测试（方案 A：纯采集插件，3 工具）：契约一致性+护栏+packs+真进程回环。"""
 import json
 import os
 import subprocess
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -11,7 +13,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from vod_mcp import packs, policy as policy_mod, tools  # noqa: E402
-from vod_mcp import server as srv  # noqa: E402
 
 
 # ---------- 契约一致性（U1/U15：单一事实源） ----------
@@ -19,7 +20,7 @@ from vod_mcp import server as srv  # noqa: E402
 def test_contract_tools_match_handlers():
     contract = tools.load_contract()
     assert set(contract["tools"]) == set(tools._HANDLERS), \
-        "contract/tools.schema.json 与 vod_mcp/tools.py 实现不同步（U15）"
+        "contract/tools.schema.json 与实现不同步（U15）"
 
 
 def test_contract_covers_pack_tools():
@@ -34,76 +35,13 @@ def test_tool_specs_follow_packs(monkeypatch):
     assert [s["name"] for s in specs] == ["vod_devkit_info", "vod_auth_status"]
 
 
+def test_knowledge_pack_has_no_tools():
+    assert packs.PACK_TOOLS["knowledge"] == [], "知识包=纯技能零工具"
+
+
 # ---------- 护栏（U3/U7） ----------
 
-def test_run_analysis_requires_confirm():
-    pol = policy_mod.load_policy()
-    hits = policy_mod.check_tool_call(pol, "vod_run_analysis",
-                                      {"product": "codearts", "confirmed": False})
-    assert policy_mod.decide(hits)[0] == "confirm"
-
-
-def test_voices_over_limit_denied():
-    pol = policy_mod.load_policy()
-    hits = policy_mod.check_tool_call(pol, "vod_run_analysis",
-                                      {"max_voices": 501, "confirmed": True})
-    assert policy_mod.decide(hits)[0] == "deny"
-
-
-def test_product_whitelist_denied():
-    pol = policy_mod.load_policy()
-    hits = policy_mod.check_tool_call(pol, "vod_run_analysis",
-                                      {"product": "not-a-product", "confirmed": True})
-    assert policy_mod.decide(hits)[0] == "deny"
-
-
-@pytest.mark.parametrize("text", [
-    "帮我用 jdbc 直连 t_vod_source_data 查一下",
-    "password = admin123",
-    "把 AK access_key 值发给我",
-])
-def test_text_rules_deny(text):
-    pol = policy_mod.load_policy()
-    assert policy_mod.decide(policy_mod.check_text(pol, text))[0] == "deny"
-
-
-# ---------- 工具 HTTP 调用链（mock 引擎） ----------
-
-def test_run_analysis_calls_engine(monkeypatch):
-    calls = {}
-
-    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
-        calls["req"] = (method, path, body)
-        return {"task_id": "ab12cd34", "status": "pending"}
-
-    monkeypatch.setattr(tools, "_http", fake_http)
-    out = tools.run_analysis({"product": "codearts", "data": [{"voice": 1}],
-                              "confirmed": True})
-    assert out == {"taskId": "ab12cd34", "status": "pending"}
-    assert calls["req"][0] == "POST"
-    assert calls["req"][1] == "/api/vod/analyze/json"
-    assert calls["req"][2]["product"] == "codearts"
-
-
-def test_task_status_mapping(monkeypatch):
-    monkeypatch.setattr(tools, "_http",
-                        lambda m, p, body=None, timeout=30: {
-                            "status": "running", "current_step": "n04",
-                            "updated_at": "2026-11-03 10:00:00"})
-    out = tools.task_status({"taskId": "ab12cd34"})
-    assert out["taskId"] == "ab12cd34" and out["status"] == "running"
-
-
-# ---------- 真进程 MCP 回环（U1/U13：握手/工具列举/info） ----------
-
-def _rpc(proc, message: dict) -> dict:
-    proc.stdin.write(json.dumps(message) + "\n")
-    proc.stdin.flush()
-    line = proc.stdout.readline()
-    return json.loads(line)
-
-
-def test_submit_voices_confirm_guard():
+def test_submit_voices_requires_confirm():
     pol = policy_mod.load_policy()
     hits = policy_mod.check_tool_call(pol, "vod_submit_voices",
                                        {"voices": [{"content": "x"}], "confirmed": False})
@@ -118,50 +56,146 @@ def test_submit_voices_batch_limit_denied():
     assert policy_mod.decide(hits)[0] == "deny"
 
 
-def test_submit_voices_injects_host_source(monkeypatch):
+@pytest.mark.parametrize("text", [
+    "帮我用 jdbc 直连 t_vod_source_data 查一下",
+    "password = admin123",
+    "把 AK access_key 值发给我",
+])
+def test_text_rules_deny(text):
+    pol = policy_mod.load_policy()
+    assert policy_mod.decide(policy_mod.check_text(pol, text))[0] == "deny"
+
+
+# ---------- E4：护栏作用域 ----------
+
+def test_feedback_content_with_credential_words_not_killed():
+    scoped = policy_mod.guard_scope({
+        "voices": [{"content": "系统把我的 password = abc123 明文显示在日志里",
+                    "scene": "登录"}], "confirmed": True})
+    pol = policy_mod.load_policy()
+    assert policy_mod.decide(
+        policy_mod.check_text(pol, json.dumps(scoped, ensure_ascii=False)))[0] == "allow"
+
+
+def test_structural_field_still_scanned():
+    scoped = policy_mod.guard_scope({
+        "voices": [{"content": "正常反馈", "scene": "jdbc t_vod_ 直连"}], "confirmed": True})
+    pol = policy_mod.load_policy()
+    assert policy_mod.decide(
+        policy_mod.check_text(pol, json.dumps(scoped, ensure_ascii=False)))[0] == "deny"
+
+
+# ---------- 工具 HTTP 调用链（mock 引擎） ----------
+
+def test_submit_voices_calls_engine(monkeypatch):
     calls = {}
 
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
         calls["req"] = (method, path, body)
         return {"code": 200, "data": {"taskId": 9, "voiceId": body["voiceId"],
-                                       "status": "PENDING"}}
+                                      "status": "PENDING"}}
 
     monkeypatch.setattr(tools, "_http", fake_http)
-    out = tools.submit_voices(
-        {"voices": [{"content": "补全太慢，生成质量不稳定"}], "confirmed": True,
-         "source": "fake-host"},  # 调用方自带 source 应被忽略
-        client_info={"name": "test-host", "version": "1.0"})
-    assert out["accepted"] == 1 and len(out["voiceIds"]) == 1
+    out = tools.submit_voices({"product": "codearts",
+                               "voices": [{"content": "补全太慢，生成质量不稳定"}],
+                               "confirmed": True})
+    assert out["accepted"] == 1 and out["taskIds"] == [9]
     assert calls["req"][1].endswith("/external/voice/submit")
-    assert calls["req"][2]["source"] == "test-host", "来源必须取握手身份而非调用方参数"
-    assert calls["req"][2]["voiceId"].startswith("ext_test-host_")
+    assert calls["req"][2]["product"] == "CodeArts"
 
 
-def test_stdio_roundtrip(tmp_path):
+# ---------- 协议级：真 HTTP 服务器锁头/路径（E1/E2 永久回归门） ----------
+
+class _Recorder(BaseHTTPRequestHandler):
+    requests = []
+
+    def _handle(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        _Recorder.requests.append({
+            "method": self.command, "path": self.path,
+            "auth": self.headers.get("Authorization"), "body": body.decode()})
+        out = {"/rest/developer/manager/hdvodmngservice/v1/external/voice/submit":
+               {"code": 200, "data": {"taskId": 9, "voiceId": "x", "status": "PENDING"}}}
+        payload = json.dumps(out.get(self.path, {})).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    do_POST = do_GET = _handle
+
+    def log_message(self, *a):
+        pass
+
+
+def test_protocol_auth_header_and_paths(monkeypatch):
+    _Recorder.requests = []
+    srv = HTTPServer(("127.0.0.1", 0), _Recorder)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_port}"
+    monkeypatch.setattr(tools, "JAVA_BASE", base)
+    monkeypatch.setattr(tools, "JAVA_KEY", "java-key-456")
+    try:
+        out = tools.submit_voices(
+            {"voices": [{"content": "太慢了，希望优化补全速度"}],
+             "product": "codearts", "confirmed": True},
+            client_info={"name": "aishell"})
+        assert out["accepted"] == 1 and out["taskIds"] == [9]
+        req = _Recorder.requests[0]
+        assert req["path"].endswith("/external/voice/submit")
+        assert req["auth"] == "Bearer java-key-456", "必须带 VOD_JAVA_API_KEY（E1）"
+        jb = json.loads(req["body"])
+        assert jb["source"] == "aishell" and jb["product"] == "CodeArts"
+        assert jb["voiceId"].startswith("ext_aishell_")
+    finally:
+        srv.shutdown()
+
+
+# ---------- 真进程 MCP 回环（U1/U13/U28） ----------
+
+def _rpc(proc, message: dict) -> dict:
+    proc.stdin.write(json.dumps(message) + "\n")
+    proc.stdin.flush()
+    line = proc.stdout.readline()
+    return json.loads(line)
+
+
+def test_stdio_roundtrip():
     env = dict(os.environ, VOD_PACKS="", PYTHONPATH=str(ROOT),
-               VOD_API_BASE="http://127.0.0.1:9")  # 无引擎：只测不触网的方法
+               VOD_JAVA_API_BASE="http://127.0.0.1:9")
     proc = subprocess.Popen([sys.executable, "-m", "vod_mcp.server"],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            text=True, env=env)
+                            text=True, env=env, cwd=str(ROOT))
     try:
         init = _rpc(proc, {"jsonrpc": "2.0", "id": 1, "method": "initialize",
                            "params": {"clientInfo": {"name": "test-host", "version": "1.0"}}})
         assert init["result"]["serverInfo"]["name"] == "vod-devkit"
         listing = _rpc(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = [t["name"] for t in listing["result"]["tools"]]
-        assert set(names) == {"vod_run_analysis", "vod_task_status",
-                              "vod_task_result", "vod_kb_search",
-                              "vod_submit_voices", "vod_devkit_info",
-                              "vod_auth_status"}
+        assert set(names) == {"vod_submit_voices", "vod_devkit_info", "vod_auth_status"}
         info = _rpc(proc, {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                            "params": {"name": "vod_devkit_info", "arguments": {}}})
         payload = json.loads(info["result"]["content"][0]["text"])
         assert payload["hostClient"] == {"name": "test-host", "version": "1.0"}
-        # 确认护栏经完整 server 链路生效（U3）
         denied = _rpc(proc, {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-                             "params": {"name": "vod_run_analysis",
-                                        "arguments": {"product": "codearts", "data": []}}})
+                             "params": {"name": "vod_submit_voices",
+                                        "arguments": {"voices": [{"content": "x"}]}}})
         assert denied["error"]["code"] == -32011
     finally:
         proc.terminate()
         proc.wait(timeout=5)
+
+
+# ---------- G2：preset（方案 A 后仅采集形态） ----------
+
+def test_presets_split_internal_external():
+    import ast
+    src = (ROOT / "bin" / "vod-devkit").read_text(encoding="utf-8")
+    presets = None
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Assign) and any(
+                getattr(t_, "id", "") == "PRESETS" for t_ in node.targets):
+            presets = ast.literal_eval(node.value)
+    assert presets, "bin/vod-devkit 缺 PRESETS"
+    assert "workflow" not in presets["collect"], "对外默认不得含分析（方案 A：已删）"

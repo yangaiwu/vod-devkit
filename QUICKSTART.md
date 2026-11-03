@@ -4,8 +4,8 @@
 
 把 vod-devkit 装进你的 AI agent / 应用后：
 
-1. **采集你产品的用户反馈**进 VOD 分析平台（写口，需用户确认）
-2. VOD 领域知识（分类匹配/问题分类/评分规则技能）
+1. **采集你产品的用户反馈**进 VOD（唯一写口，需用户确认）
+2. VOD 领域知识技能（问题分类/分类匹配/评分规则，采集预分类用）
 3. 插件自述与来源核验（vod_devkit_info / vod_auth_status）
 
 > 首次提交时插件会自动申请零字段匿名令牌（无需注册）；
@@ -37,7 +37,7 @@ bin/vod-devkit install --target hermes --preset collect
       "env": {
         "VOD_JAVA_API_BASE": "https://vod-dev.topxtopx.com",
         "VOD_JAVA_API_KEY": "",
-        "VOD_PACKS": "core,collect"
+        "VOD_PACKS": "core,collect,knowledge"
       }
     }
   }

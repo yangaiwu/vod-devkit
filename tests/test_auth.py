@@ -19,6 +19,7 @@ def test_auth_status_fingerprint_not_plaintext():
     assert fp is None or (len(fp) == 8 and fp != tools.JAVA_KEY), \
         "key 只能以 8 位指纹出现，明文禁止（fingerprint 纪律）"
     assert "packs" in out
+    assert "workflowKey" not in out, "方案 A：单上游，无 workflowKey"
 
 
 def test_auth_status_no_key_gives_guidance(monkeypatch):
