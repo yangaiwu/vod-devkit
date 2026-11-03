@@ -89,6 +89,16 @@ def kb_search(params: dict) -> dict:
     return {"hits": out.get("hits", out)}
 
 
+def submit_voices(params: dict, client_info: dict | None = None) -> dict:
+    """source 由服务端取握手宿主身份注入，忽略调用方自带 source（防伪造）。"""
+    host = (client_info or {}).get("name") or "unknown-host"
+    payload = {"source": host, "voices": params["voices"]}
+    out = _http("POST", "/api/vod/voices", payload)
+    return {"accepted": out.get("accepted", 0),
+            "voiceIds": out.get("voiceIds", []),
+            "rejected": out.get("rejected", [])}
+
+
 def devkit_info(params: dict, client_info: dict | None = None) -> dict:
     return provenance.info_payload(client_info)
 
@@ -99,6 +109,7 @@ _HANDLERS = {
     "vod_task_status": task_status,
     "vod_task_result": task_result,
     "vod_kb_search": kb_search,
+    "vod_submit_voices": submit_voices,
     "vod_devkit_info": devkit_info,
 }
 
@@ -107,4 +118,5 @@ def dispatch(name: str, params: dict, client_info: dict | None = None) -> dict:
     handler = _HANDLERS.get(name)
     if handler is None:
         raise ToolError(f"未知工具: {name}", code=-32601)
-    return handler(params, client_info) if handler in (devkit_info,) else handler(params)
+    needs_host = handler in (devkit_info, submit_voices)
+    return handler(params, client_info) if needs_host else handler(params)

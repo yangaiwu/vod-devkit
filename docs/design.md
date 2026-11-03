@@ -109,6 +109,18 @@ devkit 元技能常驻语义）。
 防漂移：分发锁定 --ref/--version（默认跟踪 git tag），不用浮动拉取；
 已装版本可复现 = `git show <SHA>` 即该份插件全部源码。
 
+### 2.6 vod_submit_voices（写，confirm，collect pack）
+
+入参：`voices[]`（content 必填 ≤2000、scene/userType/tags 可选）、
+`confirmed`（逐次同意护栏）。
+出参：`accepted`、`voiceIds[]`（引擎生成，第二类对账主键）、`rejected[]`。
+调用链：工具 → 服务端注入 source=握手 clientInfo.name（忽略调用方参数，
+防来源伪造）→ POST api.py /api/vod/voices（VOD-VOI 引擎侧需求，
+入库不触发分析）→ 逐条回执。
+护栏：confirm 逐次 + 单批 ≤50（maxVoicesPerSubmit）+ 凭据/PII 文本规则。
+配套技能 vod-feedback-collect：识别用户反馈意图→征得同意→结构化提交→
+voiceId 回执对账。
+
 ## 三、语言选型（vod_mcp 用 Python，依据与推翻条件）
 
 业界分工共识（2026 生产实践）：编排层默认 Python，插件/MCP 层按工具性质
@@ -143,6 +155,7 @@ stdio 直连零语言成本；宿主原生格式（dsh 的 npm 包等）单独�
 | core | 路由元技能 + 护栏 | vod-core |
 | workflow | 任务四工具 | run/status/result |
 | kb | 知识库检索 | vod_kb_search + kb 三件套技能 |
+| collect | 反馈采集 | vod_submit_voices + vod-feedback-collect 技能 |
 
 实现：packs.py 一张启用表，未启用的工具不注册、技能不落盘（与 devkit
 DEVKIT_PACKS 同语义）。

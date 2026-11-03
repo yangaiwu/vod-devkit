@@ -38,6 +38,8 @@ def _match_tool_rule(rule: dict, tool: str, params: dict) -> bool:
     if "gt" in m:
         limit = _resolve_ref(load_policy(), m["gt"])
         try:
+            if isinstance(actual, list):
+                return len(actual) > int(limit)
             return actual is not None and int(actual) > int(limit)
         except (TypeError, ValueError):
             return False

@@ -36,6 +36,22 @@
       "input": {"type": "object", "properties": {"query": {"type": "string"}, "top_k": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5}}, "required": ["query"]},
       "output": {"type": "object", "properties": {"hits": {"type": "array", "items": {"type": "object"}}}, "required": ["hits"]}
     },
+    "vod_submit_voices": {
+      "description": "提交 agent 产品用户反馈声音（写操作，需确认；入库不触发分析，囤积-择机分析）。调用引擎 POST /api/vod/voices。source 由服务端取握手宿主身份注入，调用方不可指定。",
+      "input": {
+        "type": "object",
+        "properties": {
+          "voices": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"type": "object", "properties": {"content": {"type": "string", "minLength": 1, "maxLength": 2000}, "scene": {"type": "string"}, "userType": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}}, "required": ["content"]}, "description": "用户反馈声音列表（content 必填）"},
+          "confirmed": {"type": "boolean", "default": false, "description": "用户已确认为 true 才执行（confirm 护栏，逐次同意）"}
+        },
+        "required": ["voices"]
+      },
+      "output": {
+        "type": "object",
+        "properties": {"accepted": {"type": "integer"}, "voiceIds": {"type": "array", "items": {"type": "string"}}, "rejected": {"type": "array"}},
+        "required": ["accepted", "voiceIds"]
+      }
+    },
     "vod_devkit_info": {
       "description": "插件自述（只读，core pack 常驻）：版本/commitSHA/宿主身份/安装信息。",
       "input": {"type": "object", "properties": {}},

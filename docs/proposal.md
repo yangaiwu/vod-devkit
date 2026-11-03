@@ -59,6 +59,7 @@ VOD 的分析引擎、领域规则和知识库检索——每次都需要人转�
 | 评分规则 | 知识 | 技能 vod-scoring-rules | 只读 |
 | 插件路由入口 | 知识 | 元技能 vod-core | 只读 |
 | 安装溯源与宿主感知 | 元信息 | install-manifest + vod_devkit_info 工具 | 只读 |
+| 用户反馈声音采集 | 写 | vod_submit_voices + vod-feedback-collect 技能 | confirm 逐次+单批≤50+source 取握手身份 |
 
 明确不暴露：Excel 批量导入、数据库直连、任何 DB 写操作。
 
@@ -124,6 +125,10 @@ VOD 的分析引擎、领域规则和知识库检索——每次都需要人转�
 | U14 | git show <manifest.SHA> 于 origin | 与已装包内容一致（版本可复现） |
 | U15 | 改 contract/tools.schema.json 后跑 CI | 实现侧 schema 未同步跟随契约即测试失败（单一事实源生效） |
 | U16 | AIShell/CodeArts 等 MCP 客户端直连 vod-mcp | 不改 Python 核心即可列举并调用全部工具（宿主矩阵分流验证） |
+| U17 | 未确认调用 vod_submit_voices | confirm 拦截（逐次同意），零入库 |
+| U18 | 单批 51 条声音提交 | deny（上限 50） |
+| U19 | 调用方伪造 source=fake-host 提交 | 引擎收到的 source=握手 clientInfo.name，伪造无效 |
+| U20 | 提交后用户拿 voiceId 追问 | 以 voiceId 对账受理状态（引擎端点 VOD-VOI V1-V7 上线后） |
 
 ---
 
@@ -172,6 +177,7 @@ VOD 的分析引擎、领域规则和知识库检索——每次都需要人转�
 | 独立成仓 | 终态独立仓 VodTeam/vod-devkit；P0 先在 VOD-Project 验证，触发条件=P0 验收通过且首个外部消费者出现前完成剥离；规则真源留 VOD-Project，构建期按 SHA vendor（方案 A，已拍板） |
 | 核心语言 | vod_mcp 用 Python。判定如实记录：5 工具均为 I/O 型（HTTP 转发），名义默认偏 TS；仍选 Python 的主依据=宿主 hook（Hermes .py）+团队栈（49 个 Python 模块）+MCP 窄腰下决策低风险可逆；"贴引擎同语言"降级为弱依据。推翻条件三项见 design.md 第三节 |
 | 工具契约 | JSON Schema 契约文件为唯一事实源，实现侧生成/校验，跨语言边界不做双边手写（含将来 TS 适配壳） |
+| 反馈采集（2026-11-03 拍板） | agent 产品用户反馈进 VOD 闭环。两项均选 A：独立囤积端点（入库不触发分析，引擎侧 VOD-VOI 立项，复用 R0 网关）；插件侧逐次 confirm。source 以握手宿主身份为准不可手填；voiceId 为第二类对账主键 |
 
 ## 六、待办
 

@@ -103,6 +103,38 @@ def _rpc(proc, message: dict) -> dict:
     return json.loads(line)
 
 
+def test_submit_voices_confirm_guard():
+    pol = policy_mod.load_policy()
+    hits = policy_mod.check_tool_call(pol, "vod_submit_voices",
+                                       {"voices": [{"content": "x"}], "confirmed": False})
+    assert policy_mod.decide(hits)[0] == "confirm"
+
+
+def test_submit_voices_batch_limit_denied():
+    pol = policy_mod.load_policy()
+    hits = policy_mod.check_tool_call(
+        pol, "vod_submit_voices",
+        {"voices": [{"content": "x"}] * 51, "confirmed": True})
+    assert policy_mod.decide(hits)[0] == "deny"
+
+
+def test_submit_voices_injects_host_source(monkeypatch):
+    calls = {}
+
+    def fake_http(method, path, body=None, timeout=30):
+        calls["req"] = (method, path, body)
+        return {"accepted": 1, "voiceIds": ["v_abc123"], "rejected": []}
+
+    monkeypatch.setattr(tools, "_http", fake_http)
+    out = tools.submit_voices(
+        {"voices": [{"content": "补全太慢"}], "confirmed": True,
+         "source": "fake-host"},  # 调用方自带 source 应被忽略
+        client_info={"name": "test-host", "version": "1.0"})
+    assert out["voiceIds"] == ["v_abc123"]
+    assert calls["req"][1] == "/api/vod/voices"
+    assert calls["req"][2]["source"] == "test-host", "来源必须取握手身份而非调用方参数"
+
+
 def test_stdio_roundtrip(tmp_path):
     env = dict(os.environ, VOD_PACKS="", PYTHONPATH=str(ROOT),
                VOD_API_BASE="http://127.0.0.1:9")  # 无引擎：只测不触网的方法
@@ -116,7 +148,8 @@ def test_stdio_roundtrip(tmp_path):
         listing = _rpc(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = [t["name"] for t in listing["result"]["tools"]]
         assert set(names) == {"vod_run_analysis", "vod_task_status",
-                              "vod_task_result", "vod_kb_search", "vod_devkit_info"}
+                              "vod_task_result", "vod_kb_search",
+                              "vod_submit_voices", "vod_devkit_info"}
         info = _rpc(proc, {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                            "params": {"name": "vod_devkit_info", "arguments": {}}})
         payload = json.loads(info["result"]["content"][0]["text"])

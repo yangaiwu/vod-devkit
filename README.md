@@ -32,7 +32,8 @@ VOD_PACKS=core,workflow python3 -m vod_mcp.server   # packs 裁剪
 |---|---|---|
 | vod_run_analysis | 写 | confirm（confirmed=true 才执行）+ 条数上限 500 + product 白名单 |
 | vod_task_status / vod_task_result | 读 | 放行 |
-| vod_kb_search | 读 | 引擎侧前置：/api/vod/knowledge/query 待补 |
+| vod_kb_search | 读 | 引擎侧前置：/api/vod/knowledge/query 待补（VOD-KBQ R1） |
+| vod_submit_voices | 写 | confirm 逐次同意 + 单批≤50 + source 取握手宿主身份（用户反馈采集闭环） |
 | vod_devkit_info | 只读常驻 | 返回版本/commitSHA/宿主 clientInfo |
 
 安全：deny 拦 DB 直连意图与凭据读取（safety/policy.json 声明式规则）。

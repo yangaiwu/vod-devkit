@@ -1,11 +1,18 @@
 {
   "version": "0.1.0",
   "maxVoicesPerTask": 500,
+  "maxVoicesPerSubmit": 50,
   "productWhitelist": ["agentarts", "codearts", "dataarts", "maas", "obs", "officeclaw"],
   "rules": [
     {"id": "vod-write-run-analysis", "category": "write", "severity": "confirm",
      "match": {"tool": "vod_run_analysis", "param": "confirmed", "equals": false},
      "message": "发起全链分析（LLM 调用+共享任务表写入），需用户确认：重试并传 confirmed=true"},
+    {"id": "vod-write-submit-voices", "category": "write", "severity": "confirm",
+     "match": {"tool": "vod_submit_voices", "param": "confirmed", "equals": false},
+     "message": "提交用户反馈声音（内容入库），需用户逐次确认：重试并传 confirmed=true"},
+    {"id": "vod-voices-batch-limit", "category": "write", "severity": "deny",
+     "match": {"tool": "vod_submit_voices", "param": "voices", "gt": "maxVoicesPerSubmit"},
+     "message": "单批声音条数超上限"},
     {"id": "vod-voices-limit", "category": "write", "severity": "deny",
      "match": {"tool": "vod_run_analysis", "param": "max_voices", "gt": "maxVoicesPerTask"},
      "message": "单任务条数超上限"},
