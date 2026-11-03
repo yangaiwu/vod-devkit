@@ -13,6 +13,7 @@ import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 HERMES_MCP_DIR = Path.home() / ".hermes" / "mcp"  # 约定：写入前打印供确认
 HERMES_SKILLS_DIR = Path.home() / ".hermes" / "skills" / "devops" / "vod-devkit"
 
