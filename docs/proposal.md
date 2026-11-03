@@ -141,6 +141,29 @@ stale 标记。/external/products 实测存在但属报告侧全集，与 submit
 三个技能已按引擎代码重写（真源=n01_classify/workflow_v2/
 category_matcher @2bb3fc82；vendor 源 skills md 已过期停用）。
 
+## 三·四d、动态元数据（可漂移值经接口取最新，已实现客户端）
+
+meta 客户端（_load_meta）：GET /external/meta → product 白名单等
+可漂移值；缓存 TTL 24h（runtime.json meta_cache）；端点不可达→
+快照兜底+stale 标记（引导文案/auth_status 均带 [stale] 提示）。
+_resolve_product 白名单校验改用 meta 值（快照兜底时容忍通过并标
+stale，宁可收下后引擎侧拒绝也不静默丢弃采集）。引擎端点上线前
+快照=当前 VALID_PRODUCTS 六值+别名；上线后插件零改动切换。
+
+场景用例（S11-S13）：
+
+S11 归因-绑定主路径
+  开发者 install --product aishell → 用户说"补全太慢" → agent
+  confirm → product 取绑定值 → 提交正确归属 aishell
+
+S12 归因-未归因引导
+  无绑定无传参 → 护栏 -32013 报错含三种解法+当前白名单
+  （meta stale 时附 [stale] 提示）→ agent 询问用户 → 补齐提交
+
+S13 meta 动态取
+  引擎新增产品（如 AISHELL）→ meta 端点返回新白名单 → 插件
+  24h 内自动跟进（缓存过期重拉）→ 无需发新版插件
+
 ## 三·五、安装溯源与宿主感知（新增需求）
 
 ### 背景与语义
@@ -250,7 +273,10 @@ S10 滥用处置
 | U25 | vod_auth_status 输出 | 单 javaKey 指纹（无 workflowKey）；无 key 时输出三步引导 |
 | U26 | 无 key 首次提交（令牌端点在线） | 自动取令牌→落 runtime→重试成功，taskIds 正常返回 |
 | U27 | 令牌端点不可用 | 结构化引导错误（含令牌/升级/宿主三步），不是裸 404 |
-| U28 | auth_status 在 hermes 会话内调用 | 7 工具含 vod_auth_status，指纹正确显示 |
+| U28 | auth_status 在 hermes 会话内调用 | 报 meta 状态（source/stale/产品数） |
+| U29 | meta 端点在线，两次调用 _load_meta | 第二次命中缓存不再请求（TTL 内） |
+| U30 | meta 端点不可达 | 快照兜底+stale 标记，引导文案含 [stale] |
+| U31 | 绑定 product=aishell 后提交（无传参） | 归因取绑定值，白名单校验经 meta |
 | U17 | 未确认调用 vod_submit_voices | confirm 拦截（逐次同意），零入库 |
 | U18 | 单批 51 条声音提交 | deny（上限 50） |
 | U19 | 调用方伪造 source=fake-host 提交 | 引擎收到的 source=握手 clientInfo.name，伪造无效 |

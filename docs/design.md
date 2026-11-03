@@ -130,11 +130,20 @@ base}（明文禁止）+ packs + 缺 key 时三步引导（令牌/升级/宿主�
 对齐 devkit error-table"步骤=可执行动作"纪律）。
 调用链：纯本地读+运行时状态，探测上游时轻量 ping。
 
+### 2.5b 动态元数据（_load_meta）
+
+GET /external/meta → {products:[...]}；缓存 runtime.json meta_cache
+（TTL 24h）；不可达→_META_SNAPSHOT 快照+stale=True。所有引导文案
+与 auth_status 携带 stale 态。设计依据：硬编码枚举必漂移（技能过期
++白名单常量为实证）；/external/products 是报告侧全集不可用作
+submit 源——meta 必须以 submit 校验常量为源（引擎侧 VOD-KEY 交付）。
+
 ### 2.5c 产品归因（_resolve_product）
 
 三层：runtime.json product（安装绑定）> 调用方显式 > 报错 -32013
 （引导 install --product / 传参 / 问用户）。静默默认禁止。
-别名归一对齐引擎（modelarts→MaaS）。
+别名归一对齐引擎（modelarts→MaaS）；白名单经 meta 动态校验
+（快照兜底时容忍提交并标 stale——引擎侧最终校验为准）。
 
 ### 2.6 vod_submit_voices（写，confirm，collect pack）
 

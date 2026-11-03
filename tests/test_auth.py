@@ -32,6 +32,9 @@ def test_auth_status_no_key_gives_guidance(monkeypatch):
 
 
 def test_submit_voices_auto_token_then_retry(monkeypatch):
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts"],
+                                             "stale": False, "source": "meta"})
     """零字段令牌链：无 key → 取令牌 → 落 runtime → 重试成功（用户无感）。"""
     calls = []
     state = {"token_issued": False}
@@ -67,6 +70,9 @@ def test_submit_voices_auto_token_then_retry(monkeypatch):
 
 
 def test_submit_voices_token_unreachable_gives_guidance(monkeypatch):
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts"],
+                                             "stale": True, "source": "snapshot"})
     """令牌端点不可用（引擎未上线）→ 结构化引导错误，不是死胡同。"""
     monkeypatch.setattr(tools, "JAVA_KEY", "")
 
@@ -84,6 +90,9 @@ def test_submit_voices_token_unreachable_gives_guidance(monkeypatch):
 
 
 def test_voice_volume_preserved_across_calls(monkeypatch):
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts"],
+                                             "stale": False, "source": "meta"})
     """R1 声量保真：不同调用提交同款反馈 → 不同 voiceId，各占一行。
 
     （曾为缺陷：确定性 voiceId 使第二个用户同款反馈被去重吞掉，
@@ -120,6 +129,9 @@ def test_product_attribution_layers(monkeypatch):
     """归因三层：绑定默认 > 显式传参 > 报错引导（禁止静默猜）。"""
     # ③ 无绑定无传参 → 引导错误
     monkeypatch.setattr(tools, "_RT", {})
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts", "aishell"],
+                                             "stale": False, "source": "meta"})
     monkeypatch.setattr(tools, "JAVA_KEY", "k")
     with pytest.raises(tools.ToolError) as ei:
         tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
@@ -128,9 +140,46 @@ def test_product_attribution_layers(monkeypatch):
 
     # ① 绑定生效（无传参取 runtime 绑定）
     monkeypatch.setattr(tools, "_RT", {"product": "aishell"})
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts", "aishell"],
+                                             "stale": False, "source": "meta"})
     monkeypatch.setattr(tools, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         {"code": 200, "data": {"taskId": 1}})
     out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
                                "confirmed": True}, client_info={"name": "t"})
     assert out["accepted"] == 1
+
+
+def test_meta_fetch_and_cache(monkeypatch):
+    """meta 端点可用：拉取→落 runtime 缓存→命中缓存不再请求。"""
+    fetched = {"n": 0}
+    saved = {}
+
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        if path.endswith("/external/meta"):
+            fetched["n"] += 1
+            return {"code": 200, "data": {"products": ["codearts", "aishell"]}}
+        raise AssertionError("不应有其他调用")
+
+    monkeypatch.setattr(tools, "_RT", {})
+    monkeypatch.setattr(tools, "_http", fake_http)
+    monkeypatch.setattr(tools, "_save_runtime", lambda u: saved.update(u))
+    m1 = tools._load_meta(force=True)
+    assert m1["source"] == "meta" and m1["products"] == ["codearts", "aishell"]
+    assert saved["meta_cache"]["data"]["products"] == ["codearts", "aishell"]
+    # 缓存命中（_RT 被写回语义由 fake 保存体现；此处直接验证不再打端点）
+    monkeypatch.setattr(tools, "_RT", saved)
+    m2 = tools._load_meta()
+    assert m2["source"] == "cache" and fetched["n"] == 1
+
+
+def test_meta_unreachable_falls_back_snapshot(monkeypatch):
+    """meta 不可达：快照兜底+stale 标记（引导文案会带 [stale]）。"""
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        raise tools.ToolError("上游不可达", code=-32001)
+    monkeypatch.setattr(tools, "_RT", {})
+    monkeypatch.setattr(tools, "_http", fake_http)
+    m = tools._load_meta(force=True)
+    assert m["source"] == "snapshot" and m["stale"] is True
+    assert "codearts" in m["products"]

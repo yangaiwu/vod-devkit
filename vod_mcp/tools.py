@@ -36,6 +36,32 @@ _RT = _runtime_cfg()
 JAVA_BASE = os.environ.get("VOD_JAVA_API_BASE") or _RT.get("java_base") or "http://127.0.0.1:8090"
 JAVA_KEY = os.environ.get("VOD_JAVA_API_KEY", "") or _RT.get("java_key", "")   # ExternalApiKeyFilter Bearer
 
+_META_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/meta"
+_META_TTL = 24 * 3600
+# 快照兜底（引擎 meta 端点未上线/不可达时用；stale 语义见 _load_meta）
+_META_SNAPSHOT = {"products": ["agentarts", "codearts", "dataarts", "maas", "obs",
+                               "officeclaw", "modelarts"]}
+
+
+def _load_meta(force: bool = False) -> dict:
+    """可漂移值（product 白名单等）动态取：缓存 TTL 24h，
+    引擎端点不可达时回退快照并标 stale。真源=引擎 submit 校验常量。"""
+    import time
+    cache = _RT.get("meta_cache") or {}
+    now = time.time()
+    if not force and cache.get("data") and now - cache.get("fetchedAt", 0) < _META_TTL:
+        return {"products": cache["data"].get("products", _META_SNAPSHOT["products"]),
+                "stale": False, "source": "cache"}
+    try:
+        out = _http("GET", _META_PATH, None, base=JAVA_BASE, key=JAVA_KEY, timeout=10)
+        data = out.get("data") or {}
+        if isinstance(data.get("products"), list) and data["products"]:
+            _save_runtime({"meta_cache": {"fetchedAt": int(now), "data": data}})
+            return {"products": data["products"], "stale": False, "source": "meta"}
+    except ToolError:
+        pass
+    return {"products": _META_SNAPSHOT["products"], "stale": True, "source": "snapshot"}
+
 
 class ToolError(Exception):
     def __init__(self, message: str, code: int = -32000):
@@ -112,13 +138,24 @@ def _resolve_product(params: dict) -> str:
     比报错更糟，会污染目标产品数据）。"""
     raw = params.get("product") or _RT.get("product")
     if not raw:
+        meta = _load_meta()
+        valid = "/".join(meta["products"][:8])
         raise ToolError(
             "product 未归因：本机未绑定默认产品且调用未显式指定。"
             "三种解法：安装时 bin/vod-devkit install --product <p> 绑定；"
             "调用时传 product；或询问用户该反馈关于哪个产品"
-            "（有效值：codearts/agentarts/dataarts/maas/obs/officeclaw）",
+            f"（当前有效值：{valid}"
+            + ("；[stale] 引擎 meta 不可达，白名单为本地快照，可能过期" if meta["stale"] else "")
+            + "）",
             code=-32013)
-    return _PRODUCT_MAP.get(str(raw).strip().lower(), str(raw).strip())
+    raw = str(raw).strip().lower()
+    meta = _load_meta()
+    if meta["products"] and raw not in meta["products"]:
+        raise ToolError(
+            f"product '{raw}' 不在白名单（{'/'.join(meta['products'][:8])}"
+            + ("，[stale] 本地快照可能过期" if meta["stale"] else "") + "）",
+            code=-32013)
+    return _PRODUCT_MAP.get(raw, raw)
 _EXISTING_SUBMIT = "/rest/developer/manager/hdvodmngservice/v1/external/voice/submit"
 _TOKEN_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/token"
 
@@ -216,6 +253,9 @@ def auth_status(params: dict, client_info: dict | None = None) -> dict:
         "javaKey": _key_state(),
         "packs": sorted(__import__("vod_mcp.packs", fromlist=["enabled_packs"]).enabled_packs()),
     }
+    meta = _load_meta()
+    out["meta"] = {"source": meta["source"], "stale": meta["stale"],
+                   "productCount": len(meta["products"])}
     if not JAVA_KEY:
         out["guidance"] = _KEY_GUIDANCE
         out["tokenReady"] = "首次提交时将自动申请匿名令牌（零字段，日限额低）"

@@ -87,8 +87,12 @@ def test_structural_field_still_scanned():
 
 # ---------- 工具 HTTP 调用链（mock 引擎） ----------
 
+META_OK = {"products": ["codearts", "agentarts"], "stale": False, "source": "meta"}
+
+
 def test_submit_voices_calls_engine(monkeypatch):
     calls = {}
+    monkeypatch.setattr(tools, "_load_meta", lambda force=False: META_OK)
 
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
         calls["req"] = (method, path, body)
@@ -136,6 +140,7 @@ def test_protocol_auth_header_and_paths(monkeypatch):
     base = f"http://127.0.0.1:{srv.server_port}"
     monkeypatch.setattr(tools, "JAVA_BASE", base)
     monkeypatch.setattr(tools, "JAVA_KEY", "java-key-456")
+    monkeypatch.setattr(tools, "_load_meta", lambda force=False: META_OK)
     try:
         out = tools.submit_voices(
             {"voices": [{"content": "太慢了，希望优化补全速度"}],

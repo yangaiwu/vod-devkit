@@ -13,6 +13,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DST = ROOT / "skills"
+# 2026-11-03：VOD-Project skills md 源已过期（与引擎 v2 代码分叉，实测），
+# vendor 停用；插件技能已按引擎代码真源重写。待 VOD 侧修复源
+# （或改从引擎代码/meta 生成）后方可恢复。
+_DISABLED_NOTE = True
 RULE_SKILLS = (
     "vod-category-matching-rules.md",
     "vod-problem-classification-rules.md",
