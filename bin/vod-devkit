@@ -104,10 +104,7 @@ def cmd_install(args):
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(entry, dst)
-        elif entry.suffix == ".md":  # vendored 领域规则（kb pack）
-            if "kb" not in pack_set:
-                continue
-            shutil.copy2(entry, HERMES_SKILLS_DIR / entry.name)
+        # vendored 领域规则已由 vendor_rules.py 落成技能目录结构
 
     bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
     manifest = {
@@ -127,9 +124,26 @@ def cmd_install(args):
     manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
                                encoding="utf-8")
     print("installed:", json.dumps(manifest, ensure_ascii=False, indent=2))
-    print(f"提示：请把 {mcp_conf} 的内容并入 Hermes 的 MCP 配置后重启会话")
-    missing = [k for k, v in (("VOD_API_KEY", mcp_conf), ) if
-               not json.loads(mcp_conf.read_text(encoding="utf-8"))["env"][k]]
+    # Hermes 真实接入机制：hermes mcp add（写 config.yaml mcp_servers，非手编文件）
+    env_args = []
+    for k in ("VOD_API_BASE", "VOD_API_KEY", "VOD_JAVA_API_BASE",
+              "VOD_JAVA_API_KEY", "VOD_PACKS"):
+        v = json.loads(mcp_conf.read_text(encoding="utf-8"))["env"].get(k, "")
+        env_args.extend(["--env", f"{k}={v}"])
+    server_entry = str(ROOT / "vod_mcp" / "server.py")  # 脚本绝对路径（非 -m：宿主 cwd 下 -m 找不到包）
+    r = subprocess.run(
+        ["hermes", "mcp", "add", "vod-devkit",
+         "--command", sys.executable,
+         *env_args,
+         "--args", server_entry],
+        input="y\ny\n", capture_output=True, text=True)
+    if r.returncode == 0:
+        print("已注册到 Hermes MCP（hermes mcp list 可见；重启会话生效）")
+    else:
+        print(f"警告：hermes mcp add 失败（{r.stderr.strip()[:200]}）——"
+              f"请手动执行上述命令")
+    missing = [k for k in ("VOD_API_KEY", "VOD_JAVA_API_KEY") if
+               not json.loads(mcp_conf.read_text(encoding="utf-8"))["env"].get(k)]
     if missing:
         print(f"警告：{missing} 未配置，网关上线后所有调用将 401（E1 纪律）")
 

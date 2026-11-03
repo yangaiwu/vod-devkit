@@ -22,8 +22,8 @@
 - [ ] VOD-KBQ（R0 网关+KB 查询端点）：文档已评审待定 → 代码增量未写（引擎侧）
 - [ ] VOD-VOI（Java /external/voices）：文档已出 → E3 查重语义待实测修正 → 代码未写
 - [ ] 多 key 防线（t_vod_api_keys/限流/吊销）：设计在 VOD-VOI 文档 → 未实现
-- [ ] GitCode CI 门禁（push 跑 pytest）：未配置
-- [ ] Hermes 真实 MCP 接入机制（当前 install 落点是占位路径，需确认 config.yaml/连接器方案）
-- [ ] vendored 规则平铺 .md 的技能发现格式与 Hermes 技能目录规范对齐
+- [x] GitCode CI 门禁：.gitcode/workflows/ci.yml 已提交（push/PR 触发 pytest），线上首跑待观察
+- [x] Hermes 真实 MCP 接入：`hermes mcp add`（config.yaml mcp_servers）+ `hermes mcp test` 实测 6 工具全通过。三坑已修：①宿主过滤 env（PYTHONPATH 不透传）→server.py 自举 sys.path；②-m 在宿主 cwd 找不到包→args 用脚本绝对路径；③add 是交互式→input y 应答
+- [x] vendored 规则改技能目录结构 skills/<name>/SKILL.md（vendor_rules.py+仓内迁移）
 - [ ] U1-U20 真引擎端到端（等引擎侧上线）
 - [ ] VodTeam 仓转移（等管理员权限，不阻塞）

@@ -5,8 +5,13 @@
 """
 import json
 import sys
+from pathlib import Path
 
-from vod_mcp import packs, policy as policy_mod, tools
+# 自举包路径（对任意 MCP 宿主成立：不依赖宿主透传 PYTHONPATH——
+# Hermes 等宿主出于安全过滤环境变量，stdio 子进程只继承白名单）
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from vod_mcp import packs, policy as policy_mod, tools  # noqa: E402
 
 _PROTOCOL_VERSION = "2025-06-18"
 _client_info = {}
@@ -71,6 +76,15 @@ def handle(message: dict) -> dict | None:
 
 
 def main():
+    # 启动自诊（排障：写 /tmp，宿主过滤环境变量时可观察实际 env）
+    try:
+        import os
+        with open("/tmp/vod_mcp_server.log", "a", encoding="utf-8") as f:
+            f.write(f"started pid={os.getpid()} argv={sys.argv} "
+                    f"VOD_PACKS={os.environ.get('VOD_PACKS')!r} "
+                    f"cwd={os.getcwd()}\n")
+    except Exception:
+        pass
     for line in sys.stdin:
         line = line.strip()
         if not line:

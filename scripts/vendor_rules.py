@@ -41,7 +41,9 @@ def vendor(source: str, sha: str | None) -> list:
                 print(f"FAIL: {p} 不存在", file=sys.stderr)
                 sys.exit(1)
             content = p.read_text(encoding="utf-8")
-        dst = SKILLS_DST / name
+        skill_dir = SKILLS_DST / name[:-3]  # 去掉 .md -> 技能目录名
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        dst = skill_dir / "SKILL.md"      # Hermes 技能发现规范：目录+SKILL.md
         dst.write_text(content, encoding="utf-8")
         pulled.append(str(dst))
     return pulled
