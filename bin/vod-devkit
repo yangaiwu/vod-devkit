@@ -211,6 +211,28 @@ def cmd_verify(_args):
     print(f"verify: OK（commit {sha[:12]} 存在于本仓/origin）")
 
 
+def cmd_update(_args):
+    """更新：git fetch 比较 origin/main，落后则 ff 拉取并重烧 build-info。"""
+    subprocess.run(["git", "fetch", "origin", "--tags"], cwd=ROOT, capture_output=True)
+    local = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
+                           capture_output=True, text=True).stdout.strip()
+    remote = subprocess.run(["git", "rev-parse", "origin/main"], cwd=ROOT,
+                            capture_output=True, text=True).stdout.strip()
+    if local == remote:
+        print(f"已是最新（{local[:12]}）")
+        return
+    r = subprocess.run(["git", "pull", "--ff-only"], cwd=ROOT,
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print("更新失败（有本地改动阻挡 ff？）：", r.stderr.strip()[:200])
+        sys.exit(1)
+    print(f"已更新 {local[:12]} → {remote[:12]}")
+    write_build_info(strict=False)
+    print("build-info 已重烧；如需重新安装执行：")
+    print(f"  {sys.argv[0]} install --target hermes --preset collect [--product <p>]")
+    print("  并重启 agent 会话")
+
+
 def cmd_uninstall(_args):
     p = manifest_path()
     if p.exists():
@@ -240,7 +262,8 @@ def main():
                     help="归因绑定：本 agent 服务的产品（codearts/aishell 等；采集反馈默认归属）")
     sp.set_defaults(fn=cmd_install)
     for name, fn in (("status", cmd_status), ("doctor", cmd_doctor),
-                     ("verify", cmd_verify), ("uninstall", cmd_uninstall)):
+                     ("verify", cmd_verify), ("update", cmd_update),
+                     ("uninstall", cmd_uninstall)):
         s = sub.add_parser(name)
         s.set_defaults(fn=fn)
     sub.add_parser("build-info").set_defaults(fn=lambda a: write_build_info(strict=False))

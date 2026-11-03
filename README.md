@@ -19,6 +19,7 @@ bin/vod-devkit install --target hermes --preset collect   # 对外默认（采�
 # 双后端+双 key（网关上线后必配，否则 401）：
 VOD_JAVA_API_BASE / VOD_JAVA_API_KEY（唯一上游 Java）
 
+bin/vod-devkit update   # git fetch+ff 拉取+重烧 build-info
 bin/vod-devkit status   # 看 install-manifest（版本+来源+宿主+packs）
 bin/vod-devkit verify   # commitSHA 到 origin 核验（篡改/改写告警）
 bin/vod-devkit doctor   # 配置+skills+build-info 三查

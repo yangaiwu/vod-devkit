@@ -1,8 +1,5 @@
 """认证与令牌链路测试：auth_status 指纹化（明文永不输出）+ 零字段令牌自动获取。"""
-import json
 import sys
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest

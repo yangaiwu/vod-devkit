@@ -15,7 +15,9 @@ stages:
         steps:
           - name: checkout
             uses: checkout-action@0.0.1
-          - name: install pytest
-            run: python3 -m pip install pytest
+          - name: install deps
+            run: python3 -m pip install pytest pyflakes
+          - name: lint (pyflakes)
+            run: cd repo_workspace 2>/dev/null || true; python3 -m pyflakes vod_mcp/*.py tests/*.py
           - name: run tests
             run: cd repo_workspace 2>/dev/null || true; python3 -m pytest tests/ -q
