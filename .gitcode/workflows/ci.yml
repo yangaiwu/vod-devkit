@@ -11,7 +11,7 @@ stages:
     jobs:
       Test:
         name: pytest
-        runs-on: [ubuntu-latest, x64, small]
+        runs-on: [default]
         steps:
           - name: checkout
             uses: checkout-action@0.0.1
