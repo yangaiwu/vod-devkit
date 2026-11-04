@@ -103,3 +103,16 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
   dsh.bundle/dsh.profile 或进 profile bundles 清单。
 - WorkBuddy 线不受此约束：GitHub 仓即市场，plugin.json 就绪即挂，与 npm
   无关（README 双语已写安装命令）。
+
+## D-dsh-ui-1 dsh 笑脸采集 UI 通道（2026-11-04 拍板 A1-A4）
+- 形态：dsh web 输入框笑脸按钮→弹窗表单→/external/voices 囤积→引擎
+  VOD-ISYNC 建 issue（VodTeam/VOD-Project，bot 代提交 on_behalf_of 昵称）。
+  已拍板：匿名档过运营队列实名自动、单仓、走 !152 囵积端点。
+- UI 扩展机制实证存在（dsh-client-ui-slots register API+浏览器插件
+  client.js 下发）；输入区槽位名留 T-VER-1 真机枚举（无槽位降级=
+  斜杠命令入口同表单）。dsh 账号体系存在性未证实→身份源三层
+  （会话 API>凭据指纹>自愿留名），表单知情同意默认勾选。
+- UI 通道 voiceId=确定性 f(identity_hash, content)（用户级维度，与 MCP
+  通道调用级 nonce 不同是有意的：同用户重试幂等+跨用户声量不吞）；
+  三层全空取安装指纹。设计文档 docs/dsh-ui-collect.md；引擎侧
+  VOD-Project feat/issue-sync f312bab（VOD-ISYNC，I1-I12）。
