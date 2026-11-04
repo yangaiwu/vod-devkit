@@ -200,6 +200,74 @@ function PrimaryBtn({ disabled, onClick, children }) {
   );
 }
 
+/* ---------- 回执轮询（U-S2/U-S5/U-S6：issue 建成后展示链接） ---------- */
+
+async function pollIssueSync(serverVoiceId, onFound) {
+  // GET /external/voices 按本机 key 查回执；issue_sync 节随声音返回
+  try {
+    const token = await ensureToken();
+    const r = await fetch(BASE + VOICES_PATH + '?limit=50', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (r.status !== 200) return null;
+    const body = await r.json().catch(() => ({}));
+    const list = body.voices || body.data?.voices || [];
+    const hit = list.find((v) => v.voiceId === serverVoiceId);
+    return hit ? (hit.issue_sync || null) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/* ---------- 暂存自动重试（U-S3：断线/未上线的反馈下次打开自动补提） ---------- */
+
+let retrySweepDone = false;  // 每会话一次
+
+async function retryStashedSubmissions() {
+  if (retrySweepDone) return;
+  retrySweepDone = true;
+  const rows = JSON.parse(localStorage.getItem(LS_LEDGER) || '[]')
+    .filter((r) => r.status === 'pending-endpoint' || r.status === 'failed');
+  for (const row of rows.slice(0, 5)) {  // cap 5 防风暴
+    try {
+      const token = await ensureToken();
+      const r = await fetch(BASE + VOICES_PATH, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          voices: [{
+            title: row.title,
+            description: row.description || '',
+            content: row.content,
+          }],
+          ...(UI_PRODUCT ? { product: UI_PRODUCT } : {}),
+        }),
+      });
+      if (r.status === 200 || r.status === 201) {
+        row.status = 'accepted';
+        const body = await r.json().catch(() => ({}));
+        row.serverVoiceId = (body.voiceIds || body.data?.voiceIds || [])[0] || '';
+        row.retriedAt = new Date().toISOString();
+      } else if (r.status !== 404) {
+        row.error = `retry ${r.status}`;
+      }
+    } catch (e) {
+      row.error = String(e && e.message || e);
+    }
+  }
+  const kept = rows.filter((r) => r.status !== 'accepted');
+  if (kept.length !== rows.length || rows.length) {
+    // 回写账本：成功的从暂存态转 accepted，其余原样保留
+    const all = JSON.parse(localStorage.getItem(LS_LEDGER) || '[]');
+    const byKey = new Map(rows.map((r) => [r.voiceKey, r]));
+    const out = all.map((r) => byKey.get(r.voiceKey) || r);
+    localStorage.setItem(LS_LEDGER, JSON.stringify(out.slice(0, LEDGER_CAP)));
+  }
+}
+
 /* ---------- 表单弹窗 ---------- */
 
 function FeedbackModal({ onClose }) {
@@ -208,6 +276,23 @@ function FeedbackModal({ onClose }) {
   const [category, setCategory] = useState(''); // '' = 不预分类，引擎重判
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null); // {ok, msg}
+
+  async function pollForReceipt(serverVoiceId, setDoneRef) {
+    if (!serverVoiceId) return;
+    for (let i = 0; i < 6; i++) {
+      await new Promise((res) => setTimeout(res, 10000));
+      const sync = await pollIssueSync(serverVoiceId);
+      if (!sync) continue;
+      if (sync.status === 'CREATED' && sync.issue_url) {
+        setDoneRef({ ok: true, msg: `已建成 issue：${sync.issue_url}` });
+        return;
+      }
+      if (sync.status === 'REJECTED') {
+        setDoneRef({ ok: false, msg: '反馈经审核未采纳，感谢你的提交。' });
+        return;
+      }
+    }
+  }
 
   async function submit() {
     const text = content.trim();
@@ -219,6 +304,9 @@ function FeedbackModal({ onClose }) {
     setBusy(true); setDone(null);
     const row = {
       title: text.slice(0, 60), scene: scene.trim(), category,
+      content: text,  // U-S3 重试重建提交体用（本机账本，cap 200）
+      description: `${UI_PRODUCT || '插件'} UI 采集${
+        category ? '｜预分类：' + category + '（待引擎重判）' : ''}`,
       at: new Date().toISOString(), status: 'failed', error: '',
     };
     try {
@@ -261,6 +349,8 @@ function FeedbackModal({ onClose }) {
         row.taskId = body.taskIds?.[0] || '';
         ledgerAppend(row);
         setDone({ ok: true, msg: '已收录，产品团队会看到这条反馈；审核后将以 issue 形式跟进。' });
+        // U-S2：后台轮询 issue_sync（引擎建成 issue 后补链接）
+        pollForReceipt(row.serverVoiceId, setDone);
       } catch (e) {
         row.error = String(e && e.message || e);
         ledgerAppend(row);
@@ -327,6 +417,8 @@ function SmileyButton() {
   // composer.dock 槽作挂载点，JS 计算输入框（contenteditable）矩形，
   // fixed 定位其右上角，ResizeObserver+窗口事件+轮询兜底跟随布局。
   useEffect(() => {
+    // U-S3：会话内首挂载补提暂存行（断线/引擎未上线期的反馈）
+    retryStashedSubmissions();
     const place = () => {
       const btn = btnRef.current;
       if (!btn) return;
