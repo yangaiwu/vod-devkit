@@ -24,7 +24,7 @@ const VOICES_PATH = `${API_PREFIX}/external/voices`;
 const LS_TOKEN = 'vod_dshui_token';
 // 渠道标注（T7b）：随包编译的固定常量，非用户输入；引擎白名单命中才生效，
 // 归并展示名（运营报表渠道分组）由引擎侧渠道体系定义
-const UI_HOST = 'dsh-ui';
+const UI_HOST = 'vod-agent';
 const LS_DEVICE = 'vod_dshui_device';
 const LS_LEDGER = 'vod_dshui_ledger';
 const LEDGER_CAP = 200;
