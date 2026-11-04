@@ -128,14 +128,32 @@ def _install_opencode(args, packs: str) -> Path:
     return conf
 
 
+def _strip_codex_vod_blocks(text: str) -> str:
+    """幂等剥离：按行删除 [mcp_servers.vod-devkit] 及 .env 子表整块。
+
+    不能用行内正则截断式剥离——args = ["…"] 行内的 '[' 会让正则提前断块，
+    旧 env 子表残留（实测：二次安装后 env 表×2、旧 VOD_PACKS 滞留，
+    换 preset 不生效）。按行扫描到下一个 '[' 开头的节头为止才是整块。
+    """
+    out, skipping = [], False
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("[mcp_servers.vod-devkit"):
+            skipping = True
+            continue
+        if skipping and s.startswith("["):
+            skipping = False
+        if not skipping:
+            out.append(line)
+    return "\n".join(out).rstrip()
+
+
 def _install_codex(args, packs: str) -> Path:
     """Codex：~/.codex/config.toml 的 [mcp_servers.vod-devkit] 表（幂等重写）。"""
     conf = Path.home() / ".codex" / "config.toml"
     conf.parent.mkdir(parents=True, exist_ok=True)
     text = conf.read_text(encoding="utf-8") if conf.exists() else ""
-    # 幂等：先剥离旧段再追加
-    import re
-    text = re.sub(r'\n?\[mcp_servers\.vod-devkit\]\n[^\n\[]*(?:\n[^\n\[]*)*', '', text)
+    text = _strip_codex_vod_blocks(text)
     env = _server_env(args, packs)
     env_lines = "\n".join(f'{k} = "{v}"' for k, v in env.items())
     block = (f'\n[mcp_servers.vod-devkit]\n'
