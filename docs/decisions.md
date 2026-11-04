@@ -142,3 +142,13 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 至此两壳产品逻辑一致：MCP 安装必填 / UI 加载必配（__VOD_DSH_UI_PRODUCT__
   注入），运行期显式传参仍可覆盖
 - 取值权威名单=GET /external/products（t_vod_product 运营预置）
+
+## D-switch-1（2026-11-04）MCP 切囤积端点完成（V16 落地）
+- 主路径=囤积批式（voices[]+tags+product，voiceId 引擎算回执下发）；
+  404（引擎未部署）自动回落老链（path=legacy-fallback），回落 source
+  带 per-install nonce（跨用户吞声量前置修复）
+- 三回归锁升级新契约：协议锁（囤积头/路径/载荷+回落两场景）、R1
+  声量锁移至回落路径、title 锁改囤积链 voices[].title 承载
+- 引擎 !152 已合入 dev（ebdc6032）+评审线三轮追加（S1-S3 anchor/
+  A2 设备绑定/tier-first R2/verbatim desc，V119-V120 幂等迁移）——
+  插件零调整（401 自愈链原生兼容 A2；契约变化与既有删除同向）
