@@ -31,19 +31,27 @@ POST /external/voices（囤积，不触发分析）→ 引擎按档建 issue
 ## 三、插件包结构（dsh/dsh-vod-devkit 扩展）
 
 ```
-dsh/lib/
-  index.js        # 现有 node 半：工具注册（不动）
-  client.js       # 新增浏览器半：槽位注册+表单组件（package.json
-                  #   exports["./client"] 声明，dsh.client 行自动下发）
-  form.css        # 随 factory 注入（loader 管 style tag 生命周期）
+dsh/src/client.jsx      # 源码：😊 按钮+弹窗表单+提交逻辑+账本（React）
+dsh/lib/client.js       # 构建产物（esbuild transform→CJS+wrap_client.py 包装）
+dsh/scripts/wrap_client.py  # 官方 factory 模式包装器（见下）
+dsh/lib/index.js        # node 半：工具注册（不动）
 ```
 
-client.js 职责（纯前端，无敏感面）：
-- register 进输入区槽位：😊 Button 组件
-- 点击 → 渲染弹窗表单（React，ui-primitives 基件）
-- 提交 → fetch 经 dsh web API gateway 转发到 VOD
-  （同源策略：浏览器不直连 VOD 域，走 node 半转发——凭据不出浏览器，
-  node 半已有 VOD_JAVA_API_BASE/KEY 配置面）
+**已实现并真机验证（2026-11-04）**：按钮渲染进 composer dock、弹窗表单
+（内容≤2000 计数/场景/昵称+知情同意勾选）、提交真打网络、失败优雅降级
+（引擎 !152 未部署→token 401→「已暂存本机稍后重试」+本地账本确定性键
+ext_dshui_da8c0949_00c6757df23f）。
+
+**构建坑（实测钉死，官方插件反编译对照）**：
+- client 半判别字段=package.json `dsh.client: {platform: "web", inject: [...]}`
+  （漏它→包不进浏览器仓单，node 半扫的就是这个字段）
+- 浏览器半导出面必须含 `exports.inject = ["slots"]`（客户端服务名数组），
+  缺它内核不激活（web boot 报 entry did not activate，整个前端起不来）
+- React 不 vendor：`require("react")` 由 shell 模块表提供——esbuild 用
+  transform 模式（`--jsx=automatic --format=cjs`），bundle 模式会把
+  module.exports 提前求值到 factory 外导致注册即崩
+- 浏览器直连 VOD：CORS 已通（VOD nginx 预检 200+ACAO 回显），零引擎新增
+- config：`window.__VOD_DSH_UI_BASE__` 覆盖，缺省 https://vod-dev.topxtopx.com
 
 ## 四、身份源三层（捕获 DSH 用户账号）
 
