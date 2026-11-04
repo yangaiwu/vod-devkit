@@ -22,6 +22,16 @@ const LS_TOKEN = 'vod_dshui_token';
 const LS_DEVICE = 'vod_dshui_device';
 const LS_LEDGER = 'vod_dshui_ledger';
 const LEDGER_CAP = 200;
+// 分类 chips（参考官方 message-feedback 七分类，对齐 agent 产品反馈维度）
+const CATEGORIES = [
+  { id: 'task-result', label: '任务结果' },
+  { id: 'instruction-following', label: '指令理解与遵循' },
+  { id: 'product-interaction', label: '产品功能与交互' },
+  { id: 'service-stability', label: '稳定性和速度' },
+  { id: 'resource-cost', label: '资源使用与费用' },
+  { id: 'security-privacy', label: '安全隐私与权限' },
+  { id: 'other', label: '其他' },
+];
 
 /* ---------- 工具 ---------- */
 
@@ -108,6 +118,7 @@ const S = {
 function FeedbackModal({ onClose }) {
   const [content, setContent] = useState('');
   const [scene, setScene] = useState('');
+  const [category, setCategory] = useState('other');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null); // {ok, msg}
   const dialogRef = useRef(null);
@@ -129,7 +140,7 @@ function FeedbackModal({ onClose }) {
     try {
       const key = await localVoiceKey(text);
       const row = {
-        voiceKey: key, title: text.slice(0, 60), scene: scene.trim(),
+        voiceKey: key, title: text.slice(0, 60), scene: scene.trim(), category,
         at: new Date().toISOString(),
       };
       try {
@@ -143,7 +154,9 @@ function FeedbackModal({ onClose }) {
           body: JSON.stringify({
             voices: [{
               title: text.slice(0, 60),
-              description: `dsh UI 采集${scene.trim() ? '｜场景：' + scene.trim() : ''}`,
+              description: `dsh UI 采集｜分类：${
+                (CATEGORIES.find((c) => c.id === category) || {}).label || category
+              }${scene.trim() ? '｜场景：' + scene.trim() : ''}`,
               content: text,
             }],
             product: 'DSH',
@@ -185,6 +198,18 @@ function FeedbackModal({ onClose }) {
         </div>
         <div style={{ fontSize: 12, opacity: 0.65, marginBottom: 12 }}>
           你的反馈将进入 VOD 开发者声音分析平台，帮助 dsh 变得更好。
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+          {CATEGORIES.map((c) => (
+            <button key={c.id} style={{
+              ...S.btn, fontSize: 12, padding: '4px 10px',
+              borderRadius: 999,
+              background: category === c.id
+                ? 'var(--dsw-alias-state-business-primary, #2563eb)' : 'transparent',
+              color: category === c.id ? '#fff' : 'inherit',
+              border: '1px solid var(--dsw-alias-border-l2, #ccc)',
+            }} onClick={() => setCategory(c.id)}>{c.label}</button>
+          ))}
         </div>
         <textarea style={S.textarea} value={content} maxLength={2000}
           placeholder="比如：补全太慢，希望优化速度" autoFocus
