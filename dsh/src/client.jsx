@@ -15,7 +15,6 @@
  * - 样式：官方 message-feedback 同款（Modal/Button 原语 + --dsw-alias 令牌）
  */
 import React, { useState, useRef, useEffect } from 'react';
-import { Modal, Button } from '@deepseek-ai/dsh-client-ui-primitives';
 
 const API_PREFIX = '/rest/developer/manager/hdvodmngservice/v1';
 const BASE = (typeof globalThis !== 'undefined'
@@ -123,7 +122,64 @@ async function ensureToken() {
   return t;
 }
 
-/* ---------- 表单弹窗（官方 Modal 原语） ---------- */
+/* ---------- 自研弹窗/按钮（解耦：零官方组件依赖，dsw 令牌做可选增强） ---------- */
+
+/* 视觉参考官方 message-feedback：遮罩+卡片+标题+关闭+footer。
+ * 主题对接走 CSS 变量（--dsw-alias-*）+硬编码兜底——变量在就跟随主题，
+ * 不在（非 dsh 宿主或主题改版）就用自己的兜底值，永不裸奔。 */
+function SelfModal({ title, onClose, children, footer }) {
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9000,
+      background: 'rgba(0,0,0,.35)', display: 'flex',
+      alignItems: 'center', justifyContent: 'center',
+    }} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div role="dialog" aria-label={title} style={{
+        width: 'min(488px, 92vw)',
+        borderRadius: 'var(--dsw-radius-panel, 12px)',
+        background: 'var(--dsw-alias-bg-layer-1, #fff)',
+        color: 'var(--dsw-alias-label-primary, #111)',
+        padding: '18px 20px', fontFamily: 'inherit',
+        boxShadow: '0 8px 40px rgba(0,0,0,.2)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>{title}</div>
+          <button onClick={onClose} aria-label="关闭" style={{
+            border: 'none', background: 'transparent', cursor: 'pointer',
+            fontSize: 16, lineHeight: 1, padding: 4, borderRadius: 6,
+            color: 'var(--dsw-alias-label-tertiary, #888)',
+          }}>✕</button>
+        </div>
+        {children}
+        {footer && <div style={{ marginTop: 14 }}>{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+function PrimaryBtn({ disabled, onClick, children }) {
+  return (
+    <button disabled={disabled} onClick={onClick} style={{
+      width: '100%', height: 44, fontSize: 14, fontWeight: 500,
+      border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+      borderRadius: 'var(--dsw-radius-lg, 10px)',
+      background: disabled
+        ? 'var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,.06))'
+        : 'var(--dsw-alias-button-primary-fill, #2563eb)',
+      color: disabled
+        ? 'var(--dsw-alias-label-tertiary, #999)'
+        : 'var(--dsw-alias-label-primary-foreground, #fff)',
+    }}>{children}</button>
+  );
+}
+
+/* ---------- 表单弹窗 ---------- */
 
 function FeedbackModal({ onClose }) {
   const [content, setContent] = useState('');
@@ -193,12 +249,11 @@ function FeedbackModal({ onClose }) {
   }
 
   return (
-    <Modal open onClose={onClose} title="反馈一句" closeLabel="关闭"
-      style={{ width: 'min(488px, 100%)' }}
+    <SelfModal title="反馈一句" onClose={onClose}
       footer={(
-        <Button variant="primary" disabled={busy || !content.trim()}
-          style={{ width: '100%', height: 44, fontSize: 14, fontWeight: 500 }}
-          onClick={submit}>{busy ? '提交中…' : '提交反馈'}</Button>
+        <PrimaryBtn disabled={busy || !content.trim()} onClick={submit}>
+          {busy ? '提交中…' : '提交反馈'}
+        </PrimaryBtn>
       )}>
       <div style={S.hint}>
         你的反馈将进入 VOD 开发者声音分析平台，帮助 dsh 变得更好。
@@ -234,7 +289,7 @@ function FeedbackModal({ onClose }) {
           onChange={(e) => setScene(e.target.value)} />
       </div>
       {done && <div style={S.result}>{done.msg}</div>}
-    </Modal>
+    </SelfModal>
   );
 }
 
