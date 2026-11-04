@@ -156,7 +156,8 @@ function FeedbackModal({ onClose }) {
               title: text.slice(0, 60),
               description: `dsh UI 采集${
                 category ? '｜预分类：' + category + '（待引擎重判）' : ''
-              }${scene.trim() ? '｜场景：' + scene.trim() : ''}`,
+              }`,
+              scene: scene.trim() ? scene.trim().slice(0, 128) : undefined,
               tags: category ? ['problem_type:' + category] : [],
               content: text,
             }],
