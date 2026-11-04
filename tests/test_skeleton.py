@@ -70,16 +70,18 @@ def test_text_rules_deny(text):
 
 def test_feedback_content_with_credential_words_not_killed():
     scoped = policy_mod.guard_scope({
-        "voices": [{"content": "系统把我的 password = abc123 明文显示在日志里",
-                    "scene": "登录"}], "confirmed": True})
+        "voices": [{"content": "系统把我的 password = abc123 明文显示在日志里"}],
+        "confirmed": True})
     pol = policy_mod.load_policy()
     assert policy_mod.decide(
         policy_mod.check_text(pol, json.dumps(scoped, ensure_ascii=False)))[0] == "allow"
 
 
 def test_structural_field_still_scanned():
+    # E4 回归锁：deny 词在结构化字段（title）也必须被扫描——不只扫 content
     scoped = policy_mod.guard_scope({
-        "voices": [{"content": "正常反馈", "scene": "jdbc t_vod_ 直连"}], "confirmed": True})
+        "voices": [{"content": "正常反馈", "title": "jdbc t_vod_ 直连"}],
+        "confirmed": True})
     pol = policy_mod.load_policy()
     assert policy_mod.decide(
         policy_mod.check_text(pol, json.dumps(scoped, ensure_ascii=False)))[0] == "deny"

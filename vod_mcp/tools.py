@@ -190,7 +190,6 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
         if len(content) > 2000:  # 契约 maxLength 2000：内容边界（防超大 payload）
             rejected.append({"index": i, "reason": f"content 超 2000 字（{len(content)}）"})
             continue
-        scene = str(v.get("scene", "") or "")[:128]
         nonce = uuid.uuid4().hex[:8]  # 调用级：重试复用，跨调用不重复
         vid = _voice_id(host, content, nonce)
         desc = content if len(content) >= 10 else f"{content} [vod-devkit]"
@@ -203,8 +202,6 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
         }
         if product:  # 无归因不带 product（引擎 UNKNOWN 档），不本地拦截
             body["product"] = product
-        if scene:
-            body["scene"] = scene
         try:
             out = _http("POST", _EXISTING_SUBMIT, body, base=JAVA_BASE, key=JAVA_KEY)
             accepted += 1

@@ -134,3 +134,11 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
   agent 会话上下文。运行期自报只覆盖显式传参这一处（优先级最高、可越层）
 - UI 无注入不激活（fail fast）替代原"不注入=中性文案+UNKNOWN"设计
   （e99c347）——归因错误比没数据更糟，配置错误第一分钟暴露给嵌入方
+
+## D-product-2（2026-11-04）产品归因安装必配统一到 MCP（与 UI 同口径）
+- install --product 必填（fail fast）：缺省宿主名在生态部署是错归陷阱
+  （高校AI开发者平台 agent 底座=hermes，不填全归 hermes）。宿主名仍是
+  合法值（自反馈场景显式 --product hermes），但不做静默默认
+- 至此两壳产品逻辑一致：MCP 安装必填 / UI 加载必配（__VOD_DSH_UI_PRODUCT__
+  注入），运行期显式传参仍可覆盖
+- 取值权威名单=GET /external/products（t_vod_product 运营预置）

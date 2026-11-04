@@ -209,9 +209,19 @@ def cmd_install(args):
         print(f"不支持目标: {target}（可选 hermes|opencode|codex|auto）", file=sys.stderr)
         sys.exit(2)
     packs = args.packs or PRESETS.get(args.preset, "")
-    # 归因绑定（「宿主即产品」口径，2026-11-03 拍板）：显式 --product 优先；
-    # 缺省=宿主名（装在 hermes 就归 hermes——用户不说产品，锚点=当前工具）
-    bound_product = args.product or target
+    # 归因绑定（T7d 统一：安装必配，与 dsh UI 加载必配同口径）：--product 必填——
+    # 缺省宿主名在生态部署是错归陷阱（高校AI开发者平台 agent 底座=hermes，
+    # 不填则反馈全归 hermes）。宿主名仍是合法值（自反馈场景显式传
+    # --product hermes），但必须显式选择，不做静默默认（归因错误比没数据更糟）。
+    if not args.product:
+        print(
+            "[vod-devkit] --product 必填：产品归因是安装必配项（与 UI 嵌入注入同口径）。\n"
+            "  取值=生态看板产品名（可用 GET /external/products 查询权威名单），如：\n"
+            "    --product \"高校AI开发者平台\" / --product \"GTD\" / --product \"Skills门户\"\n"
+            "  反馈关于宿主工具本身时显式传宿主名：--product hermes",
+            file=sys.stderr)
+        sys.exit(2)
+    bound_product = args.product
     rt = ROOT / "vod_mcp" / "runtime.json"
     cfg = {}
     if rt.exists():
@@ -347,7 +357,7 @@ def cmd_update(_args):
     print(f"已更新 {local[:12]} → {remote[:12]}")
     write_build_info(strict=False)
     print("build-info 已重烧；如需重新安装执行：")
-    print(f"  {sys.argv[0]} install --target hermes --preset collect [--product <p>]")
+    print(f"  {sys.argv[0]} install --target hermes --preset collect --product <产品名>")
     print("  并重启 agent 会话")
 
 

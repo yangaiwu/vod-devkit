@@ -8,7 +8,7 @@
  * - 身份=登录态二值：未登录纯匿名（v1）；登录取账号快照（v1.1 待接）
  * - 分类=VOD 引擎 v2.2 六类口径 chips，默认不选（引擎 LLM 全量重判，
  *   错误预分类比留空更糟）；选中仅作 problem_type hint（desc 前缀+tags）
- * - scene 按引擎契约独立字段（≤128，引擎侧落 voice_desc 前缀）
+ * - scene 独立字段已移除（T7h）：VOD-Project 全仓无独立场景字段（库/契约/归一化均无），场景写进正文
  * - 本地对账键 f(deviceId, content)：同机重试幂等、跨机不吞声量；
  *   引擎有独立确定性键（V9），本键仅账本
  * - 回执说人话（F2）：voiceId 不展示给用户
@@ -244,7 +244,6 @@ async function retryStashedSubmissions() {
           voices: [{
             title: row.title,
             content: row.content,
-            ...(row.scene ? { scene: row.scene.slice(0, 128) } : {}),
             ...(row.category ? { tags: ['problem_type:' + row.category] } : {}),
           }],
           product: UI_PRODUCT,
@@ -276,7 +275,6 @@ async function retryStashedSubmissions() {
 
 function FeedbackModal({ onClose }) {
   const [content, setContent] = useState('');
-  const [scene, setScene] = useState('');
   const [category, setCategory] = useState(''); // '' = 不预分类，引擎重判
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null); // {ok, msg}
@@ -307,7 +305,7 @@ function FeedbackModal({ onClose }) {
     }
     setBusy(true); setDone(null);
     const row = {
-      title: text.slice(0, 60), scene: scene.trim(), category,
+      title: text.slice(0, 60), category,
       content: text,  // U-S3 重试重建提交体用（本机账本，cap 200）
       // 分类走 tags 正式通道（T7c），description 模板文案已移除
       at: new Date().toISOString(), status: 'failed', error: '',
@@ -326,7 +324,6 @@ function FeedbackModal({ onClose }) {
             voices: [{
               title: text.slice(0, 60),
               content: text,
-              scene: scene.trim() ? scene.trim().slice(0, 128) : undefined,
               tags: category ? ['problem_type:' + category] : [],
             }],
             // 产品=加载必配（T7d）：入口仅在注入后激活，product 恒有值
@@ -400,12 +397,8 @@ function FeedbackModal({ onClose }) {
         color: 'var(--dsw-alias-label-tertiary, #999)' }}>
         {content.length}/2000
       </div>
-      <div style={S.label}>使用场景（选填）</div>
-      <div style={{ fontSize: 12, marginBottom: 6 }}>
-        <input style={S.input} value={scene} maxLength={128}
-          placeholder="如：您在代码补全、生成 PR 描述场景遇到的问题"
-          onChange={(e) => setScene(e.target.value)} />
-      </div>
+        {/* 场景输入已移除（T7h）：VOD-Project 全仓无独立 scene 字段（库无列/契约无键），
+          场景由用户自然写进正文——云声表单同款引导 */}
       {done && <div style={S.result}>{done.msg}</div>}
     </SelfModal>
   );

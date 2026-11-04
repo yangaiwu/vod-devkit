@@ -20,9 +20,6 @@
                   "minLength": 1,
                   "maxLength": 2000
                 },
-                "scene": {
-                  "type": "string"
-                },
                 "userType": {
                   "type": "string"
                 },
