@@ -86,10 +86,27 @@ function getDeviceId() {
 }
 
 async function sha1Hex(s) {
-  const buf = await crypto.subtle.digest('SHA-1',
-    new TextEncoder().encode(s));
-  return [...new Uint8Array(buf)]
-    .map((b) => b.toString(16).padStart(2, '0')).join('');
+  // crypto.subtle 只在安全上下文存在（https/localhost）——公网 http
+  // 访问时为 undefined（实测踩坑）。本键仅本地账本对账，无密码学要求，
+  // 兜底走纯 JS FNV-1a 双种子拼 64bit。
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const buf = await crypto.subtle.digest('SHA-1',
+      new TextEncoder().encode(s));
+    return [...new Uint8Array(buf)]
+      .map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  return fnv1a64(s);
+}
+
+function fnv1a64(s) {
+  const h1 = 0x811c9dc5, h2 = 0x01000193;
+  let a = h1 >>> 0, b = (h2 ^ 0xdeadbeef) >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    a ^= c; a = Math.imul(a, 0x01000193) >>> 0;
+    b ^= (c << 3) & 0xffff; b = Math.imul(b, 0x85ebca6b) >>> 0;
+  }
+  return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
 }
 
 async function localVoiceKey(content) {
