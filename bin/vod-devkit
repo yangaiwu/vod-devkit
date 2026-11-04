@@ -212,6 +212,9 @@ def cmd_install(args):
         except Exception:
             cfg = {}
     cfg["product"] = bound_product
+    # base 同步落 runtime.json：宿主 env 透传不稳是实测坑，透传挂了静默落回
+    # 127.0.0.1:8090；文件兑底与 env 同值不构成双真源（优先级链 env>文件）
+    cfg["java_base"] = args.java_api_base
     rt.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
     mcp_conf = installer(args, packs)
