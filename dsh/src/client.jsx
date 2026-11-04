@@ -25,6 +25,10 @@ const LS_TOKEN = 'vod_dshui_token';
 const LS_DEVICE = 'vod_dshui_device';
 const LS_LEDGER = 'vod_dshui_ledger';
 const LEDGER_CAP = 200;
+// 宿主/产品名：嵌入方可经 __VOD_DSH_UI_PRODUCT__ 注入（解耦：任何支持
+// 本插件能力的 agent 装上后文案自动对，不注入=中性通用文案）
+const UI_PRODUCT = (typeof globalThis !== 'undefined'
+  && globalThis.__VOD_DSH_UI_PRODUCT__) || '';
 
 // 分类 chips：VOD 引擎 v2.2 六类口径（n01_classify 真源）。无效问题
 // 不给用户选项；默认不选=不预分类（引擎 LLM 全量重判——错误预分类
@@ -86,10 +90,27 @@ function getDeviceId() {
 }
 
 async function sha1Hex(s) {
-  const buf = await crypto.subtle.digest('SHA-1',
-    new TextEncoder().encode(s));
-  return [...new Uint8Array(buf)]
-    .map((b) => b.toString(16).padStart(2, '0')).join('');
+  // crypto.subtle 只在安全上下文存在（https/localhost）——公网 http
+  // 访问时为 undefined（实测踩坑）。本键仅本地账本对账，无密码学要求，
+  // 兜底走纯 JS FNV-1a 双种子拼 64bit。
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const buf = await crypto.subtle.digest('SHA-1',
+      new TextEncoder().encode(s));
+    return [...new Uint8Array(buf)]
+      .map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  return fnv1a64(s);
+}
+
+function fnv1a64(s) {
+  const h1 = 0x811c9dc5, h2 = 0x01000193;
+  let a = h1 >>> 0, b = (h2 ^ 0xdeadbeef) >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    a ^= c; a = Math.imul(a, 0x01000193) >>> 0;
+    b ^= (c << 3) & 0xffff; b = Math.imul(b, 0x85ebca6b) >>> 0;
+  }
+  return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
 }
 
 async function localVoiceKey(content) {
@@ -213,13 +234,15 @@ function FeedbackModal({ onClose }) {
           body: JSON.stringify({
             voices: [{
               title: text.slice(0, 60),
-              description: `dsh UI 采集${
+              description: `${UI_PRODUCT || '插件'} UI 采集${
                 category ? '｜预分类：' + category + '（待引擎重判）' : ''}`,
               content: text,
               scene: scene.trim() ? scene.trim().slice(0, 128) : undefined,
               tags: category ? ['problem_type:' + category] : [],
             }],
-            product: 'DSH',
+            // 产品=嵌入方注入；不注入则不带 product（引擎 UNKNOWN 档
+            // 人工归正——不静默猜，与 MCP 通道同纪律）
+            ...(UI_PRODUCT ? { product: UI_PRODUCT } : {}),
           }),
         });
         if (r.status === 404) {
@@ -256,7 +279,8 @@ function FeedbackModal({ onClose }) {
         </PrimaryBtn>
       )}>
       <div style={S.hint}>
-        你的反馈将进入 VOD 开发者声音分析平台，帮助 dsh 变得更好。
+        你的反馈将进入 VOD 开发者声音分析平台
+        {UI_PRODUCT ? `，帮助 ${UI_PRODUCT} 变得更好` : ''}。
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
         {CATEGORIES.map((c) => (
