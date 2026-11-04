@@ -22,15 +22,15 @@ const LS_TOKEN = 'vod_dshui_token';
 const LS_DEVICE = 'vod_dshui_device';
 const LS_LEDGER = 'vod_dshui_ledger';
 const LEDGER_CAP = 200;
-// 分类 chips（参考官方 message-feedback 七分类，对齐 agent 产品反馈维度）
+// 分类 chips：VOD 引擎 v2.2 六类口径（n01_classify 真源）。无效问题
+// 不给用户选项；默认不选=不预分类（引擎 LLM 全量重判——错误预分类
+// 比留空更糟，技能纪律）；选中仅作 problem_type hint 附 tags。
 const CATEGORIES = [
-  { id: 'task-result', label: '任务结果' },
-  { id: 'instruction-following', label: '指令理解与遵循' },
-  { id: 'product-interaction', label: '产品功能与交互' },
-  { id: 'service-stability', label: '稳定性和速度' },
-  { id: 'resource-cost', label: '资源使用与费用' },
-  { id: 'security-privacy', label: '安全隐私与权限' },
-  { id: 'other', label: '其他' },
+  { id: '产品缺陷', label: '产品缺陷', hint: 'Bug/报错/功能不可用' },
+  { id: '技术业务咨询', label: '技术业务咨询' },
+  { id: '体验改进', label: '体验改进', hint: '可用但体验差' },
+  { id: '功能需求', label: '功能需求', hint: '希望新增能力' },
+  { id: '主观评价', label: '主观评价', hint: '纯感受/评分/对比' },
 ];
 
 /* ---------- 工具 ---------- */
@@ -118,7 +118,7 @@ const S = {
 function FeedbackModal({ onClose }) {
   const [content, setContent] = useState('');
   const [scene, setScene] = useState('');
-  const [category, setCategory] = useState('other');
+  const [category, setCategory] = useState(''); // '' = 不预分类，引擎重判
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null); // {ok, msg}
   const dialogRef = useRef(null);
@@ -154,9 +154,10 @@ function FeedbackModal({ onClose }) {
           body: JSON.stringify({
             voices: [{
               title: text.slice(0, 60),
-              description: `dsh UI 采集｜分类：${
-                (CATEGORIES.find((c) => c.id === category) || {}).label || category
+              description: `dsh UI 采集${
+                category ? '｜预分类：' + category + '（待引擎重判）' : ''
               }${scene.trim() ? '｜场景：' + scene.trim() : ''}`,
+              tags: category ? ['problem_type:' + category] : [],
               content: text,
             }],
             product: 'DSH',
@@ -201,14 +202,16 @@ function FeedbackModal({ onClose }) {
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
           {CATEGORIES.map((c) => (
-            <button key={c.id} style={{
+            <button key={c.id} title={c.hint || ''} style={{
               ...S.btn, fontSize: 12, padding: '4px 10px',
               borderRadius: 999,
               background: category === c.id
                 ? 'var(--dsw-alias-state-business-primary, #2563eb)' : 'transparent',
               color: category === c.id ? '#fff' : 'inherit',
               border: '1px solid var(--dsw-alias-border-l2, #ccc)',
-            }} onClick={() => setCategory(c.id)}>{c.label}</button>
+            }} onClick={() => setCategory(category === c.id ? '' : c.id)}>
+              {c.label}{c.hint ? '·' + c.hint : ''}
+            </button>
           ))}
         </div>
         <textarea style={S.textarea} value={content} maxLength={2000}
@@ -287,7 +290,13 @@ function SmileyButton() {
           'var(--dsw-alias-label-primary, #111)'}
         onMouseLeave={(e) => e.currentTarget.style.color =
           'var(--dsw-alias-label-tertiary, #888)'}
-        onClick={() => setOpen(true)}>💬</button>
+        onClick={() => setOpen(true)}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"
+          strokeLinejoin="round" aria-hidden="true">
+          <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 8.9 8.9 0 0 1-3.8-.8L3 21l1.9-4.4a8 8 0 0 1-1-3.9A8.4 8.4 0 0 1 12.4 3.2 8.4 8.4 0 0 1 21 11.5z"/>
+          <path d="M8.5 10.5h7M8.5 13.5h4"/>
+        </svg></button>
       {open && <FeedbackModal onClose={() => setOpen(false)} />}
     </React.Fragment>
   );
