@@ -244,6 +244,7 @@ async function retryStashedSubmissions() {
           voices: [{
             title: row.title,
             content: row.content,
+            ...(row.scene ? { scene: row.scene.slice(0, 128) } : {}),
             ...(row.category ? { tags: ['problem_type:' + row.category] } : {}),
           }],
           product: UI_PRODUCT,
@@ -347,7 +348,10 @@ function FeedbackModal({ onClose }) {
         row.serverVoiceId = body.voiceIds?.[0] || '';
         row.taskId = body.taskIds?.[0] || '';
         ledgerAppend(row);
-        setDone({ ok: true, msg: '已收录，产品团队会看到这条反馈；审核后将以 issue 形式跟进。' });
+        const reg = body.productRegistered === undefined ? true : body.productRegistered;
+        setDone(reg
+          ? { ok: true, msg: '已收录，产品团队会看到这条反馈；审核后将以 issue 形式跟进。' }
+          : { ok: true, msg: '已收录。注意：产品名尚未在平台注册，这条反馈暂不进产品分析，请联系部署方核对。' });
         // U-S2：后台轮询 issue_sync（引擎建成 issue 后补链接）
         pollForReceipt(row.serverVoiceId, setDone);
       } catch (e) {
