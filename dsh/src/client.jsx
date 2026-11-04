@@ -246,7 +246,7 @@ async function retryStashedSubmissions() {
             content: row.content,
             ...(row.category ? { tags: ['problem_type:' + row.category] } : {}),
           }],
-          ...(UI_PRODUCT ? { product: UI_PRODUCT } : {}),
+          product: UI_PRODUCT,
         }),
       });
       if (r.status === 200 || r.status === 201) {
@@ -328,9 +328,8 @@ function FeedbackModal({ onClose }) {
               scene: scene.trim() ? scene.trim().slice(0, 128) : undefined,
               tags: category ? ['problem_type:' + category] : [],
             }],
-            // 产品=嵌入方注入；不注入则不带 product（引擎 UNKNOWN 档
-            // 人工归正——不静默猜，与 MCP 通道同纪律）
-            ...(UI_PRODUCT ? { product: UI_PRODUCT } : {}),
+            // 产品=加载必配（T7d）：入口仅在注入后激活，product 恒有值
+            product: UI_PRODUCT,
           }),
         });
         if (r.status === 404) {
@@ -475,6 +474,17 @@ function SmileyButton() {
 /* ---------- 插件入口（官方 activity pill 同款注册模式） ---------- */
 
 export function apply(ctx) {
+  // 产品归因=加载必配（T7d）：嵌入方（产品部署方）装前必须注入
+  // __VOD_DSH_UI_PRODUCT__。无注入=入口不激活+控制台报错（fail fast）——
+  // 归因错误比没数据更糟：缺省宿主名在嵌入场景会静默错归（如 Skills 门户
+  // 反馈落 dsh）；UNKNOWN 档是运行期兜底（agent 误用），不做配置缺失的常规出口
+  if (!UI_PRODUCT) {
+    console.error(
+      '[vod-devkit] 嵌入方未注入 __VOD_DSH_UI_PRODUCT__，反馈入口未激活。' +
+      '产品归因是必配项：嵌入方装前设置 window.__VOD_DSH_UI_PRODUCT__ = "<产品名>"' +
+      '（引擎 product 列归因，如 "CodeArts"/"Skills门户"）');
+    return;
+  }
   ctx.slots.inject('conversation.composer.dock', function* () {
     yield ctx.slots.register(
       { name: 'conversation.composer.dock', id: 'vod-feedback', order: 20 },

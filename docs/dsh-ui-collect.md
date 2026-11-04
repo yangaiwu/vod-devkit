@@ -171,3 +171,14 @@ client 半实现+表单 1.5 天 → 联调（等 MR !152 部署）0.5 天 →
 - 场景用例对应引擎 proposal §六 V26-V29；端到端真机验证 2026-11-04：
   token body host ✓ / voices body tags ✓ / 无 description ✓ /
   账本 category+scene+accepted ✓
+
+## 十四、产品归因=加载必配（T7d，2026-11-04 拍板）
+
+- **UI 半**：嵌入方装前必须注入 `__VOD_DSH_UI_PRODUCT__`。无注入=入口
+  不激活+控制台报错（fail fast）——归因错误比没数据更糟（缺省宿主名在
+  嵌入场景会静默错归：Skills 门户反馈落 dsh）；UNKNOWN 档是运行期兜底
+  （agent 误用），不做配置缺失的常规出口。product 恒有值（提交体直带）
+- **MCP 半**：不变——install --product 安装绑定（缺省=宿主名，宿主即
+  产品场景成立），运行期显式传参覆盖优先
+- 真机双路径验证：无注入按钮不激活 ✓；注入 CodeX 后按钮激活+提交体
+  product:"CodeX" ✓（CDP addScriptToEvaluateOnNewDocument 模拟嵌入方注入）
