@@ -125,7 +125,7 @@ def _http(method: str, path: str, body: dict | None = None,
             raise ToolError(
                 f"鉴权失败（{base}）：检查 VOD_JAVA_API_KEY 配置",
                 code=-32012) from e
-        raise ToolError(f"上游返回 {e.code}: {detail}") from e
+        raise ToolError(f"上游返回 {e.code}: {detail}", code=e.code) from e
     except urllib.error.URLError as e:
         raise ToolError(f"上游不可达（{base}）: {e.reason}", code=-32001) from e
 
@@ -149,7 +149,8 @@ def _resolve_product(params: dict) -> str | None:
     if not raw:
         return None
     return _PRODUCT_MAP.get(raw.lower(), raw)
-_EXISTING_SUBMIT = "/rest/developer/manager/hdvodmngservice/v1/external/voice/submit"
+_SUBMIT_HOARDING = "/rest/developer/manager/hdvodmngservice/v1/external/voices"
+_EXISTING_SUBMIT = "/rest/developer/manager/hdvodmngservice/v1/external/voice/submit"  # 过渡期 404 回落
 _TOKEN_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/token"
 
 # 结构化引导（devkit error-table 模式：步骤=可执行动作，不是"参考文档"）
@@ -158,6 +159,21 @@ _KEY_GUIDANCE = [
     {"order": 2, "action": "upgrade", "label": "提交量达上限后升级正式 key：联系 VOD 运营（低信任档→正式档）"},
     {"order": 3, "action": "host", "label": "宿主平台整体对接可获宿主 key：由宿主运维持有（高信任档）"},
 ]
+
+
+def _install_nonce() -> str:
+    """per-install 8 位 hex：runtime.json 首次生成常驻——legacy 共用 key 场景下
+    source 命名空间 per-machine 化，杜绝不同用户提交同款内容被确定性
+    voiceId 合并成一条（跨用户吞声量，切换补丁前置修复）。"""
+    n = _RT.get("install_nonce")
+    if not n:
+        import uuid
+        n = uuid.uuid4().hex[:8]
+        try:
+            _save_runtime({"install_nonce": n})
+        except Exception:
+            pass
+    return str(n)
 
 
 def _voice_id(source: str, content: str, nonce: str) -> str:
@@ -171,18 +187,24 @@ def _voice_id(source: str, content: str, nonce: str) -> str:
 
 
 def submit_voices(params: dict, client_info: dict | None = None) -> dict:
-    """走 Java 现有 POST /external/voice/submit（Bearer；单条循环提交）。
+    """V16 切换：主路径=囤积端点 POST /external/voices（Bearer，批式，不触发分析）；
+    引擎未部署（404）自动回落老链 /external/voice/submit（提交即分析，过渡语义，
+    部署后 404 分支自然失效）。
 
-    - voiceId=调用级唯一（R1 声量保真；同调用内重试幂等）
-    - title=用户原文（R3：分析消费原话，模板只允许出现在 description）
-    - 提交即分析（现有链路语义）；囤积端点 VOD-VOI 上线后切换
+    - voiceId：囤积链由引擎确定性计算（per-token/per-install 命名空间），回执
+      voiceIds 为权威对账键；回落老链仍用客户端 nonce id（R1 声量保真）
+    - title=用户原文截断；tags=采集层三分类（problem_type:）正式入库通道
+    - source：key 持有者被引擎锚定为 host_name；legacy 共用 key 场景带
+      per-install nonce 后缀（杜绝跨用户共享命名空间吞声量）
     """
     import uuid
     host = (client_info or {}).get("name") or "unknown-host"
     product = _resolve_product(params)
     accepted, voice_ids, task_ids, rejected = 0, [], [], []
     global JAVA_KEY
-    for i, v in enumerate(params.get("voices", [])):
+    voices_in = params.get("voices", [])
+    items = []  # (index, voice_map, content)
+    for i, v in enumerate(voices_in):
         content = str(v.get("content", "")).strip()
         if not content:
             rejected.append({"index": i, "reason": "content 为空"})
@@ -190,6 +212,20 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
         if len(content) > 2000:  # 契约 maxLength 2000：内容边界（防超大 payload）
             rejected.append({"index": i, "reason": f"content 超 2000 字（{len(content)}）"})
             continue
+        items.append((i, v, content))
+    if not items:
+        return {"accepted": 0, "voiceIds": [], "taskIds": [], "rejected": rejected}
+
+    def _ledger(vids, tids):
+        import time as _time
+        entries = [{"voiceId": vid, "taskId": tid,
+                    "title": items[min(i, len(items) - 1)][2][:40],
+                    "product": product, "at": _time.strftime("%Y-%m-%dT%H:%M:%S")}
+                   for i, (vid, tid) in enumerate(zip(vids, tids))]
+        _ledger_append(entries)
+
+    def _legacy_submit(i, v, content):
+        """过渡回落：老链单条提交（提交即分析语义，仅 404 触发）。"""
         nonce = uuid.uuid4().hex[:8]  # 调用级：重试复用，跨调用不重复
         vid = _voice_id(host, content, nonce)
         desc = content if len(content) >= 10 else f"{content} [vod-devkit]"
@@ -197,38 +233,96 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
             "voiceId": vid,
             "title": content[:128],
             "description": desc,
-            "source": host,
+            "source": f"{host}-{_install_nonce()}",  # per-install 命名空间（legacy 吞声量修复）
             "customer": v.get("userType"),
         }
-        if product:  # 无归因不带 product（引擎 UNKNOWN 档），不本地拦截
+        if product:
             body["product"] = product
+        out = _http("POST", _EXISTING_SUBMIT, body, base=JAVA_BASE, key=JAVA_KEY)
+        return vid, (out.get("data") or {}).get("taskId")
+
+    # ---- 主路径：囤积端点批式提交 ----
+    hoard_voices = []
+    for i, v, content in items:
+        hv = {"title": content[:60], "content": content}
+        tags = v.get("tags")  # 采集层三分类（problem_type:值）→【类型名】标题前缀正式入库
+        if tags:
+            hv["tags"] = tags
+        ut = v.get("userType")
+        if ut:
+            hv["userType"] = ut
+        hoard_voices.append(hv)
+    body = {"voices": hoard_voices}
+    if product:  # 无归因不带 product（引擎 UNKNOWN 档），不本地拦截
+        body["product"] = product
+    out = None
+    fallback = False
+    try:
+        out = _http("POST", _SUBMIT_HOARDING, body, base=JAVA_BASE, key=JAVA_KEY)
+    except ToolError as ex:
+        if ex.code == 404:
+            fallback = True  # 囤积端点未部署 → 落到下方 legacy 回落
+        elif not JAVA_KEY or ex.code == -32012:
+            # 缺 key/401 → 零字段匿名令牌 → 落 runtime.json → 重试一次
+            token = _fetch_anon_token()
+            if not token:
+                raise ToolError(
+                    "未配置接入 key 且匿名令牌端点不可用。引导：" +
+                    "；".join(g["label"] for g in _KEY_GUIDANCE), code=-32012)
+            JAVA_KEY = token
+            _save_runtime({"java_key": token, "token_tier": "anonymous"})
+            out = _http("POST", _SUBMIT_HOARDING, body, base=JAVA_BASE, key=JAVA_KEY)
+        else:
+            raise  # 网络/413 等如实上抛
+    if not fallback:
+        server_ids = (out.get("voiceIds") or out.get("data", {}).get("voiceIds")
+                      or [])
+        accepted = len(server_ids) or len(hoard_voices)
+        voice_ids.extend(server_ids if server_ids else [""] * len(hoard_voices))
+        task_ids.extend([None] * len(hoard_voices))  # 囤积语义：无即时任务
+        result = {"accepted": accepted, "voiceIds": voice_ids,
+                  "taskIds": task_ids, "rejected": rejected,
+                  "analysis": "deferred",  # 囤积语义明示（V6 运营批量消费）
+                  "path": "hoarding"}
+        if out.get("productRegistered") is not None:
+            result["productRegistered"] = out.get("productRegistered")
+        _ledger(voice_ids, task_ids)
+        return result
+    # ---- 过渡回落：老链单条提交（仅囤积端点 404 触发） ----
+    for i, v, content in items:
         try:
-            out = _http("POST", _EXISTING_SUBMIT, body, base=JAVA_BASE, key=JAVA_KEY)
+            vid, tid = _legacy_submit(i, v, content)
             accepted += 1
             voice_ids.append(vid)
-            task_ids.append((out.get("data") or {}).get("taskId"))
+            task_ids.append(tid)
         except ToolError as e:
             msg = str(e)
             if "Duplicate entry" in msg:  # 极端重放场景：DB 唯一键兜底
                 accepted += 1
                 voice_ids.append(vid)
                 task_ids.append(None)
-            elif (not JAVA_KEY or e.code == -32012) and i == 0:
+            elif (not JAVA_KEY or e.code == -32012) and not voice_ids:
                 # 零字段匿名令牌：缺 key/401 → 自动取令牌 → 落 runtime.json → 重试一次
                 token = _fetch_anon_token()
                 if token:
                     JAVA_KEY = token
                     _save_runtime({"java_key": token, "token_tier": "anonymous"})
-                    out = _http("POST", _EXISTING_SUBMIT, body, base=JAVA_BASE, key=JAVA_KEY)
+                    vid, tid = _legacy_submit(i, v, content)
                     accepted += 1
                     voice_ids.append(vid)
-                    task_ids.append((out.get("data") or {}).get("taskId"))
+                    task_ids.append(tid)
                 else:
                     raise ToolError(
                         "未配置接入 key 且匿名令牌端点不可用。引导：" +
                         "；".join(g["label"] for g in _KEY_GUIDANCE), code=-32012)
             else:
                 rejected.append({"index": i, "reason": msg[:120]})
+    result = {"accepted": accepted, "voiceIds": voice_ids,
+              "taskIds": task_ids, "rejected": rejected,
+              "path": "legacy-fallback"}
+    _ledger(voice_ids, task_ids)
+    return result
+
     # 本地账本落账（层级①查询的源）
     import time as _time
     _contents = [str(v.get("content", ""))[:40]

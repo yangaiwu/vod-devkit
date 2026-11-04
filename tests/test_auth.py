@@ -42,9 +42,9 @@ def test_submit_voices_auto_token_then_retry(monkeypatch):
         if path.endswith("/external/token"):
             state["token_issued"] = True
             return {"token": "anon-token-xyz", "dailyLimit": 50}
-        if path.endswith("/external/voice/submit"):
+        if path.endswith("/external/voices"):
             if key == "anon-token-xyz":
-                return {"code": 200, "data": {"taskId": 77, "status": "PENDING"}}
+                return {"code": 200, "voiceIds": ["ext_vod-agent_t1"]}
             raise tools.ToolError("鉴权失败：检查 key", code=-32012)
         return {}
 
@@ -60,7 +60,8 @@ def test_submit_voices_auto_token_then_retry(monkeypatch):
         {"voices": [{"content": "补全响应有点慢，希望优化一下"}],
          "product": "codearts", "confirmed": True},
         client_info={"name": "t"})
-    assert out["accepted"] == 1 and out["taskIds"] == [77]
+    assert out["accepted"] == 1 and out["path"] == "hoarding"
+    assert out["voiceIds"] == ["ext_vod-agent_t1"]  # 囤积语义：无即时任务，id=引擎算
     assert state["token_issued"], "必须先取令牌"
     assert saved.get("java_key") == "anon-token-xyz"
     assert saved.get("token_tier") == "anonymous"
@@ -75,7 +76,7 @@ def test_submit_voices_token_unreachable_gives_guidance(monkeypatch):
     monkeypatch.setattr(tools, "JAVA_KEY", "")
 
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
-        raise tools.ToolError("上游返回 404: Not Found")
+        raise tools.ToolError("上游返回 404: Not Found", code=404)  # 对齐真实 _http：HTTP 状态进 code
 
     monkeypatch.setattr(tools, "_http", fake_http)
     with pytest.raises(tools.ToolError) as ei:
@@ -99,6 +100,10 @@ def test_voice_volume_preserved_across_calls(monkeypatch):
     seen = []
 
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        if path.endswith("/external/voices"):
+            # 囤积主路径：voiceId 由引擎按 per-token 命名空间算（server 侧职责），
+            # 客户端锁的是“把完整 content 原样交给引擎”+ 404 回落
+            raise tools.ToolError("上游返回 404: not found", code=404)
         if path.endswith("/external/voice/submit"):
             seen.append(body["voiceId"])
             return {"code": 200, "data": {"taskId": len(seen)}}
@@ -111,13 +116,13 @@ def test_voice_volume_preserved_across_calls(monkeypatch):
         out = tools.submit_voices({"voices": [voice], "product": "codearts",
                                    "confirmed": True},
                                   client_info={"name": "mcp"})
-        assert out["accepted"] == 1
-    assert len(set(seen)) == 2, "同款反馈跨调用必须不去重（声量保真）"
+        assert out["accepted"] == 1 and out["path"] == "legacy-fallback"
+    assert len(set(seen)) == 2, "404 回落老链：同款反馈跨调用必须不去重（R1 声量保真锁）"
 
-    # title 必须是用户原文（R3：分析消费原话，后缀只允许出现在 description）
+    # title 必须是用户原文（R3：分析消费原话；囤积链 voices[].title=content 截断）
     def fake2(method, path, body=None, timeout=30, base=None, key=None):
-        assert body["title"] == voice["content"], "title=用户原文，禁止模板污染"
-        return {"code": 200, "data": {"taskId": 1}}
+        assert body["voices"][0]["title"] == voice["content"], "title=用户原文，禁止模板污染"
+        return {"code": 200, "voiceIds": ["ext_vod-agent_x"]}
     monkeypatch.setattr(tools, "_http", fake2)
     tools.submit_voices({"voices": [voice], "product": "codearts", "confirmed": True},
                         client_info={"name": "mcp"})

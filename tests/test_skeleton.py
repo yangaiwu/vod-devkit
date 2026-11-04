@@ -92,27 +92,37 @@ def test_structural_field_still_scanned():
 META_OK = {"products": ["codearts", "agentarts"], "stale": False, "source": "meta"}
 
 
-def test_submit_voices_calls_engine(monkeypatch):
+def test_submit_voices_calls_hoarding_endpoint(monkeypatch):
+    """V16 切换：主路径=囤积端点批式（不触发分析），voiceId 由引擎算。"""
     calls = {}
     monkeypatch.setattr(tools, "_load_meta", lambda force=False: META_OK)
 
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
         calls["req"] = (method, path, body)
-        return {"code": 200, "data": {"taskId": 9, "voiceId": body["voiceId"],
-                                      "status": "PENDING"}}
+        return {"code": 200, "voiceIds": ["ext_vod-agent_abc123def0"],
+                "productRegistered": True}
 
     monkeypatch.setattr(tools, "_http", fake_http)
     out = tools.submit_voices({"product": "codearts",
-                               "voices": [{"content": "补全太慢，生成质量不稳定"}],
+                               "voices": [{"content": "补全太慢，生成质量不稳定",
+                                           "tags": ["problem_type:功能建议"]}],
                                "confirmed": True})
-    assert out["accepted"] == 1 and out["taskIds"] == [9]
-    assert calls["req"][1].endswith("/external/voice/submit")
-    assert calls["req"][2]["product"] == "CodeArts"
+    assert out["accepted"] == 1 and out["path"] == "hoarding"
+    assert out["voiceIds"] == ["ext_vod-agent_abc123def0"]
+    assert out["productRegistered"] is True
+    method, path, body = calls["req"]
+    assert path.endswith("/external/voices")
+    assert body["product"] == "CodeArts"
+    v = body["voices"][0]
+    assert v["title"] == "补全太慢，生成质量不稳定"[:60]
+    assert v["tags"] == ["problem_type:功能建议"]
+    assert "voiceId" not in v and "description" not in v and "scene" not in v  # 引擎算 id，无发明字段
 
 
 # ---------- 协议级：真 HTTP 服务器锁头/路径（E1/E2 永久回归门） ----------
 
 class _Recorder(BaseHTTPRequestHandler):
+    force404 = False
     requests = []
 
     def _handle(self):
@@ -120,9 +130,19 @@ class _Recorder(BaseHTTPRequestHandler):
         _Recorder.requests.append({
             "method": self.command, "path": self.path,
             "auth": self.headers.get("Authorization"), "body": body.decode()})
-        out = {"/rest/developer/manager/hdvodmngservice/v1/external/voice/submit":
+        out = {"/rest/developer/manager/hdvodmngservice/v1/external/voices":
+               {"code": 200, "voiceIds": ["ext_vod-agent_abc123"], "productRegistered": True},
+               "/rest/developer/manager/hdvodmngservice/v1/external/voice/submit":
                {"code": 200, "data": {"taskId": 9, "voiceId": "x", "status": "PENDING"}}}
         payload = json.dumps(out.get(self.path, {})).encode()
+        if getattr(_Recorder, "force404", False) and self.path.endswith("/external/voices"):
+            payload = b'{"error": "not found"}'
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
@@ -144,17 +164,38 @@ def test_protocol_auth_header_and_paths(monkeypatch):
     monkeypatch.setattr(tools, "JAVA_KEY", "java-key-456")
     monkeypatch.setattr(tools, "_load_meta", lambda force=False: META_OK)
     try:
+        # 场景一：囤积主路径（201）——锁头/路径/批式载荷
         out = tools.submit_voices(
+            {"voices": [{"content": "太慢了，希望优化补全速度",
+                         "tags": ["problem_type:用户体验"]}],
+             "product": "codearts", "confirmed": True},
+            client_info={"name": "aishell"})
+        assert out["accepted"] == 1 and out["path"] == "hoarding"
+        req = _Recorder.requests[0]
+        assert req["path"].endswith("/external/voices")
+        assert req["auth"] == "Bearer java-key-456", "必须带 VOD_JAVA_API_KEY（E1）"
+        jb = json.loads(req["body"])
+        assert jb["product"] == "CodeArts"
+        assert jb["voices"][0]["tags"] == ["problem_type:用户体验"]
+        assert "voiceId" not in jb["voices"][0]
+
+        # 场景二：囤积端点 404（引擎未部署）→ 自动回落老链（过渡语义）
+        _Recorder.requests = []
+        _Recorder.force404 = True
+        out2 = tools.submit_voices(
             {"voices": [{"content": "太慢了，希望优化补全速度"}],
              "product": "codearts", "confirmed": True},
             client_info={"name": "aishell"})
-        assert out["accepted"] == 1 and out["taskIds"] == [9]
-        req = _Recorder.requests[0]
-        assert req["path"].endswith("/external/voice/submit")
-        assert req["auth"] == "Bearer java-key-456", "必须带 VOD_JAVA_API_KEY（E1）"
-        jb = json.loads(req["body"])
-        assert jb["source"] == "aishell" and jb["product"] == "CodeArts"
-        assert jb["voiceId"].startswith("ext_aishell_")
+        assert out2["accepted"] == 1 and out2["path"] == "legacy-fallback"
+        paths = [r["path"] for r in _Recorder.requests]
+        assert any(p.endswith("/external/voices") for p in paths), "先试囤积"
+        assert any(p.endswith("/external/voice/submit") for p in paths), "404 回落老链"
+        fb = json.loads([r for r in _Recorder.requests
+                         if r["path"].endswith("/external/voice/submit")][0]["body"])
+        assert fb["source"].startswith("aishell-") and len(fb["source"].split("-")[-1]) == 8, \
+            "legacy 回落 source 带 per-install nonce（跨用户吞声量修复）"
+        assert fb["voiceId"].startswith("ext_aishell_")
+        assert fb["product"] == "CodeArts"
     finally:
         srv.shutdown()
 
