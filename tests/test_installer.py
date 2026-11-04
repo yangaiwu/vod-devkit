@@ -165,6 +165,13 @@ def test_install_persists_java_base_to_runtime(env):
         == "https://vod-dev.topxtopx.com"
 
 
+def test_install_omits_empty_key(env):
+    # 无 key 时宿主配置不落 VOD_JAVA_API_KEY 空串（运行时自动兜底 runtime.json/匿名令牌）
+    cli(env, "install", "--target", "opencode")
+    oc = json.loads((env["home"] / ".config/opencode/opencode.json").read_text())
+    assert "VOD_JAVA_API_KEY" not in oc["mcp"]["vod-devkit"]["environment"]
+
+
 # ---- packs 过滤：collect 预置不含 workflow 技能面 ----
 
 def test_install_collect_preset_skill_set(env):
