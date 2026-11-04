@@ -91,3 +91,15 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 理由：宿主识别是可信来源（插件装在谁家=用户在用谁），错误归因场景从
   "静默猜默认"变成"锚定当前工具"，白名单反而制造 AIShell 式拒收。
 - 脏值防线：引擎 64 字符截断+UNKNOWN 档人工归因解析兜底，运营侧治理。
+
+## D-market-1 dsh 社区目录上架绑定 npm 发布（2026-11-04）
+- 拍板：`dsh-plugin` topic 不提前打——根仓 package.json 是 MCP 安装引导器
+  （非 dsh 插件包），dsh 插件本体在 dsh/ 子目录；目录按 topic 自动发现+
+  人工审核收录，根仓打 topic 会被误收录/装出引导器。dsh 插件包
+  （dsh-vod-devkit，dsh.bundle=cordis.patch.yml 已声明）发布 npm 后，
+  同批打 topic+官网 Submit（dsh-plugin.org/zh/submit），目录一键安装即通。
+- 依据（源码实读 dsh-plugin-hub 2.3.3）：收录=GitHub 仓+dsh-plugin topic；
+  一键安装仅限已发布 npm 包；isDshPlugin 判定=包 package.json 声明
+  dsh.bundle/dsh.profile 或进 profile bundles 清单。
+- WorkBuddy 线不受此约束：GitHub 仓即市场，plugin.json 就绪即挂，与 npm
+  无关（README 双语已写安装命令）。

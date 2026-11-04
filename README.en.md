@@ -26,11 +26,29 @@ pre-classification at collection time.
 ## Install
 
 ```bash
+# Any MCP host (Hermes / OpenCode / Codex clients, …):
+npx github:yangaiwu/vod-devkit          # bootstrap probes the host and installs
+
+# WorkBuddy / CodeBuddy (the GitHub repo IS the marketplace, no review):
+/plugin marketplace add yangaiwu/vod-devkit
+
+# DeepSeek Harness (dsh): npm package dsh-vod-devkit (thin shell, same
+# semantics); one-click in the dsh community directory once published to
+# npm — until then, local tarball:
+dsh plugin --profile <profile> add dsh/dsh-vod-devkit-0.1.0.tgz
+```
+
+From source:
+
+```bash
 git clone https://github.com/yangaiwu/vod-devkit.git
 cd vod-devkit
 bin/vod-devkit install --target auto --product <your-product>   # hermes | opencode | codex
 # For any MCP client, see QUICKSTART.md for the manual config snippet
 ```
+
+Zero config after install: platform base has a default, and the first
+submission automatically requests a zero-field anonymous token.
 
 Verified hosts: Hermes (official `hermes mcp add`), OpenCode
 (`opencode mcp list` → connected), Codex CLI (config recognized).
@@ -47,7 +65,8 @@ Verified hosts: Hermes (official `hermes mcp add`), OpenCode
 
 ## Quality
 
-25 tests (unit / guardrails / packs / protocol-level real-HTTP lock /
+39 tests (unit / guardrails / packs / installer matrix across three hosts /
+protocol-level real-HTTP lock /
 stdio roundtrip / meta cache / ledger) + pre-push gate + GitHub Actions
 CI on the mirror + nightly local E2E against the test environment.
 
