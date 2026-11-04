@@ -143,7 +143,17 @@ def test_install_binds_product_to_host_by_default(env):
     assert rt["product"] == "CodeArts"                    # 显式传参优先
 
 
-# ---- 平台地址：install 的 --java-api-base 双落（env+runtime.json 兑底） ----
+# ---- 平台地址：install 的 --java-api-base 双落（env+runtime.json 兜底） ----
+
+def test_install_java_base_defaults_to_platform(env):
+    # 不传地址不强制用户：缺省=平台真实地址（回环默认会装完即坏）
+    cli(env, "install", "--target", "opencode")
+    rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
+    assert rt["java_base"] == "https://vod-dev.topxtopx.com"
+    oc = json.loads((env["home"] / ".config/opencode/opencode.json").read_text())
+    assert oc["mcp"]["vod-devkit"]["environment"]["VOD_JAVA_API_BASE"] \
+        == "https://vod-dev.topxtopx.com"
+
 
 def test_install_persists_java_base_to_runtime(env):
     cli(env, "install", "--target", "opencode",

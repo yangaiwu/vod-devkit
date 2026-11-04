@@ -16,6 +16,7 @@ import urllib.error
 from pathlib import Path
 
 from vod_mcp import provenance
+from vod_mcp import DEFAULT_JAVA_BASE
 
 _CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract" / "tools.schema.json"
 
@@ -33,7 +34,7 @@ def _runtime_cfg() -> dict:
 # 上游配置：env 优先，runtime.json 兜底——不依赖宿主 env 透传
 # （实测部分 MCP 宿主对子进程 env 过滤/丢失，如 Hermes 多 --env 只存活一个）
 _RT = _runtime_cfg()
-JAVA_BASE = os.environ.get("VOD_JAVA_API_BASE") or _RT.get("java_base") or "http://127.0.0.1:8090"
+JAVA_BASE = os.environ.get("VOD_JAVA_API_BASE") or _RT.get("java_base") or DEFAULT_JAVA_BASE
 JAVA_KEY = os.environ.get("VOD_JAVA_API_KEY", "") or _RT.get("java_key", "")   # ExternalApiKeyFilter Bearer
 
 _META_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/meta"

@@ -6,3 +6,6 @@
 3. 任务 ID 是唯一对账主键，写类工具返回一律携带
 """
 __version__ = "0.1.0"
+# 默认上游：VOD 测试环境。外部用户本机无 VOD，回环默认值=装完即坏；
+# 生产地址定型后只改这一处（tools.py 与 bin/vod-devkit 共用本常量）。
+DEFAULT_JAVA_BASE = "https://vod-dev.topxtopx.com"

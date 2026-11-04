@@ -182,6 +182,9 @@ def detect_targets() -> list:
 
 
 def cmd_install(args):
+    from vod_mcp import DEFAULT_JAVA_BASE
+    if not args.java_api_base:
+        args.java_api_base = DEFAULT_JAVA_BASE   # 缺省=平台真实地址，不强制用户传
     write_build_info(strict=False)
     target = args.target
     if target == "auto":
@@ -366,7 +369,8 @@ def main():
     sp.add_argument("--preset", default="collect", choices=list(PRESETS),
                     help="collect=对外默认（采集者）；full=内部全量")
     sp.add_argument("--api-base", default="http://127.0.0.1:8000")
-    sp.add_argument("--java-api-base", default="http://127.0.0.1:8090")
+    sp.add_argument("--java-api-base", default=None,
+                    help="VOD 平台地址（缺省=https://vod-dev.topxtopx.com，勿用回环默认）")
     sp.add_argument("--packs", default="", help="显式覆盖 preset（逗号分隔）")
     sp.add_argument("--product", default="",
                     help="归因绑定：本 agent 服务的产品（codearts/aishell 等；采集反馈默认归属）")
