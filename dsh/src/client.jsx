@@ -22,6 +22,9 @@ const BASE = (typeof globalThis !== 'undefined'
 const TOKEN_PATH = `${API_PREFIX}/external/token`;
 const VOICES_PATH = `${API_PREFIX}/external/voices`;
 const LS_TOKEN = 'vod_dshui_token';
+// 渠道标注（T7b）：随包编译的固定常量，非用户输入；引擎白名单命中才生效，
+// 归并展示名（运营报表渠道分组）由引擎侧渠道体系定义
+const UI_HOST = 'dsh-ui';
 const LS_DEVICE = 'vod_dshui_device';
 const LS_LEDGER = 'vod_dshui_ledger';
 const LEDGER_CAP = 200;
@@ -30,15 +33,16 @@ const LEDGER_CAP = 200;
 const UI_PRODUCT = (typeof globalThis !== 'undefined'
   && globalThis.__VOD_DSH_UI_PRODUCT__) || '';
 
-// 分类 chips：VOD 引擎 v2.2 六类口径（n01_classify 真源）。无效问题
-// 不给用户选项；默认不选=不预分类（引擎 LLM 全量重判——错误预分类
-// 比留空更糟，技能纪律）；选中仅作 problem_type hint。
+// 分类 chips：云声表单三分类（VOD-Project 采集层标准——面向人的表单用平台
+// 标准枚举：功能建议/用户体验/产品缺陷；与 suggestionType 1/2/3 逐字对齐）。
+// 六类是分析层 n01 LLM 内部枚举，不泄漏给人看表单；3→6 的映射由 n01 重判
+// 本身承担（云声链同款：选"功能建议"→标题【功能建议】→n01 判六类之一）。
+// 默认不选=不预分类（引擎全量重判——错误预分类比留空更糟）；
+// 选中=采集层渠道原生分类，以【类型名】标题前缀正式入库（T7c）。
 const CATEGORIES = [
+  { id: '功能建议', label: '功能建议', hint: '希望新增/改进能力' },
+  { id: '用户体验', label: '用户体验', hint: '可用但体验差' },
   { id: '产品缺陷', label: '产品缺陷', hint: 'Bug/报错/功能不可用' },
-  { id: '技术业务咨询', label: '技术业务咨询' },
-  { id: '体验改进', label: '体验改进', hint: '可用但体验差' },
-  { id: '功能需求', label: '功能需求', hint: '希望新增能力' },
-  { id: '主观评价', label: '主观评价', hint: '纯感受/评分/对比' },
 ];
 
 /* 样式：对齐官方 message-feedback 的 dsw 设计令牌 */
@@ -130,7 +134,7 @@ async function ensureToken() {
   const r = await fetch(BASE + TOKEN_PATH, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: '{}',
+    body: JSON.stringify({ host: UI_HOST }),
   });
   if (r.status !== 200 && r.status !== 201) {
     throw new Error(`token ${r.status}`);
@@ -240,8 +244,8 @@ async function retryStashedSubmissions() {
         body: JSON.stringify({
           voices: [{
             title: row.title,
-            description: row.description || '',
             content: row.content,
+            ...(row.category ? { tags: ['problem_type:' + row.category] } : {}),
           }],
           ...(UI_PRODUCT ? { product: UI_PRODUCT } : {}),
         }),
@@ -305,8 +309,7 @@ function FeedbackModal({ onClose }) {
     const row = {
       title: text.slice(0, 60), scene: scene.trim(), category,
       content: text,  // U-S3 重试重建提交体用（本机账本，cap 200）
-      description: `${UI_PRODUCT || '插件'} UI 采集${
-        category ? '｜预分类：' + category + '（待引擎重判）' : ''}`,
+      // 分类走 tags 正式通道（T7c），description 模板文案已移除
       at: new Date().toISOString(), status: 'failed', error: '',
     };
     try {
@@ -322,8 +325,6 @@ function FeedbackModal({ onClose }) {
           body: JSON.stringify({
             voices: [{
               title: text.slice(0, 60),
-              description: `${UI_PRODUCT || '插件'} UI 采集${
-                category ? '｜预分类：' + category + '（待引擎重判）' : ''}`,
               content: text,
               scene: scene.trim() ? scene.trim().slice(0, 128) : undefined,
               tags: category ? ['problem_type:' + category] : [],
@@ -371,6 +372,7 @@ function FeedbackModal({ onClose }) {
       <div style={S.hint}>
         你的反馈将进入 VOD 开发者声音分析平台
         {UI_PRODUCT ? `，帮助 ${UI_PRODUCT} 变得更好` : ''}。
+        选择的分类会随反馈一并记录，产品团队会结合内容复核。
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
         {CATEGORIES.map((c) => (
@@ -399,7 +401,7 @@ function FeedbackModal({ onClose }) {
       <div style={S.label}>使用场景（选填）</div>
       <div style={{ fontSize: 12, marginBottom: 6 }}>
         <input style={S.input} value={scene} maxLength={128}
-          placeholder="如：代码补全、生成 PR 描述"
+          placeholder="如：您在代码补全、生成 PR 描述场景遇到的问题"
           onChange={(e) => setScene(e.target.value)} />
       </div>
       {done && <div style={S.result}>{done.msg}</div>}
@@ -426,7 +428,8 @@ function SmileyButton() {
         '[contenteditable=true][role=textbox], [contenteditable=true]');
       if (!input) return;
       const r = input.getBoundingClientRect();
-      const w = 24, h = 24;
+      // 宽度自适应（图标+文字标签）：place 在 render 后跑，读实测 offsetWidth
+      const w = btn.offsetWidth || 24, h = 24;
       btn.style.left = Math.round(r.right - w - 8) + 'px';
       btn.style.top = Math.round(r.top - h - 6) + 'px';  // 框外上方（用户实测纠偏：+5 仍在框内）
       btn.style.width = w + 'px';
@@ -447,8 +450,10 @@ function SmileyButton() {
         style={{
           position: 'fixed', zIndex: 300, border: 'none',
           background: 'transparent', cursor: 'pointer', padding: 0,
+          display: 'inline-flex', alignItems: 'center', gap: 4,
           borderRadius: 'var(--dsw-radius-sm, 6px)',
           color: 'var(--dsw-alias-label-tertiary, #888)',
+          fontFamily: 'inherit',
         }}
         onMouseEnter={(e) => e.currentTarget.style.color =
           'var(--dsw-alias-label-primary, #111)'}
@@ -461,6 +466,7 @@ function SmileyButton() {
           <path d="M21.5 2.5 2.9 10.2c-.8.3-.8 1.5.1 1.7l4.6 1.4 1.7 5.5c.3.9 1.4 1 1.9.3l2.5-3.3 4.6 3.4c.7.5 1.7.1 1.9-.8l3.2-14.4c.2-.9-.7-1.7-1.5-1.4z"/>
           <path d="M7.3 13.5 21.5 2.5l-9.5 12.3"/>
         </svg>
+        <span style={{ fontSize: 12, lineHeight: 1, whiteSpace: 'nowrap' }}>反馈</span>
       </button>
       {open && <FeedbackModal onClose={() => setOpen(false)} />}
     </React.Fragment>

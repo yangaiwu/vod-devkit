@@ -317,9 +317,10 @@ def _save_runtime(update: dict) -> None:
 
 
 def _fetch_anon_token() -> str | None:
-    """零字段匿名令牌：不问任何信息，POST 空 body，引擎侧 IP 限频。"""
+    """零字段匿名令牌 + 渠道标注（T7b）：host=随包编译的固定常量（非用户输入），
+    引擎白名单命中则该令牌的声音可按渠道分组展示；不传/不命中维持随机编号。"""
     try:
-        out = _http("POST", _TOKEN_PATH, {}, base=JAVA_BASE, key="", timeout=15)
+        out = _http("POST", _TOKEN_PATH, {"host": "mcp"}, base=JAVA_BASE, key="", timeout=15)
         token = out.get("token")
         if isinstance(token, str) and token:
             return token
