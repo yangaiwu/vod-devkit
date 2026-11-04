@@ -244,15 +244,50 @@ function FeedbackModal({ onClose }) {
 
 function SmileyButton() {
   const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  const posRef = useRef(null);
+
+  // 自定位：图标落在输入框右上角（用户拍板）。无现成角位槽——仍挂官方
+  // composer.dock 槽作挂载点，用 JS 计算输入框（contenteditable）矩形，
+  // 把按钮 fixed 到其右上角，ResizeObserver+窗口事件跟随布局变化。
+  useEffect(() => {
+    const place = () => {
+      const btn = btnRef.current;
+      if (!btn) return;
+      const input = document.querySelector(
+        '[contenteditable=true][role=textbox], [contenteditable=true]');
+      if (!input) return;
+      const r = input.getBoundingClientRect();
+      posRef.current = r;
+      const w = 24, h = 24;
+      btn.style.left = Math.round(r.right - w - 8) + 'px';
+      btn.style.top = Math.round(r.top + 5) + 'px';
+      btn.style.width = w + 'px';
+      btn.style.height = h + 'px';
+    };
+    place();
+    const ro = new ResizeObserver(place);
+    ro.observe(document.documentElement);
+    window.addEventListener('resize', place);
+    const t = setInterval(place, 800);  // 会话切换/侧栏折叠等布局变化兜底
+    return () => { ro.disconnect(); window.removeEventListener('resize', place);
+      clearInterval(t); };
+  }, []);
+
   return (
     <React.Fragment>
-      <button title="反馈开发者声音" aria-label="反馈开发者声音"
+      <button ref={btnRef} title="反馈" aria-label="反馈开发者声音"
         style={{
-          border: 'none', background: 'transparent', fontSize: 16,
-          cursor: 'pointer', padding: '2px 6px', borderRadius: 6,
-          color: 'inherit',
+          position: 'fixed', zIndex: 300, border: 'none',
+          background: 'transparent', fontSize: 13, lineHeight: '20px',
+          cursor: 'pointer', padding: 0, borderRadius: 6,
+          color: 'var(--dsw-alias-label-tertiary, #888)',
         }}
-        onClick={() => setOpen(true)}>😊</button>
+        onMouseEnter={(e) => e.currentTarget.style.color =
+          'var(--dsw-alias-label-primary, #111)'}
+        onMouseLeave={(e) => e.currentTarget.style.color =
+          'var(--dsw-alias-label-tertiary, #888)'}
+        onClick={() => setOpen(true)}>💬</button>
       {open && <FeedbackModal onClose={() => setOpen(false)} />}
     </React.Fragment>
   );
