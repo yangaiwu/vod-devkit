@@ -15,13 +15,30 @@ MCP / skills / packs / policy），面向"服务面插件"的护栏更保守。
 - 对账主键：引擎任务 taskId；插件来源主键=commitSHA（build-info.json 构建烧录，
   install-manifest.json 安装落盘，`vod-devkit verify` 到 origin 核对 commit）
 
+## 安装（外部用户，零配置）
+
+```bash
+# 任意 MCP 宿主（Hermes / OpenCode / Codex 客户端等）：
+npx github:yangaiwu/vod-devkit          # 引导器自动探测宿主并安装
+
+# WorkBuddy / CodeBuddy（GitHub 仓即市场，无审核）：
+/plugin marketplace add yangaiwu/vod-devkit
+
+# DeepSeek Harness (dsh)：npm 包 dsh-vod-devkit（薄壳同语义）；
+# npm 首发后可在 dsh 社区目录一键安装，暂可用本地包：
+dsh plugin --profile <profile> add dsh/dsh-vod-devkit-0.1.0.tgz
+```
+
+安装后即用：平台地址有默认值，首次提交自动申请零字段匿名令牌。
+手动配置片段与故障排查见 [QUICKSTART.md](QUICKSTART.md)。
+
 ## 快速使用
 
 ```bash
 # 安装到 Hermes（写 MCP 配置+skills+install-manifest）
 bin/vod-devkit install --target hermes --preset collect   # 对外默认（采集者）
-# 双后端+双 key（网关上线后必配，否则 401）：
-VOD_JAVA_API_BASE / VOD_JAVA_API_KEY（唯一上游 Java）
+# 唯一上游 Java backend（key 未配置时首提自动申请匿名令牌）：
+VOD_JAVA_API_BASE / VOD_JAVA_API_KEY
 
 bin/vod-devkit update   # git fetch+ff 拉取+重烧 build-info
 bin/vod-devkit status   # 看 install-manifest（版本+来源+宿主+packs）
@@ -47,7 +64,7 @@ VOD_PACKS=core,collect python3 -m vod_mcp.server   # packs 裁剪
 安全：deny 拦 DB 直连意图与凭据读取（safety/policy.json 声明式规则；
 文本规则只扫结构性字段，不误杀反馈内容里的凭据引用）。
 
-测试：20 用例（方案 A 收敛后）（单元+护栏+packs+真进程 stdio 回环+**协议级真 HTTP 服务器**
+测试：39 用例（单元+护栏+packs+安装器矩阵三宿主+真进程 stdio 回环+**协议级真 HTTP 服务器**
 锁定认证头/双后端路径——E1/E2 的永久回归门）。决策闭环见 docs/decisions.md。
 
 ## 质量门禁
