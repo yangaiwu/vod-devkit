@@ -9,6 +9,7 @@ MCP / skills / packs / policy），面向"服务面插件"的护栏更保守。
 
 - 需求/设计：docs/proposal.md、docs/design.md（VOD-PLUGIN）
 - 贡献：CONTRIBUTING.md ｜ 安全策略与边界：SECURITY.md
+- 支持：SUPPORT.md ｜ 行为准则：CODE_OF_CONDUCT.md ｜ 第三方素材：NOTICE
 - 真源纪律：领域规则技能由 scripts/vendor_rules.py 从 VodTeam/VOD-Project
   按 commitSHA 锁定拉取（规则只改一处）
 - 对账主键：引擎任务 taskId；插件来源主键=commitSHA（build-info.json 构建烧录，

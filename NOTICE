@@ -1,0 +1,35 @@
+NOTICE
+
+本产品包含源自第三方项目的素材。
+
+--------------------------------------------------------------------
+VOD-Project（领域规则技能 vendored 素材）
+--------------------------------------------------------------------
+
+skills/ 下的三个领域规则技能由 scripts/vendor_rules.py 从
+VodTeam/VOD-Project 按锁定 commitSHA 拉取生成：
+
+  skills/vod-problem-classification-rules/
+  skills/vod-category-matching-rules/
+  skills/vod-scoring-rules/
+
+源项目：
+
+  VodTeam/VOD-Project
+  https://gitcode.com/VodTeam/VOD-Project
+
+内容为文档级素材（问题分类/功能子类词典/评分公式），非代码引用；
+vendor_rules.py 保证本仓内容=源仓对应 commit，过期时停用并标注。
+规则修改只改源仓一处，本仓不手改 vendored 内容。
+
+--------------------------------------------------------------------
+huaweicloud-devkit（工程骨架参考）
+--------------------------------------------------------------------
+
+本插件的工程骨架（installer / MCP / skills / packs / safety policy 的
+目录形态）参考了 huaweicloud-devkit v2：
+
+  https://github.com/huaweicloud/HuaweiCloud-Devkit
+
+无代码级复制：本插件为 Python stdlib 零依赖独立实现，仅对齐
+工程形态与护栏思想。
