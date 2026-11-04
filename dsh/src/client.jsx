@@ -362,10 +362,10 @@ function FeedbackModal({ onClose }) {
   }
 
   return (
-    <SelfModal title="反馈一句" onClose={onClose}
+    <SelfModal title="提交反馈" onClose={onClose}
       footer={(
         <PrimaryBtn disabled={busy || !content.trim()} onClick={submit}>
-          {busy ? '提交中…' : '提交反馈'}
+          {busy ? '提交中…' : '提交'}
         </PrimaryBtn>
       )}>
       <div style={S.hint}>
@@ -428,7 +428,7 @@ function SmileyButton() {
       const r = input.getBoundingClientRect();
       const w = 24, h = 24;
       btn.style.left = Math.round(r.right - w - 8) + 'px';
-      btn.style.top = Math.round(r.top + 5) + 'px';
+      btn.style.top = Math.round(r.top - h - 6) + 'px';  // 框外上方（用户实测纠偏：+5 仍在框内）
       btn.style.width = w + 'px';
       btn.style.height = h + 'px';
     };
@@ -458,8 +458,8 @@ function SmileyButton() {
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"
           strokeLinejoin="round" aria-hidden="true">
-          <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 8.9 8.9 0 0 1-3.8-.8L3 21l1.9-4.4a8 8 0 0 1-1-3.9A8.4 8.4 0 0 1 12.4 3.2 8.4 8.4 0 0 1 21 11.5z"/>
-          <path d="M8.5 10.5h7M8.5 13.5h4"/>
+          <path d="M7 22V11l4.2-8.6a1.6 1.6 0 0 1 3 .8V9h4.9a2 2 0 0 1 2 2.4l-1.3 7.2a2 2 0 0 1-2 1.6H7z"/>
+          <path d="M7 11H4a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3"/>
         </svg>
       </button>
       {open && <FeedbackModal onClose={() => setOpen(false)} />}
