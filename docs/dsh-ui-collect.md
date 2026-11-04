@@ -116,3 +116,37 @@ client 半实现+表单 1.5 天 → 联调（等 MR !152 部署）0.5 天 →
   ResizeObserver+800ms 兜底轮询跟随布局（会话切换/侧栏折叠）。脆弱性
   记档：依赖输入框选择器 [contenteditable=true]，官方改版需回归。
   图标 💬 悬停提示「反馈」，弱色常态/悬停加深（对齐官方 label 层级）
+
+## 十一、实现状态（2026-11-04，多次迭代后收敛）
+
+**已实现并真机验证**：
+- 入口：输入框右上角 24px 图标（自定位：contenteditable 矩形+ResizeObserver
+  +800ms 轮询兜底），SVG 内联图标零依赖
+- 表单：自研 SelfModal/PrimaryBtn（**解耦：零官方组件依赖**，视觉参考
+  官方 message-feedback；dsw CSS 变量在则跟主题、不在用硬编码兜底）
+- 分类=VOD 引擎 v2.2 六类口径（无效问题不给选项），默认不选=引擎重判
+- scene 独立字段（引擎契约 voices[].scene ≤128）
+- **动态产品名**：文案/product/description 前缀三处统一走
+  __VOD_DSH_UI_PRODUCT__ 注入（嵌入方装前设置），不注入=中性文案+
+  不带 product（UNKNOWN 档，不静默猜）
+- 身份=登录态二值：未登录纯匿名（v1）；v1.1 接 settings-account 快照
+
+**构建/运行坑（全部实测钉死）**：
+- crypto.subtle 只在安全上下文存在（https/localhost）——公网 http 访问
+  undefined 崩溃；sha1Hex 加 FNV-1a 双种子兜底（账本键无密码学要求）
+- 官方 client factory 三坑见 §三（dsh.client.platform 声明/exports.inject
+  =["slots"]/React 不 vendor 走模块表，esbuild transform 模式）
+- dsh web 公网暴露需 --trusted-host（browser-trust 栅栏，Host 不在名单 403）
+- 测试盲区教训：127.0.0.1 验证是安全上下文，公网 http 的坑测不出
+
+## 十二、场景用例（插件侧，对应引擎 proposal §八 S1-S7）
+
+| # | 场景 | 插件侧行为 |
+|---|---|---|
+| U-S1 | 匿名首次反馈 | 提交→自动令牌→入库成功→回执「已收录，审核后建单」 |
+| U-S2 | 实名反馈 | 提交成功→轮询 issue_sync→CREATED 时展示 issue 链接 |
+| U-S3 | 断线失败 | 「已暂存本机，稍后重试」→下次打开 dsh 自动重提暂存行 |
+| U-S4 | 重复提交 | 本地键同 voiceKey→账本去重；引擎侧 V9 updated 幂等 |
+| U-S5 | 建单后崩溃 | 插件无感知（引擎折叠检索兜底）；回执轮询终会命中 |
+| U-S6 | 运营拒绝 | 回执轮询命中 REJECTED→「反馈未采纳」 |
+| U-S7 | 凭据内容 | 客户端不拦（原文保留）；引擎建 issue 出口 sanitize |
