@@ -108,9 +108,6 @@ const S = {
 function FeedbackModal({ onClose }) {
   const [content, setContent] = useState('');
   const [scene, setScene] = useState('');
-  const [nick, setNick] = useState(
-    localStorage.getItem('vod_dshui_nick') || '');
-  const [attachIdentity, setAttachIdentity] = useState(true);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null); // {ok, msg}
   const dialogRef = useRef(null);
@@ -130,13 +127,10 @@ function FeedbackModal({ onClose }) {
     }
     setBusy(true); setDone(null);
     try {
-      if (attachIdentity && nick.trim()) {
-        localStorage.setItem('vod_dshui_nick', nick.trim());
-      }
       const key = await localVoiceKey(text);
       const row = {
         voiceKey: key, title: text.slice(0, 60), scene: scene.trim(),
-        nick: attachIdentity ? nick.trim() : '', at: new Date().toISOString(),
+        at: new Date().toISOString(),
       };
       try {
         const token = await ensureToken();
@@ -151,7 +145,6 @@ function FeedbackModal({ onClose }) {
               title: text.slice(0, 60),
               description: `dsh UI 采集${scene.trim() ? '｜场景：' + scene.trim() : ''}`,
               content: text,
-              ...(row.nick ? { user_masked: row.nick } : {}),
             }],
             product: 'DSH',
           }),
@@ -201,16 +194,6 @@ function FeedbackModal({ onClose }) {
         <div style={{ fontSize: 12, marginBottom: 10 }}>
           <input style={S.input} value={scene} placeholder="使用场景（选填），如：代码补全"
             onChange={(e) => setScene(e.target.value)} />
-        </div>
-        <div style={{ fontSize: 12, marginBottom: 14 }}>
-          <input style={{ ...S.input, width: 'auto', marginRight: 6 }}
-            value={nick} placeholder="昵称（选填）"
-            onChange={(e) => setNick(e.target.value)} />
-          <label style={{ marginLeft: 10, cursor: 'pointer' }}>
-            <input type="checkbox" checked={attachIdentity}
-              onChange={(e) => setAttachIdentity(e.target.checked)} />
-            {' '}随反馈附上昵称（帮助产品跟进，可取消）
-          </label>
         </div>
         {done && (
           <div style={{
