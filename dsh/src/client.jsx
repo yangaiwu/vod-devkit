@@ -458,8 +458,8 @@ function SmileyButton() {
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"
           strokeLinejoin="round" aria-hidden="true">
-          <path d="M7 22V11l4.2-8.6a1.6 1.6 0 0 1 3 .8V9h4.9a2 2 0 0 1 2 2.4l-1.3 7.2a2 2 0 0 1-2 1.6H7z"/>
-          <path d="M7 11H4a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3"/>
+          <path d="M21.5 2.5 2.9 10.2c-.8.3-.8 1.5.1 1.7l4.6 1.4 1.7 5.5c.3.9 1.4 1 1.9.3l2.5-3.3 4.6 3.4c.7.5 1.7.1 1.9-.8l3.2-14.4c.2-.9-.7-1.7-1.5-1.4z"/>
+          <path d="M7.3 13.5 21.5 2.5l-9.5 12.3"/>
         </svg>
       </button>
       {open && <FeedbackModal onClose={() => setOpen(false)} />}
