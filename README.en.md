@@ -51,5 +51,6 @@ Verified hosts: Hermes (official `hermes mcp add`), OpenCode
 stdio roundtrip / meta cache / ledger) + pre-push gate + GitHub Actions
 CI on the mirror + nightly local E2E against the test environment.
 
-Docs: [README.md (中文)](README.md) · QUICKSTART.md · docs/proposal.md ·
+Docs: [README.md (中文)](README.md) · QUICKSTART.md · CONTRIBUTING.md ·
+SECURITY.md · docs/proposal.md ·
 docs/design.md · docs/scheme-overview.md (one-pager) · CHANGELOG.md
