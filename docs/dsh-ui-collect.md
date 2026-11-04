@@ -9,21 +9,24 @@ dsh web 输入框增加笑脸按钮 → 弹出反馈表单 → 提交走
 POST /external/voices（囤积，不触发分析）→ 引擎按档建 issue
 （VOD-ISYNC）→ 回执展示。
 
-## 二、前置验证结论（2026-11-04 源码/包实读）
+## 二、前置验证结论（2026-11-04 真机 boot dsh web + 包实读）
 
-1. **UI 扩展机制存在（实证）**：dsh 客户端插件体系=
-   `dsh.client` 行注册 → node 半扫 /plugins/<id>/client.js 下发 →
-   浏览器半 lazy CJS 模块表；UI 面=`@deepseek-ai/dsh-client-ui-slots`
-   slot registry（register({name,children,store,inject}, Component)+
-   chain 选择+CSS 注入）+ dsh-client-web-react/dsh-client-ui-primitives。
-   即：插件可携带浏览器代码注册 UI 组件进 shell 槽位。
-2. **未实证项 T-VER-1（P0）**：输入框区具体槽位名。槽位声明在 shell
-   运行时组合，minified 前端不可静态抽取——真机 boot dsh web 后枚举
-   SlotMap（window.__DSH_BOOT__+SlotCore），选 composer/输入区最近槽位；
-   无可用槽位的降级路径=工具栏命令/斜杠命令打开同一表单。
-3. **账号面（T-VER-2）**：本机 ~/.dsh 无凭据文件、boot 无 login 子命令
-   ——dsh 账号体系存在性未证实。身份源按三层设计（§四），真机验证
-   层1是否存在。
+1. **UI 扩展机制实证（T-VER-1 完成）**：本机 boot `dsh --profile web`
+   实测。笑脸按钮落点=**`conversation.composer.dock`** 槽（输入框
+   dock 区，多 entry 按 order 排，官方 activity pill 即注册于此）。
+   注册模式（照抄官方插件）：
+   `ctx.slots.inject("conversation.composer.dock", function* () {
+     yield ctx.slots.register({ name, id, order, locale, inject },
+                              SmileyButton); })`
+   相邻槽：conversation.input.overlay（斜杠菜单）/input.attachments。
+   浏览器半=client.js 经 dsh.client 行下发（/plugins/<id>/client.js），
+   node 半不动——插件带 UI 是官方支持形态，**无降级路径需要**。
+2. **账号面实证（T-VER-2 升级）**：dsh **有账号体系**——settings-account
+   插件含平台授权 URL（login/authorize-url/browser-login）、
+   account.view.status（credential-stored 等）、avatar/details 快照。
+   身份源层1（会话身份）从「待证实」升级为「存在」：按 settings-account
+   的 snapshot 模式对接（details/avatar/状态），凭据文件指纹（层2）
+   降为未登录时的兜底，自愿留名（层3）不变。知情同意纪律不变。
 
 ## 三、插件包结构（dsh/dsh-vod-devkit 扩展）
 
@@ -88,7 +91,7 @@ dsh 产品反馈，用户可改）。
 - 内容：content ≤2000 逐条、sanitize 在引擎侧 issue 组装出口执行
   （VOD-ISYNC design §三），双层防线
 
-## 九、排期
+## 九、排期（T-VER 已完成 2026-11-04）
 
-T-VER（真机：槽位枚举+账号面证实）0.5 天 → client 半实现+表单 1.5 天
-→ 联调（等 MR !152 部署）0.5 天 → 验收 I1-I12+U 侧用例 0.5 天。
+client 半实现+表单 1.5 天 → 联调（等 MR !152 部署）0.5 天 →
+验收 I1-I12+U 侧用例 0.5 天。
