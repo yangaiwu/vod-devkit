@@ -317,10 +317,10 @@ def _save_runtime(update: dict) -> None:
 
 
 def _fetch_anon_token() -> str | None:
-    """零字段匿名令牌 + 渠道标注（T7b）：host=随包编译的固定常量（非用户输入），
-    引擎白名单命中则该令牌的声音可按渠道分组展示；不传/不命中维持随机编号。"""
+    """零字段匿名令牌（T7b 定稿）：渠道由引擎囤积入库侧固定赋值 vod-agent
+    （链路即渠道，客户端不自报）——本端保持空 body（方案 C 原样）。"""
     try:
-        out = _http("POST", _TOKEN_PATH, {"host": "vod-agent"}, base=JAVA_BASE, key="", timeout=15)
+        out = _http("POST", _TOKEN_PATH, {}, base=JAVA_BASE, key="", timeout=15)
         token = out.get("token")
         if isinstance(token, str) and token:
             return token

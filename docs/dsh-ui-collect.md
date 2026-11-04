@@ -154,9 +154,9 @@ client 半实现+表单 1.5 天 → 联调（等 MR !152 部署）0.5 天 →
 ## 十三、对齐 VOD-Project 采集标准（2026-11-04 三轮，T7b/T7c 插件侧）
 
 引擎侧契约变更（feat/kb-query-auth T7b/T7c，本仓同步）：
-- **取令牌带渠道常量**：POST /external/token body {host:"dsh-ui"}
-  （随包编译固定值，引擎 VodCollectChannels 注册表准入）→ 匿名档
-  collect_source=dsh-ui|anonymous-token（可按渠道分组，不再是随机编号）
+- **渠道=引擎固定赋值（T7b 定稿）**：取令牌零字段（方案 C 原样，客户端
+  不自报任何渠道参数）→ 囤积入库侧对插件链路统一打 vod-agent
+  （collect_source=vod-agent|anonymous-token，正式 key 走注册 host_name）
 - **分类=云声三分类**：chips 收敛为 功能建议/用户体验/产品缺陷
   （suggestionType 1/2/3 逐字对齐；六类是 n01 分析层内部枚举不进人看
   表单）；选中 → tags=["problem_type:<三分类值>"] → 引擎落
