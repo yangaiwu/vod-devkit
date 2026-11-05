@@ -133,9 +133,11 @@ F3 采集技能观测（排期）：识别准确率/确认时机需一次真实�
 ②反馈内容/调用显式指定 ③询问用户。静默默认已删除（曾为 codearts，
 会把 AIShell 反馈错误归因到 CodeArts——归因错误污染目标产品数据，
 比报错更糟；护栏 -32013 引导三种解法）。
-**实测发现的引擎缺口**：submit 白名单=代码常量 VALID_PRODUCTS
-（六值，无 AIShell）——AIShell/AI shell 类产品反馈当前会被引擎拒收，
-需引擎侧扩白名单（挂 VOD-KEY/meta 端点一并解决）。
+**引擎缺口（已解决，2026-11-05 口径更新）**：submit 白名单=代码常量
+VALID_PRODUCTS（六值，无 AIShell）曾致 AIShell 类反馈被拒收——
+T7f/normalizeLoose（MR !152 线）已改为**不设白名单**：任意产品名
+归一后未注册落 UNKNOWN 档 + productRegistered 软标记，不拒收
+（实测 product=VOD/AIShell 均正常落库）。meta 端点仍以引擎常量为源。
 **可漂移值经接口取最新（设计定稿）**：product 白名单/分类六类定义/
 功能子类词典都是引擎侧会漂移的枚举字典（本次技能过期即实证），
 静态嵌入必漂移。方案=引擎新增只读 meta 端点（GET /external/meta/*：

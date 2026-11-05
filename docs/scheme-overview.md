@@ -64,6 +64,8 @@ VOD Java backend（唯一上游：/external/voice/submit + /external/token）
 ## 里程碑
 
 - ✅ v0.1.0：采集闭环端到端（测试环境）
-- ▶ 引擎侧评审中：VOD-KEY（多 key+meta 端点+白名单补 AIShell）、
-  VOD-VOI（囤积端点+确定性查重）、VOD-KBQ（api.py 鉴权网关）
+- ✅ 引擎侧已合 dev（MR !152 线）：VOD-KEY（多 key+meta 端点+匿名令牌）、
+  VOD-VOI（囤积端点+收发分离）；产品归因 normalizeLoose 不设白名单
+  （AIShell 等未注册产品落 UNKNOWN 档不拒收）
+- ▶ 部署中：vod-dev.topxtopx.com（V116 迁移先行）
 - ○ P2：GitHub 公开镜像+市场、npm 壳、签名回执（用户自助前置）
