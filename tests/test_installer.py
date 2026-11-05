@@ -261,8 +261,8 @@ def test_plugin_selfcontained_contract(env):
     plug = env["repo"] / "plugins" / "vod-devkit"
     mcp = json.loads((plug / ".mcp.json").read_text())
     srv = mcp["mcpServers"]["vod-devkit"]
-    assert srv["command"] == "python3" and srv["cwd"] == "."
-    assert srv["args"] == ["./vod_mcp/server.py"]  # 相对路径=缓存隔离后仍可拉起
+    assert srv["command"] == "vod-devkit" and srv["args"] == ["serve"], \
+        "codex 0.166 实测：相对路径+cwd 不解析到插件目录——入口必须走全局 vod-devkit serve"
     pj = json.loads((plug / ".codex-plugin" / "plugin.json").read_text())
     assert "interface" in pj and pj["skills"] == "./skills/"
     bundled = plug / "vod_mcp" / "server.py"
@@ -270,6 +270,7 @@ def test_plugin_selfcontained_contract(env):
     assert bundled.exists(), "插件包必须自带 server（sync_plugin.py 产物已提交）"
     h = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
     assert h(bundled) == h(src), "插件包内 server 与源码漂移——跑 scripts/sync_plugin.py"
+    assert (plug / "skills" / "vod-feedback-collect" / "SKILL.md").exists(), "skills 随包（sync_plugin.py 同步）"
     assert not (plug / "vod_mcp" / "runtime.json").exists()  # 真源账本不随包
     bi = json.loads((plug / "build-info.json").read_text())  # provenance 版本真源随包
     assert bi["version"] and bi["commitSha"], "build-info 未烧录=vod_devkit_info 版本号失真"
