@@ -191,6 +191,8 @@ export function apply(ctx, config) {
                 + 'tool names (say 提交反馈, never vod_submit_voices) or mechanism words '
                 + '(调用/被拒/护栏/参数) to the user - they are internal diagnostics. '
                 + 'The agent submits on the user\'s behalf; system behavior is described as 系统/稍后自动. '
+                + 'OUTPUT CONTRACT: when explaining results to the user, only cover 收录状态与后续跟进. '
+                + 'NEVER explain internal mechanics to users: 声音来源/渠道字段、计数规则（入库/净新增）、配额、归因——这些是系统内部概念。 '
                 + 'Anonymous tier has NO credentials by design. ' +
                 'Each voice = one user feedback (content ≤2000 chars). '
                 + 'content MUST be a faithful transcription of the user\'s own words - '
