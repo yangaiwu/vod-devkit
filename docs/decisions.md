@@ -241,3 +241,8 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
   判据告警/企业共享服务器→代理 key
 - 测试：引擎 VodDeviceAnchorTest 8 条（UT1-UT9）+存量 30 条全绿；插件协议锁 1 条
   +克隆判据 2 条；legacy 语义澄清=存量令牌只认 UA 绑定，device header 不参与
+
+## D-anon-verify（2026-11-05）：匿名令牌链信封契约修复
+- 真机实锤：引擎 /external/token 返回 ApiResponse 信封 {code,data:{token}}，插件顶层取 token 恒 None → 无 key 首提必 -32012。此前未暴露=插件常驻 legacy key 不走匿名链（老平台 key 已从 runtime.json 移除）
+- 决策：解析收敛 _extract_anon_token 单函数，信封优先+扁平兼容（历史/降级引擎不破坏）；存量 mock 全部对齐真源信封——mock 边界≠协议边界教训第二次实锤（第一次=E1/E2 协议级测试）
+- 关联：S21-S23 场景用例入 proposal 三·八；D-key-guard key 移除语义真机双档实测（legacy-shared/anonymous）

@@ -248,6 +248,25 @@ S20 传输协议守卫（2026-11-03 已实现）
   http（引擎同机部署/测试 recorder）正常放行——守卫只拦明文外发，
   不拦本地开发
 
+S21 令牌端点信封契约（D-anon-verify，2026-11-05 真机实锤已修）
+  引擎真实契约=ApiResponse 信封 {code,message,data:{token,...}}；
+  插件曾顶层取 token 恒 None → 无 key 首提必 -32012"端点不可用"。
+  教训=mock 契约未对齐真源（存量测试用扁平 {"token":...} 掩盖缺陷）。
+  修复后 mock 全部对齐信封，_extract_anon_token 单函数可测。
+
+S22 匿名链端到端（真机验证通过）
+  runtime.json 无 java_key → 首提 401 → 自动 POST /external/token
+  （空 body + X-Vod-Device-Id）→ 令牌以 java_key 槽落盘
+  （token_tier=anonymous 标记档位）→ 重试 201 → 引擎落囤积区
+  key_tier=anonymous、voiceId 带匿名锚点前缀 → 同令牌重提同
+  voiceId 幂等（skipped 不烧配额）。
+
+S23 老平台 key 移除语义（D-key-guard 配套）
+  runtime.json 携带 legacy key 时提交走 legacy-shared 档（引擎侧
+  external.legacy.enabled 接住）；移除后走匿名链。两档行为均在
+  真机实测：带 key=legacy-shared、无 key=anonymous，迁移路径
+  =删除 runtime.json java_key 即切换，无代码改动。
+
 ## 三·五、安装溯源与宿主感知（新增需求）
 
 ### 背景与语义

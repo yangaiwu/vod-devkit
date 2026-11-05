@@ -42,7 +42,11 @@ def test_submit_voices_auto_token_then_retry(monkeypatch):
         calls.append((method, path, key))
         if path.endswith("/external/token"):
             state["token_issued"] = True
-            return {"token": "anon-token-xyz", "dailyLimit": 50}
+            # D-anon-verify（2026-11-05 真机实锤）：引擎真实契约=ApiResponse 信封，
+            # mock 必须对齐真源（曾用扁平 {"token":...} 掩盖了顶层取值恒 None 的缺陷）
+            return {"code": 200, "message": "令牌已签发",
+                    "data": {"token": "anon-token-xyz", "dailyLimit": 50,
+                             "expiresAt": 1796453397897, "tier": "anonymous"}}
         if path.endswith("/external/voices"):
             if key == "anon-token-xyz":
                 return {"code": 200, "voiceIds": ["ext_vod-agent_t1"]}
@@ -396,3 +400,63 @@ def test_device_header_on_all_external_requests(monkeypatch):
     tools._http("GET", "/rest/developer/manager/hdvodmngservice/v1/external/meta", None)
     assert seen["device"] == "deadbeef", "设备锚点 header 必须随所有 external 请求上送"
     assert seen["auth"] == "Bearer k"
+
+
+# ==================== D-anon-verify（2026-11-05 真机实锤）：信封契约与匿名链真源对齐 ====================
+
+def test_anon_token_envelope_contract(monkeypatch):
+    """S20 令牌端点信封契约（真源=ExternalTokenController ApiResponse）：
+    data.token 必须被解析；此前顶层取值恒 None → 无 key 首提必 -32012。"""
+    assert tools._extract_anon_token(
+        {"code": 200, "message": "令牌已签发",
+         "data": {"token": "env-tok", "dailyLimit": 50, "tier": "anonymous"}}
+    ) == "env-tok", "引擎真实信封形态必须解析出 token"
+
+
+def test_anon_token_flat_payload_compat():
+    """S21 顶层扁平形态兼容（历史/降级引擎返回 {"token":...} 不破坏）。"""
+    assert tools._extract_anon_token({"token": "flat-tok", "dailyLimit": 50}) == "flat-tok"
+
+
+def test_anon_token_missing_or_garbage_returns_none():
+    """信封无 token / 非字典 / 空 data → None（走 -32012 结构化引导，不误用垃圾值）。"""
+    assert tools._extract_anon_token({"code": 200, "data": {"dailyLimit": 50}}) is None
+    assert tools._extract_anon_token({"code": 200, "data": "not-a-dict"}) is None
+    assert tools._extract_anon_token("garbage") is None
+    assert tools._extract_anon_token({"token": 123}) is None, "非字符串 token 不得通过"
+
+
+def test_legacy_key_removed_falls_to_anon_chain_e2e(monkeypatch):
+    """S22 key 移除语义（D-key-guard 配套）：runtime.json 无 java_key →
+    首提走匿名链自动签发 → 令牌以 java_key 槽落盘 + token_tier=anonymous 标记。"""
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts"],
+                                             "stale": False, "source": "meta"})
+    calls = []
+
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        calls.append((method, path, key))
+        if path.endswith("/external/token"):
+            assert not key, "取令牌请求不得带 Bearer（零字段匿名入口）"
+            return {"code": 200, "data": {"token": "fresh-anon-tok",
+                                          "tier": "anonymous"}}
+        if path.endswith("/external/voices"):
+            if not key:
+                # 真实时序：无 key 首提 401（对齐引擎 Filter 行为）→ 取令牌 → 重试
+                raise tools.ToolError("鉴权失败（401）", code=-32012)
+            assert key == "fresh-anon-tok", "取到令牌后重试必须携带新令牌"
+            return {"code": 200, "data": {"accepted": 1,
+                                          "voiceIds": ["ext_anonymous_t1"]}}
+        return {}
+
+    saved = {}
+    monkeypatch.setattr(tools, "JAVA_KEY", "")  # 模拟移除老平台 key 后的 runtime
+    monkeypatch.setattr(tools, "_http", fake_http)
+    monkeypatch.setattr(tools, "_save_runtime", lambda u: saved.update(u))
+    out = tools.submit_voices(
+        {"voices": [{"content": "匿名链端到端验证反馈"}],
+         "product": "codearts", "confirmed": True},
+        client_info={"name": "t"})
+    assert out["accepted"] == 1 and out["path"] == "hoarding"
+    assert saved.get("token_tier") == "anonymous"
+    assert any(p.endswith("/external/token") for m, p, _ in calls), "必须先取令牌"

@@ -189,7 +189,10 @@ B 自助注册制（会把人跑掉，否决为入门方案）→ **C 零字段�
 
 实现件：
 1. 令牌签发端点（引擎侧 VOD-KEY）：POST /external/token 空 body，
-   IP 限频，返回 {token, dailyLimit}；落 t_vod_api_keys（tier=anonymous）
+   IP 限频；落 t_vod_api_keys（tier=anonymous）。**返回契约=
+   ApiResponse 信封 {"code":200,"data":{"token":...}}（D-anon-verify
+   2026-11-05 真机实锤：插件顶层取 token 曾恒 None → 无 key 首提必
+   -32012；解析收敛在 _extract_anon_token 单函数，信封+扁平双兼容）**
 2. 令牌回填链（插件侧已实现）：_fetch_anon_token → JAVA_KEY 回填 →
    _save_runtime 持久化（token_tier=anonymous）
 3. vod_auth_status（插件侧已实现）：指纹化输出+引导

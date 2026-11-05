@@ -575,20 +575,28 @@ def _warn(msg: str) -> None:
     _log(f"warn {msg}")
 
 
+def _extract_anon_token(out: object) -> str | None:
+    """从令牌端点响应提取 token（真源契约：引擎 ApiResponse 信封
+    {"code":200,"data":{"token":...}}；顶层扁平 {"token":...} 兼容历史形态）。"""
+    if not isinstance(out, dict):
+        return None
+    data = out.get("data")
+    token = data.get("token") if isinstance(data, dict) else None
+    if not token:
+        token = out.get("token")
+    return token if isinstance(token, str) and token else None
+
+
 def _fetch_anon_token() -> str | None:
     """零字段匿名令牌（T7b 定稿）：渠道由引擎囤积入库侧固定赋值 vod-agent
-    （链路即渠道，客户端不自报）——本端保持空 body（方案 C 原样）。"""
+    （链路即渠道，客户端不自报）——本端保持空 body（方案 C 原样）。
+    D-anon-verify（2026-11-05 真机实锤）：引擎返回 ApiResponse 信封，
+    顶层取 token 恒 None → 无 key 首提必 -32012，信封解析为必经路径。"""
     try:
         out = _http("POST", _TOKEN_PATH, {}, base=JAVA_BASE, key="", timeout=15)
-        # 引擎 ApiResponse 信封：{"code":200,"data":{"token":...}}；兼容顶层扁平 {"token":...}
-        token = (out.get("data") or {}).get("token") if isinstance(out.get("data"), dict) else None
-        if not token:
-            token = out.get("token")
-        if isinstance(token, str) and token:
-            return token
+        return _extract_anon_token(out)
     except ToolError:
         return None
-    return None
 
 
 def devkit_info(params: dict, client_info: dict | None = None) -> dict:
