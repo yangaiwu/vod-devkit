@@ -83,10 +83,13 @@ const S = {
 /* ---------- 工具 ---------- */
 
 function getDeviceId() {
+  // 引擎设备锚点只认纯 hex（[0-9a-f]{8,64}）——uuid 连字符会静默降级
+  // legacy ip|ua 锚点（NAT 收敛+签发 5 次/天易打满，本机实锤）
   let id = localStorage.getItem(LS_DEVICE);
   if (!id) {
-    id = (crypto.randomUUID ? crypto.randomUUID() : 'dev-' + Date.now()
-      + '-' + Math.random().toString(36).slice(2));
+    id = (crypto.randomUUID ? crypto.randomUUID()
+      : Date.now().toString(16) + Math.random().toString(16).slice(2)
+      + Math.random().toString(16).slice(2)).replace(/[^0-9a-f]/g, '').slice(0, 32);
     localStorage.setItem(LS_DEVICE, id);
   }
   return id;
