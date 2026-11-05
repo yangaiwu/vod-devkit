@@ -17,16 +17,17 @@ MCP / skills / packs / policy），面向"服务面插件"的护栏更保守。
 
 ## 安装（外部用户，零配置）
 
+完整分宿主指南见 [INSTALL.md](INSTALL.md)。速览：
+
 ```bash
-# 任意 MCP 宿主（Hermes / OpenCode / Codex 客户端等）：
-npx github:yangaiwu/vod-devkit          # 引导器自动探测宿主并安装
+# 任意 MCP 宿主（Hermes / OpenCode / Codex 客户端等）：npm 公网已发布
+npx --yes vod-devkit install --target opencode --product codearts
 
 # WorkBuddy / CodeBuddy（GitHub 仓即市场，无审核）：
 /plugin marketplace add yangaiwu/vod-devkit
 
-# DeepSeek Harness (dsh)：npm 包 dsh-vod-devkit（薄壳同语义）；
-# npm 首发后可在 dsh 社区目录一键安装，暂可用本地包：
-dsh plugin --profile <profile> add dsh/dsh-vod-devkit-0.1.0.tgz
+# DeepSeek Harness (dsh)：薄壳包 dsh-vod-devkit（npm 同名）；目录收录审核中
+dsh plugin --profile <profile> add dsh-vod-devkit
 ```
 
 安装后即用：平台地址有默认值，首次提交自动申请零字段匿名令牌。
