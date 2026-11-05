@@ -269,6 +269,30 @@ S23 老平台 key 移除语义（D-key-guard 配套）
   真机实测：带 key=legacy-shared、无 key=anonymous，迁移路径
   =删除 runtime.json java_key 即切换，无代码改动。
 
+S24 产品归因安装时注入链（D-anon-ui，2026-11-05 已实现）
+  安装配置（profile patch config.product）→ server 半
+  ctx.on("webserver/index-inject") 注入页面全局 __VOD_DSH_UI_PRODUCT__
+  → client 半模块顶层读取（原 T7d 契约零改动）。apiBase 为 server 半
+  自用值，绝不注入页面；跨域部署显式 uiBase 才注入 base 全局。
+  归因=安装时配置：使用时零设置、零追问。
+
+S25 裸装散户形态（同源部署）
+  散户 dsh plugin add 装包 → 部署方在宿主同源代理 /rest/（nginx
+  location /rest/ → VOD 实例）→ UI base=同源相对路径 → 全链通。
+  约束：web 宿主必须代理 /rest/（INSTALL.md 部署坑清单）。
+
+S26 设备锚点纯 hex 约束（UI 半对齐 VOD-DEVICE）
+  UI 设备 id 必须满足引擎 [0-9a-f]{8,64}——含连字符的 uuid 静默降
+  legacy ip|ua 锚点，签发 5 次/天打满即 429（实锤）。生成时去 mask
+  截 32 hex。
+
+S27 内容编造防线（AIShell 事故收口）
+  用户裸产品名/提问 → 模型不得编造情感结论（"体验不好"实锤）；
+  工具描述硬约束（MUST be faithful transcription / NEVER invent
+  sentiment / 名词提问不是反馈）+ SKILL.md 字段分级表与推断≠编造
+  辨析 + 调用前三项预检。欺骗通道同步封堵：工具面无 product 参数，
+  用户自报目标产品不采信、不改归因。
+
 ## 三·五、安装溯源与宿主感知（新增需求）
 
 ### 背景与语义

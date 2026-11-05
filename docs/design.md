@@ -281,6 +281,28 @@ PRODUCT_MAP 硬编码需随引擎 VodExternalProducts 手工同步——D-dsh-3�
 （ask/passthrough）→真实提交（taskId=425/426）→账本回读；另有真机
 web 会话端到端（S12，taskId=427）。
 
+## 三·十、dsh UI 部署配置通道（D-anon-ui，2026-11-05）
+
+**机制**（逆向自官方 settings-account 的 __DSH_CONTACT_CONFIG__）：
+server 半 `apply(ctx, config)` 里 `ctx.on("webserver/index-inject",
+table => table.push({kind:"global", ...}))` 把部署配置注入页面全局；
+client 半模块顶层读 `globalThis.__VOD_DSH_UI_*`（原 T7d 契约零改动）。
+
+**键位分工**：
+- `__VOD_DSH_UI_PRODUCT__` ← config.product：恒注入（安装必配，T7d）
+- `__VOD_DSH_UI_BASE__` ← config.uiBase：仅跨域部署显式配置才注入；
+  默认同源相对路径（宿主代理 /rest/）。**apiBase 是 server 半自用的
+  绝对地址，禁止注入页面**（同源策略下浏览器 fetch 127.0.0.1 即
+  Failed to fetch，公网实锤）。
+
+**实现约束**：注入行由纯函数 `uiGlobals(config)` 计算（可单测，
+test/d-anon-ui.test.mjs 契约锁：同源只注 product / uiBase 才注 base /
+apiBase 永不注入 / 无 product 注空串供 fail fast）。
+
+**过时口径警示**：VALID_PRODUCTS 拒收 AIShell 为 !152 前旧口径——
+normalizeLoose 后不设白名单（未注册落 UNKNOWN 档+productRegistered
+软标记）。文档与模型可见文本一律不得再使用"会被拒收"表述。
+
 ## 四、安全护栏（声明式）
 
 policy.json 规则集（severity: deny / confirm / warn）：
