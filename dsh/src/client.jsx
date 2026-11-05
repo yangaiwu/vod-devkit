@@ -17,8 +17,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 const API_PREFIX = '/rest/developer/manager/hdvodmngservice/v1';
-const BASE = (typeof globalThis !== 'undefined'
-  && globalThis.__VOD_DSH_UI_BASE__) || 'https://vod-dev.topxtopx.com';
+let BASE = (typeof globalThis !== 'undefined'
+  && globalThis.__VOD_DSH_UI_BASE__) || ''; // '' = 同源（宿主代理 /rest/，公网/内网/本地同构）
 const TOKEN_PATH = `${API_PREFIX}/external/token`;
 const VOICES_PATH = `${API_PREFIX}/external/voices`;
 const LS_TOKEN = 'vod_dshui_token';
@@ -83,10 +83,13 @@ const S = {
 /* ---------- 工具 ---------- */
 
 function getDeviceId() {
+  // 引擎设备锚点只认纯 hex（[0-9a-f]{8,64}）——uuid 连字符会静默降级
+  // legacy ip|ua 锚点（NAT 收敛+签发 5 次/天易打满，本机实锤）
   let id = localStorage.getItem(LS_DEVICE);
   if (!id) {
-    id = (crypto.randomUUID ? crypto.randomUUID() : 'dev-' + Date.now()
-      + '-' + Math.random().toString(36).slice(2));
+    id = (crypto.randomUUID ? crypto.randomUUID()
+      : Date.now().toString(16) + Math.random().toString(16).slice(2)
+      + Math.random().toString(16).slice(2)).replace(/[^0-9a-f]/g, '').slice(0, 32);
     localStorage.setItem(LS_DEVICE, id);
   }
   return id;
@@ -132,7 +135,7 @@ async function ensureToken() {
   if (t) return t;
   const r = await fetch(BASE + TOKEN_PATH, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'X-Vod-Device-Id': getDeviceId() },
     body: '{}',
   });
   if (r.status !== 200 && r.status !== 201) {
@@ -305,7 +308,7 @@ function FeedbackModal({ onClose }) {
     }
     setBusy(true); setDone(null);
     const row = {
-      title: text.slice(0, 60), category,
+      title: text.slice(0, 64), category, // voice_title=用户原文前 64 字（单输入框，不加标题摩擦）
       content: text,  // U-S3 重试重建提交体用（本机账本，cap 200）
       // 分类走 tags 正式通道（T7c），description 模板文案已移除
       at: new Date().toISOString(), status: 'failed', error: '',
@@ -317,7 +320,7 @@ function FeedbackModal({ onClose }) {
         const r = await fetch(BASE + VOICES_PATH, {
           method: 'POST',
           headers: {
-            'content-type': 'application/json',
+            'content-type': 'application/json', 'X-Vod-Device-Id': getDeviceId(),
             authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
@@ -391,7 +394,7 @@ function FeedbackModal({ onClose }) {
         ))}
       </div>
       <textarea style={S.textarea} value={content} maxLength={2000}
-        placeholder="比如：补全太慢，希望优化速度" autoFocus
+        placeholder="比如：对话响应慢、某个功能找不到入口" autoFocus
         onChange={(e) => setContent(e.target.value)} />
       <div style={{ fontSize: 11, textAlign: 'right', margin: '4px 0 0',
         color: 'var(--dsw-alias-label-tertiary, #999)' }}>

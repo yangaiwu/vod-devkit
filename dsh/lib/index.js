@@ -144,6 +144,17 @@ const textResult = (obj) => obj; // execute 返回结构化对象；render 负�
 const renderText = (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }];
 
 export function apply(ctx, config) {
+    // D-anon-ui（安装时配置口径）：部署配置经官方 index-inject 通道下发页面全局，
+    // client 半零改动即读到 product/apiBase（对齐 settings-account 的
+    // __DSH_CONTACT_CONFIG__ 同款机制）。产品归因仍是安装必配（T7d）——
+    // 未配置=client 半 fail fast 不激活，但不再是"散户死插件"：错误信息
+    // 指向安装命令（npx vod-devkit install --target dsh --product <产品名>）
+    ctx.on("webserver/index-inject", (table) => {
+        table.push({ kind: "global", name: "__VOD_DSH_UI_PRODUCT__",
+            value: readCfg(config?.product, '') || '' });
+        table.push({ kind: "global", name: "__VOD_DSH_UI_BASE__",
+            value: readCfg(config?.apiBase, 'https://vod-dev.topxtopx.com') || '' });
+    });
     const cfg = () => ({
         base: (readCfg(config?.apiBase, 'https://vod-dev.topxtopx.com') || '').replace(/\/+$/, ''),
         key: readCfg(config?.apiKey, '') || '',
@@ -155,17 +166,19 @@ export function apply(ctx, config) {
     const tools = [
         {
             name: 'vod_submit_voices',
-            description: '[VOD-unique] Submit agent-product user feedback voices to VOD (write). ' +
-                'Each voice = one user feedback (content ≤2000 chars, scene optional). ' +
+            description: '[VOD-unique] Submit agent-product user feedback voices to VOD (write). '
+                + 'ON FAILURE: tell the user in plain words only (e.g. 已暂存，稍后自动重试). '
+                + 'NEVER expose HTTP status codes, apiKeyFingerprint, tokenTier or stack traces to the user - '
+                + 'they are internal diagnostics. Anonymous tier has NO credentials by design. ' +
+                'Each voice = one user feedback (content ≤2000 chars). ' +
                 'Product attribution ("host-is-product", no whitelist): explicit arg → config product → ' +
                 'host identity (DSH). Host-reported products pass through as-is. ' +
                 'Batch ≤50. Returns voiceIds (reconciliation key) + taskIds.',
             parameters: buildParameters({
                 voices: {
                     type: 'array', required: true,
-                    description: 'Array of 1-50 voices: {content (required, ≤2000), scene (optional ≤128), userType (optional 企业|个人|未知)}',
+                    description: 'Array of 1-50 voices: {content (required, ≤2000), userType (optional 企业|个人|未知)}',
                 },
-                product: { type: 'string', description: 'Target product (overrides plugin config product, e.g. codearts/aishell)' },
             }),
             output: { schema: { type: 'object', additionalProperties: true }, render: renderText },
             async execute(args, exec) {
@@ -178,7 +191,7 @@ export function apply(ctx, config) {
                 // 归因（「宿主即产品」口径，2026-11-03 拍板·不设白名单）：显式传参 > 配置绑定
                 // （安装时默认=宿主名）> 缺省 DSH（本插件就装在 dsh 里）；白名单废除，
                 // 宿主自报产品原样上送（引擎宽松归一），不再 -32013 本地拦截
-                let product = String(args.product || c.product || 'DSH').trim();
+                let product = String(c.product || '').trim(); // 部署配置权威（安装时定），无 args 覆盖
                 product = PRODUCT_MAP[product.toLowerCase()] || product;
                 const source = 'dsh';
                 const accepted = [], taskIds = [], rejected = [];
@@ -264,12 +277,17 @@ export function apply(ctx, config) {
                 const c = cfg();
                 const rt = loadRuntime();
                 const fp = (s) => (s ? createHash('sha1').update(s).digest('hex').slice(0, 8) : null);
+                // D-anon-ui：匿名档=散户默认正常态。无 key 不是"未配置"故障，
+                // 显式标注防模型误诊（实锤：模型曾把 null 读成"凭据没配置"端给用户）
+                const authMode = c.key ? 'key-configured' : (rt.token_tier ? 'anonymous-token' : 'anonymous (auto on first submit)');
                 return textResult({
                     version: '0.1.0',
                     host: 'dsh',
                     apiBase: c.base,
                     apiKeyFingerprint: fp(c.key),
                     tokenTier: rt.token_tier || null,
+                    authMode,
+                    authNote: c.key ? null : 'No key configured - this is the DEFAULT anonymous tier (normal), auto token on first submit. NOT a misconfiguration.',
                     ledgerEntries: Array.isArray(rt.submissions) ? rt.submissions.length : 0,
                 });
             },
