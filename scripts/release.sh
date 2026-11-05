@@ -37,6 +37,14 @@ open('pyproject.toml','w').write(t)
 # vod_mcp/__init__.py
 i = open('vod_mcp/__init__.py').read().replace(f'__version__ = "{cur}"', f'__version__ = "{new}"')
 open('vod_mcp/__init__.py','w').write(i)
+
+# 三处同步硬断言（教训：字符串替换静默 no-op——__init__ 曾滞留 0.1.0 五个版本）
+import sys as _s
+for f, pat in [("package.json", f'"version": "{new}"'),
+               ("pyproject.toml", f'version = "{new}"'),
+               ("vod_mcp/__init__.py", f'__version__ = "{new}"')]:
+    if pat not in open(f).read():
+        print(f"FAIL: {f} 版本未同步到 {new}，中止发版", file=_s.stderr); _s.exit(1)
 EOF
 
 # CHANGELOG 段生成（自上次 tag 以来的 commit）
