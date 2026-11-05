@@ -149,6 +149,48 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
   带 per-install nonce（跨用户吞声量前置修复）
 - 三回归锁升级新契约：协议锁（囤积头/路径/载荷+回落两场景）、R1
   声量锁移至回落路径、title 锁改囤积链 voices[].title 承载
+## D-inbox-1（2026-11-05）囤积区独立表 + 收发分离 + 匿名提交入口闸（用户拍板）
+- agent 提交改入新表 t_vod_agent_inbox，不再写 t_vod_source_data（存量表是
+  V1.1 固化的 JPA 建表，四条存量链共用底座——我们的数据从别人表里收回来）。
+  主表只收正式行（存量链+回流行），分析零过滤补丁、零重复计数
+- 回流澄清为特性：agent 声音→issue→建议平台/VOC 回流进各云产品正式链路。
+  真实问题=ext_ 囤积行与回流正式行重复计数；回流行归属不可判定（新 voice_id、
+  key_id/tier 全 NULL），内容指纹=可漂移旁证违反铁律——解法=回流行只进主表、
+  囤积行不进主表，识别问题结构性消失（R2 加 agent 过滤方案作废）
+- 收发分离：收（inbox 囤积）无条件做；发（建 issue）才设闸。入库即登记
+  （t_vod_issue_sync 与 inbox 同源），backfill 补漏任务净删
+- 匿名提交入口闸 vod.external.anonymous-submit-enabled（默认 true）：
+  false=Filter 层拒收匿名提交（结构化引导正式 key），连 inbox 都不进，
+  formal/host 不受影响。管入口，与 issue-sync.enabled（管出口）互不牵连
+- 匿名 PENDING 审核队列+/issue-sync/admin 净删（人工审垃圾=负资产）；匿名
+  分发行为（是否建单/独立日天花板）为独立未拍板项，不在本批
+- 代价如实：分析只见回流行（回流失败的声音 inbox 可补录）；ext_↔正式行关联
+  靠 t_vod_issue_sync.issue_number 对账（平台签发主键），不做内容指纹匹配
+- 全文落 VOD-Project docs/vod-voices-api/design.md 第十节（本决策的引擎侧真源）
+
 - 引擎 !152 已合入 dev（ebdc6032）+评审线三轮追加（S1-S3 anchor/
   A2 设备绑定/tier-first R2/verbatim desc，V119-V120 幂等迁移）——
   插件零调整（401 自愈链原生兼容 A2；契约变化与既有删除同向）
+
+## D-key-guard-1（2026-11-05）key 安全三件：401 fail fast + S1 式写后验 + 有效性探针（用户拍板落地）
+- 背景：「安装注入 appkey、没 key 走匿名」确认合理（与现状 install env 注入口径一致），
+  但深检发现显式 key 被引擎 401 拒时会静默降级匿名档（tools.py 原 `not JAVA_KEY or
+  ex.code == -32012` 共用分支，取匿名令牌覆盖 runtime.json）——注入锚定承诺变假，
+  归因错位比报错更糟（AIShell 错归同病根）
+- ① 401 分流：新增 _explicit_key()（env 显式注入为权威 + token_tier != anonymous）。
+  显式 key 被拒 → fail fast（-32012，报错带指纹+处置指引，不取令牌不覆盖配置）；
+  匿名令牌失效 → 维持自动重领链（30 天过期自愈）。两分支互斥，回归锁双测
+- ② S1 式写后验（借 huaweicloud-devkit ensurePrivateMode 模式）：_save_runtime 写后
+  chmod 0600 + stat 回验效果（非动作），权限失效告警进 /tmp/vod_mcp_server.log 不阻断
+  主链；_runtime_path 抽出便于测试注入
+- ③ 有效性探针 probe_key()：带 key GET /external/meta（复用既有只读端点，零引擎新增，
+  devkit auth init 真调 IAM 的廉价版）。三态：200=verified / 401=rejected /
+  其他=unreachable（网络问题不是 key 问题，报"未验证"不报"无效"）。auth_status 配
+  keyCheck 字段；doctor 配 key 后探针，无效 FAIL、不可达 warn（离线 doctor 必须可用）
+- 账本脱敏复查结论（零改动）：账本只存 voiceId/taskId/title(反馈前 40 字)/product/at，
+  无凭据字段；key 明文暴露面=签发响应+runtime.json 两处（原有结论不变），新增
+  auth_status 全输出面明文 grep 锁
+- 刻意不做：S1 式静态加密（AES-GCM）——vod key 是低价值把手（可吊销/限额/UA 绑定），
+  devkit 加密库面向 AK/SK 高价值长期凭据；宿主 key 正式落地时再评估
+- 验证：45 用例全绿（新增 5）；真机探针 verified（key 133e3715）/ 假 key rejected /
+  doctor key 行通

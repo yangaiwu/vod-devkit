@@ -315,6 +315,24 @@ def cmd_doctor(_args):
         for x in problems:
             print("FAIL:", x)
         sys.exit(1)
+    # key 探针（最佳努力）：配置了 key 就问一次引擎，无效当场报；网络不可达只提示不 FAIL
+    #（离线环境 doctor 必须可用——网络问题不是 key 问题）
+    from vod_mcp.tools import _runtime_cfg
+    key = os.environ.get("VOD_JAVA_API_KEY") or _runtime_cfg().get("java_key")
+    if key:
+        from vod_mcp.tools import probe_key
+        chk = probe_key(key)
+        if chk["ok"] is False:
+            problems.append(f"key 无效（指纹 {chk['fingerprint']}，引擎 401 拒绝）——"
+                            "请核对/续期，或移除 key 走匿名档")
+        elif chk["ok"] is None:
+            print(f"warn: key 未验证（引擎不可达，指纹 {chk['fingerprint']}）")
+        else:
+            print(f"key: 有效（指纹 {chk['fingerprint']}）")
+    if problems:
+        for x in problems:
+            print("FAIL:", x)
+        sys.exit(1)
     print("doctor: OK")
 
 

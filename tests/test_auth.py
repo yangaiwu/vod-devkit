@@ -11,7 +11,8 @@ sys.path.insert(0, str(ROOT))
 from vod_mcp import tools  # noqa: E402
 
 
-def test_auth_status_fingerprint_not_plaintext():
+def test_auth_status_fingerprint_not_plaintext(monkeypatch):
+    monkeypatch.setattr(tools, "probe_key", lambda: {"ok": None, "reason": "unreachable"})  # 隔网
     out = tools.auth_status({}, client_info={"name": "t"})
     fp = out["javaKey"]["fingerprint"]
     assert fp is None or (len(fp) == 8 and fp != tools.JAVA_KEY), \
@@ -258,3 +259,108 @@ def test_transport_guard_rejects_http_public(monkeypatch):
         assert False, "不可达但应报 -32001 而非协议拒绝"
     except tools.ToolError as e:
         assert e.code == -32001
+
+
+# ---- key 安全三件（D-key-guard-1）：401 fail fast / 写后验 / 探针 ----
+
+def test_explicit_key_rejected_401_fails_fast(monkeypatch):
+    """显式 key（安装注入）被引擎 401 拒 → fail fast：不取匿名令牌、不覆盖 runtime.json。
+    静默降级匿名=配置错误被吞=归因错位（D-key-guard-1 回归锁）。"""
+    monkeypatch.setenv("VOD_JAVA_API_KEY", "formal-key-abc")
+    monkeypatch.setattr(tools, "JAVA_KEY", "formal-key-abc")
+    monkeypatch.setattr(tools, "_RT", {})
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": [], "stale": True, "source": "snapshot"})
+    fetched = []
+    monkeypatch.setattr(tools, "_fetch_anon_token", lambda: fetched.append(1) or "tok")
+
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        raise tools.ToolError("鉴权失败", code=-32012)
+
+    monkeypatch.setattr(tools, "_http", fake_http)
+    saved = []
+    monkeypatch.setattr(tools, "_save_runtime", lambda u: saved.append(u))
+    with pytest.raises(tools.ToolError) as ei:
+        tools.submit_voices(
+            {"voices": [{"content": "希望优化导出速度"}], "product": "codearts",
+             "confirmed": True}, client_info={"name": "t"})
+    assert "指纹" in str(ei.value) and "被引擎拒绝" in str(ei.value), "报错须带指纹与处置指引"
+    assert not fetched, "显式 key 被拒不得触发匿名令牌链"
+    assert not saved, "显式 key 被拒不得覆盖 runtime.json（防止假锚定）"
+
+
+def test_anon_token_expired_401_refetches(monkeypatch):
+    """匿名令牌过期 401 → 重领链保持（与显式 key fail fast 分流互斥）。"""
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
+    monkeypatch.setattr(tools, "JAVA_KEY", "stale-anon-token")
+    monkeypatch.setattr(tools, "_RT", {"token_tier": "anonymous"})
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": [], "stale": True, "source": "snapshot"})
+    calls = []
+
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        calls.append((path, key))
+        if path.endswith("/external/token"):
+            return {"token": "fresh-anon"}
+        if key == "fresh-anon":
+            return {"code": 200, "voiceIds": ["ext_vod-agent_t2"]}
+        raise tools.ToolError("鉴权失败", code=-32012)
+
+    monkeypatch.setattr(tools, "_http", fake_http)
+    monkeypatch.setattr(tools, "_save_runtime", lambda u: None)
+    out = tools.submit_voices(
+        {"voices": [{"content": "希望优化导出速度"}], "product": "codearts",
+         "confirmed": True}, client_info={"name": "t"})
+    assert out["accepted"] == 1, "匿名令牌失效应自动重领并提交成功"
+    assert any(p.endswith("/external/token") for p, _ in calls)
+
+
+def test_save_runtime_write_after_verify_0600(tmp_path, monkeypatch):
+    """S1 式写后验：写后文件必须 0600（chmod 效果验证，不是动作验证）。"""
+    import os as _os
+    target = tmp_path / "runtime.json"
+    monkeypatch.setattr(tools, "_runtime_path", lambda: target)
+    tools._save_runtime({"java_key": "k1"})
+    mode = _os.stat(target).st_mode & 0o777
+    assert mode == 0o600, f"写后验必须把 runtime.json 收到 0600，实际 {oct(mode)}"
+    cfg = json.loads(target.read_text())
+    assert cfg["java_key"] == "k1"
+
+
+def test_probe_key_three_verdicts(monkeypatch):
+    """探针三态：200=有效 / 401=无效 / 网络错误=不判定（网络问题不是 key 问题）。"""
+    monkeypatch.setattr(tools, "JAVA_KEY", "k-test")
+
+    def ok_http(method, path, body=None, timeout=30, base=None, key=None):
+        assert path.endswith("/external/meta") and key == "k-test"
+        return {"products": []}
+
+    monkeypatch.setattr(tools, "_http", ok_http)
+    assert tools.probe_key() == {"ok": True, "reason": "verified", "fingerprint": tools._fingerprint("k-test")}
+
+    def denied(method, path, body=None, timeout=30, base=None, key=None):
+        raise tools.ToolError("401", code=401)
+
+    monkeypatch.setattr(tools, "_http", denied)
+    out = tools.probe_key()
+    assert out["ok"] is False and out["reason"] == "rejected"
+
+    def dead(method, path, body=None, timeout=30, base=None, key=None):
+        raise tools.ToolError("timeout", code=-32015)
+
+    monkeypatch.setattr(tools, "_http", dead)
+    out = tools.probe_key()
+    assert out["ok"] is None and out["reason"] == "unreachable", "不可达≠无效"
+
+    monkeypatch.setattr(tools, "JAVA_KEY", "")
+    out = tools.probe_key()
+    assert out == {"ok": None, "reason": "no-key", "fingerprint": None}
+
+
+def test_auth_status_no_key_material_anywhere(monkeypatch):
+    """脱敏复查（D-key-guard-1③）：auth_status/账本全输出面 grep 不到 key 明文。"""
+    secret = "super-secret-key-value-9f2e"
+    monkeypatch.setattr(tools, "JAVA_KEY", secret)
+    monkeypatch.setattr(tools, "probe_key", lambda: {"ok": None, "reason": "unreachable"})
+    out = json.dumps(tools.auth_status({}, client_info={"name": "t"}))
+    assert secret not in out, "key 明文禁止出现在任何工具输出"

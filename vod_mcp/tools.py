@@ -11,6 +11,7 @@ ExternalApiKeyFilter Bearer）。
 """
 import json
 import os
+import stat
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -186,6 +187,19 @@ def _voice_id(source: str, content: str, nonce: str) -> str:
     return f"ext_{source}_{hashlib.sha1((content + nonce).encode('utf-8')).hexdigest()[:12]}"
 
 
+def _explicit_key() -> bool:
+    """当前 JAVA_KEY 是否为显式配置（正式/宿主 key）而非本会话自动领取的匿名令牌。
+
+    判据：环境变量显式注入（权威，env 优先级最高的既有口径）或
+    token_tier != "anonymous"。匿名令牌过期/被吊销时 401 应走重领链；
+    显式 key 被 401 拒绝时必须 fail fast（静默降级匿名=配置错误被吞=归因错位，
+    「注入 appkey」场景的锚定承诺会变成假的）。
+    """
+    if bool(os.environ.get("VOD_JAVA_API_KEY")):
+        return True
+    return bool(JAVA_KEY) and str(_RT.get("token_tier") or "") != "anonymous"
+
+
 def submit_voices(params: dict, client_info: dict | None = None) -> dict:
     """V16 切换：主路径=囤积端点 POST /external/voices（Bearer，批式，不触发分析）；
     引擎未部署（404）自动回落老链 /external/voice/submit（提交即分析，过渡语义，
@@ -263,7 +277,16 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
         if ex.code == 404:
             fallback = True  # 囤积端点未部署 → 落到下方 legacy 回落
         elif not JAVA_KEY or ex.code == -32012:
-            # 缺 key/401 → 零字段匿名令牌 → 落 runtime.json → 重试一次
+            if _explicit_key():
+                # 显式 key（安装注入/正式档）被引擎 401 拒绝 → fail fast：
+                # 不取匿名令牌、不覆盖配置——静默降级匿名档=配置错误被吞
+                #（归因错位比报错更糟，同 AIShell 错归病根）
+                raise ToolError(
+                    f"注入的 key 被引擎拒绝（指纹 {_fingerprint(JAVA_KEY)}）："
+                    "请核对 key 是否过期/被吊销，或移除 key 走匿名档（删除 "
+                    "VOD_JAVA_API_KEY 环境变量与 runtime.json java_key）",
+                    code=-32012)
+            # 缺 key/匿名令牌失效 → 零字段匿名令牌 → 落 runtime.json → 重试一次
             token = _fetch_anon_token()
             if not token:
                 raise ToolError(
@@ -302,6 +325,11 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
                 voice_ids.append(vid)
                 task_ids.append(None)
             elif (not JAVA_KEY or e.code == -32012) and not voice_ids:
+                if _explicit_key():
+                    # 显式 key 被拒 → fail fast（同囤积主路径口径，防静默降级）
+                    raise ToolError(
+                        f"注入的 key 被引擎拒绝（指纹 {_fingerprint(JAVA_KEY)}）："
+                        "请核对 key 是否过期/被吊销，或移除 key 走匿名档", code=-32012)
                 # 零字段匿名令牌：缺 key/401 → 自动取令牌 → 落 runtime.json → 重试一次
                 token = _fetch_anon_token()
                 if token:
@@ -343,6 +371,32 @@ def _fingerprint(key: str) -> str | None:
     return hashlib.sha1(key.encode()).hexdigest()[:8] if key else None
 
 
+def probe_key(key: str | None = None, timeout: int = 8) -> dict:
+    """key 有效性探针：带 key 调只读端点 GET /external/meta（Filter 网内）。
+
+    判定语义（引擎是唯一权威，本地零判定）：
+    - 200 → {"ok": True}：key 有效且在网内
+    - 401/-32012 → {"ok": False, "reason": "rejected"}：引擎判无效（过期/吊销/不存在）
+    - 其他错误（网络不可达/超时/5xx）→ {"ok": None, "reason": "unreachable"}：
+      不判定——网络问题不是 key 问题，报"无法验证"而非"无效"
+    """
+    key = key if key is not None else JAVA_KEY
+    fp = _fingerprint(key)
+    if not key:
+        return {"ok": None, "reason": "no-key", "fingerprint": None}
+    try:
+        _http("GET", _META_PATH, None, key=key, timeout=timeout)
+        return {"ok": True, "reason": "verified", "fingerprint": fp}
+    except ToolError as ex:
+        code = ex.code
+        if code == 401 or code == -32012:
+            return {"ok": False, "reason": "rejected", "fingerprint": fp}
+        return {"ok": None, "reason": "unreachable", "fingerprint": fp}
+
+
+_META_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/meta"
+
+
 def _key_state() -> dict:
     return {"configured": bool(JAVA_KEY), "fingerprint": _fingerprint(JAVA_KEY),
             "base": JAVA_BASE,
@@ -358,6 +412,9 @@ def auth_status(params: dict, client_info: dict | None = None) -> dict:
     meta = _load_meta()
     out["meta"] = {"source": meta["source"], "stale": meta["stale"],
                    "productCount": len(meta["products"])}
+    if JAVA_KEY:
+        # 主动探针（devkit auth init 真调 IAM 的廉价版）：用户问"key 好没好"有确定答案
+        out["keyCheck"] = probe_key()
     if not JAVA_KEY:
         out["guidance"] = _KEY_GUIDANCE
         out["tokenReady"] = "首次提交时将自动申请匿名令牌（零字段，日限额低）"
@@ -395,8 +452,12 @@ def list_submitted(params: dict, client_info: dict | None = None) -> dict:
             "scope": "本机提交记录（换机/重装不保留；引擎级查询随 VOD-VOI）"}
 
 
+def _runtime_path() -> Path:
+    return Path(__file__).resolve().parent / "runtime.json"
+
+
 def _save_runtime(update: dict) -> None:
-    p = Path(__file__).resolve().parent / "runtime.json"
+    p = _runtime_path()
     cfg = {}
     if p.exists():
         try:
@@ -405,6 +466,26 @@ def _save_runtime(update: dict) -> None:
             cfg = {}
     cfg.update(update)
     p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    # S1 式写后验（借 huaweicloud-devkit ensurePrivateMode 模式）：写完 chmod 0600
+    # 并 stat 回验——不假设 chmod 按文档工作（WSL/drvfs 会静默忽略 chmod），
+    # 验的是效果不是动作；runtime.json 含 java_key 明文，权限失效必须告警
+    try:
+        os.chmod(p, 0o600)
+        mode = stat.S_IMODE(os.stat(p).st_mode)
+        if mode != 0o600:
+            _warn(f"runtime.json 权限异常（{oct(mode)}，期望 0600）——"
+                  "key 可能被同机其他用户读取，请检查文件系统（WSL 挂载盘建议移回 Linux 原生盘）")
+    except OSError as e:
+        _warn(f"runtime.json 权限校验失败：{e}")
+
+
+def _warn(msg: str) -> None:
+    """告警出口：server 日志（排障真源），失败静默——不阻断业务主链。"""
+    try:
+        with open("/tmp/vod_mcp_server.log", "a", encoding="utf-8") as f:
+            f.write(f"warn {msg}\n")
+    except Exception:
+        pass
 
 
 def _fetch_anon_token() -> str | None:
