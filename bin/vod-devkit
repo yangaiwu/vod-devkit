@@ -153,8 +153,53 @@ def _strip_codex_vod_blocks(text: str) -> str:
     return "\n".join(out).rstrip()
 
 
+_AGENTS_MARKER_BEGIN = "<!-- vod-devkit:feedback-skill BEGIN -->"
+_AGENTS_MARKER_END = "<!-- vod-devkit:feedback-skill END -->"
+
+# codex 无 skill 机制，AGENTS.md（每次任务自动读取，总量 32KiB 有截断）是
+# 技能层软约束的唯一载体——工具描述只装硬约束最低保障，采集质量方法论
+# （字段分级/编造禁例/预检/回执话术）必须随安装落到这里。紧凑块+标记幂等。
+_AGENTS_SKILL_BLOCK = _AGENTS_MARKER_BEGIN + """
+## VOD 反馈采集（vod_submit_voices 使用纪律）
+- 触发（三条件可判定）：用户表达对**本产品**的否定/建议（慢/错/卡/缺功能/希望支持）；用户明确要求提交反馈。产品问答、闲聊、讨论第三方事物→不采集不激活。
+- 字段分级：content=用户原话🔒原样保留（只做脱敏，禁止改写/补充情感结论）；title=从表述提炼核心问题（不手拼，引擎截断）；分类=从内容推断三分类之一（功能建议/用户体验/产品缺陷），判断不了不填（引擎重判兜底）。
+- 推断≠编造：✅"补全经常卡住"→分类产品缺陷；❌用户只说了产品名→写成"体验不好"（编造，实锤事故）；❌用户提问"X是什么"→不是反馈，不采集。
+- 调用前预检（不过不调）：①content=用户原话？②构成一条反馈（有具体对象/现象）？裸产品名/纯提问/闲聊→先澄清；③分类与内容相符？
+- 不追问：内容太泛引导一次，不补就按原话提交或放弃；禁止反复追问、禁止脑补细节。
+- 确认与回执：提交前征得用户同意（confirmed=true），一次一批；回执对人话（"已收录，产品团队会看到"）；voiceId 不展示给用户（编号噪音，仅供你对账）；失败说"已暂存本机稍后自动重试"，禁止复述 HTTP 状态码/指纹等内部字段。
+- 职责边界：产品问答/对比/内部机制解释不在职责内，一句"不在反馈功能范围内"交回宿主。
+""" + _AGENTS_MARKER_END
+
+
+def _strip_agents_vod_block(text: str) -> str:
+    """幂等剥离 AGENTS.md 中带标记的 vod-devkit 技能块。"""
+    lines, skipping, out = text.splitlines(), False, []
+    for line in lines:
+        if line.strip() == _AGENTS_MARKER_BEGIN:
+            skipping = True
+            continue
+        if line.strip() == _AGENTS_MARKER_END:
+            skipping = False
+            continue
+        if not skipping:
+            out.append(line)
+    return "\n".join(out).rstrip()
+
+
+def _install_codex_agents() -> Path:
+    """codex 技能层载体：~/.codex/AGENTS.md 幂等合并 vod-devkit 技能紧凑块。"""
+    agents = Path.home() / ".codex" / "AGENTS.md"
+    agents.parent.mkdir(parents=True, exist_ok=True)
+    text = agents.read_text(encoding="utf-8") if agents.exists() else ""
+    text = _strip_agents_vod_block(text)
+    agents.write_text(text.rstrip() + "\n\n" + _AGENTS_SKILL_BLOCK + "\n", encoding="utf-8")
+    print(f"已写入 Codex 技能块：{agents}（AGENTS.md，随会话自动读取）")
+    return agents
+
+
 def _install_codex(args, packs: str) -> Path:
-    """Codex：~/.codex/config.toml 的 [mcp_servers.vod-devkit] 表（幂等重写）。"""
+    """Codex：~/.codex/config.toml 的 [mcp_servers.vod-devkit] 表（幂等重写）
+    + AGENTS.md 技能紧凑块（codex 无 skill 机制的技能层载体，幂等）。"""
     conf = Path.home() / ".codex" / "config.toml"
     conf.parent.mkdir(parents=True, exist_ok=True)
     text = conf.read_text(encoding="utf-8") if conf.exists() else ""
@@ -167,6 +212,7 @@ def _install_codex(args, packs: str) -> Path:
              f'\n[mcp_servers.vod-devkit.env]\n{env_lines}\n')
     conf.write_text(text.rstrip() + "\n" + block, encoding="utf-8")
     print(f"已写入 Codex 配置：{conf}（重启 Codex 会话生效）")
+    _install_codex_agents()
     return conf
 
 

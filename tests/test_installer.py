@@ -223,6 +223,26 @@ def test_install_product_accepts_name_or_id(env):
     assert rt["product"] == "651"
 
 
+def test_install_codex_agents_skill_block(env):
+    """codex 无 skill 机制——AGENTS.md 是技能层载体：随 install 幂等写入
+    vod-devkit 技能紧凑块（触发条件/字段分级/编造禁例/预检/回执话术）。"""
+    cli(env, "install", "--target", "codex", "--product", "CodeArts")
+    agents = env["home"] / ".codex" / "AGENTS.md"
+    assert agents.exists()
+    text = agents.read_text()
+    assert text.count("vod-devkit:feedback-skill") == 2  # BEGIN/END 各一
+    for key in ("推断≠编造", "调用前预检", "不追问", "职责边界", "voiceId 不展示"):
+        assert key in text
+    # 二次安装幂等：不重复成块
+    cli(env, "install", "--target", "codex", "--product", "CodeArts")
+    assert agents.read_text().count("## VOD 反馈采集") == 1
+    # 卸载/重装其他目标不影响既有内容（块外文本保留）
+    agents.write_text("# 用户自有内容\n\n" + text)
+    cli(env, "install", "--target", "codex", "--product", "CodeArts")
+    t2 = agents.read_text()
+    assert "用户自有内容" in t2 and t2.count("## VOD 反馈采集") == 1
+
+
 def test_install_rejects_when_catalog_unreachable(env):
     """目录不可达（引擎 500/离线）→ 拒绝安装：宁可不装不可装错。"""
     env["engine"]["state"]["meta_up"] = False
