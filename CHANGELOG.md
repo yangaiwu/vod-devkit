@@ -106,3 +106,13 @@
 - a0bd37f feat: 身份界定定稿（归属/授权分离，外部分析对表：三处不采纳+签名回执记P2）；内容边界≤2000落码（U32）；方案一页纸；S14-S16/U32-U34，24 用例全绿
 - 01e61cc ci: pre-push 本地机器门禁（平台 Actions 不可用期间的替代，实测隔离为账号级平台问题）
 
+
+## v0.2.0（2026-11-05）
+
+- cd37786 feat(D-drift-lock+宿主接入对表): devkit 对表三件落地——①技能拷贝件漂移锁：install 记 skillHashes 指纹→doctor 比对（篡改/缺失 FAIL 引导重装；拒绝 skills-as-MCP-data 架构迁移的依据=规模变量，漂移可检先落地）②opencode /vod-doctor 自检命令随装（devkit_info/auth_status/list_submitted+key 禁令）③scripts/smoke_hosts.py 三宿主连通冒烟（无宿主 SKIP 语义；真机三 PASS）。hooks 层拒绝理由修正为威胁面对照（devkit hook=封 shell 里 hcloud 绕行路 2665 行对抗；囤积链无破坏面无绕行路）。proposal S38-S40+design 九节对照表；75 用例绿
+- 80117b4 docs+test(D-codex-plugin-1 收口): ①proposal 新增 S36（插件自包含+stale 缓存治理+校验设备锚点）/S37（设备锚点一致性协议级）场景用例 ②design 增第八节 Codex 原生插件接入（机制实测/约束三层分工表/自包含与缓存治理/宿主能力判定纪律）③新增 S37 协议级测试：桩引擎捕获 token/meta 请求头比对设备锚点+UA 一致性+纯 hex 断言；73 用例绿
+- 4c65af6 feat(D-codex-plugin-1 增补): devkit 对表三件采纳——①install 前清 stale 插件缓存（~/.codex/plugins/{marketplaces,cache}/vod-local，缓存不自动失效）②插件自包含：.mcp.json 改 python3+./vod_mcp/server.py 相对路径+cwd（去 npm -g 前置），sync_plugin.py 同步 vod_mcp+烧录 build-info.json 进插件包（第四版本失位点实锤：契约 version 滞留 0.1.0，vod_devkit_info 假象——release.sh 同步点 3→4）③plugin.json 补 interface 元数据；安装器校验探针补设备锚点（token/meta 同 device+UA，S1 设备绑定）；自包含契约锁测试新增；72 用例绿；真机闭环：重装→codex exec 报 version=0.1.12
+- 3ea554b feat(D-codex-plugin-1 codex 原生插件接入终态): 实测推翻'codex 无 skill 机制'——0.166 有 codex plugin add/marketplace+.codex-plugin/plugin.json(skills+mcpServers)+skills 渐进式加载；AGENTS.md 方案作废（降级模拟），改原生插件：仓内 plugins/vod-devkit（SKILL.md 采集工作流全量+.mcp.json）+本地 marketplace 清单；bin 新增 serve 子命令（.mcp.json 可移植入口）；install --target codex 切原生路径+清理旧 config.toml 段/AGENTS.md 块（同名双注册防）；工具描述修 S1 口径冲突（用户自报产品不采信不覆盖）。proposal S35+decisions D-codex-plugin-1（含方法论教训：判定宿主能力必须翻全 --help 子命令树）；真机闭环（marketplace→add→提单不反问→product_id 落库）；72 用例绿
+- 599478b feat(D-codex-agents-1): codex 技能层载体落地——codex 无 skill 机制，采集质量方法论（触发三条件/content🔒字段分级/推断≠编造禁例/预检三项/不追问/回执话术/职责边界）此前在 codex 上裸奔（工具描述只装硬约束）。install --target codex 随装幂等写入 ~/.codex/AGENTS.md 技能紧凑块（标记剥离幂等，用户自有内容保留）。工具描述同步修口径冲突：删除'用户明确要求其他产品可显式传参覆盖'（违背 S1 同源原则——用户自报产品一律不采信不覆盖，照部署产品提交正文原样）。tags 语义注释（problem_type:云声三分类入标题前缀，非 n01 六类）。新增 AGENTS.md 幂等/内容保留测试锁；72 用例绿
+- acfcc4d fix(D-product-id-2 收口): submit_voices 描述补归因话术并前置——codex 等 MCP-only 宿主不加载 skill，模型唯一约束源是工具描述；原描述零归因话术导致用户提单时被反问'什么产品'（T7d 后已废除的旧职责话机复活）。话术前置防宿主描述截断；外部对表建议采纳：约束三层（工具描述/参数描述/非required 结构）+AGENTS.md 仅冗余；其 .codex-plugin/capability_directories 体系与本机 codex CLI v0.166 实测机制不符未采纳（待证据）。71 用例绿；codex 真机行为验证：提单不带 product 不再反问、直接安装绑定归因提交落库
+
