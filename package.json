@@ -1,6 +1,6 @@
 {
   "name": "vod-devkit",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "VOD 用户声音采集插件——MCP server + 技能 + 声明式护栏，把 agent 产品的用户反馈安全送进 VOD 平台",
   "license": "MIT",
   "type": "module",
