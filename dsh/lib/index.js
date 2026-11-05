@@ -152,8 +152,12 @@ export function apply(ctx, config) {
     ctx.on("webserver/index-inject", (table) => {
         table.push({ kind: "global", name: "__VOD_DSH_UI_PRODUCT__",
             value: readCfg(config?.product, '') || '' });
-        table.push({ kind: "global", name: "__VOD_DSH_UI_BASE__",
-            value: readCfg(config?.apiBase, 'https://vod-dev.topxtopx.com') || '' });
+        // UI base 默认同源（''，宿主代理 /rest/）；仅跨域部署显式配 uiBase 才注入绝对地址
+        // （apiBase 是 server 半自己发请求用的，浏览器同源策略下不能直接给页面）
+        const uiBase = readCfg(config?.uiBase, '');
+        if (uiBase) {
+            table.push({ kind: "global", name: "__VOD_DSH_UI_BASE__", value: uiBase });
+        }
     });
     const cfg = () => ({
         base: (readCfg(config?.apiBase, 'https://vod-dev.topxtopx.com') || '').replace(/\/+$/, ''),
