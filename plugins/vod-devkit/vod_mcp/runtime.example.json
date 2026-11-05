@@ -1,0 +1,6 @@
+{
+  "workflow_base": "http://127.0.0.1:8000",
+  "workflow_key": "<WORKFLOW_API_KEY 或留空（R0 上线前）>",
+  "java_base": "https://vod-dev.topxtopx.com",
+  "java_key": "<VOD_JAVA_API_KEY>"
+}

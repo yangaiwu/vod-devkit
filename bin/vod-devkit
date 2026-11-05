@@ -183,10 +183,6 @@ def _install_codex(args, packs: str) -> Path:
     if not codex:
         print("[vod-devkit] 未找到 codex CLI，无法走原生插件安装", file=sys.stderr)
         sys.exit(2)
-    if not shutil.which("vod-devkit"):
-        print("[vod-devkit] PATH 上没有 vod-devkit 命令（插件 .mcp.json 依赖它拉起 MCP server）。\n"
-              "  先执行：npm i -g vod-devkit（≥0.1.12）", file=sys.stderr)
-        sys.exit(2)
     conf = Path.home() / ".codex" / "config.toml"
     if conf.exists():  # 历史遗留：config.toml MCP 段与插件同名=双注册，移除
         text = conf.read_text(encoding="utf-8")
@@ -210,6 +206,13 @@ def _install_codex(args, packs: str) -> Path:
         return r.stdout
 
     mp_name = "vod-local"
+    # devkit 卫生实践：stale cache 先清——codex 插件缓存不自动失效，不清则
+    # 重装/升级后旧版本残留（marketplace 指向与 cache 内容漂移）
+    for stale in (Path.home() / ".codex" / "plugins" / "marketplaces" / mp_name,
+                  Path.home() / ".codex" / "plugins" / "cache" / mp_name):
+        if stale.exists():
+            shutil.rmtree(stale)
+            print(f"已清理 stale 插件缓存：{stale}")
     ml = subprocess.run([codex, "plugin", "marketplace", "list"], capture_output=True, text=True, timeout=120).stdout
     if mp_name not in ml:
         _run([codex, "plugin", "marketplace", "add", str(mp_root)])
@@ -241,14 +244,21 @@ def _validate_product_or_exit(product: str, base: str) -> bool:
     未命中/目录不可达一律拒绝安装并给可执行引导（宁可不装不可装错）。"""
     import urllib.request
     import urllib.error
+    import uuid
     api_prefix = "/rest/developer/manager/hdvodmngservice/v1"
     key = os.environ.get("VOD_JAVA_API_KEY", "")
     token = ""
+    # 全程一致的设备锚点（S1 设备绑定：token 与后续请求必须同 device/UA，
+    # 否则 meta 401 设备不匹配；每次装机一个新锚点，一次校验只耗一枚令牌）
+    device = uuid.uuid4().hex[:32]
+    ua = "vod-devkit-installer/1"
 
     def _get(url: str):
         auth = key or token
         req = urllib.request.Request(url, headers={
             "content-type": "application/json",
+            "X-Vod-Device-Id": device,
+            "User-Agent": ua,
             **({"authorization": f"Bearer {auth}"} if auth else {}),
         })
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -258,7 +268,8 @@ def _validate_product_or_exit(product: str, base: str) -> bool:
         if not key:
             req = urllib.request.Request(  # 零字段匿名令牌（方案 C 同链）
                 f"{base}{api_prefix}/external/token", data=b"{}",
-                headers={"content-type": "application/json"}, method="POST")
+                headers={"content-type": "application/json", "X-Vod-Device-Id": device,
+                         "User-Agent": ua}, method="POST")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 body = json.loads(resp.read().decode("utf-8", "replace") or "{}")
             token = (body.get("data") or {}).get("token") or body.get("token") or ""

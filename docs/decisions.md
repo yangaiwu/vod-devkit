@@ -267,3 +267,9 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 分发形态：仓内 `plugins/vod-devkit/`（插件）+ `plugins/.agents/plugins/marketplace.json`（本地 marketplace，root=仓 plugins/ 目录）；bin 新增 `serve` 子命令（.mcp.json 以 `vod-devkit serve` 可移植拉起 server，npm i -g 前置）；双注册防：安装时清理旧 config.toml MCP 段与 AGENTS.md 块
 - 真机闭环：marketplace add→plugin add（installed, enabled）→codex exec 提单不带 product 不反问、经安装绑定归因落库（product_id=1）
 - 方法论教训：判定宿主能力前必须把 `--help` 子命令树翻全（plugin 子命令当时就在），单点探测（mcp/exec）得出的"宿主不支持 X"结论不可靠
+
+## D-codex-plugin-1 增补（2026-11-05 晚）：devkit 对表三件采纳+第四版本失位点
+- devkit（huaweicloud-devkit v2）codex 接入实测对照：同布局（仓根 .agents marketplace + .codex-plugin + .mcp.json），成熟度三差异已采纳——①安装前清 stale 插件缓存（~/.codex/plugins/{marketplaces,cache}/<name>，缓存不自动失效）②.mcp.json 自包含（python3 + ./vod_mcp/server.py 相对路径 + cwd "."，插件包自带 server，去掉 npm -g 全局命令前置）③plugin.json 补 interface 元数据（displayName/defaultPrompt/capabilities）。policy 保持 AVAILABLE/ON_INSTALL（第三方插件用户主动装，不抄官方预装语义）
+- 第四版本失位点实锤：contract/tools.schema.json "version" 从未被 release.sh 同步（vod_devkit_info 恒 0.1.0 假象，原生插件真机实锤）；release.sh 同步点 3→4（含契约）+sync_plugin.py 烧录 build-info.json 进插件包（provenance 真源随包）；自包含契约锁测试（server 漂移/相对路径/build-info 断言）
+- 安装器校验探针补设备锚点：token+meta 全程同 X-Vod-Device-Id+UA（S1 设备绑定，缺设备头=meta 401 或 legacy 锚点日 5 次烧满；每次装机新锚点一次校验一枚令牌）
+- 本地验证实例已重建至 feat/kb-query-auth 最新（含 50/h+catalog）

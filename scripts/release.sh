@@ -38,11 +38,13 @@ open('pyproject.toml','w').write(t)
 i = open('vod_mcp/__init__.py').read().replace(f'__version__ = "{cur}"', f'__version__ = "{new}"')
 open('vod_mcp/__init__.py','w').write(i)
 
-# 三处同步硬断言（教训：字符串替换静默 no-op——__init__ 曾滞留 0.1.0 五个版本）
+# 三处+契约 版本同步硬断言（教训：字符串替换静默 no-op——__init__ 曾滞留 0.1.0
+# 五个版本；contract/tools.schema.json 又滞留（vod_devkit_info 版本号假象））
 import sys as _s
 for f, pat in [("package.json", f'"version": "{new}"'),
                ("pyproject.toml", f'version = "{new}"'),
-               ("vod_mcp/__init__.py", f'__version__ = "{new}"')]:
+               ("vod_mcp/__init__.py", f'__version__ = "{new}"'),
+               ("contract/tools.schema.json", f'"version": "{new}"')]:
     if pat not in open(f).read():
         print(f"FAIL: {f} 版本未同步到 {new}，中止发版", file=_s.stderr); _s.exit(1)
 EOF

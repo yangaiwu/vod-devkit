@@ -177,10 +177,13 @@ def test_install_opencode_idempotent(env):
 # ---- codex：TOML 表形态 + 幂等（同表不重复） ----
 
 def test_install_codex_native_plugin_and_legacy_cleanup(env):
-    """D-codex-agents-1 终态：--target codex 走原生插件路径（codex plugin
+    """D-codex-plugin-1 终态：--target codex 走原生插件路径（codex plugin
     marketplace/add），并清理历史遗留 config.toml MCP 段与 AGENTS.md 技能块
-    （同名双注册防）。stub codex/vod-devkit 记录调用。"""
+    （同名双注册防）+ stale 插件缓存（devkit 卫生实践）。stub codex/vod-devkit。"""
     home = env["home"]
+    stale_cache = home / ".codex" / "plugins" / "cache" / "vod-local"
+    stale_cache.mkdir(parents=True, exist_ok=True)
+    (stale_cache / "junk").write_text("old")
     legacy_conf = home / ".codex" / "config.toml"
     legacy_conf.parent.mkdir(parents=True, exist_ok=True)
     legacy_conf.write_text('[mcp_servers.vod-devkit]\ncommand = "old"\n', encoding="utf-8")
@@ -189,8 +192,9 @@ def test_install_codex_native_plugin_and_legacy_cleanup(env):
     for _ in range(2):
         r = cli(env, "install", "--target", "codex", "--product", "CodeArts")
         assert r.returncode == 0, r.stderr
-    # 历史遗留清理
+    # 历史遗留清理 + stale cache 清理
     assert "mcp_servers.vod-devkit" not in legacy_conf.read_text()
+    assert not stale_cache.exists(), "stale 插件缓存必须先清（重装旧版残留防）"
     a = legacy_agents.read_text()
     assert "旧技能块" not in a and "用户自有内容" in a
     # 原生插件路径调用（stub codex 记录）
@@ -246,6 +250,27 @@ def test_install_product_accepts_name_or_id(env):
     cli(env, "install", "--target", "codex", "--product", "651")  # 平台主键 id
     rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
     assert rt["product"] == "651"
+
+
+def test_plugin_selfcontained_contract(env):
+    """插件自包含契约锁（devkit 卫生对齐）：.mcp.json 相对路径指向包内 server；
+    vod_mcp 随包携带且与源码同步（sync_plugin.py 的回归锁——漂移即红）。"""
+    import hashlib
+    plug = env["repo"] / "plugins" / "vod-devkit"
+    mcp = json.loads((plug / ".mcp.json").read_text())
+    srv = mcp["mcpServers"]["vod-devkit"]
+    assert srv["command"] == "python3" and srv["cwd"] == "."
+    assert srv["args"] == ["./vod_mcp/server.py"]  # 相对路径=缓存隔离后仍可拉起
+    pj = json.loads((plug / ".codex-plugin" / "plugin.json").read_text())
+    assert "interface" in pj and pj["skills"] == "./skills/"
+    bundled = plug / "vod_mcp" / "server.py"
+    src = env["repo"] / "vod_mcp" / "server.py"
+    assert bundled.exists(), "插件包必须自带 server（sync_plugin.py 产物已提交）"
+    h = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+    assert h(bundled) == h(src), "插件包内 server 与源码漂移——跑 scripts/sync_plugin.py"
+    assert not (plug / "vod_mcp" / "runtime.json").exists()  # 真源账本不随包
+    bi = json.loads((plug / "build-info.json").read_text())  # provenance 版本真源随包
+    assert bi["version"] and bi["commitSha"], "build-info 未烧录=vod_devkit_info 版本号失真"
 
 
 def test_install_rejects_when_catalog_unreachable(env):
