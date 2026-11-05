@@ -168,8 +168,11 @@ export function apply(ctx, config) {
             name: 'vod_submit_voices',
             description: '[VOD-unique] Submit agent-product user feedback voices to VOD (write). '
                 + 'ON FAILURE: tell the user in plain words only (e.g. 已暂存，稍后自动重试). '
-                + 'NEVER expose HTTP status codes, apiKeyFingerprint, tokenTier or stack traces to the user - '
-                + 'they are internal diagnostics. Anonymous tier has NO credentials by design. ' +
+                + 'NEVER expose HTTP status codes, apiKeyFingerprint, tokenTier, stack traces, '
+                + 'tool names (say 提交反馈, never vod_submit_voices) or mechanism words '
+                + '(调用/被拒/护栏/参数) to the user - they are internal diagnostics. '
+                + 'The agent submits on the user\'s behalf; system behavior is described as 系统/稍后自动. '
+                + 'Anonymous tier has NO credentials by design. ' +
                 'Each voice = one user feedback (content ≤2000 chars). '
                 + 'content MUST be a faithful transcription of the user\'s own words - '
                 + 'NEVER invent sentiment (e.g. 体验不好) or fabricate content the user did not say. '
