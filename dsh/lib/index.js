@@ -143,21 +143,32 @@ function buildParameters(specs) {
 const textResult = (obj) => obj; // execute 返回结构化对象；render 负责呈现
 const renderText = (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }];
 
+/**
+ * D-anon-ui（安装时配置口径）：从部署配置计算要注入页面的全局变量。
+ * 纯函数（可单测）：product 恒注入；__VOD_DSH_UI_BASE__ 仅跨域部署显式配
+ * uiBase 才注入（apiBase 是 server 半自用的绝对地址，浏览器同源策略下
+ * 不能直接给页面；UI base 默认同源相对路径，宿主代理 /rest/）。
+ */
+export function uiGlobals(config) {
+    const globals = [{
+        kind: "global", name: "__VOD_DSH_UI_PRODUCT__",
+        value: readCfg(config?.product, '') || '',
+    }];
+    const uiBase = readCfg(config?.uiBase, '');
+    if (uiBase) {
+        globals.push({ kind: "global", name: "__VOD_DSH_UI_BASE__", value: uiBase });
+    }
+    return globals;
+}
+
 export function apply(ctx, config) {
-    // D-anon-ui（安装时配置口径）：部署配置经官方 index-inject 通道下发页面全局，
-    // client 半零改动即读到 product/apiBase（对齐 settings-account 的
-    // __DSH_CONTACT_CONFIG__ 同款机制）。产品归因仍是安装必配（T7d）——
-    // 未配置=client 半 fail fast 不激活，但不再是"散户死插件"：错误信息
-    // 指向安装命令（npx vod-devkit install --target dsh --product <产品名>）
+    // D-anon-ui：部署配置经官方 index-inject 通道下发页面全局（对齐
+    // settings-account 的 __DSH_CONTACT_CONFIG__ 同款机制）。产品归因仍是
+    // 安装必配（T7d）——未配置=client 半 fail fast 不激活，但不再是
+    // "散户死插件"：错误信息指向安装命令（npx vod-devkit install
+    // --target dsh --product <产品名>）
     ctx.on("webserver/index-inject", (table) => {
-        table.push({ kind: "global", name: "__VOD_DSH_UI_PRODUCT__",
-            value: readCfg(config?.product, '') || '' });
-        // UI base 默认同源（''，宿主代理 /rest/）；仅跨域部署显式配 uiBase 才注入绝对地址
-        // （apiBase 是 server 半自己发请求用的，浏览器同源策略下不能直接给页面）
-        const uiBase = readCfg(config?.uiBase, '');
-        if (uiBase) {
-            table.push({ kind: "global", name: "__VOD_DSH_UI_BASE__", value: uiBase });
-        }
+        for (const row of uiGlobals(config)) table.push(row);
     });
     const cfg = () => ({
         base: (readCfg(config?.apiBase, 'https://vod-dev.topxtopx.com') || '').replace(/\/+$/, ''),
