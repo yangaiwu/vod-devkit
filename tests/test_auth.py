@@ -364,3 +364,35 @@ def test_auth_status_no_key_material_anywhere(monkeypatch):
     monkeypatch.setattr(tools, "probe_key", lambda: {"ok": None, "reason": "unreachable"})
     out = json.dumps(tools.auth_status({}, client_info={"name": "t"}))
     assert secret not in out, "key 明文禁止出现在任何工具输出"
+
+
+# ---- VOD-DEVICE：设备锚点 header 协议锁 ----
+
+def test_device_header_on_all_external_requests(monkeypatch):
+    """锚点协议锁：所有 /external 请求（签发+提交）必须携带 X-Vod-Device-Id，
+    取值=install_nonce（首启自生成常驻）——引擎据此建每设备独立锚点。"""
+    import urllib.request
+    seen = {}
+
+
+    class FakeResp(io := __import__("io").BytesIO):
+        def __init__(self):
+            self.status = 200
+        def read(self):
+            return b"{}"
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, *a, **kw):
+        seen["device"] = req.headers.get("X-vod-device-id")
+        seen["auth"] = req.headers.get("Authorization")
+        return FakeResp()
+
+    monkeypatch.setattr(tools, "_install_nonce", lambda: "deadbeef")
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    tools._http("GET", "/rest/developer/manager/hdvodmngservice/v1/external/meta", None)
+    assert seen["device"] == "deadbeef", "设备锚点 header 必须随所有 external 请求上送"
+    assert seen["auth"] == "Bearer k"

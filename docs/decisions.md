@@ -214,3 +214,30 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
   任何"装完即有 key"的分发形态=违规
 - 隐患澄清（本轮结论）：隐患根源=「预置随分发」的使用纪律，非 key 代码本身——
   fail fast/写后验/探针全是往误用更难方向加的护栏，拆除即回退到静默降级旧缺陷
+
+## D-inbox-2（2026-11-05）匿名分发：产品维度日天花板（用户拍板）
+- 匿名可建 issue：vod.issue-sync.anonymous-distribution 开（默认 false）→
+  匿名行 APPROVED 直建；关=PENDING 冻结（默认态）。legacy 永远 PENDING
+- 天花板按产品维度各 500/天（anonymous-daily-cap 可配）：产品间互不挤占，
+  单产品打爆不拖累其他产品；尝试数计额（失败重试也占——防绕过上限外呼）
+- 触顶行为：匿名行留 APPROVED 当天跳过（次日自动恢复），不标 FAILED，
+  formal 不受牵连；计数=countAnonymousCreatedToday（status<>PENDING 当日行）
+- 双层闸独立：入库层（500/30天+日50 管收）与分发层（产品 500/天 管发）
+- 引擎真源=VOD-Project docs/vod-voices-api/{proposal V44, design §十}；
+  回归 4 例+legacy 锁
+
+## D-device-anchor-1（2026-11-05）匿名令牌身份锚点设备化（两仓联动，引擎 docs/vod-device-anchor）
+- 根因定案：匿名锚点 sha256(ip|ua) 在网络层找身份——preset 分发下同产品 UA 相同
+  +企业 NAT IP 相同=全公司收敛一个锚点，签发 5/天堵死装机。调数值=永久拆防线，
+  根本修法=锚点迁设备层
+- 引擎：token/提交请求携带 X-Vod-Device-Id（客户端首启自生成随机 hex=install_nonce，
+  零字段不破/可重置/非硬件标识符——合规口径引 Anthropic deviceMid 同构）；锚点
+  sha256("dev:"+id)，每设备独立 5/天签发+50/500 配额（防线全量复用零改动）；IP 层
+  降兜底（device 路径 60/h，legacy 维持 5/h）；A2 绑定升级=ua_hash 列存 sha256(deviceId)
+  （复用列零 DDL）；存量令牌 UA 路径不变；非法 device_id 降级 legacy 不拒
+- 插件：_http 统一出口对所有 /external 请求附 X-Vod-Device-Id=install_nonce，零新增状态
+- 场景矩阵：用户自装机✅/厂商自己服务器→host key 直连（红线已有）/厂商预配逐台
+  install✅/母机镜像克隆→装机 checklist（镜像冻结前清 runtime.json）+preset uptime
+  判据告警/企业共享服务器→代理 key
+- 测试：引擎 VodDeviceAnchorTest 8 条（UT1-UT9）+存量 30 条全绿；插件协议锁 1 条
+  +克隆判据 2 条；legacy 语义澄清=存量令牌只认 UA 绑定，device header 不参与

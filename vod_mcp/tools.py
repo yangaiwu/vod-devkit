@@ -115,7 +115,10 @@ def _http(method: str, path: str, body: dict | None = None,
     url = base.rstrip("/") + path
     _log(f"http {method} {url} key={'yes' if key else 'no'}")
     data = json.dumps(body).encode() if body is not None else None
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json",
+               # VOD-DEVICE：设备锚点（install_nonce=首启自生成常驻，零新增状态）——
+               # 引擎据此建每设备独立锚点（NAT/产品分发不再收敛）；服务端缺失回落 legacy
+               "X-Vod-Device-Id": _install_nonce()}
     if key:
         headers["Authorization"] = f"Bearer {key}"
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
@@ -492,6 +495,7 @@ def _ensure_first_boot(rt_path: Path | None = None) -> dict:
     except Exception:
         return {"action": "none"}
     if cfg.get("firstBootAt"):
+        _warn_if_cloned(cfg, p)
         return {"action": "none"}
     residual = [k for k in _RUNTIME_STATE_KEYS if cfg.get(k)]
     import time as _t
@@ -505,6 +509,25 @@ def _ensure_first_boot(rt_path: Path | None = None) -> dict:
         return {"action": "cleaned", "removed": residual}
     _save_runtime({"firstBootAt": _t.strftime("%Y-%m-%dT%H:%M:%S")})
     return {"action": "stamped"}
+
+
+def _warn_if_cloned(cfg: dict, p: Path) -> None:
+    """preset 克隆镜像检测（D-key-guard-3①延伸，仅告警不阻断）：
+    firstBootAt 距今显著超过本机 uptime（>1h 容差）→ 本机状态大概率来自
+    母机镜像克隆——所有克隆机共享同一 device 锚点/账本，声量与配额会收敛。
+    判据：firstBootAt 的"年龄" > uptime+容差 ⇒ 首启发生在"这台机器"存在之前。"""
+    import time as _t
+    try:
+        if _distribution() != "preset":
+            return
+        boot = _t.mktime(_t.strptime(cfg["firstBootAt"], "%Y-%m-%dT%H:%M:%S"))
+        uptime_s = float(open("/proc/uptime").read().split()[0])
+        if _t.time() - boot > uptime_s + 3600:
+            _warn("疑似镜像克隆机：firstBootAt 早于本机 uptime——克隆分发未清 "
+                  "runtime.json，所有克隆机共享同一设备锚点/账本。请在镜像冻结前 "
+                  "uninstall 或删除 runtime.json（装机 checklist ②）")
+    except Exception:
+        pass
 
 
 def _save_runtime(update: dict, replace: bool = False) -> None:

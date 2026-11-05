@@ -173,3 +173,29 @@ def test_log_rotation_cap(tmp_path):
     assert big.stat().st_size < 1024 * 1024 + 4096, "轮转后不得继续超限膨胀"
     assert "new-line-after-rotation" in big.read_text()
     assert (tmp_path / "vod_mcp_server.log.old").exists(), "旧日志轮转保留"
+
+
+def test_clone_image_detection_warns(tmp_path, monkeypatch):
+    """preset + firstBootAt 早于本机 uptime → 克隆告警（仅日志，不阻断）。"""
+    from vod_mcp import tools
+    import time as _t
+    boot_age = 3600 * 24 * 7  # 首启发生在 7 天前
+    cfg = {"firstBootAt": _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime(_t.time() - boot_age)),
+           "product": "GTD"}
+    warned = []
+    monkeypatch.setattr(tools, "_distribution", lambda: "preset")
+    monkeypatch.setattr(tools, "_warn", lambda m: warned.append(m))
+    tools._warn_if_cloned(cfg, tmp_path / "runtime.json")
+    assert any("克隆" in w for w in warned), "镜像克隆机必须告警"
+    assert tools._ensure_first_boot.__doc__  # 只告警不清理（firstBootAt 保留）
+
+
+def test_no_clone_warning_on_fresh_boot(tmp_path, monkeypatch):
+    from vod_mcp import tools
+    import time as _t
+    cfg = {"firstBootAt": _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime(_t.time() - 60))}
+    warned = []
+    monkeypatch.setattr(tools, "_distribution", lambda: "preset")
+    monkeypatch.setattr(tools, "_warn", lambda m: warned.append(m))
+    tools._warn_if_cloned(cfg, tmp_path / "runtime.json")
+    assert not warned, "首启晚于 uptime（正常新装机）不得误报"
