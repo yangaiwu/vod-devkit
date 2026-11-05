@@ -43,12 +43,7 @@ const UI_PRODUCT = (typeof globalThis !== 'undefined'
 // 本身承担（云声链同款：选"功能建议"→标题【功能建议】→n01 判六类之一）。
 // 默认不选=不预分类（引擎全量重判——错误预分类比留空更糟）；
 // 选中=采集层渠道原生分类，以【类型名】标题前缀正式入库（T7c）。
-const CATEGORIES = [
-  // id/label=云声平台标准枚举（引擎 T7c 映射锚点，不可改）；hint=面向用户的口语引导
-  { id: '功能建议', label: '功能建议', hint: '希望新增能力，或改进现有功能' },
-  { id: '用户体验', label: '用户体验', hint: '能用但别扭：慢、难找、确认烦' },
-  { id: '产品缺陷', label: '产品缺陷', hint: '报错、答非所问、结果不符合预期' },
-];
+
 
 /* 样式：对齐官方 message-feedback 的 dsw 设计令牌 */
 const S = {
@@ -254,7 +249,6 @@ async function retryStashedSubmissions() {
           voices: [{
             title: row.title,
             content: row.content,
-            ...(row.category ? { tags: ['problem_type:' + row.category] } : {}),
           }],
           product: UI_PRODUCT,
         }),
@@ -288,10 +282,11 @@ function FeedbackModal({ onClose }) {
   // 草稿自动保存（借鉴 DSH-Feedback-Bridge）：刷新/重启不丢半截反馈
   const draft = (() => { try { return JSON.parse(localStorage.getItem(LS_DRAFT) || 'null') || {}; } catch (e) { return {}; } })();
   const [content, setContent] = useState(draft.content || '');
-  const [category, setCategory] = useState(draft.category || ''); // '' = 不预分类，引擎重判
+  // 分类已撤（2026-11-05 用户拍板）：n01 引擎全量重判，UI 预分类仅 hint 且
+  // 用户分不清边界——三层认知负担换不来信号质量。表单=单输入框
   useEffect(() => {
-    try { localStorage.setItem(LS_DRAFT, JSON.stringify({ content, category })); } catch (e) {}
-  }, [content, category]);
+    try { localStorage.setItem(LS_DRAFT, JSON.stringify({ content })); } catch (e) {}
+  }, [content]);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null); // {ok, msg}
 
@@ -321,7 +316,7 @@ function FeedbackModal({ onClose }) {
     }
     setBusy(true); setDone(null);
     const row = {
-      title: text.slice(0, 64), category, // voice_title=用户原文前 64 字（单输入框，不加标题摩擦）
+      title: text.slice(0, 64), // voice_title=用户原文前 64 字（单输入框，不加标题摩擦）
       content: text,  // U-S3 重试重建提交体用（本机账本，cap 200）
       // 分类走 tags 正式通道（T7c），description 模板文案已移除
       at: new Date().toISOString(), status: 'failed', error: '',
@@ -384,26 +379,18 @@ function FeedbackModal({ onClose }) {
           {busy ? '提交中…' : '提交'}
         </PrimaryBtn>
       )}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-        {CATEGORIES.map((c) => (
-          <button key={c.id} title={c.hint || ''} style={{
-            fontSize: 12, padding: '4px 10px', cursor: 'pointer',
-            borderRadius: 'var(--dsw-radius-sm, 999px)',
-            background: category === c.id
-              ? 'var(--dsw-alias-state-business-primary, #2563eb)' : 'transparent',
-            color: category === c.id
-              ? 'var(--dsw-alias-label-primary-foreground, #fff)'
-              : 'var(--dsw-alias-label-secondary, #666)',
-            border: '1px solid var(--dsw-alias-border-l3, #ccc)',
-          }}
-            onClick={() => setCategory(category === c.id ? '' : c.id)}>
-            {c.label}{c.hint ? '·' + c.hint : ''}
-          </button>
-        ))}
-      </div>
-      <textarea style={S.textarea} value={content} maxLength={2000}
+      <label htmlFor="vod-fb-content"
+        style={{ fontSize: 11, color: 'var(--dsw-alias-label-secondary, #666)', display: 'block', marginBottom: 4 }}>
+        描述你遇到的问题或想法（会原样转达给产品团队）
+      </label>
+      <textarea id="vod-fb-content" style={S.textarea} value={content} maxLength={2000}
         placeholder="比如：对话响应慢、某个功能找不到入口" autoFocus
+        aria-describedby="vod-fb-content-hint"
         onChange={(e) => setContent(e.target.value)} />
+      <div id="vod-fb-content-hint"
+        style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary, #999)', margin: '2px 0 0' }}>
+        具体现象更容易被受理：哪一步慢、哪里答非所问、期待什么
+      </div>
       <div style={{ fontSize: 11, textAlign: 'right', margin: '4px 0 0',
         color: 'var(--dsw-alias-label-tertiary, #999)' }}>
         {content.length}/2000
@@ -443,7 +430,7 @@ function HistoryPanel() {
                 <div key={i} style={{ fontSize: 11, padding: '4px 0',
                   borderBottom: '1px dashed var(--dsw-alias-border-l2, #eee)' }}>
                   <div style={{ color: 'var(--dsw-alias-label-secondary, #666)' }}>
-                    {(r.at || '').replace('T', ' ').slice(0, 16)}　[{r.category || '未分类'}]　{label(r.status)}
+                    {(r.at || '').replace('T', ' ').slice(0, 16)}　{label(r.status)}
                   </div>
                   <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {(r.title || r.content || '').slice(0, 40)}
