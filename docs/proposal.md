@@ -325,6 +325,12 @@ S33 产品归因主键化解析矩阵（T7i，方案 A，2026-11-05 两仓拍板
   回归：tests/test_auth.py#test_product_id_resolution_t7i /
   #test_meta_catalog_cached_t7i（缓存命中零二次请求+老引擎兼容）。
 
+S34 安装期产品硬校验（D-product-id-2，2026-11-05 用户拍板 B，推翻宿主名宽容口径）
+  install --product 必须命中 meta productCatalog（名字/平台主键 id），未命中或
+  目录不可达一律拒绝安装（宁可不装不可装错）。回归：tests/test_installer.py
+  #test_install_rejects_unregistered_product / #test_install_product_accepts_name_or_id
+  / #test_install_rejects_when_catalog_unreachable（桩引擎协议级）。
+
 ## 三·五、安装溯源与宿主感知（新增需求）
 
 ### 背景与语义

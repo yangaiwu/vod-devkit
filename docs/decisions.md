@@ -252,3 +252,10 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 引擎（VOD-Project feat/kb-query-auth 364af5df）：product 纯数字=selectById 主键精确命中（短路 name 兜底），name 通道保留兼容回落；双列落库+回执 productId；囤积区通用化正名 t_vod_agent_inbox→t_vod_voice_inbox（!152 合入前零成本窗口）；meta 端点组装 productCatalog=[{id,name}]（t_vod_product 真源，目录失败不阻塞基础载荷）
 - 插件（本仓）：三壳统一——配置/注入的名字经 meta productCatalog 解析平台 id 后提交，纯数字 id 透传，目录无此名/不可达（老引擎无 productCatalog 键）→规范名兼容通道（引擎命中同样补落 product_id）不静默丢提交；python 进程 runtime.json 24h 缓存，node/UI 进程内缓存一次
 - 回归：python T7i 2 例（解析矩阵+catalog 缓存/老引擎兼容）共 68 绿；dsh node test fail 0；引擎定向 55 绿（ExternalVoicesServiceImplTest 33+VodIssueSyncServiceImplTest 22）
+
+## D-product-id-2（2026-11-05）：安装期产品硬校验（用户拍板 B，推翻"宿主名是显式合法值"宽容口径）
+- 触发：真机 install --product asdasdasdasd 安装成功——归因前提无效但用户无感知
+- 论据（用户原话逻辑）：--product 是整条采集链的归因前提，没这个前提内置 skill 逻辑（识别/预分类/透传）全部空转；归因错误比报错更糟
+- 决策：install --product 必须命中 meta productCatalog（名字大小写不敏感或平台主键 id 精确），未命中/目录不可达一律 exit 2 拒绝安装（宁可不装不可装错，postinstall 拒绝猜测同源纪律）；运行期显式传参覆盖保持现状（引擎 name 兼容通道是老插件兼容，不是安装期放行理由）
+- 实现：bin/_validate_product_or_exit（无 key 走零字段匿名令牌链；老引擎无 catalog 退 /external/products）；java-api-base 优先级补 env VOD_JAVA_API_BASE（与插件运行时同键）
+- 口径变更连带：--product 帮助文案删"宿主名合法"引导；测试矩阵新增 3 例（未注册拒/hermes 同拒+零副作用、名字或 id 放行、目录不可达拒），桩引擎 engine_stub 进 installer fixture（distribution 同册），71 用例绿

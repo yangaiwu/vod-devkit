@@ -186,10 +186,75 @@ def detect_targets() -> list:
     return found
 
 
+def _validate_product_or_exit(product: str, base: str) -> bool:
+    """D-product-id-2：安装期产品硬校验（B 案，2026-11-05 拍板）。
+    --product 命中 meta productCatalog（名字大小写不敏感或 id 精确）才放行；
+    未命中/目录不可达一律拒绝安装并给可执行引导（宁可不装不可装错）。"""
+    import urllib.request
+    import urllib.error
+    api_prefix = "/rest/developer/manager/hdvodmngservice/v1"
+    key = os.environ.get("VOD_JAVA_API_KEY", "")
+    token = ""
+
+    def _get(url: str):
+        auth = key or token
+        req = urllib.request.Request(url, headers={
+            "content-type": "application/json",
+            **({"authorization": f"Bearer {auth}"} if auth else {}),
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, resp.read().decode("utf-8", "replace")
+
+    try:
+        if not key:
+            req = urllib.request.Request(  # 零字段匿名令牌（方案 C 同链）
+                f"{base}{api_prefix}/external/token", data=b"{}",
+                headers={"content-type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                body = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+            token = (body.get("data") or {}).get("token") or body.get("token") or ""
+        catalog = None
+        status, text = _get(f"{base}{api_prefix}/external/meta")
+        data = (json.loads(text) or {}).get("data") or {}
+        catalog = data.get("productCatalog")
+        if not catalog and token:  # 老引擎 meta 无目录 → 退 /external/products
+            status, text = _get(f"{base}{api_prefix}/external/products") if not key else (None, None)
+            if text:
+                data = (json.loads(text) or {}).get("data") or []
+                catalog = data
+        if not catalog:
+            print("[vod-devkit] 产品校验失败：引擎 meta 无 productCatalog 且 /external/products 不可用。\n"
+                  "  不执行安装（宁可不装不可装错）。请核对 --java-api-base 指向的引擎是否已部署 T7i 版本。",
+                  file=sys.stderr)
+            sys.exit(2)
+        p = product.strip()
+        hit = any(
+            (str(x.get("name") or "").lower() == p.lower())
+            or (str(x.get("id")) == p)
+            for x in catalog if isinstance(x, dict))
+        if not hit:
+            sample = " / ".join(str(x.get("name")) for x in catalog[:8] if isinstance(x, dict))
+            print(f"[vod-devkit] --product '{product}' 不在产品名录（t_vod_product），拒绝安装。\n"
+                  "  归因前提无效=内置采集技能/分类/透传全部空转且用户无感知（归因错误比报错更糟）。\n"
+                  f"  权威名单：GET {api_prefix}/external/products（共 {len(catalog)} 项），示例：{sample} …",
+                  file=sys.stderr)
+            sys.exit(2)
+        return True
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"[vod-devkit] 产品校验不可达（{e.__class__.__name__}），拒绝安装（宁可不装不可装错）。\n"
+              "  请核对网络与 --java-api-base；确需离线安装请联系 VOD 运营。",
+              file=sys.stderr)
+        sys.exit(2)
+
+
 def cmd_install(args):
     from vod_mcp import DEFAULT_JAVA_BASE
     if not args.java_api_base:
-        args.java_api_base = DEFAULT_JAVA_BASE   # 缺省=平台真实地址，不强制用户传
+        # 优先级：--java-api-base > env VOD_JAVA_API_BASE > DEFAULT_JAVA_BASE
+        #（env 与插件运行时同键，安装器跟随同链；测试/CI 用 env 指桩引擎零外呼）
+        args.java_api_base = os.environ.get("VOD_JAVA_API_BASE") or DEFAULT_JAVA_BASE
     write_build_info(strict=False)
     target = args.target
     if target == "auto":
@@ -218,10 +283,19 @@ def cmd_install(args):
             "[vod-devkit] --product 必填：产品归因是安装必配项（与 UI 嵌入注入同口径）。\n"
             "  取值=生态看板产品名（可用 GET /external/products 查询权威名单），如：\n"
             "    --product \"高校AI开发者平台\" / --product \"GTD\" / --product \"Skills门户\"\n"
-            "  反馈关于宿主工具本身时显式传宿主名：--product hermes",
+            "  取值必须在产品名录内（安装期硬校验，D-product-id-2）；完整名单：\n"
+            "    GET /external/products",
             file=sys.stderr)
         sys.exit(2)
     bound_product = args.product
+    # D-product-id-2（2026-11-05 用户拍板 B，推翻"宿主名是显式合法值"宽容口径）：
+    # 安装期产品硬校验——--product 必须命中 meta productCatalog（名字大小写不敏感
+    # 或平台主键 id 精确）。理由：--product 是整条采集链（内置采集技能/分类/透传）
+    # 的归因前提，装错=全套 skill 逻辑空转且用户无感知；归因错误比报错更糟。
+    # 目录不可达（离线/引擎异常）同样拒绝——宁可不装不可装错（postinstall 拒绝
+    # 猜测同源纪律）。插件提交链的 name 兼容通道不受影响（那是老版本插件兼容，
+    # 不是安装期放行理由）。
+    _validate_product_or_exit(args.product, args.java_api_base)
     # D-key-guard-2 红线：preset（产品分发）形态下 key 禁止随包——环境变量里的
     # key 不透传给宿主配置（客户机一律走匿名令牌自领），并当场告警
     distribution = args.distribution

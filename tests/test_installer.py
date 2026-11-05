@@ -20,7 +20,61 @@ def _git(cwd, *args):
 
 
 @pytest.fixture
-def env(tmp_path):
+def engine_stub(tmp_path):
+    """桩引擎（协议级：本地 HTTP 服务器，零外呼）。D-product-id-2 安装期
+    产品硬校验的回归源：meta 带 productCatalog，token 零字段签发。"""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    state = {"meta_up": True}
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _send(self, obj, code=200):
+            body = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path.endswith("/external/meta"):
+                if not state["meta_up"]:
+                    self._send({"code": 500, "message": "stub down"}, 500)
+                    return
+                self._send({"code": 200, "data": {
+                    "products": ["codearts"],
+                    "productCatalog": [
+                        {"id": 31, "name": "CodeArts"},
+                        {"id": 651, "name": "高校AI开发者平台"},
+                        {"id": 663, "name": "GTD"},
+                    ]}})
+                return
+            if self.path.endswith("/external/products"):
+                self._send({"code": 200, "data": [
+                    {"id": 31, "name": "CodeArts"},
+                    {"id": 651, "name": "高校AI开发者平台"}]})
+                return
+            self._send({"code": 404, "message": "no route"}, 404)
+
+        def do_POST(self):
+            if self.path.endswith("/external/token"):
+                self._send({"code": 200, "data": {"token": "stub-token"}})
+                return
+            self._send({"code": 404, "message": "no route"}, 404)
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    yield {"base": f"http://127.0.0.1:{srv.server_port}", "state": state}
+    srv.shutdown()
+
+
+@pytest.fixture
+def env(tmp_path, engine_stub):
     """隔离环境：fake home + 桩 hermes + 仓库克隆（origin=本地 bare，可离线演进）。"""
     home = tmp_path / "home"
     home.mkdir()
@@ -47,8 +101,9 @@ def env(tmp_path):
     e["HOME"] = str(home)
     e["PATH"] = str(stub) + os.pathsep + e["PATH"]
     e.pop("VOD_JAVA_API_KEY", None)
+    e["VOD_JAVA_API_BASE"] = engine_stub["base"]  # 安装校验/绑定全打桩引擎（零外呼）
     return {"home": home, "repo": repo, "bare": bare, "env": e,
-            "hermes_calls": calls, "stub": stub}
+            "hermes_calls": calls, "stub": stub, "engine": engine_stub}
 
 
 def shq(p):
@@ -144,33 +199,61 @@ def test_install_binds_explicit_product(env):
     mf = json.loads((env["repo"] / "install-manifest.json").read_text())
     rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
     assert mf["product"] == "高校AI开发者平台" and rt["product"] == "高校AI开发者平台"
-    # 宿主名=自反馈场景的合法显式值
-    cli(env, "install", "--target", "opencode", "--product", "hermes")
+
+
+# ---- D-product-id-2（2026-11-05 拍板 B）：安装期产品硬校验 ----
+
+def test_install_rejects_unregistered_product(env):
+    """--product 不在产品名录 → 拒绝安装（归因前提无效=采集技能全部空转）。"""
+    r = cli(env, "install", "--target", "codex", "--product", "asdasdasdasd")
+    assert r.returncode == 2
+    assert "不在产品名录" in r.stderr and "权威名单" in r.stderr
+    assert not (env["home"] / ".codex" / "config.toml").exists()  # 零副作用
+    # 宿主名同拒：D-product-id-2 推翻"宿主名是显式合法值"宽容口径
+    r = cli(env, "install", "--target", "opencode", "--product", "hermes")
+    assert r.returncode == 2 and "不在产品名录" in r.stderr
+
+
+def test_install_product_accepts_name_or_id(env):
+    """名录命中（名字大小写不敏感/平台主键 id）→ 放行安装。"""
+    cli(env, "install", "--target", "codex", "--product", "codearts")  # 小写名
+    assert (env["home"] / ".codex" / "config.toml").exists()
+    cli(env, "install", "--target", "codex", "--product", "651")  # 平台主键 id
     rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
-    assert rt["product"] == "hermes"
+    assert rt["product"] == "651"
+
+
+def test_install_rejects_when_catalog_unreachable(env):
+    """目录不可达（引擎 500/离线）→ 拒绝安装：宁可不装不可装错。"""
+    env["engine"]["state"]["meta_up"] = False
+    r = cli(env, "install", "--target", "codex", "--product", "CodeArts")
+    assert r.returncode == 2 and ("拒绝安装" in r.stderr or "无 productCatalog" in r.stderr)
+    env["engine"]["state"]["meta_up"] = True
 
 
 # ---- 平台地址：install 的 --java-api-base 双落（env+runtime.json 兜底） ----
 
 def test_install_java_base_defaults_to_platform(env):
-    # 不传地址不强制用户：缺省=平台真实地址（回环默认会装完即坏）
+    # 地址优先级：--java-api-base > env VOD_JAVA_API_BASE > DEFAULT_JAVA_BASE；
+    # env 与插件运行时同键（安装器跟随同链），此处验证 env 兜底生效
     cli(env, "install", "--target", "opencode", "--product", "CodeArts")
     rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
-    assert rt["java_base"] == "https://vod-dev.topxtopx.com"
+    assert rt["java_base"] == env["engine"]["base"]
     oc = json.loads((env["home"] / ".config/opencode/opencode.json").read_text())
     assert oc["mcp"]["vod-devkit"]["environment"]["VOD_JAVA_API_BASE"] \
-        == "https://vod-dev.topxtopx.com"
+        == env["engine"]["base"]
 
 
 def test_install_persists_java_base_to_runtime(env):
+    # 显式 --java-api-base 覆盖 env/缺省（优先级第一位的回归锁）；地址打桩引擎零外呼
     cli(env, "install", "--target", "opencode",
-        "--java-api-base", "https://vod-dev.topxtopx.com",
+        "--java-api-base", env["engine"]["base"],
         "--product", "CodeArts")
     rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
-    assert rt["java_base"] == "https://vod-dev.topxtopx.com"
+    assert rt["java_base"] == env["engine"]["base"]
     oc = json.loads((env["home"] / ".config/opencode/opencode.json").read_text())
     assert oc["mcp"]["vod-devkit"]["environment"]["VOD_JAVA_API_BASE"] \
-        == "https://vod-dev.topxtopx.com"
+        == env["engine"]["base"]
 
 
 def test_install_omits_empty_key(env):

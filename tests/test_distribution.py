@@ -8,8 +8,10 @@ from pathlib import Path
 
 from tests.test_installer import cli
 from tests.test_installer import env as _installer_env_fixture
+from tests.test_installer import engine_stub as _engine_stub_fixture  # env 依赖它，须同册
 
 env = _installer_env_fixture  # pytest 夹具 re-export（赋值别名，避免 import 未用误报）
+engine_stub = _engine_stub_fixture
 
 
 # ---- 安装器级：形态位写入与红线 ----
