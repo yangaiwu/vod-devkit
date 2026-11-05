@@ -384,11 +384,6 @@ function FeedbackModal({ onClose }) {
           {busy ? '提交中…' : '提交'}
         </PrimaryBtn>
       )}>
-      <div style={S.hint}>
-        你的反馈将进入 VOD 开发者声音分析平台
-        {UI_PRODUCT ? `，帮助 ${UI_PRODUCT} 变得更好` : ''}。
-        选择的分类会随反馈一并记录，产品团队会结合内容复核。
-      </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
         {CATEGORIES.map((c) => (
           <button key={c.id} title={c.hint || ''} style={{
