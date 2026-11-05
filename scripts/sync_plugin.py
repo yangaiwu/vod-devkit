@@ -10,6 +10,11 @@ dst = ROOT / "plugins" / "vod-devkit" / "vod_mcp"
 if dst.exists():
     shutil.rmtree(dst)
 shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__", "runtime.json", "*.log"))
+# skills 同步（codex 插件包的 SKILL.md 必须与仓源一致——漂移第三形态：源内过期段落）
+skill_dst = ROOT / "plugins" / "vod-devkit" / "skills"
+if skill_dst.exists():
+    shutil.rmtree(skill_dst)
+shutil.copytree(ROOT / "skills", skill_dst, ignore=shutil.ignore_patterns("__pycache__"))
 # 烧录 build-info.json（provenance 的版本/SHA 真源）：插件包没有它，vod_devkit_info 版本号失真
 import subprocess, datetime
 sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip() or None

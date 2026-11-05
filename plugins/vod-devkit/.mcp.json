@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "vod-devkit": {
-      "command": "python3",
-      "args": ["./vod_mcp/server.py"],
-      "cwd": ".",
+      "command": "vod-devkit",
+      "args": ["serve"],
       "env": { "VOD_PACKS": "core,collect" }
     }
   }
