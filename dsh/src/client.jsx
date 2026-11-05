@@ -379,9 +379,18 @@ function FeedbackModal({ onClose }) {
           {busy ? '提交中…' : '提交'}
         </PrimaryBtn>
       )}>
-      <textarea style={S.textarea} value={content} maxLength={2000}
+      <label htmlFor="vod-fb-content"
+        style={{ fontSize: 11, color: 'var(--dsw-alias-label-secondary, #666)', display: 'block', marginBottom: 4 }}>
+        描述你遇到的问题或想法（会原样转达给产品团队）
+      </label>
+      <textarea id="vod-fb-content" style={S.textarea} value={content} maxLength={2000}
         placeholder="比如：对话响应慢、某个功能找不到入口" autoFocus
+        aria-describedby="vod-fb-content-hint"
         onChange={(e) => setContent(e.target.value)} />
+      <div id="vod-fb-content-hint"
+        style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary, #999)', margin: '2px 0 0' }}>
+        具体现象更容易被受理：哪一步慢、哪里答非所问、期待什么
+      </div>
       <div style={{ fontSize: 11, textAlign: 'right', margin: '4px 0 0',
         color: 'var(--dsw-alias-label-tertiary, #999)' }}>
         {content.length}/2000
