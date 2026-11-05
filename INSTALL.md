@@ -78,6 +78,22 @@ dsh plugin --profile <profile> add dsh-vod-devkit    # npm 已发布
 dsh 社区目录收录依赖 `dsh.bundle` manifest + `dsh-plugin` topic，随
 npm 首发已解锁，收录审核进行中。
 
+## dsh 部署已知坑（全部实锤，装前必读）
+
+- **激活 id 必须等于包名**：client bundle 内嵌的 `__ModuleLoader__.load`
+  注册 id ≠ package name → 激活审计报 `loaded without registering`；
+- **设备锚点必须纯 hex**：`X-Vod-Device-Id` 含连字符等非 `[0-9a-f]` 字符
+  → 引擎静默降 legacy ip|ua 锚点 → 签发 5 次/天易打满（429）；
+- **web 宿主必须同源代理 /rest/**：dsh 页面经相对路径 `/rest/…` 访问
+  VOD 外部 API——nginx 需加 `location /rest/ → VOD 实例`（参见
+  `/etc/nginx/conf.d` 示例），否则提交报 `Failed to fetch`；
+- **profile patch config 不下发 client 半**：client 侧配置经 server 半
+  `ctx.on("webserver/index-inject")` 注入页面全局（同款机制参考
+  `__DSH_CONTACT_CONFIG__`），不要指望 client `apply(ctx, config)`
+  的第二参能拿到 patch config；
+- **端点 429/401 的日志在哪**：服务端看 `/opt/vod/logs/vod-system/vod-system.log`；
+  排障时勿用 `pgrep -f` 带 jar/脚本名自匹配杀进程。
+
 ## 故障排查
 
 - **401/`-32012` 且提示"匿名令牌端点不可用"**：引擎侧 VOD-KEY（!152 线）未部署，

@@ -26,6 +26,7 @@ const LS_TOKEN = 'vod_dshui_token';
 // 本端零字段取令牌（方案 C 原样），无任何渠道上报参数
 const LS_DEVICE = 'vod_dshui_device';
 const LS_LEDGER = 'vod_dshui_ledger';
+const LS_DRAFT = 'vod_dshui_draft';
 const LEDGER_CAP = 200;
 // 宿主/产品名：嵌入方可经 __VOD_DSH_UI_PRODUCT__ 注入（解耦：任何支持
 // 本插件能力的 agent 装上后文案自动对，不注入=中性通用文案）
@@ -255,6 +256,7 @@ async function retryStashedSubmissions() {
       });
       if (r.status === 200 || r.status === 201) {
         row.status = 'accepted';
+        try { localStorage.removeItem(LS_DRAFT); } catch (e) {} // 成功提交清草稿
         const body = await r.json().catch(() => ({}));
         row.serverVoiceId = (body.voiceIds || body.data?.voiceIds || [])[0] || '';
         row.retriedAt = new Date().toISOString();
@@ -278,8 +280,13 @@ async function retryStashedSubmissions() {
 /* ---------- 表单弹窗 ---------- */
 
 function FeedbackModal({ onClose }) {
-  const [content, setContent] = useState('');
-  const [category, setCategory] = useState(''); // '' = 不预分类，引擎重判
+  // 草稿自动保存（借鉴 DSH-Feedback-Bridge）：刷新/重启不丢半截反馈
+  const draft = (() => { try { return JSON.parse(localStorage.getItem(LS_DRAFT) || 'null') || {}; } catch (e) { return {}; } })();
+  const [content, setContent] = useState(draft.content || '');
+  const [category, setCategory] = useState(draft.category || ''); // '' = 不预分类，引擎重判
+  useEffect(() => {
+    try { localStorage.setItem(LS_DRAFT, JSON.stringify({ content, category })); } catch (e) {}
+  }, [content, category]);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null); // {ok, msg}
 
