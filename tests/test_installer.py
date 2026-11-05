@@ -288,6 +288,36 @@ def test_validation_probe_uses_consistent_device_anchor(env):
     assert re.fullmatch(r"[0-9a-f]{8,64}", th.get("x-vod-device-id", "")), "设备 id 必须纯 hex（非 hex 静默降 legacy 锚点）"
 
 
+def test_skill_drift_lock(env):
+    """D-drift-lock：安装记录技能拷贝件 sha256 指纹→安装后篡改拷贝件→
+    doctor/verify 检出漂移并引导重装（vendor 规则漂移实锤的针对性防线）。"""
+    import json as _json
+    cli(env, "install", "--target", "hermes", "--product", "CodeArts")
+    mf = _json.loads((env["repo"] / "install-manifest.json").read_text())
+    assert mf.get("skillHashes"), "安装必须记录技能拷贝件指纹"
+    r = cli(env, "doctor")
+    assert r.returncode == 0, r.stderr
+    # 篡改一个已安装技能文件 → doctor 检出漂移
+    skills_dir = Path(mf["skillsDir"])
+    target = next(skills_dir.rglob("SKILL.md"))
+    target.write_text(target.read_text() + "\n<!-- 篡改 -->\n")
+    r = cli(env, "doctor")
+    assert r.returncode == 1 and "漂移" in r.stdout
+    r = cli(env, "install", "--target", "hermes", "--product", "CodeArts")  # 重装恢复
+    assert cli(env, "doctor").returncode == 0
+
+
+def test_opencode_doctor_command_file(env):
+    """opencode 自检命令随装写入 /vod-doctor（devkit 对表），内容含自检序列
+    与 key 明文禁令。"""
+    cli(env, "install", "--target", "opencode", "--product", "CodeArts")
+    cmd = env["home"] / ".config/opencode/command/vod-doctor.md"
+    assert cmd.exists()
+    text = cmd.read_text()
+    for key in ("vod_devkit_info", "vod_auth_status", "vod_list_submitted", "不要打印任何 key"):
+        assert key in text
+
+
 def test_install_rejects_when_catalog_unreachable(env):
     """目录不可达（引擎 500/离线）→ 拒绝安装：宁可不装不可装错。"""
     env["engine"]["state"]["meta_up"] = False

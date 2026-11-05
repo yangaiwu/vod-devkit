@@ -352,6 +352,23 @@ S37 安装校验设备锚点一致性（协议级）
   测试：tests/test_installer.py#test_validation_probe_uses_consistent_device_anchor
   （桩引擎捕获两请求头比对，协议级零外呼）。
 
+S38 技能拷贝件漂移锁（D-drift-lock，devkit 对表采纳①）
+  install 记录技能拷贝件 sha256 指纹（manifest.skillHashes）→doctor/verify
+  比对：拷贝件被改/缺失即 FAIL 并引导重装。动机=vendor 规则漂移实锤的
+  针对性防线（不采纳 devkit 的 skills-as-MCP-data 架构——5 个静态技能
+  拷贝够用，但漂移必须可检；架构迁移挂账到技能规模增长时）。
+  回归：test_skill_drift_lock（篡改→doctor 1→重装→doctor 0）。
+
+S39 opencode 自检命令 /vod-doctor（devkit 对表采纳②）
+  install --target opencode 随装写入 command/vod-doctor.md（devkit_info/
+  auth_status/list_submitted 自检序列+key 明文禁令）；卸载随删。
+  回归：test_opencode_doctor_command_file。
+
+S40 三宿主连通冒烟（devkit 对表采纳③）
+  scripts/smoke_hosts.py：hermes/opencode/codex 各跑宿主 list 命令断言
+  vod-devkit 注册可见；无宿主 CLI=SKIP 不 FAIL（CI 语义）；任一 FAIL 退出 1。
+  真机基线（2026-11-05）：三宿主 PASS。
+
 S34 安装期产品硬校验（D-product-id-2，2026-11-05 用户拍板 B，推翻宿主名宽容口径）
   install --product 必须命中 meta productCatalog（名字/平台主键 id），未命中或
   目录不可达一律拒绝安装（宁可不装不可装错）。回归：tests/test_installer.py

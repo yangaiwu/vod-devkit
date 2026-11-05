@@ -82,6 +82,34 @@ def _server_env(args, packs: str) -> dict:
     return env
 
 
+def _skill_hashes() -> dict:
+    """技能拷贝件指纹（D-drift-lock）：安装时记录 sha256，verify/doctor 比对
+    ——拷贝件与安装产物漂移可检（vendor 规则漂移实锤的针对性防线）。"""
+    import hashlib
+    out = {}
+    for entry in sorted((ROOT / "skills").iterdir()):
+        if entry.is_dir():
+            for f in sorted(entry.rglob("*")):
+                if f.is_file():
+                    rel = f"{entry.name}/{f.relative_to(entry)}"
+                    out[rel] = hashlib.sha256(f.read_bytes()).hexdigest()
+    return out
+
+
+def _drifted_skills(manifest: dict) -> list:
+    """比对 skillsDir 拷贝件与 manifest.skillHashes，返回漂移文件清单。"""
+    import hashlib
+    base = Path(manifest["skillsDir"])
+    drifted = []
+    for rel, sha in (manifest.get("skillHashes") or {}).items():
+        f = base / rel
+        if not f.exists():
+            drifted.append(f"{rel}（缺失）")
+        elif hashlib.sha256(f.read_bytes()).hexdigest() != sha:
+            drifted.append(f"{rel}（内容被改）")
+    return drifted
+
+
 def _install_hermes(args, packs: str) -> Path:
     """Hermes：官方途径 hermes mcp add（config.yaml mcp_servers）。"""
     conf = HERMES_MCP_DIR / "vod-devkit.json"
@@ -130,6 +158,20 @@ def _install_opencode(args, packs: str) -> Path:
     }
     conf.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"已写入 OpenCode 配置：{conf}（重启 OpenCode 会话生效）")
+    cmd_dir = base / "command"
+    cmd_dir.mkdir(parents=True, exist_ok=True)
+    (cmd_dir / "vod-doctor.md").write_text(
+        "---\n"
+        "description: 自检 VOD DevKit 就绪状态（MCP 连通/版本/key/账本）。\n"
+        "---\n\n"
+        "使用 vod-devkit 工具做就绪自检，按序执行并汇总 OK/缺失：\n"
+        "1. 调用 vod_devkit_info：确认 version 与 commitSha 非空（版本/来源溯源）。\n"
+        "2. 调用 vod_auth_status：报告 key 配置态与引擎连通性；无 key 属正常（首次提交自动取匿名令牌）。\n"
+        "3. 调用 vod_list_submitted（limit 5）：报告本机已提交反馈数（本地账本口径）。\n"
+        "4. 汇总：installed（OK）vs 缺失（需处理项）。不要打印任何 key/令牌明文。\n"
+        "若 MCP 工具不可用（刚装完未重启），提示用户重启 OpenCode 会话。\n",
+        encoding="utf-8")
+    print(f"已写入 OpenCode 自检命令：/vod-doctor（{cmd_dir / 'vod-doctor.md'}）")
     return conf
 
 
@@ -412,6 +454,7 @@ def cmd_install(args):
         "packs": packs,
         "mcpConfig": str(mcp_conf),
         "skillsDir": str(HERMES_SKILLS_DIR),
+        "skillHashes": _skill_hashes(),
     }
     manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
                                encoding="utf-8")
@@ -455,6 +498,10 @@ def cmd_doctor(_args):
             problems.append("MCP 配置文件缺失")
         if not Path(mf["skillsDir"]).exists():
             problems.append("skills 目录缺失")
+        drifted = _drifted_skills(mf)
+        if drifted:
+            problems.append("技能拷贝件与安装产物漂移（D-drift-lock）："
+                            + "、".join(drifted) + "——重跑 install 恢复")
     if problems:
         for x in problems:
             print("FAIL:", x)
@@ -559,6 +606,10 @@ def cmd_uninstall(_args):
             if path.exists():
                 shutil.rmtree(path) if path.is_dir() else path.unlink()
                 print("removed:", path)
+        oc_cmd = Path.home() / ".config/opencode/command/vod-doctor.md"
+        if oc_cmd.exists():
+            oc_cmd.unlink()
+            print("removed:", oc_cmd)
         p.unlink()
         print("removed:", p)
     else:

@@ -451,3 +451,18 @@ npx 浮动版本的来源不可控问题。
   曾滞留 0.1.0 致 vod_devkit_info 假象）——release.sh 硬断言 4 处
 - 安装校验探针全程同设备锚点（X-Vod-Device-Id+UA，token/meta 一致；S1 设备
   绑定；每次装机新锚点=一次校验一枚令牌额度）
+
+## 九、Hermes/OpenCode 接入对照与取舍（D-drift-lock，2026-11-05 devkit 对表）
+
+### 与 huaweicloud-devkit v2 的形态差异
+| 维度 | devkit | 本仓 | 取舍依据 |
+|---|---|---|---|
+| hermes skills 分发 | MCP 数据下发（list/retrieve，防拷贝漂移+pack 动态门控） | 文件拷贝+**漂移锁**（manifest.skillHashes→doctor 比对） | 规模是决定变量：几十个动态技能 vs 5 个静态技能；拷贝够用但漂移必须可检（vendor 漂移实锤）；架构迁移挂账到技能增长时 |
+| 护栏层 | 宿主 PreToolUse hook（2665 行，拦 shell 里 hcloud 绕行路，防 ANSI-C/引号/bash -c 包装逃逸） | server 内 policy+confirmed | **威胁面决定**：hook 价值=封"MCP 旁的 shell 直达破坏面"绕行路；囤积链无破坏面（绕过 MCP 直发=自愿提交），无路可封不建墙；演进闸=出现破坏性写先 token 化审批。devkit 自己也承认 hook 不可移植（server 内同 policy 双实现） |
+| opencode 附加 | command/huaweicloud-doctor.md + 权限缝（external_directory allow+edit deny） | command/vod-doctor.md（自检序列+key 禁令） | 权限缝依赖技能文件树随宿主可写；我们技能装在 hermes 侧，opencode 侧无树可缝——采纳命令、缝随技能上 opencode 时一并配 |
+| 冒烟 | smoke-agents E2E | scripts/smoke_hosts.py（list 可见性断言，无宿主 SKIP） | 真机基线三宿主 PASS |
+
+### 安装器校验设备锚点（S37 补设计）
+校验链 token+meta 全程携带自生成纯 hex X-Vod-Device-Id+固定 UA：S1 设备绑定
+要求 token 与后续请求同锚点（缺设备头=meta 401 设备不匹配，或走 legacy ip|ua
+锚点烧日 5 次签发额度）；每次装机生成新锚点=一次校验恰好消耗一枚令牌额度。
