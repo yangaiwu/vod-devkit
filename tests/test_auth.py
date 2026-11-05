@@ -133,6 +133,62 @@ def test_voice_volume_preserved_across_calls(monkeypatch):
                         client_info={"name": "mcp"})
 
 
+def test_product_id_resolution_t7i(monkeypatch):
+    """T7i（方案 A，2026-11-05 拍板）：产品归因主键化——
+    ①名字+meta productCatalog → 解析出平台 id 提交（对账主键化）
+    ②纯数字=平台 id 原样透传（引擎 selectById 精确命中）
+    ③目录无此名/目录不可用 → 规范名上送（引擎 name 兼容通道，不静默丢）"""
+    cat = [{"id": 31, "name": "CodeArts"}, {"id": 42, "name": "AIShell"}]
+
+    def fake_meta(force=False):
+        return {"products": ["codearts"], "catalog": cat,
+                "stale": False, "source": "cache"}
+
+    monkeypatch.setattr(tools, "_load_meta", fake_meta)
+    # ① 短码先归一再查目录 → id
+    assert tools._resolve_product({"product": "codearts"}) == "31"
+    assert tools._resolve_product({"product": "CodeArts"}) == "31"
+    assert tools._resolve_product({"product": "aishell"}) == "42"
+    # ② 纯数字=平台 id 透传（不查目录）
+    assert tools._resolve_product({"product": "31"}) == "31"
+    # ③ 目录无此名 → 规范名原样（兼容回落）
+    assert tools._resolve_product({"product": "hermes"}) == "hermes"
+    # ③' 目录不可用（快照/老引擎 catalog 空）→ 名字通道
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": [], "catalog": [],
+                                             "stale": True, "source": "snapshot"})
+    assert tools._resolve_product({"product": "codearts"}) == "CodeArts"
+
+
+def test_meta_catalog_cached_t7i(monkeypatch):
+    """T7i：meta 载荷 productCatalog 进缓存并在缓存命中分支带回（提交解析不重打端点）。"""
+    fetched = {"n": 0}
+    saved = {}
+
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        if path.endswith("/external/meta"):
+            fetched["n"] += 1
+            return {"code": 200, "data": {"products": ["codearts"],
+                                          "productCatalog": [{"id": 31, "name": "CodeArts"}]}}
+        raise AssertionError("不应有其他调用")
+
+    monkeypatch.setattr(tools, "_RT", {})
+    monkeypatch.setattr(tools, "_http", fake_http)
+    monkeypatch.setattr(tools, "_save_runtime", lambda u: saved.update(u))
+    m1 = tools._load_meta(force=True)
+    assert m1["catalog"] == [{"id": 31, "name": "CodeArts"}]
+    monkeypatch.setattr(tools, "_RT", saved)
+    m2 = tools._load_meta()
+    assert fetched["n"] == 1  # 缓存命中零二次请求
+    assert m2["catalog"] == [{"id": 31, "name": "CodeArts"}]
+    # 老引擎无 productCatalog 键 → catalog 空不崩
+    monkeypatch.setattr(tools, "_RT", {})
+    monkeypatch.setattr(tools, "_http",
+                        lambda m, p, body=None, timeout=30, base=None, key=None:
+                        {"code": 200, "data": {"products": ["codearts"]}})
+    assert tools._load_meta(force=True)["catalog"] == []
+
+
 def test_product_attribution_layers(monkeypatch):
     """归因（宿主即产品·不设白名单，2026-11-03 拍板）：显式传参 > 安装绑定 >
     无归因（不再 -32013 本地拦截，body 不带 product → 引擎 UNKNOWN 档）。"""

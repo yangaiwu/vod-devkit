@@ -246,3 +246,9 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 真机实锤：引擎 /external/token 返回 ApiResponse 信封 {code,data:{token}}，插件顶层取 token 恒 None → 无 key 首提必 -32012。此前未暴露=插件常驻 legacy key 不走匿名链（老平台 key 已从 runtime.json 移除）
 - 决策：解析收敛 _extract_anon_token 单函数，信封优先+扁平兼容（历史/降级引擎不破坏）；存量 mock 全部对齐真源信封——mock 边界≠协议边界教训第二次实锤（第一次=E1/E2 协议级测试）
 - 关联：S21-S23 场景用例入 proposal 三·八；D-key-guard key 移除语义真机双档实测（legacy-shared/anonymous）
+
+## D-product-id-1（2026-11-05）：产品归因主键化（两仓联动，方案 A 用户拍板）
+- 缺口：提交链路 product 传名字（归一化/改名漂移面），违背「对账以平台签发主键为准」；主表 t_vod_source_data 既有 product_id+product 双列模式，agent 链只落名字
+- 引擎（VOD-Project feat/kb-query-auth 364af5df）：product 纯数字=selectById 主键精确命中（短路 name 兜底），name 通道保留兼容回落；双列落库+回执 productId；囤积区通用化正名 t_vod_agent_inbox→t_vod_voice_inbox（!152 合入前零成本窗口）；meta 端点组装 productCatalog=[{id,name}]（t_vod_product 真源，目录失败不阻塞基础载荷）
+- 插件（本仓）：三壳统一——配置/注入的名字经 meta productCatalog 解析平台 id 后提交，纯数字 id 透传，目录无此名/不可达（老引擎无 productCatalog 键）→规范名兼容通道（引擎命中同样补落 product_id）不静默丢提交；python 进程 runtime.json 24h 缓存，node/UI 进程内缓存一次
+- 回归：python T7i 2 例（解析矩阵+catalog 缓存/老引擎兼容）共 68 绿；dsh node test fail 0；引擎定向 55 绿（ExternalVoicesServiceImplTest 33+VodIssueSyncServiceImplTest 22）

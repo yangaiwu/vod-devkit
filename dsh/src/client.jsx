@@ -21,6 +21,7 @@ let BASE = (typeof globalThis !== 'undefined'
   && globalThis.__VOD_DSH_UI_BASE__) || ''; // '' = 同源（宿主代理 /rest/，公网/内网/本地同构）
 const TOKEN_PATH = `${API_PREFIX}/external/token`;
 const VOICES_PATH = `${API_PREFIX}/external/voices`;
+const META_PATH = `${API_PREFIX}/external/meta`; // T7i：productCatalog 解析源
 const LS_TOKEN = 'vod_dshui_token';
 // 渠道=T7b 定稿：引擎囤积入库侧固定赋值 vod-agent（链路即渠道，客户端不自报）——
 // 本端零字段取令牌（方案 C 原样），无任何渠道上报参数
@@ -307,6 +308,29 @@ function FeedbackModal({ onClose }) {
     }
   }
 
+  // T7i（方案 A，2026-11-05 拍板）：产品归因主键化——meta productCatalog 按名解析
+  // 平台 id 后提交；纯数字=平台 id 透传；目录无此名/不可达 → 名字兼容通道（不静默丢）。
+  // 进程内缓存一次，页内刷新即重取。
+  let PRODUCT_CATALOG = null;
+  async function resolveProductId(product, token) {
+    if (/^\d+$/.test(product)) return product;
+    try {
+      if (!PRODUCT_CATALOG) {
+        const r = await fetch(BASE + META_PATH, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (r.ok) {
+          const j = await r.json().catch(() => ({}));
+          PRODUCT_CATALOG = ((j.data || j).productCatalog) || [];
+        }
+      }
+      const hit = (PRODUCT_CATALOG || []).find(
+        (x) => String(x?.name || '').toLowerCase() === product.toLowerCase());
+      if (hit && hit.id != null) return String(hit.id);
+    } catch (e) { /* 目录不可用 → 名字兼容通道 */ }
+    return product;
+  }
+
   async function submit() {
     const text = content.trim();
     if (!text) { setDone({ ok: false, msg: '请先填写反馈内容' }); return; }
@@ -338,7 +362,8 @@ function FeedbackModal({ onClose }) {
               tags: category ? ['problem_type:' + category] : [],
             }],
             // 产品=加载必配（T7d）：入口仅在注入后激活，product 恒有值
-            product: UI_PRODUCT,
+            // T7i：注入名→meta 目录解析平台 id 后提交（主键化，名字漂移不进链路）
+            product: await resolveProductId(UI_PRODUCT, token),
           }),
         });
         if (r.status === 404) {

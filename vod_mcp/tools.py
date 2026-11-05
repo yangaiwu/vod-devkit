@@ -53,22 +53,28 @@ _META_SNAPSHOT = {"products": ["agentarts", "codearts", "dataarts", "maas", "obs
 
 def _load_meta(force: bool = False) -> dict:
     """可漂移值（product 白名单等）动态取：缓存 TTL 24h，
-    引擎端点不可达时回退快照并标 stale。真源=引擎 submit 校验常量。"""
+    引擎端点不可达时回退快照并标 stale。真源=引擎 submit 校验常量。
+    T7i：productCatalog=[{id,name}]（t_vod_product 运营预置，meta 组装）——
+    提交产品归因按平台主键 id 的解析真源；老引擎无该键=catalog 空。"""
     import time
     cache = _RT.get("meta_cache") or {}
     now = time.time()
     if not force and cache.get("data") and now - cache.get("fetchedAt", 0) < _META_TTL:
         return {"products": cache["data"].get("products", _META_SNAPSHOT["products"]),
+                "catalog": cache["data"].get("productCatalog") or [],
                 "stale": False, "source": "cache"}
     try:
         out = _http("GET", _META_PATH, None, base=JAVA_BASE, key=JAVA_KEY, timeout=10)
         data = out.get("data") or {}
         if isinstance(data.get("products"), list) and data["products"]:
             _save_runtime({"meta_cache": {"fetchedAt": int(now), "data": data}})
-            return {"products": data["products"], "stale": False, "source": "meta"}
+            return {"products": data["products"],
+                    "catalog": data.get("productCatalog") or [],
+                    "stale": False, "source": "meta"}
     except ToolError:
         pass
-    return {"products": _META_SNAPSHOT["products"], "stale": True, "source": "snapshot"}
+    return {"products": _META_SNAPSHOT["products"], "catalog": [],
+            "stale": True, "source": "snapshot"}
 
 
 class ToolError(Exception):
@@ -150,11 +156,24 @@ def _resolve_product(params: dict) -> str | None:
     ①调用方显式传参 ②安装绑定（runtime.json product——安装器默认写入宿主名，
     hermes/opencode/codex 装在哪就归哪）③都没有 → 返回 None（body 不带
     product，引擎落 UNKNOWN 档人工归因解析，V19）——不再 -32013 本地拦截。
-    白名单校验已废除：宿主工具自报产品原样上送，由引擎宽松归一收编。"""
+    T7i（方案 A，2026-11-05 拍板）：产品归因主键化——
+    ①纯数字串=平台主键 id，原样透传（引擎 selectById 精确命中）
+    ②名字→meta productCatalog 按名解析出平台 id 后提交（对账主键化，
+    归一化/改名漂移不进提交链路）；_PRODUCT_MAP 先归一短码再查目录
+    ③目录无此名/目录不可用→规范名原样上送（引擎 name 兼容通道，
+    命中同样补落 product_id）——不静默丢提交。"""
     raw = str(params.get("product") or _RT.get("product") or "").strip()
     if not raw:
         return None
-    return _PRODUCT_MAP.get(raw.lower(), raw)
+    if raw.isdigit():
+        return raw
+    name = _PRODUCT_MAP.get(raw.lower(), raw)
+    for item in (_load_meta().get("catalog") or []):
+        if str(item.get("name") or "").lower() == name.lower():
+            return str(item.get("id"))
+    return name
+
+
 _SUBMIT_HOARDING = "/rest/developer/manager/hdvodmngservice/v1/external/voices"
 _EXISTING_SUBMIT = "/rest/developer/manager/hdvodmngservice/v1/external/voice/submit"  # 过渡期 404 回落
 _TOKEN_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/token"

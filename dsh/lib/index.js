@@ -121,6 +121,27 @@ async function http(method, path, body, { base, key, timeoutSec, signal }) {
     }
 }
 
+// T7i（方案 A，2026-11-05 拍板）：产品归因主键化——meta productCatalog
+// （[{id,name}]，t_vod_product 运营预置）按名解析平台 id 后提交；
+// ①纯数字=平台 id 透传 ②目录无此名/不可达（含老引擎 404）→ 规范名兼容通道
+// （引擎 name 命中同样补落 product_id）——不静默丢提交。进程内缓存一次。
+const META_PATH = `${API_PREFIX}/external/meta`;
+let _productCatalog = null;
+async function resolveProductId(product, cfg, signal) {
+    if (/^\d+$/.test(product)) return product;
+    try {
+        if (!_productCatalog) {
+            const out = await http('GET', META_PATH, undefined, { ...cfg, signal });
+            _productCatalog = (out.ok && out.data && out.data.data?.productCatalog)
+                || out.data?.productCatalog || [];
+        }
+        const hit = _productCatalog.find(
+            (x) => String(x?.name || '').toLowerCase() === product.toLowerCase());
+        if (hit && hit.id != null) return String(hit.id);
+    } catch (e) { /* 目录不可用 → 名字兼容通道 */ }
+    return product;
+}
+
 async function fetchAnonToken(cfg) {
     const out = await http('POST', TOKEN_PATH, {}, cfg);
     if (out.ok && out.data && (out.data.token || out.data.data?.token)) {
@@ -235,6 +256,7 @@ export function apply(ctx, config) {
                 // 宿主自报产品原样上送（引擎宽松归一），不再 -32013 本地拦截
                 let product = String(c.product || '').trim(); // 部署配置权威（安装时定），无 args 覆盖
                 product = PRODUCT_MAP[product.toLowerCase()] || product;
+                product = await resolveProductId(product, c, exec?.signal); // T7i：主键化提交
                 const source = 'dsh';
                 const accepted = [], taskIds = [], rejected = [];
                 let key = c.key;
