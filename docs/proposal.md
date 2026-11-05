@@ -352,6 +352,15 @@ S37 安装校验设备锚点一致性（协议级）
   测试：tests/test_installer.py#test_validation_probe_uses_consistent_device_anchor
   （桩引擎捕获两请求头比对，协议级零外呼）。
 
+S41 一键发版体系+包内容校验（D-release-1，2026-11-05；devkit release-please 对表）
+  scripts/release.sh：bump 从提交历史推导（feat→minor/破坏→major）+版本落点
+  表驱动 EXTRA_FILES+整行正则替换+全落点硬断言（根治静默 no-op 两连实锤）；
+  npm 包内容门 scripts/pack_verify.py（pack --dry-run 必含/危险项断言，
+  publish 前必跑；npm 分发必需 plugins/ 随包——0.2.0 漏项实锤）；RELEASING.md
+  发版手册。事件：0.1.12 曾含 runtime.json 凭据残留——已 deprecate+0.2.0 起
+  文件级白名单结构性排除。回归：test_plugin_selfcontained_contract（随包
+  完整性）+pack_verify（发版流程执行）。
+
 S38 技能拷贝件漂移锁（D-drift-lock，devkit 对表采纳①）
   install 记录技能拷贝件 sha256 指纹（manifest.skillHashes）→doctor/verify
   比对：拷贝件被改/缺失即 FAIL 并引导重装。动机=vendor 规则漂移实锤的

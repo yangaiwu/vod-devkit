@@ -1,20 +1,36 @@
 #!/usr/bin/env bash
-# 发版自动化（release-please 的本地等价物）
-# 用法：scripts/release.sh patch|minor|major [--dry-run]
-# 动作：版本三处同步 bump（package.json/pyproject/__init__）
-#      → CHANGELOG 从 git log 生成 → tag → push（npm/GitHub 远端存在时一并推）
+# 发版自动化（对齐 devkit release-please 语义的本地实现）：
+#   bump 推导：默认从上一 tag 以来的提交历史推导（feat→minor，破坏性→major，
+#   否则 patch）；显式 patch|minor|major 可覆盖。
+#   版本落点表驱动：EXTRA_FILES 声明全部附加版本落点（加落点只改表——
+#   __init__/契约曾静默滞留旧版本的实锤教训）；落点用正则整行替换（非子串
+#   replace），替换后逐点硬断言兜底。
+#   质量门：pyflakes+pytest 全绿才发。
+# 用法：scripts/release.sh [patch|minor|major|auto] [--dry-run]
 set -e
 cd "$(dirname "$0")/.."
 
-PART="${1:-patch}"
-DRY="${2:---dry-run}"
+PART="${1:-auto}"
+DRY="${2:---run}"
 
 CUR=$(python3 -c "import json;print(json.load(open('package.json'))['version'])")
+if [ "$PART" = "auto" ]; then
+  LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+  RANGE=${LAST_TAG:+$LAST_TAG..HEAD}
+  if [ -n "$LAST_TAG" ] && git log $RANGE --oneline | grep -qiE ' (feat|fix)![(:]|BREAKING CHANGE'; then
+    PART=major
+  elif [ -n "$LAST_TAG" ] && git log $RANGE --oneline | grep -qE '^\w+ feat(\(|:| )'; then
+    PART=minor
+  else
+    PART=patch
+  fi
+  echo "bump 由提交历史推导：$PART"
+fi
 case "$PART" in
   patch) BUMP=$(python3 -c "v='$CUR'.split('.');v[2]=str(int(v[2])+1);print('.'.join(v))");;
   minor) BUMP=$(python3 -c "v='$CUR'.split('.');v[1]=str(int(v[1])+1);v[2]='0';print('.'.join(v))");;
   major) BUMP=$(python3 -c "v='$CUR'.split('.');v[0]=str(int(v[0])+1);v[1]='0';v[2]='0';print('.'.join(v))");;
-  *) echo "用法: $0 patch|minor|major [--dry-run]"; exit 1;;
+  *) echo "用法: scripts/release.sh [patch|minor|major|auto] [--dry-run]"; exit 1;;
 esac
 echo "版本: $CUR → $BUMP"
 
@@ -26,28 +42,52 @@ export PYTHONPATH="/root/.hermes/cache/scratch/pylibs:$PYTHONPATH"
 if [ "$DRY" = "--dry-run" ]; then echo "[dry-run] 止步于此（质量门已过）"; exit 0; fi
 
 python3 - "$CUR" "$BUMP" <<'EOF'
-import json, sys, re
+import json, re, sys
 cur, new = sys.argv[1], sys.argv[2]
-# package.json
-p = json.load(open('package.json')); p['version'] = new
-json.dump(p, open('package.json','w'), indent=2, ensure_ascii=False)
-# pyproject.toml
-t = open('pyproject.toml').read().replace(f'version = "{cur}"', f'version = "{new}"')
-open('pyproject.toml','w').write(t)
-# vod_mcp/__init__.py
-i = open('vod_mcp/__init__.py').read().replace(f'__version__ = "{cur}"', f'__version__ = "{new}"')
-open('vod_mcp/__init__.py','w').write(i)
 
-# 三处+契约 版本同步硬断言（教训：字符串替换静默 no-op——__init__ 曾滞留 0.1.0
-# 五个版本；contract/tools.schema.json 又滞留（vod_devkit_info 版本号假象））
-import sys as _s
-for f, pat in [("package.json", f'"version": "{new}"'),
-               ("pyproject.toml", f'version = "{new}"'),
-               ("vod_mcp/__init__.py", f'__version__ = "{new}"'),
-               ("contract/tools.schema.json", f'"version": "{new}"')]:
-    if pat not in open(f).read():
-        print(f"FAIL: {f} 版本未同步到 {new}，中止发版", file=_s.stderr); _s.exit(1)
+def sub_line(path, pattern, repl, flags=re.M):
+    s = open(path).read()
+    s2, n = re.subn(pattern, repl, s, count=1, flags=flags)
+    if n != 1:
+        print(f"FAIL: {path} 版本落点未命中（{pattern}），中止发版", file=sys.stderr)
+        sys.exit(1)
+    open(path, "w").write(s2)
+
+# 核心落点：整行正则替换（非子串 replace——静默 no-op 的根因）
+sub_line("package.json", r'(?m)^  "version": ".*",$', f'  "version": "{new}",')
+sub_line("pyproject.toml", r'(?m)^version = ".*"$', f'version = "{new}"')
+sub_line("vod_mcp/__init__.py", r'(?m)^__version__ = ".*"$', f'__version__ = "{new}"')
+sub_line("contract/tools.schema.json", r'(?m)^  "version": ".*",$', f'  "version": "{new}",')
+
+# 附加落点表驱动（对齐 devkit release-please extra-files 语义）：
+# 加版本落点=在表里加一行，不再改脚本逻辑。
+EXTRA_FILES = [
+    ("plugins/vod-devkit/.codex-plugin/plugin.json", "json"),
+    ("plugins/vod-devkit/build-info.json", "json"),
+]
+for f, kind in EXTRA_FILES:
+    try:
+        d = json.load(open(f))
+    except FileNotFoundError:
+        continue
+    if d.get("version"):
+        d["version"] = new
+        open(f, "w").write(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+
+# 全落点硬断言兜底（表漏了/替换没生效都在这里拦住）
+ALL = ["package.json", "pyproject.toml", "vod_mcp/__init__.py",
+       "contract/tools.schema.json"] + [f for f, _ in EXTRA_FILES]
+for f in ALL:
+    try:
+        s = open(f).read()
+    except FileNotFoundError:
+        continue
+    if new not in s:
+        print(f"FAIL: {f} 版本未同步到 {new}，中止发版", file=sys.stderr)
+        sys.exit(1)
 EOF
+
+python3 scripts/sync_plugin.py
 
 # CHANGELOG 段生成（自上次 tag 以来的 commit）
 PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
@@ -60,9 +100,12 @@ RANGE="${PREV_TAG}..HEAD" && [ -z "$PREV_TAG" ] && RANGE="HEAD"
   echo ""
 } >> CHANGELOG.md
 
-git add -A
+# 显式文件列表提交（纪律：禁 git add -A——曾误收垃圾文件）
+git add package.json pyproject.toml vod_mcp/__init__.py contract/tools.schema.json \
+        plugins/vod-devkit/.codex-plugin/plugin.json plugins/vod-devkit/build-info.json \
+        plugins/vod-devkit/vod_mcp CHANGELOG.md
 git commit -qm "release: v$BUMP"
 git tag "v$BUMP"
 git push origin main --tags 2>/dev/null && echo "已推送 GitCode" || echo "GitCode 推送跳过"
 git push github main --tags 2>/dev/null && echo "已推送 GitHub 镜像" || echo "GitHub 镜像推送跳过（token 权限待补）"
-echo "发版完成 v$BUMP（npm publish 需 granular token+2FA bypass，就绪后：npm publish --access public）"
+echo "发版完成 v$BUMP（npm publish --access public 一键发布；缓存分发约 1-3 分钟）"

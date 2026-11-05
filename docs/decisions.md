@@ -273,3 +273,10 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 第四版本失位点实锤：contract/tools.schema.json "version" 从未被 release.sh 同步（vod_devkit_info 恒 0.1.0 假象，原生插件真机实锤）；release.sh 同步点 3→4（含契约）+sync_plugin.py 烧录 build-info.json 进插件包（provenance 真源随包）；自包含契约锁测试（server 漂移/相对路径/build-info 断言）
 - 安装器校验探针补设备锚点：token+meta 全程同 X-Vod-Device-Id+UA（S1 设备绑定，缺设备头=meta 401 或 legacy 锚点日 5 次烧满；每次装机新锚点一次校验一枚令牌）
 - 本地验证实例已重建至 feat/kb-query-auth 最新（含 50/h+catalog）
+
+## D-release-1（2026-11-05 深夜）：发版体系对表 devkit（release-please 语义）+0.1.12 凭据残留事件
+- **0.1.12 凭据残留事件**：npm 包曾包含 vod_mcp/runtime.json（含当时的匿名令牌 java_key）——上轮宣称"28 files 肉眼过没问题"是裸奔，pack-verify 第一次跑就抓到。处置：0.1.12 已 deprecate（unpublish 被 registry 策略 403 禁）+0.2.0 发布含修复；令牌仅对已销毁的本地旧库有效，实际风险低；package.json files 从目录级改文件级白名单（runtime.json 结构性出不了包）
+- **发版体系重写（对齐 devkit release-please 语义）**：bump 从提交历史推导（feat→minor/破坏性→major，可显式覆盖）；版本落点表驱动 EXTRA_FILES+整行正则替换（子串 replace 静默 no-op 的根治）+全落点硬断言；显式文件列表提交（git add -A 违纪清除）；RELEASING.md 发版手册落档
+- **npm 包内容校验**：scripts/pack_verify.py（pack --dry-run 必含/危险项断言，publish 前必跑）——npm 分发必需 plugins/（marketplace+插件随包），0.2.0 曾漏致 npx 用户 codex 路径必挂，0.2.1 修复并加 MUST_HAVE 断言
+- **npx 0.2.1 真机闭环**：一键 install --target codex（marketplace 注册→插件缓存 server+skills 随包）
+- **教训**："肉眼过"不是校验；对外制品的每一版发布前必须有程序化内容门
