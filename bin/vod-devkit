@@ -209,9 +209,25 @@ def cmd_install(args):
         print(f"不支持目标: {target}（可选 hermes|opencode|codex|auto）", file=sys.stderr)
         sys.exit(2)
     packs = args.packs or PRESETS.get(args.preset, "")
-    # 归因绑定（「宿主即产品」口径，2026-11-03 拍板）：显式 --product 优先；
-    # 缺省=宿主名（装在 hermes 就归 hermes——用户不说产品，锚点=当前工具）
-    bound_product = args.product or target
+    # 归因绑定（T7d 统一：安装必配，与 dsh UI 加载必配同口径）：--product 必填——
+    # 缺省宿主名在生态部署是错归陷阱（高校AI开发者平台 agent 底座=hermes，
+    # 不填则反馈全归 hermes）。宿主名仍是合法值（自反馈场景显式传
+    # --product hermes），但必须显式选择，不做静默默认（归因错误比没数据更糟）。
+    if not args.product:
+        print(
+            "[vod-devkit] --product 必填：产品归因是安装必配项（与 UI 嵌入注入同口径）。\n"
+            "  取值=生态看板产品名（可用 GET /external/products 查询权威名单），如：\n"
+            "    --product \"高校AI开发者平台\" / --product \"GTD\" / --product \"Skills门户\"\n"
+            "  反馈关于宿主工具本身时显式传宿主名：--product hermes",
+            file=sys.stderr)
+        sys.exit(2)
+    bound_product = args.product
+    # D-key-guard-2 红线：preset（产品分发）形态下 key 禁止随包——环境变量里的
+    # key 不透传给宿主配置（客户机一律走匿名令牌自领），并当场告警
+    distribution = args.distribution
+    if distribution == "preset" and os.environ.pop("VOD_JAVA_API_KEY", None):
+        print("[vod-devkit] warn: preset 形态下 VOD_JAVA_API_KEY 已忽略且不写入宿主配置"
+              "（key 落在哪台机器哪台就是信任边界；客户机走匿名令牌）", file=sys.stderr)
     rt = ROOT / "vod_mcp" / "runtime.json"
     cfg = {}
     if rt.exists():
@@ -220,6 +236,9 @@ def cmd_install(args):
         except Exception:
             cfg = {}
     cfg["product"] = bound_product
+    if getattr(args, "no_local_ledger", False):
+        # D-key-guard-3④：企业数据驻留要求可关本地账本（代价 vod_list_submitted 不可用）
+        cfg["local_ledger"] = False
     # base 同步落 runtime.json：宿主 env 透传不稳是实测坑，透传挂了静默落回
     # 127.0.0.1:8090；文件兑底与 env 同值不构成双真源（优先级链 env>文件）
     cfg["java_base"] = args.java_api_base
@@ -254,6 +273,7 @@ def cmd_install(args):
         "target": target,
         "installedAt": datetime.datetime.now().isoformat(timespec="seconds"),
         "preset": args.preset,
+        "distribution": getattr(args, "distribution", "devkit"),
         "product": bound_product,
         "packs": packs,
         "mcpConfig": str(mcp_conf),
@@ -305,7 +325,37 @@ def cmd_doctor(_args):
         for x in problems:
             print("FAIL:", x)
         sys.exit(1)
+    # key 探针（最佳努力）：配置了 key 就问一次引擎，无效当场报；网络不可达只提示不 FAIL
+    #（离线环境 doctor 必须可用——网络问题不是 key 问题）
+    from vod_mcp.tools import _runtime_cfg
+    key = os.environ.get("VOD_JAVA_API_KEY") or _runtime_cfg().get("java_key")
+    if key:
+        from vod_mcp.tools import probe_key
+        chk = probe_key(key)
+        if chk["ok"] is False:
+            problems.append(f"key 无效（指纹 {chk['fingerprint']}，引擎 401 拒绝）——"
+                            "请核对/续期，或移除 key 走匿名档")
+        elif chk["ok"] is None:
+            print(f"warn: key 未验证（引擎不可达，指纹 {chk['fingerprint']}）")
+        else:
+            print(f"key: 有效（指纹 {chk['fingerprint']}）")
+    if problems:
+        for x in problems:
+            print("FAIL:", x)
+        sys.exit(1)
     print("doctor: OK")
+
+
+def _distribution() -> str:
+    """分发形态位（D-key-guard-3）：install --distribution 写入，构建期定死。
+    devkit=开发/运维形态（自装自管）；preset=产品随 agent 分发（客户机只读）。"""
+    p = manifest_path()
+    if not p.exists():
+        return "devkit"
+    try:
+        return json.loads(p.read_text(encoding="utf-8")).get("distribution", "devkit")
+    except Exception:
+        return "devkit"
 
 
 def cmd_verify(_args):
@@ -317,6 +367,15 @@ def cmd_verify(_args):
     if not sha:
         print("manifest 无 commitSha（dev 构建无法核验）")
         sys.exit(1)
+    if _distribution() == "preset":
+        # D-key-guard-3②：产品分发形态客户机无 git 源——只做本地完整性校验，
+        # 源端比对降级为 unchecked 不 FAIL（离线 verify 必须可用）
+        bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
+        if sha != bi.get("commitSha"):
+            print("FAIL: manifest 与 build-info commitSHA 不一致（安装产物被篡改/混装）")
+            sys.exit(1)
+        print("verify: OK（preset 本地完整性；源端比对 unchecked）")
+        return
     r = subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"],
                        cwd=ROOT, capture_output=True)
     if r.returncode != 0:
@@ -331,6 +390,12 @@ def cmd_verify(_args):
 
 def cmd_update(_args):
     """更新：git fetch 比较 origin/main，落后则 ff 拉取并重烧 build-info。"""
+    if _distribution() == "preset":
+        # D-key-guard-3②：产品分发形态插件版本随 agent 发版管理，客户机禁止自更新
+        #（绕过产品版本管理=未测试代码进客户现场）
+        print("产品分发形态（preset）不支持自更新：插件版本随 agent 发版管理。"
+              "如需升级请联系产品提供方发布新版本。")
+        return
     subprocess.run(["git", "fetch", "origin", "--tags"], cwd=ROOT, capture_output=True)
     local = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
                            capture_output=True, text=True).stdout.strip()
@@ -347,7 +412,7 @@ def cmd_update(_args):
     print(f"已更新 {local[:12]} → {remote[:12]}")
     write_build_info(strict=False)
     print("build-info 已重烧；如需重新安装执行：")
-    print(f"  {sys.argv[0]} install --target hermes --preset collect [--product <p>]")
+    print(f"  {sys.argv[0]} install --target hermes --preset collect --product <产品名>")
     print("  并重启 agent 会话")
 
 
@@ -379,6 +444,11 @@ def main():
     sp.add_argument("--packs", default="", help="显式覆盖 preset（逗号分隔）")
     sp.add_argument("--product", default="",
                     help="归因绑定：本 agent 服务的产品（codearts/aishell 等；采集反馈默认归属）")
+    sp.add_argument("--distribution", default="devkit", choices=["devkit", "preset"],
+                    help="devkit=开发/运维自装（默认）；preset=产品随 agent 分发（禁 key 随包/"
+                         "禁自更新/客户机首启重生成状态）")
+    sp.add_argument("--no-local-ledger", action="store_true",
+                    help="关闭本地提交账本（企业数据驻留要求；vod_list_submitted 将不可用）")
     sp.set_defaults(fn=cmd_install)
     for name, fn in (("status", cmd_status), ("doctor", cmd_doctor),
                      ("verify", cmd_verify), ("update", cmd_update),

@@ -8,7 +8,7 @@
  * - 身份=登录态二值：未登录纯匿名（v1）；登录取账号快照（v1.1 待接）
  * - 分类=VOD 引擎 v2.2 六类口径 chips，默认不选（引擎 LLM 全量重判，
  *   错误预分类比留空更糟）；选中仅作 problem_type hint（desc 前缀+tags）
- * - scene 按引擎契约独立字段（≤128，引擎侧落 voice_desc 前缀）
+ * - scene 独立字段已移除（T7h）：VOD-Project 全仓无独立场景字段（库/契约/归一化均无），场景写进正文
  * - 本地对账键 f(deviceId, content)：同机重试幂等、跨机不吞声量；
  *   引擎有独立确定性键（V9），本键仅账本
  * - 回执说人话（F2）：voiceId 不展示给用户
@@ -22,6 +22,8 @@ const BASE = (typeof globalThis !== 'undefined'
 const TOKEN_PATH = `${API_PREFIX}/external/token`;
 const VOICES_PATH = `${API_PREFIX}/external/voices`;
 const LS_TOKEN = 'vod_dshui_token';
+// 渠道=T7b 定稿：引擎囤积入库侧固定赋值 vod-agent（链路即渠道，客户端不自报）——
+// 本端零字段取令牌（方案 C 原样），无任何渠道上报参数
 const LS_DEVICE = 'vod_dshui_device';
 const LS_LEDGER = 'vod_dshui_ledger';
 const LEDGER_CAP = 200;
@@ -30,15 +32,16 @@ const LEDGER_CAP = 200;
 const UI_PRODUCT = (typeof globalThis !== 'undefined'
   && globalThis.__VOD_DSH_UI_PRODUCT__) || '';
 
-// 分类 chips：VOD 引擎 v2.2 六类口径（n01_classify 真源）。无效问题
-// 不给用户选项；默认不选=不预分类（引擎 LLM 全量重判——错误预分类
-// 比留空更糟，技能纪律）；选中仅作 problem_type hint。
+// 分类 chips：云声表单三分类（VOD-Project 采集层标准——面向人的表单用平台
+// 标准枚举：功能建议/用户体验/产品缺陷；与 suggestionType 1/2/3 逐字对齐）。
+// 六类是分析层 n01 LLM 内部枚举，不泄漏给人看表单；3→6 的映射由 n01 重判
+// 本身承担（云声链同款：选"功能建议"→标题【功能建议】→n01 判六类之一）。
+// 默认不选=不预分类（引擎全量重判——错误预分类比留空更糟）；
+// 选中=采集层渠道原生分类，以【类型名】标题前缀正式入库（T7c）。
 const CATEGORIES = [
+  { id: '功能建议', label: '功能建议', hint: '希望新增/改进能力' },
+  { id: '用户体验', label: '用户体验', hint: '可用但体验差' },
   { id: '产品缺陷', label: '产品缺陷', hint: 'Bug/报错/功能不可用' },
-  { id: '技术业务咨询', label: '技术业务咨询' },
-  { id: '体验改进', label: '体验改进', hint: '可用但体验差' },
-  { id: '功能需求', label: '功能需求', hint: '希望新增能力' },
-  { id: '主观评价', label: '主观评价', hint: '纯感受/评分/对比' },
 ];
 
 /* 样式：对齐官方 message-feedback 的 dsw 设计令牌 */
@@ -240,10 +243,10 @@ async function retryStashedSubmissions() {
         body: JSON.stringify({
           voices: [{
             title: row.title,
-            description: row.description || '',
             content: row.content,
+            ...(row.category ? { tags: ['problem_type:' + row.category] } : {}),
           }],
-          ...(UI_PRODUCT ? { product: UI_PRODUCT } : {}),
+          product: UI_PRODUCT,
         }),
       });
       if (r.status === 200 || r.status === 201) {
@@ -272,7 +275,6 @@ async function retryStashedSubmissions() {
 
 function FeedbackModal({ onClose }) {
   const [content, setContent] = useState('');
-  const [scene, setScene] = useState('');
   const [category, setCategory] = useState(''); // '' = 不预分类，引擎重判
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null); // {ok, msg}
@@ -303,10 +305,9 @@ function FeedbackModal({ onClose }) {
     }
     setBusy(true); setDone(null);
     const row = {
-      title: text.slice(0, 60), scene: scene.trim(), category,
+      title: text.slice(0, 60), category,
       content: text,  // U-S3 重试重建提交体用（本机账本，cap 200）
-      description: `${UI_PRODUCT || '插件'} UI 采集${
-        category ? '｜预分类：' + category + '（待引擎重判）' : ''}`,
+      // 分类走 tags 正式通道（T7c），description 模板文案已移除
       at: new Date().toISOString(), status: 'failed', error: '',
     };
     try {
@@ -322,15 +323,11 @@ function FeedbackModal({ onClose }) {
           body: JSON.stringify({
             voices: [{
               title: text.slice(0, 60),
-              description: `${UI_PRODUCT || '插件'} UI 采集${
-                category ? '｜预分类：' + category + '（待引擎重判）' : ''}`,
               content: text,
-              scene: scene.trim() ? scene.trim().slice(0, 128) : undefined,
               tags: category ? ['problem_type:' + category] : [],
             }],
-            // 产品=嵌入方注入；不注入则不带 product（引擎 UNKNOWN 档
-            // 人工归正——不静默猜，与 MCP 通道同纪律）
-            ...(UI_PRODUCT ? { product: UI_PRODUCT } : {}),
+            // 产品=加载必配（T7d）：入口仅在注入后激活，product 恒有值
+            product: UI_PRODUCT,
           }),
         });
         if (r.status === 404) {
@@ -348,7 +345,10 @@ function FeedbackModal({ onClose }) {
         row.serverVoiceId = body.voiceIds?.[0] || '';
         row.taskId = body.taskIds?.[0] || '';
         ledgerAppend(row);
-        setDone({ ok: true, msg: '已收录，产品团队会看到这条反馈；审核后将以 issue 形式跟进。' });
+        const reg = body.productRegistered === undefined ? true : body.productRegistered;
+        setDone(reg
+          ? { ok: true, msg: '已收录，产品团队会看到这条反馈；审核后将以 issue 形式跟进。' }
+          : { ok: true, msg: '已收录。注意：产品名尚未在平台注册，这条反馈暂不进产品分析，请联系部署方核对。' });
         // U-S2：后台轮询 issue_sync（引擎建成 issue 后补链接）
         pollForReceipt(row.serverVoiceId, setDone);
       } catch (e) {
@@ -371,6 +371,7 @@ function FeedbackModal({ onClose }) {
       <div style={S.hint}>
         你的反馈将进入 VOD 开发者声音分析平台
         {UI_PRODUCT ? `，帮助 ${UI_PRODUCT} 变得更好` : ''}。
+        选择的分类会随反馈一并记录，产品团队会结合内容复核。
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
         {CATEGORIES.map((c) => (
@@ -396,12 +397,8 @@ function FeedbackModal({ onClose }) {
         color: 'var(--dsw-alias-label-tertiary, #999)' }}>
         {content.length}/2000
       </div>
-      <div style={S.label}>使用场景（选填）</div>
-      <div style={{ fontSize: 12, marginBottom: 6 }}>
-        <input style={S.input} value={scene} maxLength={128}
-          placeholder="如：代码补全、生成 PR 描述"
-          onChange={(e) => setScene(e.target.value)} />
-      </div>
+        {/* 场景输入已移除（T7h）：VOD-Project 全仓无独立 scene 字段（库无列/契约无键），
+          场景由用户自然写进正文——云声表单同款引导 */}
       {done && <div style={S.result}>{done.msg}</div>}
     </SelfModal>
   );
@@ -426,7 +423,8 @@ function SmileyButton() {
         '[contenteditable=true][role=textbox], [contenteditable=true]');
       if (!input) return;
       const r = input.getBoundingClientRect();
-      const w = 24, h = 24;
+      // 宽度自适应（图标+文字标签）：place 在 render 后跑，读实测 offsetWidth
+      const w = btn.offsetWidth || 24, h = 24;
       btn.style.left = Math.round(r.right - w - 8) + 'px';
       btn.style.top = Math.round(r.top - h - 6) + 'px';  // 框外上方（用户实测纠偏：+5 仍在框内）
       btn.style.width = w + 'px';
@@ -447,8 +445,10 @@ function SmileyButton() {
         style={{
           position: 'fixed', zIndex: 300, border: 'none',
           background: 'transparent', cursor: 'pointer', padding: 0,
+          display: 'inline-flex', alignItems: 'center', gap: 4,
           borderRadius: 'var(--dsw-radius-sm, 6px)',
           color: 'var(--dsw-alias-label-tertiary, #888)',
+          fontFamily: 'inherit',
         }}
         onMouseEnter={(e) => e.currentTarget.style.color =
           'var(--dsw-alias-label-primary, #111)'}
@@ -461,6 +461,7 @@ function SmileyButton() {
           <path d="M21.5 2.5 2.9 10.2c-.8.3-.8 1.5.1 1.7l4.6 1.4 1.7 5.5c.3.9 1.4 1 1.9.3l2.5-3.3 4.6 3.4c.7.5 1.7.1 1.9-.8l3.2-14.4c.2-.9-.7-1.7-1.5-1.4z"/>
           <path d="M7.3 13.5 21.5 2.5l-9.5 12.3"/>
         </svg>
+        <span style={{ fontSize: 12, lineHeight: 1, whiteSpace: 'nowrap' }}>反馈</span>
       </button>
       {open && <FeedbackModal onClose={() => setOpen(false)} />}
     </React.Fragment>
@@ -470,6 +471,19 @@ function SmileyButton() {
 /* ---------- 插件入口（官方 activity pill 同款注册模式） ---------- */
 
 export function apply(ctx) {
+  // 产品归因=加载必配（T7d）：嵌入方（产品部署方）装前必须注入
+  // __VOD_DSH_UI_PRODUCT__。无注入=入口不激活+控制台报错（fail fast）——
+  // 归因错误比没数据更糟：缺省宿主名在嵌入场景会静默错归（如 Skills 门户
+  // 反馈落 dsh）；UNKNOWN 档是运行期兜底（agent 误用），不做配置缺失的常规出口
+  if (!UI_PRODUCT) {
+    console.error(
+      '[vod-devkit] 嵌入方未注入 __VOD_DSH_UI_PRODUCT__，反馈入口未激活。' +
+      '产品归因是必配项：嵌入方装前设置 window.__VOD_DSH_UI_PRODUCT__ = "<产品名>"' +
+      '（取值=生态看板产品名：高校AI开发者平台/成长中心/AI云原生开发实践中心/鸿蒙开发实践中心/' +
+      'AI办公实践中心/IaC 实践中心/AI 开发者空间/AI Agent 集成/AI 工具集成/AI 运行环境/开放能力/' +
+      'Skills门户/GTD/VOD）');
+    return;
+  }
   ctx.slots.inject('conversation.composer.dock', function* () {
     yield ctx.slots.register(
       { name: 'conversation.composer.dock', id: 'vod-feedback', order: 20 },

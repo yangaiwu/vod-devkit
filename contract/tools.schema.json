@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "tools": {
     "vod_submit_voices": {
-      "description": "提交 agent 产品用户反馈声音（写，需确认）。对接 Java 现有 POST /external/voice/submit（提交即分析）。voiceId=调用级唯一（跨调用不去重保声量，R1）；title=用户原文（R3）。缺 key 时自动获取零字段匿名令牌。",
+      "description": "提交 agent 产品用户反馈声音（写，需确认）。对接囤积端点 POST /external/voices（V16 切换：批式、不触发分析，voiceId 由引擎确定性计算回执下发；引擎未部署 404 自动回落老链）。tags=采集层三分类（problem_type:值）。缺 key 时自动获取零字段匿名令牌。",
       "input": {
         "type": "object",
         "properties": {
@@ -19,9 +19,6 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 2000
-                },
-                "scene": {
-                  "type": "string"
                 },
                 "userType": {
                   "type": "string"

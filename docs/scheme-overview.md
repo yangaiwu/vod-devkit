@@ -51,8 +51,15 @@ VOD Java backend（唯一上游：/external/voice/submit + /external/token）
 ## 对外交付形态
 
 开发者拿到三样：git 仓地址 + 一条 install 命令（--product 归因绑定）+
-自己的 key（匿名令牌自动获取，量大升级）。装完即用：知识层匿名可用，
-提交声音那一步才需要凭证——引导（devkit error-table 模式）内建。
+匿名令牌自动获取（零交互，量大升级）。装完即用：知识层匿名可用，
+提交声音那一步自动领令牌——引导（devkit error-table 模式）内建。
+
+**分发红线（D-key-guard-2，2026-11-05 拍板）**：key 落在哪台机器，哪台
+机器就是信任边界——对外分发的插件产物禁止预置任何 key（env/配置/install
+注入均不允许），发版检查产物不含 VOD_JAVA_API_KEY 字面值。三档信任模型：
+①终端用户=匿名令牌（唯一对外分发形态）②宿主平台=host key 只配宿主
+服务端，插件经代理访问 VOD ③VOD 运营=formal key 自用。key 注入只允许
+发生在运营/宿主运维自己的机器，任何"装完即有 key"的分发形态=违规。
 
 ## 里程碑
 

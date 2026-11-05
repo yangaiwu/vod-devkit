@@ -85,7 +85,7 @@ def test_install_opencode_schema_and_merge(env):
     oc = env["home"] / ".config" / "opencode" / "opencode.json"
     oc.parent.mkdir(parents=True)
     oc.write_text(json.dumps({"provider": "keep-me", "theme": "dark"}))
-    r = cli(env, "install", "--target", "opencode", "--preset", "collect")
+    r = cli(env, "install", "--target", "opencode", "--preset", "collect", "--product", "CodeArts")
     assert r.returncode == 0, r.stderr
     cfg = json.loads(oc.read_text())
     # 既有内容无损（读改写只动 mcp.vod-devkit 键）
@@ -99,7 +99,7 @@ def test_install_opencode_schema_and_merge(env):
 
 def test_install_opencode_idempotent(env):
     for _ in range(2):
-        r = cli(env, "install", "--target", "opencode")
+        r = cli(env, "install", "--target", "opencode", "--product", "CodeArts")
         assert r.returncode == 0, r.stderr
     cfg = json.loads((env["home"] / ".config/opencode/opencode.json").read_text())
     assert list(cfg["mcp"]) == ["vod-devkit"]
@@ -109,7 +109,7 @@ def test_install_opencode_idempotent(env):
 
 def test_install_codex_toml_and_idempotent(env):
     for _ in range(2):
-        r = cli(env, "install", "--target", "codex")
+        r = cli(env, "install", "--target", "codex", "--product", "CodeArts")
         assert r.returncode == 0, r.stderr
     text = (env["home"] / ".codex" / "config.toml").read_text()
     assert text.count("[mcp_servers.vod-devkit]") == 1
@@ -121,7 +121,7 @@ def test_install_codex_toml_and_idempotent(env):
 # ---- hermes：官方 mcp add 通道 + 配置片段落盘 ----
 
 def test_install_hermes_official_cli_and_conf(env):
-    r = cli(env, "install", "--target", "hermes", "--preset", "collect")
+    r = cli(env, "install", "--target", "hermes", "--preset", "collect", "--product", "CodeArts")
     assert r.returncode == 0, r.stderr
     calls = env["hermes_calls"].read_text().strip().splitlines()
     assert calls and calls[0].startswith("mcp add vod-devkit --command")
@@ -131,23 +131,30 @@ def test_install_hermes_official_cli_and_conf(env):
     assert conf["env"]["VOD_PACKS"] == "core,collect"
 
 
-# ---- 归因绑定：缺省=宿主名（「宿主即产品」口径） ----
+# ---- 归因绑定：安装必配（T7d 统一，与 dsh UI 加载必配同口径） ----
 
-def test_install_binds_product_to_host_by_default(env):
-    cli(env, "install", "--target", "opencode")
+def test_install_requires_product(env):
+    # 缺省宿主名=生态部署错归陷阱（高校AI开发者平台 agent 底座=hermes，
+    # 不填全归 hermes）——必填 fail fast，宿主名须显式传
+    r = cli(env, "install", "--target", "opencode")
+    assert r.returncode == 2 and "--product 必填" in r.stderr
+
+def test_install_binds_explicit_product(env):
+    cli(env, "install", "--target", "codex", "--product", "高校AI开发者平台")
     mf = json.loads((env["repo"] / "install-manifest.json").read_text())
     rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
-    assert mf["product"] == "opencode" and rt["product"] == "opencode"
-    cli(env, "install", "--target", "codex", "--product", "CodeArts")
+    assert mf["product"] == "高校AI开发者平台" and rt["product"] == "高校AI开发者平台"
+    # 宿主名=自反馈场景的合法显式值
+    cli(env, "install", "--target", "opencode", "--product", "hermes")
     rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
-    assert rt["product"] == "CodeArts"                    # 显式传参优先
+    assert rt["product"] == "hermes"
 
 
 # ---- 平台地址：install 的 --java-api-base 双落（env+runtime.json 兜底） ----
 
 def test_install_java_base_defaults_to_platform(env):
     # 不传地址不强制用户：缺省=平台真实地址（回环默认会装完即坏）
-    cli(env, "install", "--target", "opencode")
+    cli(env, "install", "--target", "opencode", "--product", "CodeArts")
     rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
     assert rt["java_base"] == "https://vod-dev.topxtopx.com"
     oc = json.loads((env["home"] / ".config/opencode/opencode.json").read_text())
@@ -157,7 +164,8 @@ def test_install_java_base_defaults_to_platform(env):
 
 def test_install_persists_java_base_to_runtime(env):
     cli(env, "install", "--target", "opencode",
-        "--java-api-base", "https://vod-dev.topxtopx.com")
+        "--java-api-base", "https://vod-dev.topxtopx.com",
+        "--product", "CodeArts")
     rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
     assert rt["java_base"] == "https://vod-dev.topxtopx.com"
     oc = json.loads((env["home"] / ".config/opencode/opencode.json").read_text())
@@ -167,7 +175,7 @@ def test_install_persists_java_base_to_runtime(env):
 
 def test_install_omits_empty_key(env):
     # 无 key 时宿主配置不落 VOD_JAVA_API_KEY 空串（运行时自动兜底 runtime.json/匿名令牌）
-    cli(env, "install", "--target", "opencode")
+    cli(env, "install", "--target", "opencode", "--product", "CodeArts")
     oc = json.loads((env["home"] / ".config/opencode/opencode.json").read_text())
     assert "VOD_JAVA_API_KEY" not in oc["mcp"]["vod-devkit"]["environment"]
 
@@ -175,7 +183,7 @@ def test_install_omits_empty_key(env):
 # ---- packs 过滤：collect 预置不含 workflow 技能面 ----
 
 def test_install_collect_preset_skill_set(env):
-    cli(env, "install", "--target", "hermes", "--preset", "collect")
+    cli(env, "install", "--target", "hermes", "--preset", "collect", "--product", "CodeArts")
     skills = env["home"] / ".hermes/skills/devops/vod-devkit"
     names = {p.name for p in skills.iterdir()}
     assert "vod-core" in names and "vod-feedback-collect" in names
@@ -205,7 +213,7 @@ def test_update_refuses_when_tracked_conflict(env):
 # ---- doctor / uninstall ----
 
 def test_doctor_flags_missing_mcp_config(env):
-    cli(env, "install", "--target", "opencode")
+    cli(env, "install", "--target", "opencode", "--product", "CodeArts")
     mf = json.loads((env["repo"] / "install-manifest.json").read_text())
     Path(mf["mcpConfig"]).unlink()
     r = cli(env, "doctor")
@@ -213,7 +221,7 @@ def test_doctor_flags_missing_mcp_config(env):
 
 
 def test_uninstall_removes_artifacts(env):
-    cli(env, "install", "--target", "opencode")
+    cli(env, "install", "--target", "opencode", "--product", "CodeArts")
     mf = json.loads((env["repo"] / "install-manifest.json").read_text())
     r = cli(env, "uninstall")
     assert r.returncode == 0, r.stderr

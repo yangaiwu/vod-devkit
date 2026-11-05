@@ -248,6 +248,25 @@ S20 传输协议守卫（2026-11-03 已实现）
   http（引擎同机部署/测试 recorder）正常放行——守卫只拦明文外发，
   不拦本地开发
 
+S21 令牌端点信封契约（D-anon-verify，2026-11-05 真机实锤已修）
+  引擎真实契约=ApiResponse 信封 {code,message,data:{token,...}}；
+  插件曾顶层取 token 恒 None → 无 key 首提必 -32012"端点不可用"。
+  教训=mock 契约未对齐真源（存量测试用扁平 {"token":...} 掩盖缺陷）。
+  修复后 mock 全部对齐信封，_extract_anon_token 单函数可测。
+
+S22 匿名链端到端（真机验证通过）
+  runtime.json 无 java_key → 首提 401 → 自动 POST /external/token
+  （空 body + X-Vod-Device-Id）→ 令牌以 java_key 槽落盘
+  （token_tier=anonymous 标记档位）→ 重试 201 → 引擎落囤积区
+  key_tier=anonymous、voiceId 带匿名锚点前缀 → 同令牌重提同
+  voiceId 幂等（skipped 不烧配额）。
+
+S23 老平台 key 移除语义（D-key-guard 配套）
+  runtime.json 携带 legacy key 时提交走 legacy-shared 档（引擎侧
+  external.legacy.enabled 接住）；移除后走匿名链。两档行为均在
+  真机实测：带 key=legacy-shared、无 key=anonymous，迁移路径
+  =删除 runtime.json java_key 即切换，无代码改动。
+
 ## 三·五、安装溯源与宿主感知（新增需求）
 
 ### 背景与语义
@@ -466,3 +485,60 @@ S16 双形态语义一致（架构约束回归）
 
 - 设计文档评审（docs/vod-devkit-plugin/design.md）
 - 评审通过后 P0 开工
+
+---
+
+## 七、分发形态与信任边界（D-key-guard-3，2026-11-05）
+
+### 背景
+
+产品部门将把插件集成进其 agent 随产品对外分发。现有实现默认
+「安装者=使用者=运维者」三合一；分发把三者拆开后，每个装机时生成的
+状态都成为分发污染源。诊断共 6 项（详见 decisions.md D-key-guard-2/3），
+解法=统一形态位收口，不逐个打补丁。
+
+### 方案：distribution 形态位
+
+- `install --distribution devkit|preset`（缺省 devkit）：写入 install-manifest，
+  构建期定死、客户机只读；
+- devkit=开发/运维自装自管（现状语义）；preset=产品随 agent 分发；
+- 逐条分支：①key 禁止随包（安装时忽略并告警环境变量 key，客户机走匿名令牌）
+  ②update 禁用（版本随产品发版管理）③verify 降级为本地完整性校验
+  （源端比对 unchecked，离线不 FAIL）④首启残留清理（构建机状态自动重生成）
+  ⑤本地账本可关（--no-local-ledger，企业数据驻留）⑥日志 1MB 轮转。
+
+### 信任模型三档（对外口径）
+
+| 档位 | 主体 | key 位置 | 说明 |
+|---|---|---|---|
+| 匿名令牌 | 终端用户（对外分发形态） | 客户机每机自领 | 30 天/500 条+UA 绑定+per-install 命名空间；归因靠 install --product |
+| host key | 宿主平台 | 宿主服务端/运维管控面 | 插件经代理访问 VOD，key 不落客户机 |
+| formal key | VOD 运营 | 运营自有 | 内部自用 |
+
+红线：**key 落在哪台机器，哪台机器就是信任边界——对外分发的插件产物
+禁止预置任何 key**；共享服务器部署（一部署服务全公司）不适用匿名档，
+必须走服务端代理。
+
+### 场景用例（DG1-DG9）
+
+| 用例 | 场景 | 断言 |
+|---|---|---|
+| DG1 | 产品构建机 install --distribution preset | manifest 写入 distribution=preset；缺省 devkit 不变 |
+| DG2 | 构建机环境变量带 key 做 preset 安装 | key 不进宿主配置+当场告警；devkit 形态透传保持 |
+| DG3 | 客户机打包者漏排 runtime.json | 首启检测残留（java_key/nonce/账本）自动清空重生成，保留 product/java_base，写 firstBootAt |
+| DG4 | 客户机正常首启 | 只写 firstBootAt 不清理；二次启动不再触发（防误伤） |
+| DG5 | 客户机执行 update | 拒绝并指引"随 agent 发版管理" |
+| DG6 | 客户机离线执行 verify | 本地完整性通过即 OK（unchecked），不触 git；产物混装（manifest≠build-info）FAIL |
+| DG7 | 企业客户要求数据不留痕 | --no-local-ledger 安装后提交不落账本，vod_list_submitted 返回空；缺省账本开启 |
+| DG8 | 客户机长期运行 | /tmp 日志超 1MB 截断轮转，旧日志 .old 保留，新写入正常 |
+| DG9 | 运营/宿主运维自己机器注入 key（devkit 形态） | 现有行为不变（fail fast/探针/写后验护栏继续生效） |
+
+### 已决策（负责人确认）
+
+- 对外分发形态禁止预置 appkey（D-key-guard-2 拍板）；appkey 通道 dormant
+  保留，收窄为运营/宿主服务端专属（D-key-guard-1/2）
+- 形态位写入=我们安装器的 --distribution 参数，产品侧打包流水线零改动
+- preset 残留处置=自动清空重生成+告警，不拒绝启动（残留数据全为本机
+  可再生，拒启会把误判放大成全功能瘫痪）
+- 问题 3（共享服务器部署的令牌模型）落为红线约束（共享部署走服务端
+  代理），代码不提前写死——插件侧 base URL 覆盖项已支持代理形态

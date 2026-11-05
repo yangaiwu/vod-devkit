@@ -150,3 +150,54 @@ client 半实现+表单 1.5 天 → 联调（等 MR !152 部署）0.5 天 →
 | U-S5 | 建单后崩溃 | 插件无感知（引擎折叠检索兜底）；回执轮询终会命中 |
 | U-S6 | 运营拒绝 | 回执轮询命中 REJECTED→「反馈未采纳」 |
 | U-S7 | 凭据内容 | 客户端不拦（原文保留）；引擎建 issue 出口 sanitize |
+
+## 十三、对齐 VOD-Project 采集标准（2026-11-04 三轮，T7b/T7c 插件侧）
+
+引擎侧契约变更（feat/kb-query-auth T7b/T7c，本仓同步）：
+- **渠道=引擎固定赋值（T7b 定稿）**：取令牌零字段（方案 C 原样，客户端
+  不自报任何渠道参数）→ 囤积入库侧对插件链路统一打 vod-agent
+  （collect_source=vod-agent|anonymous-token，正式 key 走注册 host_name）
+- **分类=云声三分类**：chips 收敛为 功能建议/用户体验/产品缺陷
+  （suggestionType 1/2/3 逐字对齐；六类是 n01 分析层内部枚举不进人看
+  表单）；选中 → tags=["problem_type:<三分类值>"] → 引擎落
+  【类型名】标题前缀正式入库，n01 重判两层并存
+- **description 模板文案移除**（主提交/重试体/账本行）：预分类已走
+  tags 正式通道，[vod-devkit] 渠道标记由 collect_source 列承载，
+  description 不再有任何承载物
+- **title 显式传入**：content 前 60 字作 title（引擎尊重显式传入）
+- **文案**：场景 placeholder 对齐云声表单契约（"您在XX场景遇到的
+  问题"引导）；hint 补"选择的分类会随反馈一并记录，产品团队会结合
+  内容复核"（两层并存的真实语义，不让用户以为选了就定案）
+- 场景用例对应引擎 proposal §六 V26-V29；端到端真机验证 2026-11-04：
+  token body host ✓ / voices body tags ✓ / 无 description ✓ /
+  账本 category+scene+accepted ✓
+
+## 十四、产品归因=加载必配（T7d，2026-11-04 拍板）
+
+- **UI 半**：嵌入方装前必须注入 `__VOD_DSH_UI_PRODUCT__`。无注入=入口
+  不激活+控制台报错（fail fast）——归因错误比没数据更糟（缺省宿主名在
+  嵌入场景会静默错归：Skills 门户反馈落 dsh）；UNKNOWN 档是运行期兜底
+  （agent 误用），不做配置缺失的常规出口。product 恒有值（提交体直带）
+- **MCP 半**：不变——install --product 安装绑定（缺省=宿主名，宿主即
+  产品场景成立），运行期显式传参覆盖优先
+- 真机双路径验证：无注入按钮不激活 ✓；注入 CodeX 后按钮激活+提交体
+  product:"CodeX" ✓（CDP addScriptToEvaluateOnNewDocument 模拟嵌入方注入）
+
+## 十五、对接产品清单（2026-11-04 用户确认为准）
+
+产品归因取值=生态看板 14 个产品（嵌入/安装时二选一，逐字使用）：
+高校AI开发者平台、成长中心、AI云原生开发实践中心、鸿蒙开发实践中心、
+AI办公实践中心、IaC 实践中心、AI 开发者空间、AI Agent 集成、AI 工具
+集成、AI 运行环境、开放能力、Skills门户、GTD、VOD。
+（CodeArts/agentarts 等为旧 7 产品 profile 体系词汇，不是对接清单，
+提示文案已修正。引擎 product 列按名存取；进分析联表需 t_vod_product
+注册同名行——部署前置项，见引擎侧运营动作。）
+
+## 十六、引擎合入后行为变化（2026-11-04，MR !152 合入 dev）
+
+- **囤积端点已随引擎进 dev**——UI 主路径即将真通：部署前 404→暂存
+  本地账本自动重提（现行）；部署后 201 直通（同一代码，无需改动）
+- 引擎评审线新增机制与 UI 的关系：A2 令牌设备绑定（UA 不一致 401）
+  → UI 清 token 重领自愈 ✓；锚点聚合配额（IP|UA 锚点级 500/日）→
+  服务端管；verbatim desc（无后缀补齐）→ 与 scene 字段删除同向 ✓
+- MCP 壳已先行切换囤积端点（404 回落老链过渡语义），两侧协议统一

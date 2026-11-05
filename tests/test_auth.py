@@ -11,7 +11,8 @@ sys.path.insert(0, str(ROOT))
 from vod_mcp import tools  # noqa: E402
 
 
-def test_auth_status_fingerprint_not_plaintext():
+def test_auth_status_fingerprint_not_plaintext(monkeypatch):
+    monkeypatch.setattr(tools, "probe_key", lambda: {"ok": None, "reason": "unreachable"})  # 隔网
     out = tools.auth_status({}, client_info={"name": "t"})
     fp = out["javaKey"]["fingerprint"]
     assert fp is None or (len(fp) == 8 and fp != tools.JAVA_KEY), \
@@ -41,10 +42,14 @@ def test_submit_voices_auto_token_then_retry(monkeypatch):
         calls.append((method, path, key))
         if path.endswith("/external/token"):
             state["token_issued"] = True
-            return {"token": "anon-token-xyz", "dailyLimit": 50}
-        if path.endswith("/external/voice/submit"):
+            # D-anon-verify（2026-11-05 真机实锤）：引擎真实契约=ApiResponse 信封，
+            # mock 必须对齐真源（曾用扁平 {"token":...} 掩盖了顶层取值恒 None 的缺陷）
+            return {"code": 200, "message": "令牌已签发",
+                    "data": {"token": "anon-token-xyz", "dailyLimit": 50,
+                             "expiresAt": 1796453397897, "tier": "anonymous"}}
+        if path.endswith("/external/voices"):
             if key == "anon-token-xyz":
-                return {"code": 200, "data": {"taskId": 77, "status": "PENDING"}}
+                return {"code": 200, "voiceIds": ["ext_vod-agent_t1"]}
             raise tools.ToolError("鉴权失败：检查 key", code=-32012)
         return {}
 
@@ -60,7 +65,8 @@ def test_submit_voices_auto_token_then_retry(monkeypatch):
         {"voices": [{"content": "补全响应有点慢，希望优化一下"}],
          "product": "codearts", "confirmed": True},
         client_info={"name": "t"})
-    assert out["accepted"] == 1 and out["taskIds"] == [77]
+    assert out["accepted"] == 1 and out["path"] == "hoarding"
+    assert out["voiceIds"] == ["ext_vod-agent_t1"]  # 囤积语义：无即时任务，id=引擎算
     assert state["token_issued"], "必须先取令牌"
     assert saved.get("java_key") == "anon-token-xyz"
     assert saved.get("token_tier") == "anonymous"
@@ -75,7 +81,7 @@ def test_submit_voices_token_unreachable_gives_guidance(monkeypatch):
     monkeypatch.setattr(tools, "JAVA_KEY", "")
 
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
-        raise tools.ToolError("上游返回 404: Not Found")
+        raise tools.ToolError("上游返回 404: Not Found", code=404)  # 对齐真实 _http：HTTP 状态进 code
 
     monkeypatch.setattr(tools, "_http", fake_http)
     with pytest.raises(tools.ToolError) as ei:
@@ -99,6 +105,10 @@ def test_voice_volume_preserved_across_calls(monkeypatch):
     seen = []
 
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        if path.endswith("/external/voices"):
+            # 囤积主路径：voiceId 由引擎按 per-token 命名空间算（server 侧职责），
+            # 客户端锁的是“把完整 content 原样交给引擎”+ 404 回落
+            raise tools.ToolError("上游返回 404: not found", code=404)
         if path.endswith("/external/voice/submit"):
             seen.append(body["voiceId"])
             return {"code": 200, "data": {"taskId": len(seen)}}
@@ -111,13 +121,13 @@ def test_voice_volume_preserved_across_calls(monkeypatch):
         out = tools.submit_voices({"voices": [voice], "product": "codearts",
                                    "confirmed": True},
                                   client_info={"name": "mcp"})
-        assert out["accepted"] == 1
-    assert len(set(seen)) == 2, "同款反馈跨调用必须不去重（声量保真）"
+        assert out["accepted"] == 1 and out["path"] == "legacy-fallback"
+    assert len(set(seen)) == 2, "404 回落老链：同款反馈跨调用必须不去重（R1 声量保真锁）"
 
-    # title 必须是用户原文（R3：分析消费原话，后缀只允许出现在 description）
+    # title 必须是用户原文（R3：分析消费原话；囤积链 voices[].title=content 截断）
     def fake2(method, path, body=None, timeout=30, base=None, key=None):
-        assert body["title"] == voice["content"], "title=用户原文，禁止模板污染"
-        return {"code": 200, "data": {"taskId": 1}}
+        assert body["voices"][0]["title"] == voice["content"], "title=用户原文，禁止模板污染"
+        return {"code": 200, "voiceIds": ["ext_vod-agent_x"]}
     monkeypatch.setattr(tools, "_http", fake2)
     tools.submit_voices({"voices": [voice], "product": "codearts", "confirmed": True},
                         client_info={"name": "mcp"})
@@ -253,3 +263,200 @@ def test_transport_guard_rejects_http_public(monkeypatch):
         assert False, "不可达但应报 -32001 而非协议拒绝"
     except tools.ToolError as e:
         assert e.code == -32001
+
+
+# ---- key 安全三件（D-key-guard-1）：401 fail fast / 写后验 / 探针 ----
+
+def test_explicit_key_rejected_401_fails_fast(monkeypatch):
+    """显式 key（安装注入）被引擎 401 拒 → fail fast：不取匿名令牌、不覆盖 runtime.json。
+    静默降级匿名=配置错误被吞=归因错位（D-key-guard-1 回归锁）。"""
+    monkeypatch.setenv("VOD_JAVA_API_KEY", "formal-key-abc")
+    monkeypatch.setattr(tools, "JAVA_KEY", "formal-key-abc")
+    monkeypatch.setattr(tools, "_RT", {})
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": [], "stale": True, "source": "snapshot"})
+    fetched = []
+    monkeypatch.setattr(tools, "_fetch_anon_token", lambda: fetched.append(1) or "tok")
+
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        raise tools.ToolError("鉴权失败", code=-32012)
+
+    monkeypatch.setattr(tools, "_http", fake_http)
+    saved = []
+    monkeypatch.setattr(tools, "_save_runtime", lambda u: saved.append(u))
+    with pytest.raises(tools.ToolError) as ei:
+        tools.submit_voices(
+            {"voices": [{"content": "希望优化导出速度"}], "product": "codearts",
+             "confirmed": True}, client_info={"name": "t"})
+    assert "指纹" in str(ei.value) and "被引擎拒绝" in str(ei.value), "报错须带指纹与处置指引"
+    assert not fetched, "显式 key 被拒不得触发匿名令牌链"
+    assert not saved, "显式 key 被拒不得覆盖 runtime.json（防止假锚定）"
+
+
+def test_anon_token_expired_401_refetches(monkeypatch):
+    """匿名令牌过期 401 → 重领链保持（与显式 key fail fast 分流互斥）。"""
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
+    monkeypatch.setattr(tools, "JAVA_KEY", "stale-anon-token")
+    monkeypatch.setattr(tools, "_RT", {"token_tier": "anonymous"})
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": [], "stale": True, "source": "snapshot"})
+    calls = []
+
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        calls.append((path, key))
+        if path.endswith("/external/token"):
+            return {"token": "fresh-anon"}
+        if key == "fresh-anon":
+            return {"code": 200, "voiceIds": ["ext_vod-agent_t2"]}
+        raise tools.ToolError("鉴权失败", code=-32012)
+
+    monkeypatch.setattr(tools, "_http", fake_http)
+    monkeypatch.setattr(tools, "_save_runtime", lambda u: None)
+    out = tools.submit_voices(
+        {"voices": [{"content": "希望优化导出速度"}], "product": "codearts",
+         "confirmed": True}, client_info={"name": "t"})
+    assert out["accepted"] == 1, "匿名令牌失效应自动重领并提交成功"
+    assert any(p.endswith("/external/token") for p, _ in calls)
+
+
+def test_save_runtime_write_after_verify_0600(tmp_path, monkeypatch):
+    """S1 式写后验：写后文件必须 0600（chmod 效果验证，不是动作验证）。"""
+    import os as _os
+    target = tmp_path / "runtime.json"
+    monkeypatch.setattr(tools, "_runtime_path", lambda: target)
+    tools._save_runtime({"java_key": "k1"})
+    mode = _os.stat(target).st_mode & 0o777
+    assert mode == 0o600, f"写后验必须把 runtime.json 收到 0600，实际 {oct(mode)}"
+    cfg = json.loads(target.read_text())
+    assert cfg["java_key"] == "k1"
+
+
+def test_probe_key_three_verdicts(monkeypatch):
+    """探针三态：200=有效 / 401=无效 / 网络错误=不判定（网络问题不是 key 问题）。"""
+    monkeypatch.setattr(tools, "JAVA_KEY", "k-test")
+
+    def ok_http(method, path, body=None, timeout=30, base=None, key=None):
+        assert path.endswith("/external/meta") and key == "k-test"
+        return {"products": []}
+
+    monkeypatch.setattr(tools, "_http", ok_http)
+    assert tools.probe_key() == {"ok": True, "reason": "verified", "fingerprint": tools._fingerprint("k-test")}
+
+    def denied(method, path, body=None, timeout=30, base=None, key=None):
+        raise tools.ToolError("401", code=401)
+
+    monkeypatch.setattr(tools, "_http", denied)
+    out = tools.probe_key()
+    assert out["ok"] is False and out["reason"] == "rejected"
+
+    def dead(method, path, body=None, timeout=30, base=None, key=None):
+        raise tools.ToolError("timeout", code=-32015)
+
+    monkeypatch.setattr(tools, "_http", dead)
+    out = tools.probe_key()
+    assert out["ok"] is None and out["reason"] == "unreachable", "不可达≠无效"
+
+    monkeypatch.setattr(tools, "JAVA_KEY", "")
+    out = tools.probe_key()
+    assert out == {"ok": None, "reason": "no-key", "fingerprint": None}
+
+
+def test_auth_status_no_key_material_anywhere(monkeypatch):
+    """脱敏复查（D-key-guard-1③）：auth_status/账本全输出面 grep 不到 key 明文。"""
+    secret = "super-secret-key-value-9f2e"
+    monkeypatch.setattr(tools, "JAVA_KEY", secret)
+    monkeypatch.setattr(tools, "probe_key", lambda: {"ok": None, "reason": "unreachable"})
+    out = json.dumps(tools.auth_status({}, client_info={"name": "t"}))
+    assert secret not in out, "key 明文禁止出现在任何工具输出"
+
+
+# ---- VOD-DEVICE：设备锚点 header 协议锁 ----
+
+def test_device_header_on_all_external_requests(monkeypatch):
+    """锚点协议锁：所有 /external 请求（签发+提交）必须携带 X-Vod-Device-Id，
+    取值=install_nonce（首启自生成常驻）——引擎据此建每设备独立锚点。"""
+    import urllib.request
+    seen = {}
+
+
+    class FakeResp(io := __import__("io").BytesIO):
+        def __init__(self):
+            self.status = 200
+        def read(self):
+            return b"{}"
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, *a, **kw):
+        seen["device"] = req.headers.get("X-vod-device-id")
+        seen["auth"] = req.headers.get("Authorization")
+        return FakeResp()
+
+    monkeypatch.setattr(tools, "_install_nonce", lambda: "deadbeef")
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    tools._http("GET", "/rest/developer/manager/hdvodmngservice/v1/external/meta", None)
+    assert seen["device"] == "deadbeef", "设备锚点 header 必须随所有 external 请求上送"
+    assert seen["auth"] == "Bearer k"
+
+
+# ==================== D-anon-verify（2026-11-05 真机实锤）：信封契约与匿名链真源对齐 ====================
+
+def test_anon_token_envelope_contract(monkeypatch):
+    """S20 令牌端点信封契约（真源=ExternalTokenController ApiResponse）：
+    data.token 必须被解析；此前顶层取值恒 None → 无 key 首提必 -32012。"""
+    assert tools._extract_anon_token(
+        {"code": 200, "message": "令牌已签发",
+         "data": {"token": "env-tok", "dailyLimit": 50, "tier": "anonymous"}}
+    ) == "env-tok", "引擎真实信封形态必须解析出 token"
+
+
+def test_anon_token_flat_payload_compat():
+    """S21 顶层扁平形态兼容（历史/降级引擎返回 {"token":...} 不破坏）。"""
+    assert tools._extract_anon_token({"token": "flat-tok", "dailyLimit": 50}) == "flat-tok"
+
+
+def test_anon_token_missing_or_garbage_returns_none():
+    """信封无 token / 非字典 / 空 data → None（走 -32012 结构化引导，不误用垃圾值）。"""
+    assert tools._extract_anon_token({"code": 200, "data": {"dailyLimit": 50}}) is None
+    assert tools._extract_anon_token({"code": 200, "data": "not-a-dict"}) is None
+    assert tools._extract_anon_token("garbage") is None
+    assert tools._extract_anon_token({"token": 123}) is None, "非字符串 token 不得通过"
+
+
+def test_legacy_key_removed_falls_to_anon_chain_e2e(monkeypatch):
+    """S22 key 移除语义（D-key-guard 配套）：runtime.json 无 java_key →
+    首提走匿名链自动签发 → 令牌以 java_key 槽落盘 + token_tier=anonymous 标记。"""
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts"],
+                                             "stale": False, "source": "meta"})
+    calls = []
+
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        calls.append((method, path, key))
+        if path.endswith("/external/token"):
+            assert not key, "取令牌请求不得带 Bearer（零字段匿名入口）"
+            return {"code": 200, "data": {"token": "fresh-anon-tok",
+                                          "tier": "anonymous"}}
+        if path.endswith("/external/voices"):
+            if not key:
+                # 真实时序：无 key 首提 401（对齐引擎 Filter 行为）→ 取令牌 → 重试
+                raise tools.ToolError("鉴权失败（401）", code=-32012)
+            assert key == "fresh-anon-tok", "取到令牌后重试必须携带新令牌"
+            return {"code": 200, "data": {"accepted": 1,
+                                          "voiceIds": ["ext_anonymous_t1"]}}
+        return {}
+
+    saved = {}
+    monkeypatch.setattr(tools, "JAVA_KEY", "")  # 模拟移除老平台 key 后的 runtime
+    monkeypatch.setattr(tools, "_http", fake_http)
+    monkeypatch.setattr(tools, "_save_runtime", lambda u: saved.update(u))
+    out = tools.submit_voices(
+        {"voices": [{"content": "匿名链端到端验证反馈"}],
+         "product": "codearts", "confirmed": True},
+        client_info={"name": "t"})
+    assert out["accepted"] == 1 and out["path"] == "hoarding"
+    assert saved.get("token_tier") == "anonymous"
+    assert any(p.endswith("/external/token") for m, p, _ in calls), "必须先取令牌"
