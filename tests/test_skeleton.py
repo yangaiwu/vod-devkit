@@ -29,6 +29,18 @@ def test_contract_covers_pack_tools():
         assert tool in contract["tools"]
 
 
+def test_submit_description_frontloads_consent():
+    """确认纪律必须话术前置——MCP-only 宿主不加载技能，工具 description 是唯一约束源。
+
+    实锤事故（2026-11-06）：旧描述以「立即调用本工具」开头、确认要求埋在参数里，
+    opencode 把用户陈述反馈自行当成同意、直接传 confirmed=true 提单。
+    """
+    desc = tools.load_contract()["tools"]["vod_submit_voices"]["description"]
+    assert desc.index("先决条件") < 60, "确认纪律必须在描述开头 60 字内（话术前置）"
+    assert "不构成同意" in desc, "必须显式声明「用户陈述反馈本身不构成同意」"
+    assert "confirmed=true" in desc
+
+
 def test_tool_specs_follow_packs(monkeypatch):
     monkeypatch.setenv("VOD_PACKS", "core")
     specs = tools.tool_specs(packs.enabled_tools())

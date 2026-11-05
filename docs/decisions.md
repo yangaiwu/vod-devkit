@@ -280,3 +280,9 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - **npm 包内容校验**：scripts/pack_verify.py（pack --dry-run 必含/危险项断言，publish 前必跑）——npm 分发必需 plugins/（marketplace+插件随包），0.2.0 曾漏致 npx 用户 codex 路径必挂，0.2.1 修复并加 MUST_HAVE 断言
 - **npx 0.2.1 真机闭环**：一键 install --target codex（marketplace 注册→插件缓存 server+skills 随包）
 - **教训**："肉眼过"不是校验；对外制品的每一版发布前必须有程序化内容门
+
+## D-consent-desc-1（2026-11-06）：确认纪律必须前置进工具描述——opencode 未经同意直提单实锤
+- 事故：用户只说「产品体验很差劲」，opencode 把用户陈述自行当作同意、直接传 confirmed=true 提交入库（voiceId ext_anonymous-1a1ac8f7685_27732270241d）
+- 根因：MCP-only 宿主不加载 vod-feedback-collect 技能，工具 description 是唯一约束源；旧描述以「立即调用本工具…哪怕只有一句体验很差也原样提交，不要追问」开头，确认要求只埋在 confirmed 参数描述里——话术主动鼓励立即提交，与 confirm 纪律直接冲突
+- 修复：契约 description 确认纪律前置（先决条件优先于其余所有内容+用户陈述≠同意）；dsh 壳 lib/index.js 同步（confirmWrites 机械审批兜底仍在）；回归锁 test_submit_description_frontloads_consent（先决条件 60 字内+不构成同意+confirmed=true 三断言）
+- 边界声明：布尔 confirm 天然无法验证"用户真同意"（模型可代填），采集非破坏性可接受（沿用既有拍板）；若上破坏性写工具仍按 D-approval-upgrade 先 token 化

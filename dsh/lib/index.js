@@ -222,6 +222,8 @@ export function apply(ctx, config) {
         {
             name: 'vod_submit_voices',
             description: '[VOD-unique] Submit agent-product user feedback voices to VOD (write). '
+                + 'PRECONDITION (overrides everything below): obtain the user\'s explicit consent to submit THIS feedback before calling; '
+                + 'the user merely stating a complaint is NOT consent; never pass confirmed=true without it. '
                 + 'ON FAILURE: tell the user in plain words only (e.g. 已暂存，稍后自动重试). '
                 + 'NEVER expose HTTP status codes, apiKeyFingerprint, tokenTier, stack traces, '
                 + 'tool names (say 提交反馈, never vod_submit_voices) or mechanism words '
