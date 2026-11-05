@@ -120,3 +120,12 @@
 ## v0.2.1（2026-11-05）
 
 
+
+## v0.2.2（2026-11-06）
+
+- e2928cb test(D-codex-plugin-1 增补2 补): 自包含契约锁断言更新为 serve 入口形态（相对路径断言随 .mcp.json 定稿移除，失败原因留注释）；skills 随包断言补入
+- 4cd6d84 fix(D-codex-plugin-1 增补2): ①SKILL.md 清除 V16 前废弃旧职责残留（四节 content 模板/声音来源字段/detect_channel——与工具描述新契约直接冲突，codex 真机会话实锤模型按旧模板走偏：翻仓库找提交规范→要工单字段→用户原话丢失未提交）；frontmatter 触发词补 提单/提 issue②工具描述补提单语义+话术前置强化（content=原话即完整提交物，禁止追问补齐/索要开发者字段）③.mcp.json 定稿 vod-devkit serve（相对路径+cwd 在 codex 0.166 实测不解析到插件目录）④sync_plugin.py 补 skills 同步（此前只同步 vod_mcp=又一漂移面）
+- 4418a91 feat(D-golden-1 扩展+D-probe-1 探针工具化): ①tests/probe.py 可复用 stdio 探针（initialize/tools/call/护栏 error 分流——多轮真机手法沉淀）+pack 门控真实装配层锁（VOD_PACKS 两种取值 tools/list 协议级断言）②golden 扩展：status 原样 manifest 契约（HOME/REPO/ORIGIN/SHA/installedAt 归一化+skillHashes 值不锁归漂移锁专项）+preset update 固定拒绝语；_assert_golden 复用 helper；78 用例绿。proposal S43/S44
+- 2782f5e feat(D-golden-1 doctor/verify golden 基线): 用户可见输出快照比对（devkit doctor-golden 对表，差距清单①第一步）——易变段归一化（HOME/REPO/SHA12），口径漂移即红，有意变更 UPDATE_GOLDEN=1 重录并在失败 diff 人工过目；无 key 确定性基线（key 探针行含易变指纹不入基线）；顺带修测试基建 bug：shutil.ignore_patterns 只匹配基名，'vod_mcp/runtime.json' 带斜杠模式永不命中致 clone 混入真源账本。proposal S42+design golden 节；76 用例绿
+- 28c1f80 feat(D-release-1 一键发版体系+包内容门): release.sh 重写对齐 devkit release-please 语义——bump 从提交历史推导+版本落点表驱动 EXTRA_FILES+整行正则替换+全落点硬断言（根治静默 no-op）；新增 scripts/pack_verify.py 包内容门（pack --dry-run 必含/危险项断言）——首跑即实锤 0.1.12 曾含 runtime.json 凭据残留（已 deprecate，0.2.0 起文件级白名单结构性排除，npm 0.1.12 残留令牌仅对已销毁本地库有效）；package.json files 改文件级白名单+npm 分发补 plugins/ 随包（0.2.0 漏项致 npx codex 路径必挂，0.2.1 修复）；RELEASING.md 发版手册；proposal S41+decisions D-release-1；一键发版真机闭环 v0.2.0/v0.2.1（npx codex 原生插件安装复验通过）
+
