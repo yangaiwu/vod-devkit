@@ -22,7 +22,8 @@ const PKG_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const DATA_DIR = join(PKG_DIR, 'data');
 const RUNTIME = join(DATA_DIR, 'runtime.json');
 const API_PREFIX = '/rest/developer/manager/hdvodmngservice/v1';
-const SUBMIT_PATH = `${API_PREFIX}/external/voice/submit`; // TODO(引擎VOD-VOI上线)：切换为 `${API_PREFIX}/external/voices`（囤积入库、批量、不触发LLM分析、逐条结构化回执）——切换点仅此一行+body 字段核对，见 docs/decisions.md D-dsh-4
+const HOARD_PATH = `${API_PREFIX}/external/voices`; // V16 囤积端点（批量/不触发 LLM/结构化回执）
+const SUBMIT_PATH = `${API_PREFIX}/external/voice/submit`; // 旧单条端点：仅 404 回落使用 // V16 已切换：主路径 HOARD_PATH（囤积），本路径仅 404 回落（见 docs/decisions.md D-dsh-4）
 const TOKEN_PATH = `${API_PREFIX}/external/token`;
 const LEDGER_CAP = 200;
 
@@ -79,6 +80,19 @@ function transportError(base) {
     return null;
 }
 
+// VOD-DEVICE：设备锚点（纯 hex 32 位，引擎 [0-9a-f]{8,64} 校验；
+// 含非 hex 字符会静默降 legacy 锚点——UI 半实锤的同类坑）
+function i0Anon() { return true; } // 401 → 匿名令牌重试一次（保持原行为锚点）
+
+function deviceNonce() {
+    let n = loadRuntime().device_nonce;
+    if (!n) {
+        n = (randomUUID() + randomUUID()).replace(/[^0-9a-f]/g, '').slice(0, 32);
+        saveRuntime({ device_nonce: n });
+    }
+    return n;
+}
+
 async function http(method, path, body, { base, key, timeoutSec, signal }) {
     const guard = transportError(base);
     if (guard) throw new Error(`[${guard.code}] ${guard.error}`); // backstop：守卫在工具入口已拦截，此处兜底
@@ -91,6 +105,7 @@ async function http(method, path, body, { base, key, timeoutSec, signal }) {
             method,
             headers: {
                 'content-type': 'application/json',
+                'X-Vod-Device-Id': deviceNonce(),
                 ...(key ? { authorization: `Bearer ${key}` } : {}),
             },
             body: body === undefined ? undefined : JSON.stringify(body),
@@ -223,12 +238,65 @@ export function apply(ctx, config) {
                 const source = 'dsh';
                 const accepted = [], taskIds = [], rejected = [];
                 let key = c.key;
+                // V16 切换（囤积端点）：批量一次 POST，title=原文截取、content=用户原话
+                // （新端点无 10 字下限，不做模板补齐——P1 数据完整性）。404=引擎未部署 → 回落旧单条
+                const hoard = [];
                 for (let i = 0; i < voices.length; i++) {
                     const v = voices[i] || {};
                     const content = String(v.content ?? '').trim();
                     if (!content) { rejected.push({ index: i, reason: 'content 为空' }); continue; }
                     if (content.length > 2000) { rejected.push({ index: i, reason: `content 超 2000 字（${content.length}）` }); continue; }
-                    const scene = String(v.scene ?? '').slice(0, 128);
+                    hoard.push({ title: content.slice(0, 128), content }); // R3：title=用户原文
+                }
+                if (hoard.length) {
+                    let out = await http('POST', HOARD_PATH, { voices: hoard, product },
+                        { ...c, key, signal: exec?.signal });
+                    if (out.status === 401 && i0Anon(c)) {
+                        const token = await fetchAnonToken({ ...c, key: '', signal: exec?.signal });
+                        if (token) {
+                            key = token;
+                            saveRuntime({ java_key: token, token_tier: 'anonymous' });
+                            out = await http('POST', HOARD_PATH, { voices: hoard, product },
+                                { ...c, key, signal: exec?.signal });
+                        } else {
+                            return textResult({
+                                error: '未配置接入 key 且匿名令牌端点不可用。引导：1) 首次提交时插件自动申请零字段匿名令牌；' +
+                                    '2) 量到上限后联系 VOD 运营升级正式 key；3) 宿主平台整体对接可获宿主 key',
+                                code: -32012,
+                            });
+                        }
+                    }
+                    if (out.status !== 404) {
+                        if (out.ok) {
+                            const d = out.data?.data || out.data || {};
+                            const ids = d.voiceIds || [];
+                            const sts = d.statuses || [];
+                            for (let i = 0; i < hoard.length; i++) {
+                                const vid = ids[i] || '';
+                                if (vid && sts[i] !== 'skipped') accepted.push(vid);
+                                else if (vid) { accepted.push(vid); } // skipped=幂等，也回执
+                                taskIds.push(null); // 囤积语义：无即时任务
+                            }
+                            const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+                            ledgerAppend(hoard.map((h, i) => ({
+                                voiceId: ids[i] || '', taskId: null,
+                                title: h.title.slice(0, 40), product,
+                                at: now, status: sts[i] === 'skipped' ? 'accepted' : 'accepted',
+                            })));
+                            return textResult({
+                                accepted: accepted.length, voiceIds: accepted,
+                                taskIds, rejected, path: 'hoarding',
+                                ...(d.productRegistered !== undefined ? { productRegistered: d.productRegistered } : {}),
+                            });
+                        }
+                        // 非 404 非 2xx → 回落旧单条（如 401 已处理；此处为兼容异常响应）
+                    }
+                }
+                for (let i = 0; i < voices.length; i++) {
+                    const v = voices[i] || {};
+                    const content = String(v.content ?? '').trim();
+                    if (!content) { rejected.push({ index: i, reason: 'content 为空' }); continue; }
+                    if (content.length > 2000) { rejected.push({ index: i, reason: `content 超 2000 字（${content.length}）` }); continue; }
                     const nonce = randomUUID().replace(/-/g, '').slice(0, 8); // 调用级幂等、跨调用保声量
                     const vid = voiceId(source, content, nonce);
                     const desc = content.length >= 10 ? content : `${content} [vod-devkit]`;
@@ -239,7 +307,6 @@ export function apply(ctx, config) {
                         product,
                         source,
                         ...(v.userType ? { customer: v.userType } : {}),
-                        ...(scene ? { scene } : {}),
                     };
                     const call = () => http('POST', SUBMIT_PATH, body, { ...c, key, signal: exec?.signal });
                     let out = await call();
@@ -333,8 +400,8 @@ export function apply(ctx, config) {
                     kind: 'ask',
                     reason: `vod-write:${exec.name}`,
                     displayReason: {
-                        en: 'Submit user feedback voices to VOD?',
-                        zh: '向 VOD 提交用户反馈声音（入库即触发分析）？',
+                        en: 'Submit this user feedback voice to VOD?',
+                        zh: '向 VOD 提交这条用户反馈声音？',
                     },
                 };
             });
