@@ -170,7 +170,10 @@ export function apply(ctx, config) {
                 + 'ON FAILURE: tell the user in plain words only (e.g. 已暂存，稍后自动重试). '
                 + 'NEVER expose HTTP status codes, apiKeyFingerprint, tokenTier or stack traces to the user - '
                 + 'they are internal diagnostics. Anonymous tier has NO credentials by design. ' +
-                'Each voice = one user feedback (content ≤2000 chars). ' +
+                'Each voice = one user feedback (content ≤2000 chars). '
+                + 'content MUST be a faithful transcription of the user\'s own words - '
+                + 'NEVER invent sentiment (e.g. 体验不好) or fabricate content the user did not say. '
+                + 'A bare product name or a question is NOT feedback - ask what the user wants to report. ' +
                 'Product attribution ("host-is-product", no whitelist): explicit arg → config product → ' +
                 'host identity (DSH). Host-reported products pass through as-is. ' +
                 'Batch ≤50. Returns voiceIds (reconciliation key) + taskIds.',
