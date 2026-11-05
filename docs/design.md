@@ -419,3 +419,35 @@ npx 浮动版本的来源不可控问题。
   （DG9：devkit 形态注入 key 的运营场景零变化）
 - preset 不动 CORS/浏览器通道（dsh UI 形态若被产品集成，走 cordis.patch.yml
   config 注入检查，红线同源——配置段含 key 即违规，后续 UI 集成立项时对齐）
+
+## 八、Codex 原生插件接入（D-codex-plugin-1，2026-11-05）
+
+### 机制（codex CLI 0.166 实测）
+- `codex plugin marketplace add <root>`：root 必须含 `.agents/plugins/marketplace.json`
+  （本仓 root=plugins/ 目录）+ `plugins/<name>/` 插件目录
+- 插件清单 `.codex-plugin/plugin.json`（官方兼容布局，便携版=根 plugin.json+
+  extensions.com.openai+agents/openai.yaml，暂不迁）：声明 `skills:"./skills/"`
+  与 `mcpServers:"./.mcp.json"`；interface 元数据（displayName/defaultPrompt/
+  capabilities）为展示层
+- Skill 渐进式加载：模型只见 name+description 元数据（description=触发条件），
+  匹配才读全文——SKILL.md 的 description 必须写清触发，细节在 body
+- **宿主能力判定纪律**：结论前必须翻全 `--help` 子命令树（"codex 无 skill"
+  的误判即因只探测了 mcp/exec 单点）
+
+### 约束三层分工（官方 skills 概念直接对应）
+| 层 | 载体 | 承载 |
+|---|---|---|
+| 硬约束 | MCP 工具描述（contract 单一事实源，话术前置防截断） | 归因不问用户/S1 自报不采信/禁内部机制 |
+| 工作流 | 插件 SKILL.md（vod-feedback-collect 全量） | 触发三条件/字段分级/推断≠编造/预检/回执话术 |
+| 冗余 | AGENTS.md | 已撤（被原生 skill 取代，仅保留 strip 清理旧装机残留） |
+
+### 自包含与缓存治理（devkit 对表采纳）
+- 插件包自带 `vod_mcp/`（`scripts/sync_plugin.py` 同步+烧录 build-info.json）
+  ——.mcp.json 相对路径 `python3 ./vod_mcp/server.py` + cwd，缓存隔离安装后
+  仍可拉起，去 npm -g 全局命令前置
+- install 前清 `~/.codex/plugins/{marketplaces,cache}/vod-local`（缓存不自动
+  失效，不清=重装旧版残留）
+- 版本真源四点同步：package.json/pyproject/__init__/contract（契约 version
+  曾滞留 0.1.0 致 vod_devkit_info 假象）——release.sh 硬断言 4 处
+- 安装校验探针全程同设备锚点（X-Vod-Device-Id+UA，token/meta 一致；S1 设备
+  绑定；每次装机新锚点=一次校验一枚令牌额度）

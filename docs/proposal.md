@@ -335,6 +335,23 @@ S35 codex 原生插件接入（D-codex-plugin-1，2026-11-05）
   （桩 codex 调用记录+遗留清理）；真机：提单不带 product 不反问、落库
   product_id=1（2026-11-05 实测）。
 
+S36 插件自包含+缓存治理+校验设备锚点（D-codex-plugin-1 增补，devkit 对表三件）
+  ①自包含：.mcp.json=python3+./vod_mcp/server.py（相对路径+cwd），插件包
+  自带 server（sync_plugin.py 同步+build-info.json 烧录）——去 npm -g 全局
+  命令前置，缓存隔离安装后仍可拉起；②stale 缓存治理：install 前清
+  ~/.codex/plugins/{marketplaces,cache}/vod-local（codex 缓存不自动失效，
+  不清=重装旧版残留）；③安装校验探针全程同 X-Vod-Device-Id+UA（S1 设备
+  绑定：token 与 meta 必须同锚点，缺设备头=401 或烧 legacy 日额度）。
+  回归：test_plugin_selfcontained_contract（相对路径/server 漂移 sha256/
+  build-info 断言）+test_install_codex_native_plugin_and_legacy_cleanup
+  （stale 缓存清除断言）；真机：重装后 codex exec 报 version=0.1.12。
+
+S37 安装校验设备锚点一致性（协议级）
+  安装器校验链 token 签发与 meta 查询必须携带同一 X-Vod-Device-Id 与 UA
+  （S1 设备绑定语义）；每次装机生成新锚点（一次校验一枚令牌额度）。
+  测试：tests/test_installer.py#test_validation_probe_uses_consistent_device_anchor
+  （桩引擎捕获两请求头比对，协议级零外呼）。
+
 S34 安装期产品硬校验（D-product-id-2，2026-11-05 用户拍板 B，推翻宿主名宽容口径）
   install --product 必须命中 meta productCatalog（名字/平台主键 id），未命中或
   目录不可达一律拒绝安装（宁可不装不可装错）。回归：tests/test_installer.py

@@ -26,7 +26,7 @@ def engine_stub(tmp_path):
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
-    state = {"meta_up": True}
+    state = {"meta_up": True, "token_headers": None, "meta_headers": None}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -42,6 +42,7 @@ def engine_stub(tmp_path):
 
         def do_GET(self):
             if self.path.endswith("/external/meta"):
+                state["meta_headers"] = {k.lower(): v for k, v in self.headers.items()}
                 if not state["meta_up"]:
                     self._send({"code": 500, "message": "stub down"}, 500)
                     return
@@ -62,6 +63,7 @@ def engine_stub(tmp_path):
 
         def do_POST(self):
             if self.path.endswith("/external/token"):
+                state["token_headers"] = {k.lower(): v for k, v in self.headers.items()}
                 self._send({"code": 200, "data": {"token": "stub-token"}})
                 return
             self._send({"code": 404, "message": "no route"}, 404)
@@ -271,6 +273,19 @@ def test_plugin_selfcontained_contract(env):
     assert not (plug / "vod_mcp" / "runtime.json").exists()  # 真源账本不随包
     bi = json.loads((plug / "build-info.json").read_text())  # provenance 版本真源随包
     assert bi["version"] and bi["commitSha"], "build-info 未烧录=vod_devkit_info 版本号失真"
+
+
+def test_validation_probe_uses_consistent_device_anchor(env):
+    """S37（协议级）：安装校验链 token 签发与 meta 查询必须携带同一
+    X-Vod-Device-Id 与 UA（S1 设备绑定语义）——缺失=meta 401 或烧 legacy 锚点。"""
+    cli(env, "install", "--target", "codex", "--product", "CodeArts")
+    st = env["engine"]["state"]
+    assert st["token_headers"] and st["meta_headers"], "校验链必须先领令牌再查 meta"
+    th, mh = st["token_headers"], st["meta_headers"]
+    assert th.get("x-vod-device-id") == mh.get("x-vod-device-id"), "设备锚点不一致=S1 绑定校验必挂"
+    assert th.get("user-agent") == mh.get("user-agent"), "UA 不一致=legacy 锚点漂移"
+    import re
+    assert re.fullmatch(r"[0-9a-f]{8,64}", th.get("x-vod-device-id", "")), "设备 id 必须纯 hex（非 hex 静默降 legacy 锚点）"
 
 
 def test_install_rejects_when_catalog_unreachable(env):
