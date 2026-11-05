@@ -378,6 +378,13 @@ S40 三宿主连通冒烟（devkit 对表采纳③）
   vod-devkit 注册可见；无宿主 CLI=SKIP 不 FAIL（CI 语义）；任一 FAIL 退出 1。
   真机基线（2026-11-05）：三宿主 PASS。
 
+S42 doctor/verify 输出 golden 基线（D-golden-1，devkit doctor-golden 对表）
+  用户可见输出快照比对：易变段（HOME/REPO 路径/commit SHA）归一化后锁
+  doctor+verify 全输出（文案/判定顺序/新增行漂移即红）；有意变更必须
+  UPDATE_GOLDEN=1 重录并在测试失败 diff 里人工过目。测试：
+  tests/test_installer.py#test_doctor_verify_golden + tests/golden/
+  doctor_verify.txt（无 key 基线，key 态由 auth_status 专项覆盖）。
+
 S34 安装期产品硬校验（D-product-id-2，2026-11-05 用户拍板 B，推翻宿主名宽容口径）
   install --product 必须命中 meta productCatalog（名字/平台主键 id），未命中或
   目录不可达一律拒绝安装（宁可不装不可装错）。回归：tests/test_installer.py

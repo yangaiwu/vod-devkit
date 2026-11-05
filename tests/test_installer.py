@@ -110,7 +110,7 @@ def env(tmp_path, engine_stub):
     shutil.copytree(SRC_REPO, repo, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns(".git", "__pycache__",
                                                   ".e2e-nightly.log",
-                                                  ".smoke", "vod_mcp/runtime.json"))
+                                                  ".smoke", "runtime.json"))
 
     e = os.environ.copy()
     e["HOME"] = str(home)
@@ -316,6 +316,40 @@ def test_opencode_doctor_command_file(env):
     text = cmd.read_text()
     for key in ("vod_devkit_info", "vod_auth_status", "vod_list_submitted", "不要打印任何 key"):
         assert key in text
+
+
+def test_doctor_verify_golden(env):
+    """D-golden-1（devkit doctor-golden 对表）：doctor/verify 用户可见输出
+    快照基线——口径漂移（文案/判定顺序/新增行）即红，改口径必须显式
+    UPDATE_GOLDEN=1 重录并在 diff 里过目。易变段（HOME/REPO 路径、commit
+    SHA）归一化后比对。"""
+    cli(env, "install", "--target", "hermes", "--product", "CodeArts")
+    # 输出确定性：剥离 key 源（runtime.json 残留）——key 探针行含易变指纹，
+    # golden 只锁无 key 基线（key 态由 auth_status 专项用例覆盖）
+    rt = env["repo"] / "vod_mcp" / "runtime.json"
+    if rt.exists():
+        d = json.loads(rt.read_text())
+        d.pop("java_key", None); d.pop("token_tier", None)
+        rt.write_text(json.dumps(d, ensure_ascii=False))
+    outs = []
+    for cmd in ("doctor", "verify"):
+        r = cli(env, cmd)
+        assert r.returncode == 0, r.stderr
+        outs.append(f"$ vod-devkit {cmd}\n{r.stdout.strip()}")
+    mf = json.loads((env["repo"] / "install-manifest.json").read_text())
+    actual = "\n".join(outs)
+    for volatile, tag in ((str(env["home"]), "<HOME>"), (str(env["repo"]), "<REPO>"),
+                          (str(mf["source"]["commitSha"][:12]), "<SHA12>")):
+        actual = actual.replace(volatile, tag)
+    golden = Path(__file__).parent / "golden" / "doctor_verify.txt"
+    if os.environ.get("UPDATE_GOLDEN") == "1":
+        golden.parent.mkdir(parents=True, exist_ok=True)
+        golden.write_text(actual + "\n")
+    assert golden.exists(), "golden 缺失：UPDATE_GOLDEN=1 生成并人工过目"
+    expected = golden.read_text().rstrip("\n")
+    assert actual == expected, (
+        "doctor/verify 输出口径漂移——确认是有意变更后 UPDATE_GOLDEN=1 重录，\n"
+        f"--- expected\n{expected}\n--- actual\n{actual}")
 
 
 def test_install_rejects_when_catalog_unreachable(env):

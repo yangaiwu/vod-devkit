@@ -466,3 +466,11 @@ npx 浮动版本的来源不可控问题。
 校验链 token+meta 全程携带自生成纯 hex X-Vod-Device-Id+固定 UA：S1 设备绑定
 要求 token 与后续请求同锚点（缺设备头=meta 401 设备不匹配，或走 legacy ip|ua
 锚点烧日 5 次签发额度）；每次装机生成新锚点=一次校验恰好消耗一枚令牌额度。
+
+### Golden 基线（D-golden-1，devkit doctor-golden 对表）
+doctor/verify 的用户可见输出=对外契约的一部分：文案漂移/判定顺序变化/
+新增行都影响依赖输出的用户与脚本。测试快照比对（tests/golden/），易变段
+（HOME/REPO/SHA）归一化；UPDATE_GOLDEN=1 显式重录——重录动作本身即"口径
+变更评审点"。已知取舍：key 探针行含易变指纹不入基线（golden 锁无 key
+基线，key 态由 auth_status 专项用例覆盖）；测试基建注意 shutil.ignore_
+patterns 只匹配基名（带斜杠的模式永不命中——runtime.json 曾因此漏进 clone）。

@@ -1,0 +1,4 @@
+$ vod-devkit doctor
+doctor: OK
+$ vod-devkit verify
+verify: OK（commit <SHA12> 存在于本仓/origin）
