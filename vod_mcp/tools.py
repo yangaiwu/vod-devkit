@@ -22,8 +22,14 @@ from vod_mcp import DEFAULT_JAVA_BASE
 _CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract" / "tools.schema.json"
 
 
+def _runtime_path() -> Path:
+    return Path(__file__).resolve().parent / "runtime.json"
+
+
 def _runtime_cfg() -> dict:
-    p = Path(__file__).resolve().parent.parent / "vod_mcp" / "runtime.json"
+    # 路径单源：一律走 _runtime_path()（曾与 _save_runtime 双写路径，
+    # 注入/重定位场景读写分叉——测试实锤的真缺陷）
+    p = _runtime_path()
     if p.exists():
         try:
             return json.loads(p.read_text(encoding="utf-8"))
@@ -107,11 +113,7 @@ def _http(method: str, path: str, body: dict | None = None,
             f"上游 {base} 非 https 且非本机回环——Bearer key 明文外发被拒"
             "（配置 VOD_JAVA_API_BASE 为 https:// 地址）", code=-32014)
     url = base.rstrip("/") + path
-    try:
-        with open("/tmp/vod_mcp_server.log", "a", encoding="utf-8") as _f:
-            _f.write(f"http {method} {url} key={'yes' if key else 'no'}\n")
-    except Exception:
-        pass
+    _log(f"http {method} {url} key={'yes' if key else 'no'}")
     data = json.dumps(body).encode() if body is not None else None
     headers = {"Content-Type": "application/json"}
     if key:
@@ -429,10 +431,14 @@ def _ledger_append(entries: list) -> None:
     """本地提交账本（层级①）：本机提交记录，供 vod_list_submitted 对账。
     cap 200 条（环形截断，防 runtime.json 膨胀）。
     实现纪律：每次从文件读改写、只动 submissions 键——不从内存 _RT
-    合并（陈旧配置会整体回写，覆盖其他键，且把无关配置泄入调用方）。"""
+    合并（陈旧配置会整体回写，覆盖其他键，且把无关配置泄入调用方）。
+    D-key-guard-3④：local_ledger=false（企业数据驻留要求）→ 账本关闭，
+    vod_list_submitted 随之不可用——留痕是可选项不是义务。"""
     if not entries:
         return
     fresh = _runtime_cfg()
+    if fresh.get("local_ledger") is False:
+        return
     ledger = (fresh.get(_LEDGER_KEY) or [])[-_LEDGER_CAP:]
     ledger.extend(entries)
     _save_runtime({_LEDGER_KEY: ledger[-_LEDGER_CAP:]})
@@ -452,14 +458,59 @@ def list_submitted(params: dict, client_info: dict | None = None) -> dict:
             "scope": "本机提交记录（换机/重装不保留；引擎级查询随 VOD-VOI）"}
 
 
-def _runtime_path() -> Path:
-    return Path(__file__).resolve().parent / "runtime.json"
+_RUNTIME_STATE_KEYS = ("java_key", "token_tier", "install_nonce", "submissions",
+                       "meta_cache")
 
 
-def _save_runtime(update: dict) -> None:
+def _distribution() -> str:
+    """分发形态位（D-key-guard-3）：install --distribution preset 写入 manifest。
+    devkit=自装自管；preset=产品随 agent 分发（客户机首启重生成运行时状态）。"""
+    p = Path(__file__).resolve().parent.parent / "install-manifest.json"
+    if not p.exists():
+        return "devkit"
+    try:
+        return json.loads(p.read_text(encoding="utf-8")).get("distribution", "devkit")
+    except Exception:
+        return "devkit"
+
+
+def _ensure_first_boot(rt_path: Path | None = None) -> dict:
+    """首启标记 + 构建机残留清理（D-key-guard-3①，preset 形态兜底）。
+
+    主防线是打包排除（分发产物不含 runtime.json）；本函数兜底打包者漏排：
+    preset 形态 + runtime.json 存在但无 firstBootAt + 携带运行时状态
+    （key/nonce/账本/缓存）→ 判构建机残留 → 自动清空这些状态（保留
+    product/java_base 等装机配置）+ 重新生成 per-install nonce + 告警。
+    处置用自动重生成而非拒绝启动：残留状态全是本机可再生数据，
+    自动清零伤害半径为零，拒启会把误判放大成全功能瘫痪。
+    firstBootAt 首启写入，此后不再触发（防误伤正常运行中的安装）。"""
+    p = rt_path or _runtime_path()
+    if not p.exists():
+        return {"action": "none"}
+    try:
+        cfg = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {"action": "none"}
+    if cfg.get("firstBootAt"):
+        return {"action": "none"}
+    residual = [k for k in _RUNTIME_STATE_KEYS if cfg.get(k)]
+    import time as _t
+    if _distribution() == "preset" and residual:
+        # 残留清理=整体重建（合并删不掉旧键），但保留装机配置（product/java_base 等）
+        _save_runtime({**{k: v for k, v in cfg.items() if k not in _RUNTIME_STATE_KEYS},
+                       "firstBootAt": _t.strftime("%Y-%m-%dT%H:%M:%S")},
+                      replace=True)
+        _warn(f"检测到构建机残留状态（{','.join(residual)}）已自动清空重生成——"
+              "分发产物应只含代码与配置，不含安装结果（D-key-guard-3①）")
+        return {"action": "cleaned", "removed": residual}
+    _save_runtime({"firstBootAt": _t.strftime("%Y-%m-%dT%H:%M:%S")})
+    return {"action": "stamped"}
+
+
+def _save_runtime(update: dict, replace: bool = False) -> None:
     p = _runtime_path()
     cfg = {}
-    if p.exists():
+    if p.exists() and not replace:
         try:
             cfg = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
@@ -479,13 +530,26 @@ def _save_runtime(update: dict) -> None:
         _warn(f"runtime.json 权限校验失败：{e}")
 
 
-def _warn(msg: str) -> None:
-    """告警出口：server 日志（排障真源），失败静默——不阻断业务主链。"""
+def _log(line: str, path: str = "/tmp/vod_mcp_server.log") -> None:
+    """统一日志出口，1MB 截断轮转
+    （D-key-guard-3⑤：客户机长期运行防无限增长；截断保留尾部近期日志）。"""
     try:
-        with open("/tmp/vod_mcp_server.log", "a", encoding="utf-8") as f:
-            f.write(f"warn {msg}\n")
+        p = path
+        if os.path.exists(p) and os.path.getsize(p) > 1024 * 1024:
+            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                tail = f.read()[-200 * 1024:]
+            os.replace(p, p + ".old")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("== truncated ==\n" + tail)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(line.rstrip("\n") + "\n")
     except Exception:
         pass
+
+
+def _warn(msg: str) -> None:
+    """告警出口：server 日志（排障真源），失败静默——不阻断业务主链。"""
+    _log(f"warn {msg}")
 
 
 def _fetch_anon_token() -> str | None:

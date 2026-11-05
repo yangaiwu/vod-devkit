@@ -317,3 +317,53 @@ npx 浮动版本的来源不可控问题。
 - pytest：工具契约（mock api.py）+ 护栏规则命中 + packs 裁剪 + 安装器
   uninstall 幂等
 - 走完整调用链验证后断言才能落文档（入口路由→api.py→任务表）
+
+## 七、分发形态实现（D-key-guard-3，2026-11-05）
+
+对应 proposal.md 第七节（需求/用例 DG1-DG9）。实现落点：
+
+### 形态位
+
+- 写入：`install --distribution devkit|preset` → install-manifest.json
+  `.distribution`；缺省 devkit（存量安装读不到该字段=devkit，行为不变）
+- 读取：bin `_distribution()` 与 vod_mcp/tools `_distribution()` 各自实现
+  （bin 面向子命令，tools 面向运行时；两处同语义：manifest 缺失/损坏→devkit）
+
+### 逐条分支
+
+1. **key 禁随包**（bin cmd_install）：distribution=preset 时 `os.environ.pop`
+   VOD_JAVA_API_KEY 并 stderr 告警——installer 的 env 透传天然拿不到，key
+   进不了宿主配置文件；devkit 形态不动
+2. **update 禁用**（bin cmd_update）：preset → 打印"随 agent 发版管理"直接返回
+3. **verify 降级**（bin cmd_verify）：preset → 只比对 manifest.commitSha 与
+   build-info.commitSha（本地完整性），一致即 OK（输出标 unchecked），不一致
+   FAIL（产物混装/篡改）；不触 git——客户机离线可用
+4. **首启残留清理**（tools._ensure_first_boot，server.main 启动时调）：
+   - runtime.json 无 firstBootAt 标记 = 首启（或残留）；
+   - preset + 携带状态键（java_key/token_tier/install_nonce/submissions/meta_cache）
+     → 构建机残留 → `_save_runtime(replace=True)` 整体重建（保留非状态键
+     product/java_base 等）+ firstBootAt + 日志告警；随后重新自领匿名令牌/nonce
+   - devkit 或无状态 → 只补 firstBootAt 标记
+   - 处置选自动重生成不选拒绝启动：残留全为本机可再生数据，伤害半径为零
+   - **时间戳启发式被否**：update 每次重烧 build-info/manifest，"nonce 早于
+     manifest"会误伤全部正常自更新的安装——判定只认 firstBootAt 标记缺失
+5. **账本出口**（tools._ledger_append）：runtime.json `local_ledger: false`
+   （install --no-local-ledger 写入）→ 提交不落账本；vod_list_submitted
+   返回空。留痕是可选项不是义务（企业数据驻留）
+6. **日志轮转**（tools._log 统一出口）：>1MB 截断，尾部 200KB 迁 .old，
+   新写追加；_http 与 _warn 两处共用（原来两处各自裸 append）
+
+### 重构实锤（测试抓出的存量缺陷）
+
+- `_runtime_cfg` 与 `_save_runtime` 路径双写（一个用 `Path(__file__)` 直算、
+  一个走 `_runtime_path()`）——注入/重定位场景读写分叉。修：路径单源，
+  `_runtime_cfg` 改走 `_runtime_path()`，且定义上移至 `_RT` 初始化之前
+- `_save_runtime` 原只有合并语义无法删键——残留清理需要删键，新增
+  `replace=True` 整体重建参数（默认 False 行为不变）
+
+### 与既有机制的边界
+
+- preset 不改认证链本身：匿名令牌自领/fail fast/探针/写后验全部继续生效
+  （DG9：devkit 形态注入 key 的运营场景零变化）
+- preset 不动 CORS/浏览器通道（dsh UI 形态若被产品集成，走 cordis.patch.yml
+  config 注入检查，红线同源——配置段含 key 即违规，后续 UI 集成立项时对齐）

@@ -4,6 +4,7 @@
 握手记录 clientInfo（宿主感知）；工具调用前过声明式护栏。
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -78,13 +79,13 @@ def handle(message: dict) -> dict | None:
 def main():
     # 启动自诊（排障：写 /tmp，宿主过滤环境变量时可观察实际 env）
     try:
-        import os
-        with open("/tmp/vod_mcp_server.log", "a", encoding="utf-8") as f:
-            f.write(f"started pid={os.getpid()} argv={sys.argv} "
-                    f"VOD_PACKS={os.environ.get('VOD_PACKS')!r} "
-                    f"cwd={os.getcwd()}\n")
+        tools._ensure_first_boot()  # D-key-guard-3①：首启标记+构建机残留清理（preset 兜底）
     except Exception:
         pass
+    tools._log(f"started pid={os.getpid()} argv={sys.argv} "
+               f"VOD_PACKS={os.environ.get('VOD_PACKS')!r} "
+               f"distribution={tools._distribution()} "
+               f"cwd={os.getcwd()}")
     for line in sys.stdin:
         line = line.strip()
         if not line:
