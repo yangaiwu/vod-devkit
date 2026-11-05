@@ -593,3 +593,10 @@ S16 双形态语义一致（架构约束回归）
   可再生，拒启会把误判放大成全功能瘫痪）
 - 问题 3（共享服务器部署的令牌模型）落为红线约束（共享部署走服务端
   代理），代码不提前写死——插件侧 base URL 覆盖项已支持代理形态
+
+S33 产品归因主键化解析矩阵（T7i，方案 A，2026-11-05 两仓拍板；D-product-id-1）
+  ①配置/注入产品名 → meta productCatalog 解析平台 id 后提交（短码先归一再查目录）
+  ②纯数字=平台 id 透传 ③目录无此名/不可达（老引擎无 productCatalog 键）→
+  规范名兼容通道（引擎 name 命中同样补落 product_id），不静默丢提交。
+  回归：tests/test_auth.py#test_product_id_resolution_t7i /
+  #test_meta_catalog_cached_t7i（缓存命中零二次请求+老引擎兼容）。
