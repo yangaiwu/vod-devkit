@@ -474,3 +474,8 @@ doctor/verify 的用户可见输出=对外契约的一部分：文案漂移/判�
 变更评审点"。已知取舍：key 探针行含易变指纹不入基线（golden 锁无 key
 基线，key 态由 auth_status 专项用例覆盖）；测试基建注意 shutil.ignore_
 patterns 只匹配基名（带斜杠的模式永不命中——runtime.json 曾因此漏进 clone）。
+（续 golden 节）status/preset-update 拒绝语纳入基线：status 契约=原样
+manifest（归一化 HOME/REPO/ORIGIN/SHA/installedAt，skillHashes 值不锁——
+漂移由 D-drift-lock 专项覆盖）；探针手法沉淀 tests/probe.py（护栏拒止按
+error 字段分流的教训入注释），pack 门控补真实装配层锁（stdio probe 对
+VOD_PACKS 两种取值的 tools/list 断言）。

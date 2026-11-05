@@ -385,6 +385,16 @@ S42 doctor/verify 输出 golden 基线（D-golden-1，devkit doctor-golden 对�
   tests/test_installer.py#test_doctor_verify_golden + tests/golden/
   doctor_verify.txt（无 key 基线，key 态由 auth_status 专项覆盖）。
 
+S43 stdio 探针工具化+pack 门控装配锁（tests/probe.py）
+  探针手法沉淀为可复用 Probe（initialize/tools/call/error 分流）；
+  新增真实 server 装配层锁：VOD_PACKS=core 无写工具 / core,collect 全四
+  工具（协议级，in-process 锁之外补装配层）。
+  回归：test_stdio_probe_pack_gating_e2e。
+S44 golden 扩展：status 原样契约+preset update 拒绝语
+  status=manifest 原样输出（归一化 HOME/REPO/ORIGIN/SHA/installedAt，
+  skillHashes 值由漂移锁专项不锁）+preset 形态 update 固定拒绝语。
+  回归：test_golden_status_and_preset_update_refusal。
+
 S34 安装期产品硬校验（D-product-id-2，2026-11-05 用户拍板 B，推翻宿主名宽容口径）
   install --product 必须命中 meta productCatalog（名字/平台主键 id），未命中或
   目录不可达一律拒绝安装（宁可不装不可装错）。回归：tests/test_installer.py

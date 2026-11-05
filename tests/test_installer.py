@@ -318,6 +318,19 @@ def test_opencode_doctor_command_file(env):
         assert key in text
 
 
+def _assert_golden(name, actual):
+    """golden 快照比对：易变段由调用方归一化；UPDATE_GOLDEN=1 显式重录。"""
+    golden = Path(__file__).parent / "golden" / f"{name}.txt"
+    if os.environ.get("UPDATE_GOLDEN") == "1":
+        golden.parent.mkdir(parents=True, exist_ok=True)
+        golden.write_text(actual + "\n")
+    assert golden.exists(), f"golden 缺失：UPDATE_GOLDEN=1 生成 {name} 并人工过目"
+    expected = golden.read_text().rstrip("\n")
+    assert actual == expected, (
+        f"{name} 输出口径漂移——确认是有意变更后 UPDATE_GOLDEN=1 重录，\n"
+        f"--- expected\n{expected}\n--- actual\n{actual}")
+
+
 def test_doctor_verify_golden(env):
     """D-golden-1（devkit doctor-golden 对表）：doctor/verify 用户可见输出
     快照基线——口径漂移（文案/判定顺序/新增行）即红，改口径必须显式
@@ -345,11 +358,47 @@ def test_doctor_verify_golden(env):
     if os.environ.get("UPDATE_GOLDEN") == "1":
         golden.parent.mkdir(parents=True, exist_ok=True)
         golden.write_text(actual + "\n")
-    assert golden.exists(), "golden 缺失：UPDATE_GOLDEN=1 生成并人工过目"
-    expected = golden.read_text().rstrip("\n")
-    assert actual == expected, (
-        "doctor/verify 输出口径漂移——确认是有意变更后 UPDATE_GOLDEN=1 重录，\n"
-        f"--- expected\n{expected}\n--- actual\n{actual}")
+    _assert_golden("doctor_verify", actual)
+
+
+def test_golden_status_and_preset_update_refusal(env):
+    """golden 扩展：status（manifest 原文，易变段归一化）+ preset 形态的
+    update 拒绝语（固定文案）。"""
+    cli(env, "install", "--target", "hermes", "--product", "CodeArts")
+    r = cli(env, "status")
+    assert r.returncode == 0
+    mf = json.loads((env["repo"] / "install-manifest.json").read_text())
+    actual = r.stdout.strip()
+    for volatile, tag in ((str(env["home"]), "<HOME>"), (str(env["repo"]), "<REPO>"),
+                          (str(env["bare"]), "<ORIGIN>"),
+                          (str(mf["source"]["commitSha"]), "<SHA>"),
+                          (str(mf["installedAt"]), "<INSTALLED_AT>")):
+        actual = actual.replace(volatile, tag)
+    # JSON 结构稳定性：归一化后必须仍是合法 JSON（status 契约=原样 manifest）
+    d = json.loads(actual)
+    d["skillHashes"] = "<SKILL_HASHES>"  # 漂移锁专项覆盖，golden 不锁哈希值
+    actual = json.dumps(d, ensure_ascii=False, indent=2)
+    _assert_golden("status", actual)
+    cli(env, "install", "--target", "hermes", "--product", "CodeArts",
+        "--distribution", "preset")
+    r = cli(env, "update")
+    assert r.returncode == 0 and "不支持自更新" in r.stdout
+    _assert_golden("preset_update_refusal", r.stdout.strip())
+
+
+def test_stdio_probe_pack_gating_e2e(env):
+    """S43（stdio 探针协议级）：pack 门控走真实 server 装配——
+    VOD_PACKS=core → tools/list 无写工具；core,collect → 含 submit。
+    （in-process 锁见 test_tool_specs_follow_packs；本例锁 server.py 装配层）"""
+    from tests.probe import Probe
+    base_env = {"VOD_JAVA_API_BASE": env["engine"]["base"]}
+    with Probe(env_extra={**base_env, "VOD_PACKS": "core"}) as p:
+        names = {t["name"] for t in p.list_tools()}
+        assert "vod_devkit_info" in names and "vod_submit_voices" not in names
+    with Probe(env_extra={**base_env, "VOD_PACKS": "core,collect"}) as p:
+        names = {t["name"] for t in p.list_tools()}
+        assert {"vod_devkit_info", "vod_submit_voices", "vod_auth_status",
+                "vod_list_submitted"} <= names
 
 
 def test_install_rejects_when_catalog_unreachable(env):
