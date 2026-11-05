@@ -1,0 +1,9 @@
+{
+  "name": "vod-devkit",
+  "version": "0.1.12",
+  "description": "VOD user-feedback collection: structured voice capture and submission to the VOD hoarding endpoint.",
+  "keywords": ["feedback", "vod", "voice", "collection"],
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

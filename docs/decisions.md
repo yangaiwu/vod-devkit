@@ -259,3 +259,11 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 决策：install --product 必须命中 meta productCatalog（名字大小写不敏感或平台主键 id 精确），未命中/目录不可达一律 exit 2 拒绝安装（宁可不装不可装错，postinstall 拒绝猜测同源纪律）；运行期显式传参覆盖保持现状（引擎 name 兼容通道是老插件兼容，不是安装期放行理由）
 - 实现：bin/_validate_product_or_exit（无 key 走零字段匿名令牌链；老引擎无 catalog 退 /external/products）；java-api-base 优先级补 env VOD_JAVA_API_BASE（与插件运行时同键）
 - 口径变更连带：--product 帮助文案删"宿主名合法"引导；测试矩阵新增 3 例（未注册拒/hermes 同拒+零副作用、名字或 id 放行、目录不可达拒），桩引擎 engine_stub 进 installer fixture（distribution 同册），71 用例绿
+
+## D-codex-plugin-1（2026-11-05）：codex 接入终态=原生插件（推翻 D-codex-agents-1 的 AGENTS.md 方案）
+- 实锤纠正：本机 codex CLI 0.166 有完整原生机制——`codex plugin add/list/marketplace`、插件清单 `.codex-plugin/plugin.json`（`skills:"./skills/"` + `mcpServers:"./.mcp.json"`）、`~/.codex/skills/` 渐进式加载（只装 name+description 元数据，匹配才读全文）。上一轮"codex 无 skill 机制"的判断是探测面不全（只测了 mcp/exec），AGENTS.md 方案是降级模拟
+- 官方规范锚点（developers.openai.com/plugins/*，页面加 .md 取源文）：MCP server=数据/鉴权/受控动作，skill=工作流（何时调用/顺序/异常/输出）；description 决定触发，细节在 body；.codex-plugin 是官方兼容回退布局，便携版=根 plugin.json+extensions.com.openai+agents/openai.yaml 依赖声明
+- 终态三层：①工具描述=硬约束（归因不问用户/S1 自报不采信/禁内部机制，话术前置防截断）②原生插件 SKILL.md=采集工作流方法论（全量搬运 vod-feedback-collect）③AGENTS.md 撤（被原生 skill 取代，留 strip 清理旧装机残留）
+- 分发形态：仓内 `plugins/vod-devkit/`（插件）+ `plugins/.agents/plugins/marketplace.json`（本地 marketplace，root=仓 plugins/ 目录）；bin 新增 `serve` 子命令（.mcp.json 以 `vod-devkit serve` 可移植拉起 server，npm i -g 前置）；双注册防：安装时清理旧 config.toml MCP 段与 AGENTS.md 块
+- 真机闭环：marketplace add→plugin add（installed, enabled）→codex exec 提单不带 product 不反问、经安装绑定归因落库（product_id=1）
+- 方法论教训：判定宿主能力前必须把 `--help` 子命令树翻全（plugin 子命令当时就在），单点探测（mcp/exec）得出的"宿主不支持 X"结论不可靠

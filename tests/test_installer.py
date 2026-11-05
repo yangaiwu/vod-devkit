@@ -85,6 +85,19 @@ def env(tmp_path, engine_stub):
     stub_hermes.write_text(
         "#!/bin/sh\necho \"$@\" >> " + shq(calls) + "\nexit 0\n")
     stub_hermes.chmod(0o755)
+    # 桩 codex / vod-devkit：D-codex-agents-1 原生插件路径的调用记录
+    codex_calls = tmp_path / "codex-calls.log"
+    stub_codex = stub / "codex"
+    stub_codex.write_text(
+        "#!/bin/sh\necho \"$@\" >> " + shq(codex_calls) + "\n"
+        "case \"$1 $2 $3\" in\n"
+        "  \"plugin marketplace list\") echo 'vod-local';;\n"
+        "  \"plugin list\") echo 'vod-devkit@vod-local  not installed';;\n"
+        "esac\nexit 0\n")
+    stub_codex.chmod(0o755)
+    stub_vd = stub / "vod-devkit"
+    stub_vd.write_text("#!/bin/sh\nexit 0\n")
+    stub_vd.chmod(0o755)
 
     bare = tmp_path / "origin.git"
     _git(SRC_REPO, "clone", "--bare", "--quiet", str(SRC_REPO), str(bare))
@@ -103,7 +116,8 @@ def env(tmp_path, engine_stub):
     e.pop("VOD_JAVA_API_KEY", None)
     e["VOD_JAVA_API_BASE"] = engine_stub["base"]  # 安装校验/绑定全打桩引擎（零外呼）
     return {"home": home, "repo": repo, "bare": bare, "env": e,
-            "hermes_calls": calls, "stub": stub, "engine": engine_stub}
+            "hermes_calls": calls, "stub": stub, "engine": engine_stub,
+            "codex_calls": codex_calls}
 
 
 def shq(p):
@@ -162,15 +176,26 @@ def test_install_opencode_idempotent(env):
 
 # ---- codex：TOML 表形态 + 幂等（同表不重复） ----
 
-def test_install_codex_toml_and_idempotent(env):
+def test_install_codex_native_plugin_and_legacy_cleanup(env):
+    """D-codex-agents-1 终态：--target codex 走原生插件路径（codex plugin
+    marketplace/add），并清理历史遗留 config.toml MCP 段与 AGENTS.md 技能块
+    （同名双注册防）。stub codex/vod-devkit 记录调用。"""
+    home = env["home"]
+    legacy_conf = home / ".codex" / "config.toml"
+    legacy_conf.parent.mkdir(parents=True, exist_ok=True)
+    legacy_conf.write_text('[mcp_servers.vod-devkit]\ncommand = "old"\n', encoding="utf-8")
+    legacy_agents = home / ".codex" / "AGENTS.md"
+    legacy_agents.write_text("# 用户自有内容\n<!-- vod-devkit:feedback-skill BEGIN -->\n旧技能块\n<!-- vod-devkit:feedback-skill END -->\n", encoding="utf-8")
     for _ in range(2):
         r = cli(env, "install", "--target", "codex", "--product", "CodeArts")
         assert r.returncode == 0, r.stderr
-    text = (env["home"] / ".codex" / "config.toml").read_text()
-    assert text.count("[mcp_servers.vod-devkit]") == 1
-    assert text.count("[mcp_servers.vod-devkit.env]") == 1
-    assert f'command = "{sys.executable}"' in text
-    assert 'VOD_PACKS = "core,collect"' in text
+    # 历史遗留清理
+    assert "mcp_servers.vod-devkit" not in legacy_conf.read_text()
+    a = legacy_agents.read_text()
+    assert "旧技能块" not in a and "用户自有内容" in a
+    # 原生插件路径调用（stub codex 记录）
+    calls = env["codex_calls"].read_text()
+    assert "marketplace" in calls and "add" in calls and "vod-devkit@vod-local" in calls
 
 
 # ---- hermes：官方 mcp add 通道 + 配置片段落盘 ----
@@ -215,32 +240,12 @@ def test_install_rejects_unregistered_product(env):
 
 
 def test_install_product_accepts_name_or_id(env):
-    """名录命中（名字大小写不敏感/平台主键 id）→ 放行安装。"""
+    """名录命中（名字大小写不敏感/平台主键 id）→ 放行安装（codex=原生插件路径）。"""
     cli(env, "install", "--target", "codex", "--product", "codearts")  # 小写名
-    assert (env["home"] / ".codex" / "config.toml").exists()
+    assert "vod-devkit@vod-local" in env["codex_calls"].read_text()
     cli(env, "install", "--target", "codex", "--product", "651")  # 平台主键 id
     rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
     assert rt["product"] == "651"
-
-
-def test_install_codex_agents_skill_block(env):
-    """codex 无 skill 机制——AGENTS.md 是技能层载体：随 install 幂等写入
-    vod-devkit 技能紧凑块（触发条件/字段分级/编造禁例/预检/回执话术）。"""
-    cli(env, "install", "--target", "codex", "--product", "CodeArts")
-    agents = env["home"] / ".codex" / "AGENTS.md"
-    assert agents.exists()
-    text = agents.read_text()
-    assert text.count("vod-devkit:feedback-skill") == 2  # BEGIN/END 各一
-    for key in ("推断≠编造", "调用前预检", "不追问", "职责边界", "voiceId 不展示"):
-        assert key in text
-    # 二次安装幂等：不重复成块
-    cli(env, "install", "--target", "codex", "--product", "CodeArts")
-    assert agents.read_text().count("## VOD 反馈采集") == 1
-    # 卸载/重装其他目标不影响既有内容（块外文本保留）
-    agents.write_text("# 用户自有内容\n\n" + text)
-    cli(env, "install", "--target", "codex", "--product", "CodeArts")
-    t2 = agents.read_text()
-    assert "用户自有内容" in t2 and t2.count("## VOD 反馈采集") == 1
 
 
 def test_install_rejects_when_catalog_unreachable(env):

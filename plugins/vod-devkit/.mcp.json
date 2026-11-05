@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "vod-devkit": {
+      "command": "vod-devkit",
+      "args": ["serve"],
+      "env": { "VOD_PACKS": "core,collect" }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "vod-local",
+  "plugins": [
+    {
+      "name": "vod-devkit",
+      "source": {
+        "source": "local",
+        "path": "./vod-devkit"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL",
+        "products": [
+          "CODEX"
+        ]
+      }
+    }
+  ]
+}

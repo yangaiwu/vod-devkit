@@ -325,6 +325,16 @@ S33 产品归因主键化解析矩阵（T7i，方案 A，2026-11-05 两仓拍板
   回归：tests/test_auth.py#test_product_id_resolution_t7i /
   #test_meta_catalog_cached_t7i（缓存命中零二次请求+老引擎兼容）。
 
+S35 codex 原生插件接入（D-codex-plugin-1，2026-11-05）
+  接入终态=原生插件：codex plugin marketplace add <仓>/plugins +
+  plugin add vod-devkit@vod-local；插件打包 skills/vod-feedback-collect
+  （SKILL.md 渐进式按需加载，采集工作流全量）+ .mcp.json（vod-devkit
+  serve 可移植入口）；工具描述承载归因硬约束（含 S1 自报不采信）。
+  安装时清理旧 config.toml 段与 AGENTS.md 块（同名双注册防）。
+  回归：tests/test_installer.py#test_install_codex_native_plugin_and_legacy_cleanup
+  （桩 codex 调用记录+遗留清理）；真机：提单不带 product 不反问、落库
+  product_id=1（2026-11-05 实测）。
+
 S34 安装期产品硬校验（D-product-id-2，2026-11-05 用户拍板 B，推翻宿主名宽容口径）
   install --product 必须命中 meta productCatalog（名字/平台主键 id），未命中或
   目录不可达一律拒绝安装（宁可不装不可装错）。回归：tests/test_installer.py
