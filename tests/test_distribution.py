@@ -2,14 +2,14 @@
 verify 本地降级/首启残留清理/账本出口/日志轮转。
 安装器级用例复用 test_installer 的 fake-home 隔离骨架；工具级用例直调 tools。"""
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
+from tests.test_installer import cli
+from tests.test_installer import env as _installer_env_fixture
 
-from tests.test_installer import env, cli  # noqa: F401  复用隔离夹具
+env = _installer_env_fixture  # pytest 夹具 re-export（赋值别名，避免 import 未用误报）
 
 
 # ---- 安装器级：形态位写入与红线 ----
@@ -101,7 +101,6 @@ def _write_manifest_preset(repo: Path):
 
 def test_first_boot_cleans_build_machine_residual(tmp_path, monkeypatch):
     """①兜底：preset + 无 firstBootAt + 携带状态 → 自动清空重生成，保留装机配置。"""
-    import importlib
     from vod_mcp import tools
     rt = tmp_path / "runtime.json"
     rt.write_text(json.dumps({"product": "GTD", "java_base": "https://x",
