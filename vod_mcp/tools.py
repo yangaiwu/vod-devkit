@@ -580,7 +580,10 @@ def _fetch_anon_token() -> str | None:
     （链路即渠道，客户端不自报）——本端保持空 body（方案 C 原样）。"""
     try:
         out = _http("POST", _TOKEN_PATH, {}, base=JAVA_BASE, key="", timeout=15)
-        token = out.get("token")
+        # 引擎 ApiResponse 信封：{"code":200,"data":{"token":...}}；兼容顶层扁平 {"token":...}
+        token = (out.get("data") or {}).get("token") if isinstance(out.get("data"), dict) else None
+        if not token:
+            token = out.get("token")
         if isinstance(token, str) and token:
             return token
     except ToolError:
