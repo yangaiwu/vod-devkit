@@ -39,9 +39,10 @@ const UI_PRODUCT = (typeof globalThis !== 'undefined'
 // 默认不选=不预分类（引擎全量重判——错误预分类比留空更糟）；
 // 选中=采集层渠道原生分类，以【类型名】标题前缀正式入库（T7c）。
 const CATEGORIES = [
-  { id: '功能建议', label: '功能建议', hint: '希望新增/改进能力' },
-  { id: '用户体验', label: '用户体验', hint: '可用但体验差' },
-  { id: '产品缺陷', label: '产品缺陷', hint: 'Bug/报错/功能不可用' },
+  // id/label=云声平台标准枚举（引擎 T7c 映射锚点，不可改）；hint=面向用户的口语引导
+  { id: '功能建议', label: '功能建议', hint: '希望新增能力，或改进现有功能' },
+  { id: '用户体验', label: '用户体验', hint: '能用但别扭：慢、难找、确认烦' },
+  { id: '产品缺陷', label: '产品缺陷', hint: '报错、答非所问、结果不符合预期' },
 ];
 
 /* 样式：对齐官方 message-feedback 的 dsw 设计令牌 */
