@@ -158,6 +158,10 @@ export function uiGlobals(config) {
     if (uiBase) {
         globals.push({ kind: "global", name: "__VOD_DSH_UI_BASE__", value: uiBase });
     }
+    // 企业数据驻留（--no-local-ledger）：通知 client 半停写账本+隐藏历史入口
+    if (readCfg(config?.noLocalLedger, false)) {
+        globals.push({ kind: "global", name: "__VOD_DSH_UI_LEDGER_DISABLED__", value: true });
+    }
     return globals;
 }
 

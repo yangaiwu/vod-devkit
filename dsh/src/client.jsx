@@ -28,6 +28,10 @@ const LS_DEVICE = 'vod_dshui_device';
 const LS_LEDGER = 'vod_dshui_ledger';
 const LS_DRAFT = 'vod_dshui_draft';
 const LEDGER_CAP = 200;
+// 企业数据驻留（--no-local-ledger）：server 半经 index-inject 注入禁用旗标，
+// UI 停写账本 + 隐藏历史入口（显式不可用，不显示空列表——三主体边界拍板）
+const LEDGER_DISABLED = (typeof globalThis !== 'undefined'
+  && globalThis.__VOD_DSH_UI_LEDGER_DISABLED__ === true);
 // 宿主/产品名：嵌入方可经 __VOD_DSH_UI_PRODUCT__ 注入（解耦：任何支持
 // 本插件能力的 agent 装上后文案自动对，不注入=中性通用文案）
 const UI_PRODUCT = (typeof globalThis !== 'undefined'
@@ -126,6 +130,7 @@ async function localVoiceKey(content) {
 }
 
 function ledgerAppend(row) {
+  if (LEDGER_DISABLED) return; // 数据驻留模式：不落本地
   const rows = JSON.parse(localStorage.getItem(LS_LEDGER) || '[]');
   rows.unshift(row);
   localStorage.setItem(LS_LEDGER,
@@ -379,11 +384,6 @@ function FeedbackModal({ onClose }) {
           {busy ? '提交中…' : '提交'}
         </PrimaryBtn>
       )}>
-      <div style={S.hint}>
-        你的反馈将进入 VOD 开发者声音分析平台
-        {UI_PRODUCT ? `，帮助 ${UI_PRODUCT} 变得更好` : ''}。
-        选择的分类会随反馈一并记录，产品团队会结合内容复核。
-      </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
         {CATEGORIES.map((c) => (
           <button key={c.id} title={c.hint || ''} style={{
@@ -411,7 +411,51 @@ function FeedbackModal({ onClose }) {
         {/* 场景输入已移除（T7h）：VOD-Project 全仓无独立 scene 字段（库无列/契约无键），
           场景由用户自然写进正文——云声表单同款引导 */}
       {done && <div style={S.result}>{done.msg}</div>}
+      {!LEDGER_DISABLED && <HistoryPanel />}
+      {LEDGER_DISABLED && <div style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary, #999)', marginTop: 8 }}>
+        本机提交记录已按部署策略停用
+      </div>}
     </SelfModal>
+  );
+}
+
+/* ---------- 我的反馈（本机记录）——三主体边界：用户看自己的，仅本机 ---------- */
+
+function HistoryPanel() {
+  const [open, setOpen] = useState(false);
+  const rows = (() => {
+    try { return JSON.parse(localStorage.getItem(LS_LEDGER) || '[]'); } catch (e) { return []; }
+  })();
+  const label = (st) => st === 'accepted' ? '已收录'
+    : (st === 'failed' || st === 'stashed') ? '暂存，打开时自动重试' : (st || '');
+  return (
+    <div style={{ marginTop: 8, borderTop: '1px solid var(--dsw-alias-border-l2, #e5e5e5)', paddingTop: 6 }}>
+      <button onClick={() => setOpen(!open)} aria-label="我的反馈（本机记录）"
+        style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0,
+          fontSize: 11, color: 'var(--dsw-alias-label-tertiary, #888)' }}>
+        {open ? '▾' : '▸'} 我的反馈（本机记录，{rows.length}）
+      </button>
+      {open && (
+        rows.length === 0
+          ? <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary, #999)', padding: '4px 0' }}>本机暂无提交记录</div>
+          : <div style={{ maxHeight: 160, overflowY: 'auto' }}>
+              {rows.map((r, i) => (
+                <div key={i} style={{ fontSize: 11, padding: '4px 0',
+                  borderBottom: '1px dashed var(--dsw-alias-border-l2, #eee)' }}>
+                  <div style={{ color: 'var(--dsw-alias-label-secondary, #666)' }}>
+                    {(r.at || '').replace('T', ' ').slice(0, 16)}　[{r.category || '未分类'}]　{label(r.status)}
+                  </div>
+                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {(r.title || r.content || '').slice(0, 40)}
+                  </div>
+                </div>
+              ))}
+            </div>
+      )}
+      <div style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary, #999)', marginTop: 4 }}>
+        仅保存在当前浏览器；换浏览器或清除数据后不可见
+      </div>
+    </div>
   );
 }
 
