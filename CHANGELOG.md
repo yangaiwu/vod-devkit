@@ -116,3 +116,7 @@
 - 599478b feat(D-codex-agents-1): codex 技能层载体落地——codex 无 skill 机制，采集质量方法论（触发三条件/content🔒字段分级/推断≠编造禁例/预检三项/不追问/回执话术/职责边界）此前在 codex 上裸奔（工具描述只装硬约束）。install --target codex 随装幂等写入 ~/.codex/AGENTS.md 技能紧凑块（标记剥离幂等，用户自有内容保留）。工具描述同步修口径冲突：删除'用户明确要求其他产品可显式传参覆盖'（违背 S1 同源原则——用户自报产品一律不采信不覆盖，照部署产品提交正文原样）。tags 语义注释（problem_type:云声三分类入标题前缀，非 n01 六类）。新增 AGENTS.md 幂等/内容保留测试锁；72 用例绿
 - acfcc4d fix(D-product-id-2 收口): submit_voices 描述补归因话术并前置——codex 等 MCP-only 宿主不加载 skill，模型唯一约束源是工具描述；原描述零归因话术导致用户提单时被反问'什么产品'（T7d 后已废除的旧职责话机复活）。话术前置防宿主描述截断；外部对表建议采纳：约束三层（工具描述/参数描述/非required 结构）+AGENTS.md 仅冗余；其 .codex-plugin/capability_directories 体系与本机 codex CLI v0.166 实测机制不符未采纳（待证据）。71 用例绿；codex 真机行为验证：提单不带 product 不再反问、直接安装绑定归因提交落库
 
+
+## v0.2.1（2026-11-05）
+
+

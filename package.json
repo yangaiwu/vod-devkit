@@ -1,6 +1,6 @@
 {
   "name": "vod-devkit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "VOD 用户声音采集插件——MCP server + 技能 + 声明式护栏，把 agent 产品的用户反馈安全送进 VOD 平台",
   "license": "MIT",
   "type": "module",
@@ -23,7 +23,20 @@
     "vod_mcp/packs.py",
     "vod_mcp/policy.py",
     "vod_mcp/provenance.py",
-    "vod_mcp/runtime.example.json"
+    "vod_mcp/runtime.example.json",
+    "vod_mcp/__init__.py",
+    "vod_mcp/server.py",
+    "vod_mcp/tools.py",
+    "vod_mcp/packs.py",
+    "vod_mcp/policy.py",
+    "vod_mcp/provenance.py",
+    "vod_mcp/runtime.example.json",
+    "plugins/vod-devkit/.codex-plugin/plugin.json",
+    "plugins/vod-devkit/.mcp.json",
+    "plugins/vod-devkit/build-info.json",
+    "plugins/vod-devkit/vod_mcp",
+    "plugins/vod-devkit/skills",
+    "plugins/.agents/plugins/marketplace.json"
   ],
   "keywords": [
     "mcp",
