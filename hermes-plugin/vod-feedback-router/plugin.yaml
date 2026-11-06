@@ -1,0 +1,5 @@
+name: vod-feedback-router
+description: 强制评估路由钩子——每轮对用户消息做确定性意图判定，命中产品反馈采集意图时注入 vod-feedback-collect 激活指令（forced-eval 模式）
+version: 1.0.0
+provides_hooks:
+  - pre_llm_call

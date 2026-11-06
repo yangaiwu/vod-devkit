@@ -300,3 +300,9 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - **归因口径澄清（7b 在 dsh 壳的形态）**：dsh 壳 schema 无 product 参数（部署配置权威）= 7b 极限形态（无运行期入口即无错归入口）；python MCP 壳保留"传参与绑定一致→采信、不一致→忽略+ignoredRuntimeProduct"（D-attrib-A）。修掉 description 漂移（曾写"explicit arg → config product → host identity"旧宽容口径，实现早已只认绑定——约束源三层最陈旧一层生效的复发，验证宿主行为以真调为准）。
 - 业界对表（用户质询"分析合理吗"后沉淀）：五项要素=解析期校验/先校验后写入/幂等写入/稳定退出码/失败不留半成品，均有实锤业界源（Cordova CB-10921、Authelia config validate、12factor §V）；部分引用（Gitpod/Chainguard/ServiceOverride）标无源。退出码与现有安装器约定一致（用法/校验=2，运行失败=1），不引入新语义。
 - 回归：9 用例（合法装+配置写入/非法产品 exit2 无 add/缺 product/缺 profile/幂等不重复/upsert 保留他人段/原位更新/dsh 缺失 exit2/golden 重录仅 +dshProfile 键）。真机端到端：installer→plugin add→patch 写入→banner 读到 product=CodeArts。
+
+## D-hook-1 Hermes 强制评估路由插件（2026-11-06，负责人确认立项）
+- 背景：采集技能自动激活概率性（业界实测简单指令钩子~20%≈无钩子，强制评估注入~84%，显式调用100%）；实锤 hermes 运维上下文压过采集意图（「体验不好」被反问复现排查，技能未加载）。
+- 落地：hermes-plugin/vod-feedback-router（pre_llm_call 每轮确定性关键词判定，命中注入 vod-feedback-collect 激活指令，未命中零注入）；描述触发词前置（8bdc225，Hermes 索引仅前57字符可见，「体验差」原在截断边缘）。
+- 已知边界：「报错/卡」在纯排障对话也命中=错注入无害（指令不自动提交）；漏注入才是事故。注入仍是文本指令，不改变模型服从性天花板——提交硬保障仍是方案A回显+护栏。
+- opencode/codex 钩子面未调研（opencode 有 plugin 体系待查）。

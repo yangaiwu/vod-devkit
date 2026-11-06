@@ -163,6 +163,17 @@ def _install_hermes(args, packs: str) -> Path:
         ["hermes", "mcp", "add", "vod-devkit", "--command", sys.executable,
          *["--env"] + env_args, "--args", _server_entry()],
         input="y\ny\n", capture_output=True, text=True)
+    # D-hook-1：强制评估路由插件（pre_llm_call 确定性意图路由，业界 forced-eval 模式）
+    import shutil as _sh
+    plug_src = ROOT / "hermes-plugin" / "vod-feedback-router"
+    plug_dst = Path.home() / ".hermes" / "plugins" / "vod-feedback-router"
+    if plug_src.is_dir():
+        if plug_dst.exists():
+            _sh.rmtree(plug_dst)
+        _sh.copytree(plug_src, plug_dst)
+        print("已安装 vod-feedback-router 路由插件（~/.hermes/plugins/）；"
+              "需在 plugins.enabled 加入该名单后生效"
+              "（hermes config set plugins.enabled ...，重启会话生效）")
     if r.returncode == 0:
         print("已注册 Hermes MCP（hermes mcp list 可见；重启会话生效）")
     else:
