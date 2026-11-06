@@ -625,6 +625,26 @@ S57 widget E_AUTH 暂存兜底（VOD-Project 网页壳，对齐 dsh 壳）
   反馈已暂存，请重新打开后提交」。widget 无后台自动重试链
   （草稿回填+用户手动重提），故无 dsh 壳的静默重试缺口。
 
+S58 dsh patch 块 name 绑定与嵌套铁律（2026-11-06 入口消失事故）
+  真机实锤：installer 幂等 upsert 的块模板无 name 行，重装时整
+  块替换吞掉 `name: dsh-vod-devkit`——无 name 绑定=client 半
+  （反馈按钮）静默失激活，工具壳正常而入口消失（双通道不对称
+  掩盖故障）。且 patch 文件被打平（`- id:` 未缩进在 `- insert:`
+  之下）时 insert 不生效，工具壳+UI 双双静默消失。修复：①块
+  模板自带 name 行（重装不吞）②现网 patch 恢复正确嵌套③回归
+  锁（tests/test_installer.py name 绑定断言）。铁律：cordis.patch.yml
+  的 id/name/config 必须缩进在 `- insert:` 之下；改动 installer
+  块模板必须过 name 断言。
+
+S59 回执话术=行为实况（S51 在回执面的应用，用户抓出）
+  匿名直建模式无人工审核闸（提交后引擎自动建 issue），回执
+  禁止出现「审核后将以 issue 形式跟进」类不存在的流程承诺；
+  issue 链接由 pollForReceipt 在引擎真实建成后补出（U-S2），
+  不靠话术许诺。「反馈经审核未采纳」保留——REJECTED 是引擎
+  状态闭包真实值（仅引擎明确拒绝时出现），有承载非空头。
+  回归锁：回执文案禁「审核后将以」；REJECTED 话术必须挂在
+  sync.status==='REJECTED' 判断上。
+
 ## 四、验收用例清单（在目标环境执行，工具不入库）
 
 | # | 用例 | 预期 |

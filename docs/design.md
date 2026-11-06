@@ -352,6 +352,13 @@ normalizeLoose 后不设白名单（未注册落 UNKNOWN 档+productRegistered
 **UI 形态**：弹窗 textarea resize:none（S55，用户拉伸角顶破布局）；
    widget E_AUTH 草稿兜底对齐（S57）。
 
+**回执与安装面（S58/S59）**：回执话术=行为实况（S51 应用——
+   匿名直建无审核闸，issue 链接只由 pollForReceipt 真实建成后
+   补出）；installer dsh 块模板自带 name 绑定行（重装不吞，
+   cordis.patch.yml 必须保持 `- insert:` 嵌套，打平=工具壳+UI
+   双静默消失）。承载=bin/vod-devkit（块模板）+
+   tests/test_installer.py name 断言 + ux-sync S51 回执锁。
+
 ## 四、安全护栏（声明式）## 四、安全护栏（声明式）
 
 policy.json 规则集（severity: deny / confirm / warn）：
