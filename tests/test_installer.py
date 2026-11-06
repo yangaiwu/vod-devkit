@@ -730,3 +730,53 @@ def test_agents_markdown_missing_end_refuses_cleanup(env):
     assert r.returncode == 2
     assert "END 标记" in r.stderr
     assert "无 END" in agents.read_text(), "拒绝清理时不得写盘"
+
+
+def _load_bin():
+    import importlib.util
+    from importlib.machinery import SourceFileLoader
+    p = str(Path(__file__).resolve().parent.parent / "bin" / "vod-devkit")
+    loader = SourceFileLoader("vd_repair", p)
+    spec = importlib.util.spec_from_loader("vd_repair", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def test_doctor_repairs_dsh_patch_block(monkeypatch, tmp_path):
+    """S58/A doctor 自愈回归锁：三态——块缺失→重建嵌套组；打平→重建；
+    完好嵌套→不动（返回 None 不写盘）。"""
+    mod = _load_bin()
+    home = tmp_path / "home"
+    monkeypatch.setattr(mod.Path, "home", staticmethod(lambda: home))
+    patch = home / ".dsh" / "profiles" / "web" / "cordis.patch.yml"
+    patch.parent.mkdir(parents=True, exist_ok=True)
+    mf = {"target": "dsh", "dshProfile": "web",
+          "product": "VOD", "apiBase": "http://127.0.0.1:18080"}
+
+    # ① 块缺失（dsh 运行时序列化冲掉的实锤形态）→ 重建
+    patch.write_text("- insert:\n"
+                     "    - id: ui-settings-general\n"
+                     "      name: \"@deepseek-ai/x\"\n"
+                     "      config:\n"
+                     "        k: 1\n", encoding="utf-8")
+    assert mod._repair_dsh_patch_block(mf) == str(patch)
+    t = patch.read_text()
+    assert "    - id: vod-devkit" in t and "      name: dsh-vod-devkit" in t
+    assert "product: VOD" in t and "apiBase: http://127.0.0.1:18080" in t
+    assert "- id: ui-settings-general" in t and "k: 1" in t  # 不吞他人段
+
+    # ② 打平（未缩进在 - insert: 下）→ 重建为嵌套
+    patch.write_text("- insert:\n"
+                     "- id: vod-devkit\n"
+                     "  name: dsh-vod-devkit\n"
+                     "  config:\n"
+                     "    product: VOD\n", encoding="utf-8")
+    assert mod._repair_dsh_patch_block(mf) == str(patch)
+    t = patch.read_text()
+    assert "\n    - id: vod-devkit" in t or t.startswith("- insert:\n    - id: vod-devkit")
+
+    # ③ 完好嵌套 → 不动
+    before = patch.read_text()
+    assert mod._repair_dsh_patch_block(mf) is None
+    assert patch.read_text() == before

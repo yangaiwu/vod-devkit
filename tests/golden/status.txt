@@ -13,6 +13,7 @@
   "product": "CodeArts",
   "packs": "core,collect",
   "dshProfile": null,
+  "apiBase": "http://127.0.0.1:<PORT>",
   "mcpConfig": "<HOME>/.hermes/mcp/vod-devkit.json",
   "skillsDir": "<HOME>/.hermes/skills/devops/vod-devkit",
   "skillInstalls": [

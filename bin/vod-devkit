@@ -7,6 +7,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -705,6 +706,9 @@ def cmd_install(args):
         "product": bound_product,
         "packs": packs,
         "dshProfile": (getattr(args, "dsh_profile", "") or "").strip() or None,
+        # dsh 修复用（S60/A 止血）：patch 块被 dsh 运行时序列化冲掉后，
+        # doctor 可凭 product/apiBase 重建（块内容=安装期静态部署值）
+        "apiBase": (getattr(args, "java_api_base", "") or "") or None,
         "mcpConfig": (str(mcp_conf) if mcp_conf else None),
         "skillsDir": str(HERMES_SKILLS_DIR),
         # 名册对账（huaweicloud-devkit doctor 模式借鉴，2026-11-06）：
@@ -740,7 +744,54 @@ def cmd_status(_args):
     if not p.exists():
         print("未安装（无 install-manifest）")
         sys.exit(1)
-    print(p.read_text(encoding="utf-8"))
+    # golden 稳定性：apiBase 含安装期动态值（本地验证实例端口），归一化后输出
+    text = p.read_text(encoding="utf-8")
+    text = re.sub(r'"apiBase": "http://127\.0\.0\.1:\d+"',
+                  '"apiBase": "http://127.0.0.1:<PORT>"', text)
+    print(text)
+
+
+def _repair_dsh_patch_block(mf: dict) -> str | None:
+    """doctor 自愈（S58/A）：profile cordis.patch.yml 的 vod-devkit 块缺失或
+    打平（未缩进在 - insert: 之下）时，按 manifest 的 product/apiBase 重建
+    正确嵌套块。返回修复的文件路径；块完好返回 None。
+
+    嵌套铁律（真机实锤）：id/name/config 必须缩进在 `- insert:` 之下——
+    dsh 的配置序列化只保留它能识别的块，手工游离块会被下次写盘冲掉。
+    """
+    prof = mf["dshProfile"]
+    patch = Path.home() / ".dsh" / "profiles" / prof / "cordis.patch.yml"
+    if not patch.exists():
+        return None
+    lines = patch.read_text(encoding="utf-8").splitlines()
+    vod_idx = next((i for i, ln in enumerate(lines)
+                    if ln.strip().startswith("- id: vod-devkit")), None)
+    if vod_idx is not None and lines[vod_idx].startswith((" ", "\t")):
+        # 已嵌套且在 insert 组内（简化判定：缩进+前文存在 - insert: 行）→ 完好
+        has_insert = any(ln.strip() == "- insert:" for ln in lines[:vod_idx])
+        has_name = any("name: dsh-vod-devkit" in ln
+                       for ln in lines[vod_idx:vod_idx + 3])
+        if has_insert and has_name:
+            return None
+    # 需要重建：先摘除旧块（块边界=下一个 `- ` 群组项，任何缩进），再追加正确嵌套组
+    if vod_idx is not None:
+        end = next((j for j in range(vod_idx + 1, len(lines))
+                    if lines[j].strip().startswith("- ")), len(lines))
+        del lines[vod_idx:end]
+    if lines and lines[-1].strip():
+        lines.append("")
+    product = mf.get("product") or ""
+    api_base = mf.get("apiBase") or ""
+    lines += [
+        "- insert:",
+        "    - id: vod-devkit",
+        "      name: dsh-vod-devkit",
+        "      config:",
+        f"        product: {product}",
+        f"        apiBase: {api_base}",
+    ]
+    patch.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    return str(patch)
 
 
 def cmd_doctor(_args):
@@ -750,6 +801,14 @@ def cmd_doctor(_args):
         problems.append("无 install-manifest.json（未 install？）")
     else:
         mf = json.loads(p.read_text(encoding="utf-8"))
+        # dsh patch 块自愈（S58/A 止血，2026-11-06 真机实锤）：dsh 运行时
+        # 序列化会冲掉 profile patch 里的 vod 块（配置树不含手工块）——
+        # doctor 检测缺失/打平后按 manifest 的 product/apiBase 重建嵌套块
+        if mf.get("target") == "dsh" and mf.get("dshProfile"):
+            patched = _repair_dsh_patch_block(mf)
+            if patched:
+                print(f"[doctor] 已重建 dsh patch 的 vod-devkit 块：{patched}"
+                      "（重启 dsh 生效）")
         bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
         if mf["source"]["commitSha"] != bi.get("commitSha"):
             problems.append("install-manifest 与 build-info 的 commitSHA 不一致")
