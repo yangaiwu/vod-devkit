@@ -43,3 +43,16 @@ plugins.enabled 是显式同意门（第三方代码默认不运行），需手�
   方案 A 回显 + 护栏 confirmed=false 拒绝
 - 仅 Hermes 宿主可装（pre_llm_call 是 Hermes 插件面）；opencode/codex
   的对应能力待各宿主钩子面调研（opencode 有 plugin 体系待查）
+
+## 多宿主对表（2026-11-06，opencode/codex/dsh 是否需要同款路由）
+
+| 宿主 | 激活现状（实测） | 截断暴露 | 强制评估可行性 | 结论 |
+|---|---|---|---|---|
+| hermes | 概率性，运维上下文实锤压过 | 57 字符索引预算（触发词已前置） | ✅ pre_llm_call 钩子（已落本插件） | 已覆盖 |
+| opencode | 实测自动激活成功一次（`→ Skill vod-feedback-collect`）；业界反馈自动触发概率低 | 工具输出通用截断（2000 行/50KiB），技能描述非独立窗口 | 待调研：opencode JS plugin 是否有消息级注入钩子（社区有 opencode-skill-activation 先例） | P2 调研项，不阻塞 |
+| codex | 技能已装（~/.codex/skills，5 个远低于 5440 字符预算——大规模截断发生在 20+ 技能场景）；$ 显式调用已验证 | 本仓技能数少，预算无忧 | 无已知消息级钩子面；社区方案是外部 wrapper（lazy-skill-router） | 接受显式兜底（「提交反馈：」前缀），不上 wrapper |
+| dsh 壳 | MCP 工具常驻注册，无激活问题 | **500 字符描述窗口——D-desc-budget-1 门禁已锁**（先决条件<500） | cordis 侧理论可实现消息钩子 | 已由预算门禁覆盖；路由插件低优先 |
+| dsh UI | 部署注入形态（fail-fast 必配），无激活环节 | 不适用 | 不适用 | 天然免疫 |
+
+通用兜底（全宿主）：「提交反馈：」显式前缀 = 100% 确定性入口。
+语义路由不做（M5 相似度未校准红线同款）。
