@@ -129,3 +129,36 @@
 - 2782f5e feat(D-golden-1 doctor/verify golden 基线): 用户可见输出快照比对（devkit doctor-golden 对表，差距清单①第一步）——易变段归一化（HOME/REPO/SHA12），口径漂移即红，有意变更 UPDATE_GOLDEN=1 重录并在失败 diff 人工过目；无 key 确定性基线（key 探针行含易变指纹不入基线）；顺带修测试基建 bug：shutil.ignore_patterns 只匹配基名，'vod_mcp/runtime.json' 带斜杠模式永不命中致 clone 混入真源账本。proposal S42+design golden 节；76 用例绿
 - 28c1f80 feat(D-release-1 一键发版体系+包内容门): release.sh 重写对齐 devkit release-please 语义——bump 从提交历史推导+版本落点表驱动 EXTRA_FILES+整行正则替换+全落点硬断言（根治静默 no-op）；新增 scripts/pack_verify.py 包内容门（pack --dry-run 必含/危险项断言）——首跑即实锤 0.1.12 曾含 runtime.json 凭据残留（已 deprecate，0.2.0 起文件级白名单结构性排除，npm 0.1.12 残留令牌仅对已销毁本地库有效）；package.json files 改文件级白名单+npm 分发补 plugins/ 随包（0.2.0 漏项致 npx codex 路径必挂，0.2.1 修复）；RELEASING.md 发版手册；proposal S41+decisions D-release-1；一键发版真机闭环 v0.2.0/v0.2.1（npx codex 原生插件安装复验通过）
 
+
+## v0.2.3（2026-11-06）
+
+- b3a9a19 S52/S53 场景用例独立成条（极端选择兜底/纠正闭环，从S50补口拆出）+design话术分层同步至S49-S53+D-option引用；router冗余前缀判断合并（in text[:20]为startswith超集，语义不变，既有回归锁覆盖两分支）
+- d30c76a S50 补两口（用户确认）：只提追加句括号兜底不进并列选项+纠正闭环（不辩论/按纠正理解走/content仍原话逐字/禁新定性改写）；S51 泛化落档 D-option-executability-1（话术选项可执行性纪律：写选项前逐项问代码路径在哪）；7例回归锁（115绿）
+- 54d08e3 S49-S51 追加反馈定性话术定稿：先定性再问+留纠正口子+禁空头承诺（无承载机制不得进话术选项）；双副本同步锁+frontmatter完整性回归（plugins副本漏同步太慢/吞frontmatter实锤修复）；proposal/design/test 三件套齐（113例绿）
+- 5e926b1 skill(collect): 追加反馈定性话术——确认环节用户追加表达时先定性再问（定性是 agent 职责，用户只拍板范围），补模糊话术闭环
+- a16f52d test+docs(router): M1 描述前置回归锁（57字符可见预算+长度上限+词表一致性三断言）——实锤补「太慢」缺失进四副本 description；design §五 多宿主对表与来源分级+M 用例承载表
+- cd4f995 docs(router): 矩阵来源分级+官方文档校正——codex 预算参照改官方 8000 默认（5440=实测值）、钩子事件表官方依据；opencode 官方通道正名 prompt admission hook+description 1-1024 官方上限；dsh/hermes 行标注内部依据（可追溯性纪律）
+- 087f005 docs(router): 矩阵修正——codex「无钩子面」事实错误更正（钩子面存在但输出截断+注入路径不一致方为不做理由，两行合一）；hermes 预算表述精确化（57字符索引预算由描述前置吸收）；opencode 补截断阈值依据
+- 02f68f5 docs+test+refactor(router): 需求/设计文档正式化（docs/hermes-feedback-router/）+场景用例 H1-H4/R5-R8 承载映射+触发词表单一事实源重构（TRIGGER_WORDS 正则自动组装，补「很糟糕/太糟糕」变体——R5 长句用例暴露覆盖缺口实锤）+register 契约回归锁；修指令文案笔误
+- 37af96f docs(router): 多宿主矩阵更新——opencode 钩子能力实锤结案（chat.message+合成消息双通路，前提高不成立）；codex 注入路径不一致风险补记（#37463/#33945）
+- e7d2bf3 docs(router): 多宿主对表——opencode/codex/dsh 激活现状/截断暴露/强制评估可行性矩阵
+- 4a4e095 docs(router): hermes-router.md 补入版本库（上笔提交遗漏 add，untracked 实锤——多会话并行时提交前必须核对文件清单）
+- 5ca9960 feat(docs+gate): S45-S48 场景用例+D-desc-budget-1 截断预算门禁+安装器块扫描重构——①proposal 三·八新增 S45-S48（dsh 安装硬校验拒/放/幂等落盘/修复指引、description 500 字窗口与 Codex 5440 预算存活、归因口径单源）+S11 刷新安装器通道+决策表两行；design 五节 dsh target/六节预算门禁承载；②tests/test_desc_budget.py 4 用例：B1 先决条件<500 字符（dsh 最严窗口）/B2 总长≤1500/双载体（contract+dsh lib 组合串提取）/漂移锁禁旧宽容口径回流；③重构 _find_dsh_block 单一实现供 upsert/uninstall 共用（防双处扫描规则漂移），uninstall 净化；101 pytest+7 node 绿，pyflakes 净
+- e8a21f9 feat(hook): D-hook-1 强制评估路由插件 vod-feedback-router——pre_llm_call 确定性意图路由（业界 forced-eval ~84% 模式），H1-H4 回归锁+installer 集成+decisions 记档
+- 50f754c feat(installer+dsh): D-dsh-install-1 安装期硬校验落 dsh 壳——install --target dsh（--profile 必填先校验后 add、产品 meta 硬校验复用、幂等 upsert profile cordis.patch.yml config 段、dsh 缺失 exit2、写失败 exit1 带修复指引、manifest dshProfile+uninstall 摘除）；生效通道真机实证（profile patch config override，banner+桩提交链）；dsh 壳 description 归因漂移修复（旧宽容口径句→部署配置权威）；INSTALL/dsh README 口径更新；9 回归+golden 重录（仅 +dshProfile 键）；93 pytest+7 node 绿
+- 8bdc225 fix(collect-skill): description 触发词前置（Hermes 索引仅前57字符可见，「体验差」原在截断边缘——业界截断静默失败教训）+禁复现排查模式句
+- 7261ec0 docs(dsh): 归因注释对齐 D-attrib-A（实现本就只读配置绑定，模型传参不采信——天然免疫宿主名错归）
+- 53579b0 feat(attribution): D-attrib-A 归因只由安装绑定决定——运行期显式传参仅绑定一致才采信（宿主名自报忽略+ignoredRuntimeProduct 留痕+productSource 可观测），6 回归锁覆盖拍板五场景；推翻 2026-11-03 宽容口径
+- 8f8dca9 fix(collect-skill): 一次抱怨=一条声音红线——禁拆分禁改写变体（实锤：一次抱怨被宿主改写成两条入库建两 issue，引擎逐字幂等被绕过）
+- cd4cccc fix(roster): 多宿主落点并集合并+HOME 隔离剪枝（实锤：按最近安装覆盖互相冲掉落点；fake-home 吞真实 HOME 历史落点）
+- d67ad1b chore(plugin): sync+重烧 build-info
+- a14b857 feat(doctor+instructions+e2e): 名册对账逐宿主核对技能副本+codex 目录补拷；initialize instructions 主动披露采集纪律；free-choice 行为回归脚本（B 熔断违规计数）——huaweicloud-devkit 三防线借鉴落地
+- b3d6030 feat(echo): 提交回执强制原话回显（方案 A 拍板落地）——echo{requiresUserEcho,instruction,contents}+契约 schema/description+2 回归锁；decisions.md 记 D-echo-A-1（A 默认/B 宿主级熔断触发条件）
+- ede20d7 fix(installer): manifest 重复 product 死键删除+golden 键序重录（值不变，product 移至绑定位置）
+- 28c8f5f fix(installer): opencode 目标补拷原生技能到 ~/.config/opencode/skills/（opencode 原生 skill 机制实测识别，此前仅工具描述单通道）
+- 0f4b9d2 feat(contract): vod_submit_voices 描述前置模糊反馈固定话术（MCP-only 宿主唯一约束源，opencode 交互三件套补齐）
+- 5b97527 chore(plugin): sync vod_mcp+skills 自包含包+重烧 build-info（8bfb9f6）
+- 8bfb9f6 fix(submit): 囤积回执缺 voiceIds 不得兜底计成功+引擎 rejected 透出（codex 谎报成功实锤修复）；采集技能模糊反馈固定话术（F3 观测定稿）
+- bb312e3 test: golden status 重录版本号 0.2.1→0.2.2（v0.2.2 发版漏重录，pre-push 门禁被存量红挡）
+- b111900 fix(D-consent-desc-1): 确认纪律前置进工具描述——opencode 把用户陈述反馈当同意直提单实锤（契约 description 立即调用话术与 confirm 纪律冲突，MCP-only 宿主不加载技能唯描述可依）+dsh 壳同步+回归锁
+
