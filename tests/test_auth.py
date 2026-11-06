@@ -145,19 +145,25 @@ def test_product_id_resolution_t7i(monkeypatch):
                 "stale": False, "source": "cache"}
 
     monkeypatch.setattr(tools, "_load_meta", fake_meta)
+    # D-attrib-A：显式传参仅在与安装绑定一致时进入解析路径（逐用例设绑定）
     # ① 短码先归一再查目录 → id
-    assert tools._resolve_product({"product": "codearts"}) == "31"
-    assert tools._resolve_product({"product": "CodeArts"}) == "31"
-    assert tools._resolve_product({"product": "aishell"}) == "42"
+    monkeypatch.setattr(tools, "_RT", {"product": "CodeArts"})
+    assert tools._resolve_product({"product": "codearts"}) == ("31", None)
+    assert tools._resolve_product({"product": "CodeArts"}) == ("31", None)
+    monkeypatch.setattr(tools, "_RT", {"product": "AIShell"})
+    assert tools._resolve_product({"product": "aishell"}) == ("42", None)
     # ② 纯数字=平台 id 透传（不查目录）
-    assert tools._resolve_product({"product": "31"}) == "31"
-    # ③ 目录无此名 → 规范名原样（兼容回落）
-    assert tools._resolve_product({"product": "hermes"}) == "hermes"
+    monkeypatch.setattr(tools, "_RT", {"product": "31"})
+    assert tools._resolve_product({"product": "31"}) == ("31", None)
+    # ③ 目录无此名 → 规范名原样（兼容回落；绑定名同样走此路径）
+    monkeypatch.setattr(tools, "_RT", {"product": "hermes"})
+    assert tools._resolve_product({}) == ("hermes", None)
     # ③' 目录不可用（快照/老引擎 catalog 空）→ 名字通道
     monkeypatch.setattr(tools, "_load_meta",
                         lambda force=False: {"products": [], "catalog": [],
                                              "stale": True, "source": "snapshot"})
-    assert tools._resolve_product({"product": "codearts"}) == "CodeArts"
+    monkeypatch.setattr(tools, "_RT", {"product": "CodeArts"})
+    assert tools._resolve_product({"product": "codearts"}) == ("CodeArts", None)
 
 
 def test_meta_catalog_cached_t7i(monkeypatch):
@@ -190,33 +196,34 @@ def test_meta_catalog_cached_t7i(monkeypatch):
 
 
 def test_product_attribution_layers(monkeypatch):
-    """归因（宿主即产品·不设白名单，2026-11-03 拍板）：显式传参 > 安装绑定 >
-    无归因（不再 -32013 本地拦截，body 不带 product → 引擎 UNKNOWN 档）。"""
-    # ③ 无绑定无传参 → 不拦截：body 不带 product（引擎落 UNKNOWN 档人工归因）
-    monkeypatch.setattr(tools, "_RT", {})
+    """归因三层（D-attrib-A，2026-11-06 拍板，推翻 2026-11-03 宽容口径）：
+    归因只由安装绑定决定——显式传参仅绑定一致才采信；无绑定一律 UNKNOWN 档。"""
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": [], "catalog": [],
+                                             "stale": False, "source": "cache"})
     monkeypatch.setattr(tools, "JAVA_KEY", "k")
     captured = {}
     monkeypatch.setattr(tools, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         captured.update(body=body) or {"code": 201, "voiceIds": ["ext_vod-agent_t1"], "statuses": ["new"]})
+    # ③ 无绑定（无论传不传参）→ body 不带 product（引擎 UNKNOWN 档人工归因）
+    monkeypatch.setattr(tools, "_RT", {})
     out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
                                 "confirmed": True}, client_info={"name": "t"})
     assert out["accepted"] == 1 and "product" not in captured["body"]
 
-    # ③' 宿主自报产品（不在任何白名单）原样上送，不拒收
+    # ③' 宿主自报产品（无绑定）→ 不采信，仍 UNKNOWN；回执留痕
     out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
                                 "product": "hermes", "confirmed": True},
                               client_info={"name": "t"})
-    assert out["accepted"] == 1 and captured["body"]["product"] == "hermes"
+    assert out["accepted"] == 1 and "product" not in captured["body"]
+    assert out["ignoredRuntimeProduct"] == "hermes"
 
-    # ① 绑定生效（无传参取 runtime 绑定）
+    # ① 绑定生效（无传参取 runtime 绑定；目录空走规范名通道）
     monkeypatch.setattr(tools, "_RT", {"product": "aishell"})
-    monkeypatch.setattr(tools, "_http",
-                        lambda m, p, body=None, timeout=30, base=None, key=None:
-                        {"code": 201, "voiceIds": ["ext_vod-agent_t1"], "statuses": ["new"]})
     out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
                                "confirmed": True}, client_info={"name": "t"})
-    assert out["accepted"] == 1
+    assert out["accepted"] == 1 and captured["body"]["product"] == "aishell"
 
 
 def test_meta_fetch_and_cache(monkeypatch):
@@ -290,6 +297,63 @@ def test_hoarding_engine_rejected_passthrough(monkeypatch):
     assert out["accepted"] == 0
     assert any("NoSuchProduct" in str(r.get("reason", "")) for r in out["rejected"])
 
+
+def test_attribution_install_binding_only(monkeypatch):
+    """D-attrib-A（2026-11-06 拍板，方案 A）：归因只由安装绑定决定——
+    运行期显式传参仅当与绑定一致才采信；宿主名自报一律忽略并留痕。"""
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts"],
+                                             "stale": False, "source": "meta",
+                                             "catalog": [{"id": "1", "name": "CodeArts"}]})
+    captured = {}
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    monkeypatch.setattr(tools, "_RT", {"product": "CodeArts"})
+    monkeypatch.setattr(tools, "_http",
+                        lambda m, p, body=None, timeout=30, base=None, key=None:
+                        captured.update(body=body) or
+                        {"code": 201, "voiceIds": ["ext_v1"], "statuses": ["new"]})
+
+    # ①运行期传参与绑定不一致（宿主名自报）→ 忽略，落绑定值，回执留痕
+    out = tools.submit_voices({"voices": [{"content": "反馈一"}],
+                               "product": "hermes", "confirmed": True},
+                              client_info={"name": "t"})
+    assert captured["body"]["product"] == "1", "回退安装绑定并主键化（目录命中）"
+    assert out.get("ignoredRuntimeProduct") == "hermes"
+    assert out.get("productSource") == "install_binding"
+
+    # ②运行期传参与绑定一致（忽略大小写）→ 采信，无留痕
+    out = tools.submit_voices({"voices": [{"content": "反馈二"}],
+                               "product": "codearts", "confirmed": True},
+                              client_info={"name": "t"})
+    assert captured["body"]["product"] == "1"  # 目录主键化命中
+    assert "ignoredRuntimeProduct" not in out
+
+    # ③运行期不传 → 走绑定（同样主键化）
+    out = tools.submit_voices({"voices": [{"content": "反馈三"}],
+                               "confirmed": True},
+                              client_info={"name": "t"})
+    assert captured["body"]["product"] == "1"
+    assert "ignoredRuntimeProduct" not in out
+
+
+def test_attribution_no_binding_ignores_runtime_param(monkeypatch):
+    """D-attrib-A：无绑定时运行期传参同样不采信（归因只由 install 决定），
+    body 不带 product → 引擎 UNKNOWN 档兜底。"""
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": [], "stale": False,
+                                             "source": "meta", "catalog": []})
+    captured = {}
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    monkeypatch.setattr(tools, "_RT", {})
+    monkeypatch.setattr(tools, "_http",
+                        lambda m, p, body=None, timeout=30, base=None, key=None:
+                        captured.update(body=body) or
+                        {"code": 201, "voiceIds": ["ext_v2"], "statuses": ["new"]})
+    out = tools.submit_voices({"voices": [{"content": "反馈四"}],
+                               "product": "hermes", "confirmed": True},
+                              client_info={"name": "t"})
+    assert "product" not in captured["body"], "无绑定+自报 → 不带 product 走 UNKNOWN"
+    assert out.get("ignoredRuntimeProduct") == "hermes"
 
 def test_submit_echo_requires_verbatim_relay(monkeypatch):
     """方案 A 回归锁：回执必须携带 echo（原话回显），content 与提交原话逐字一致。"""

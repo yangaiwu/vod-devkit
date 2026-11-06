@@ -151,27 +151,35 @@ _PRODUCT_MAP = {
 }
 
 
-def _resolve_product(params: dict) -> str | None:
-    """归因（「宿主即产品」口径，2026-11-03 拍板·不设白名单）：
-    ①调用方显式传参 ②安装绑定（runtime.json product——安装器默认写入宿主名，
-    hermes/opencode/codex 装在哪就归哪）③都没有 → 返回 None（body 不带
-    product，引擎落 UNKNOWN 档人工归因解析，V19）——不再 -32013 本地拦截。
+def _resolve_product(params: dict) -> tuple[str | None, str | None]:
+    """归因（D-attrib-A：2026-11-06 负责人拍板，方案 A 收紧）：
+    归因只由 install 绑定（runtime.json product）决定——运行期显式传参
+    仅当与绑定一致（忽略大小写）才采信；不一致=宿主模型自报，一律忽略
+    回退绑定值（实锤：hermes 会话模型传 product="hermes" 覆盖 CodeArts
+    绑定，[HERMES] 未注册错归）。无绑定 → None（引擎 UNKNOWN 档兜底）。
+    返回 (product, ignored_runtime_product)。
     T7i（方案 A，2026-11-05 拍板）：产品归因主键化——
     ①纯数字串=平台主键 id，原样透传（引擎 selectById 精确命中）
     ②名字→meta productCatalog 按名解析出平台 id 后提交（对账主键化，
     归一化/改名漂移不进提交链路）；_PRODUCT_MAP 先归一短码再查目录
     ③目录无此名/目录不可用→规范名原样上送（引擎 name 兼容通道，
     命中同样补落 product_id）——不静默丢提交。"""
-    raw = str(params.get("product") or _RT.get("product") or "").strip()
-    if not raw:
-        return None
-    if raw.isdigit():
-        return raw
-    name = _PRODUCT_MAP.get(raw.lower(), raw)
+    binding = str(_RT.get("product") or "").strip()
+    raw = str(params.get("product") or "").strip()
+    ignored = None
+    if raw and (not binding or raw.lower() != binding.lower()):
+        ignored = raw  # 运行期自报≠绑定（或无绑定）→ 忽略留痕，不采信
+        raw = ""
+    product = raw or binding or None
+    if not product:
+        return None, ignored
+    if product.isdigit():
+        return product, ignored
+    name = _PRODUCT_MAP.get(product.lower(), product)
     for item in (_load_meta().get("catalog") or []):
         if str(item.get("name") or "").lower() == name.lower():
-            return str(item.get("id"))
-    return name
+            return str(item.get("id")), ignored
+    return name, ignored
 
 
 _SUBMIT_HOARDING = "/rest/developer/manager/hdvodmngservice/v1/external/voices"
@@ -237,7 +245,7 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
     """
     import uuid
     host = (client_info or {}).get("name") or "unknown-host"
-    product = _resolve_product(params)
+    product, ignored_runtime = _resolve_product(params)
     accepted, voice_ids, task_ids, rejected = 0, [], [], []
     global JAVA_KEY
     voices_in = params.get("voices", [])
@@ -359,6 +367,10 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
                   "echo": _echo(voice_ids)}
         if out.get("productRegistered") is not None:
             result["productRegistered"] = out.get("productRegistered")
+        # D-attrib-A 可观测：模型试图改归因留痕，不静默吞
+        result["productSource"] = "install_binding"
+        if ignored_runtime:
+            result["ignoredRuntimeProduct"] = ignored_runtime
         _ledger(voice_ids, task_ids)
         return result
     # ---- 过渡回落：老链单条提交（仅囤积端点 404 触发） ----
