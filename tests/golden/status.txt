@@ -12,6 +12,7 @@
   "distribution": "devkit",
   "product": "CodeArts",
   "packs": "core,collect",
+  "dshProfile": null,
   "mcpConfig": "<HOME>/.hermes/mcp/vod-devkit.json",
   "skillsDir": "<HOME>/.hermes/skills/devops/vod-devkit",
   "skillInstalls": [

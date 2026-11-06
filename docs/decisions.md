@@ -292,3 +292,11 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - A（默认防线，已实施）：vod_submit_voices 回执强制携带 echo{requiresUserEcho, instruction, contents[voiceId,content]}，agent 必须逐条原样转述「已收录原话：…」。边界：约束不了提交前行为，只让污染当场可见；真正锁死确认只能靠宿主 UI 弹窗。
 - B（不全局启用）：draft/commit 两段式 token 审批降级为按宿主可选熔断开关（未实现，仅定位留档）。注意 B 在 MCP 层也锁不死人类确认（agent 可自读 token 自动 commit），只能加摩擦。升级触发：同一宿主 7 天内 ≥2 次未确认提交，或 ≥1 次原话改写且用户不可接受→对该宿主启用 token 化或直接禁写切只读。破坏性工具继续按原口径 token 化。
 - 补强建议（未排期，需引擎侧端点）：短窗口 vod_correct_voice/vod_delete_voice，让用户看到改写后能当场更正/撤回——引擎 /external/** 无此端点，须走 VOD-Project 新需求。
+
+## D-dsh-install-1 dsh 工具壳安装期硬校验+幂等写配置（2026-11-06 用户拍板 A+B 配套）
+- 拍板：方案 A（`install --target dsh` 包装命令）落地，B（模板写全+README 标红）降级为配套文档防线，不替代硬校验。判据=D-product-id-2 口径三壳统一：dsh 壳此前是「装了再手工补配置」的老形态，正是当初要消灭的"装错=采集链空转且无感知"。
+- **强制前置已完成（2026-11-06 真机实测）**：dsh 工具壳的 config 生效通道=profile cordis.patch.yml 的 id-targeted config override（dsh 0.2.1-rc.5 启动 banner + 桩引擎提交链实证 product/apiBase/confirmWrites 三字段全生效）；`dsh plugin add` 对不存在 profile 会自建。
+- 实现（bin/vod-devkit）：`--target dsh --profile <p> --product <产品>`——①缺 --profile 在进入任何安装动作前 exit 2（先校验后写入）②产品硬校验复用 _validate_product_or_exit（cmd_install 既有先行位，校验失败不进 add=无半成品）③dsh 不可用 exit 2 ④add 成功后幂等 upsert cordis.patch.yml（已存在 `- id: vod-devkit` 段原位整块替换不重复插入，按行扫块边界不引 YAML 依赖；不吞其它插件段，有回归锁）⑤写配置失败 exit 1 + 手动修复格式指引 ⑥manifest 记 dshProfile，uninstall 摘插件+移除 config 段。
+- **归因口径澄清（7b 在 dsh 壳的形态）**：dsh 壳 schema 无 product 参数（部署配置权威）= 7b 极限形态（无运行期入口即无错归入口）；python MCP 壳保留"传参与绑定一致→采信、不一致→忽略+ignoredRuntimeProduct"（D-attrib-A）。修掉 description 漂移（曾写"explicit arg → config product → host identity"旧宽容口径，实现早已只认绑定——约束源三层最陈旧一层生效的复发，验证宿主行为以真调为准）。
+- 业界对表（用户质询"分析合理吗"后沉淀）：五项要素=解析期校验/先校验后写入/幂等写入/稳定退出码/失败不留半成品，均有实锤业界源（Cordova CB-10921、Authelia config validate、12factor §V）；部分引用（Gitpod/Chainguard/ServiceOverride）标无源。退出码与现有安装器约定一致（用法/校验=2，运行失败=1），不引入新语义。
+- 回归：9 用例（合法装+配置写入/非法产品 exit2 无 add/缺 product/缺 profile/幂等不重复/upsert 保留他人段/原位更新/dsh 缺失 exit2/golden 重录仅 +dshProfile 键）。真机端到端：installer→plugin add→patch 写入→banner 读到 product=CodeArts。

@@ -71,8 +71,14 @@ npx --yes vod-devkit uninstall
 ## DeepSeek Harness (dsh)
 
 ```bash
-dsh plugin --profile <profile> add dsh-vod-devkit    # npm 已发布
+npx --yes vod-devkit install --target dsh --profile <profile> --product <产品>
 ```
+
+- 包装命令做三件事：`dsh plugin add dsh-vod-devkit` → 产品安装期硬校验
+  （--product 必须命中产品目录，未命中/不可达 exit 2 拒装，与三壳统一口径）→
+  幂等写入 profile 的 cordis.patch.yml config 段（product/apiBase，工具壳的
+  唯一生效通道，真机实证）。校验先于 add，不留半成品。
+- dsh 壳无运行期 product 传参通道（部署配置权威）；重复 install 原位更新不重复插入。
 
 薄壳包 `dsh-vod-devkit` 与主包同语义（同 PRODUCT_MAP/护栏码/匿名链）；
 dsh 社区目录收录依赖 `dsh.bundle` manifest + `dsh-plugin` topic，随

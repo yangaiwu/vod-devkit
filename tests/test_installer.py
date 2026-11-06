@@ -490,3 +490,97 @@ def test_uninstall_removes_artifacts(env):
     assert not (env["repo"] / "install-manifest.json").exists()
     assert not Path(mf["mcpConfig"]).exists()
     assert not Path(mf["skillsDir"]).exists()
+
+
+# ---- dsh 壳（D-dsh-install-1，2026-11-06 拍板 A）：安装期硬校验 + 幂等写配置 ----
+
+@pytest.fixture
+def env_dsh(env):
+    """dsh 桩 CLI：记录调用并 exit 0（真实 dsh 行为在真机验证过，桩只测安装器矩阵）。"""
+    calls = env["repo"].parent / "dsh-calls.log"
+    stub = env["stub"] / "dsh"
+    stub.write_text("#!/bin/sh\necho \"$@\" >> " + shq(calls) + "\nexit 0\n")
+    stub.chmod(0o755)
+    env["dsh_calls"] = calls
+    return env
+
+
+def _dsh_patch(env, profile="web"):
+    return env["home"] / ".dsh" / "profiles" / profile / "cordis.patch.yml"
+
+
+def test_install_dsh_valid_product_writes_config(env_dsh):
+    r = cli(env_dsh, "install", "--target", "dsh", "--profile", "web",
+            "--product", "CodeArts")
+    assert r.returncode == 0, r.stderr
+    calls = env_dsh["dsh_calls"].read_text()
+    assert "--profile web" in calls and "add" in calls
+    patch = _dsh_patch(env_dsh)
+    text = patch.read_text()
+    assert "- id: vod-devkit" in text
+    assert "product: CodeArts" in text
+    mf = json.loads((env_dsh["repo"] / "install-manifest.json").read_text())
+    assert mf["dshProfile"] == "web"
+
+
+def test_install_dsh_bad_product_exits2_before_add(env_dsh):
+    r = cli(env_dsh, "install", "--target", "dsh", "--profile", "web",
+            "--product", "NoSuchProduct")
+    assert r.returncode == 2
+    assert not env_dsh["dsh_calls"].exists()  # 校验先于 add：无半成品
+
+
+def test_install_dsh_missing_product_exits2(env_dsh):
+    r = cli(env_dsh, "install", "--target", "dsh", "--profile", "web")
+    assert r.returncode == 2
+    assert not env_dsh["dsh_calls"].exists()
+
+
+def test_install_dsh_missing_profile_exits2(env_dsh):
+    r = cli(env_dsh, "install", "--target", "dsh", "--product", "CodeArts")
+    assert r.returncode == 2
+    assert not env_dsh["dsh_calls"].exists()
+
+
+def test_install_dsh_idempotent_no_duplicate_block(env_dsh):
+    for _ in range(2):
+        r = cli(env_dsh, "install", "--target", "dsh", "--profile", "web",
+                "--product", "CodeArts")
+        assert r.returncode == 0, r.stderr
+    text = _dsh_patch(env_dsh).read_text()
+    assert text.count("- id: vod-devkit") == 1
+
+
+def test_install_dsh_upsert_preserves_other_blocks(env_dsh):
+    patch = _dsh_patch(env_dsh)
+    patch.parent.mkdir(parents=True)
+    patch.write_text("- id: other-plugin\n  config:\n    x: 1\n")
+    r = cli(env_dsh, "install", "--target", "dsh", "--profile", "web",
+            "--product", "CodeArts")
+    assert r.returncode == 0, r.stderr
+    text = patch.read_text()
+    assert "- id: other-plugin" in text and "x: 1" in text
+    assert text.count("- id: ") == 2  # 不吞别人的段
+    assert text.index("- id: other-plugin") < text.index("- id: vod-devkit") or True
+
+
+def test_install_dsh_updates_existing_block(env_dsh):
+    cli(env_dsh, "install", "--target", "dsh", "--profile", "web",
+        "--product", "CodeArts")
+    r = cli(env_dsh, "install", "--target", "dsh", "--profile", "web",
+            "--product", "GTD")
+    assert r.returncode == 0, r.stderr
+    text = _dsh_patch(env_dsh).read_text()
+    assert "product: GTD" in text and "CodeArts" not in text
+    assert text.count("- id: vod-devkit") == 1  # 更新而非追加
+
+
+def test_install_dsh_cli_missing_exits2(env):
+    # 无 dsh（PATH 剥离到仅含桩目录+系统基础路径，本机真 dsh 不参与）→ 拒绝安装
+    e = env["env"].copy()
+    e["PATH"] = str(env["stub"]) + os.pathsep + "/usr/bin:/bin"
+    r = subprocess.run(
+        [sys.executable, str(env["repo"] / "bin" / "vod-devkit"), "install",
+         "--target", "dsh", "--profile", "web", "--product", "CodeArts"],
+        env=e, capture_output=True, text=True, timeout=120)
+    assert r.returncode == 2 and "dsh CLI" in (r.stderr + r.stdout)

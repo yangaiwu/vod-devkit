@@ -235,9 +235,8 @@ export function apply(ctx, config) {
                 'Each voice = one user feedback (content ≤2000 chars). '
                 + 'content MUST be a faithful transcription of the user\'s own words - '
                 + 'NEVER invent sentiment (e.g. 体验不好) or fabricate content the user did not say. '
-                + 'A bare product name or a question is NOT feedback - ask what the user wants to report. ' +
-                'Product attribution ("host-is-product", no whitelist): explicit arg → config product → ' +
-                'host identity (DSH). Host-reported products pass through as-is. ' +
+                +                'A bare product name or a question is NOT feedback - ask what the user wants to report. ' +
+                'Product attribution is bound at install/deploy time (config product; no runtime product argument exists). ' +
                 'Batch ≤50. Returns voiceIds (reconciliation key) + taskIds.',
             parameters: buildParameters({
                 voices: {

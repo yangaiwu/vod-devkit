@@ -302,8 +302,85 @@ def _install_codex(args, packs: str) -> Path:
     return conf
 
 
+def _install_dsh(args, packs: str) -> Path:
+    """dsh 工具壳（D-dsh-install-1，2026-11-06 用户拍板 A）：三壳口径统一——
+    --product 安装期硬校验（cmd_install 已先行，到达此处必已过）+ 校验先于
+    add + 幂等写 profile cordis.patch.yml config override。
+    生效通道真机实测（2026-11-06，dsh 0.2.1-rc.5）：profile cordis.patch.yml
+    的 id-targeted config override 是工具壳读取 product/apiBase/confirmWrites
+    的唯一运行时通道（启动 banner + 桩引擎提交链实证）。dsh plugin add 会自建
+    profile，无需前置。"""
+    dsh = shutil.which("dsh")
+    profile = (getattr(args, "dsh_profile", "") or "").strip()
+    if not profile:
+        # argparse 进入安装前校验（cmd_install 已兜底，直调防御）
+        print("[vod-devkit] --profile 必填：dsh 按 profile 组织插件与配置"
+              "（--profile <name>）", file=sys.stderr)
+        sys.exit(2)
+    if not dsh:
+        print("[vod-devkit] 未找到 dsh CLI（PATH），拒绝安装（宁可不装不可装错）。"
+              "前置：npm i -g @deepseek-ai/dsh（需 pnpm）", file=sys.stderr)
+        sys.exit(2)
+    r = subprocess.run([dsh, "plugin", "--profile", profile,
+                        "add", "dsh-vod-devkit"],
+                       capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        print(f"[vod-devkit] dsh plugin add 失败：{(r.stderr or r.stdout).strip()[-300:]}",
+              file=sys.stderr)
+        sys.exit(1)
+    print(f"已安装 dsh 插件 dsh-vod-devkit（profile={profile}，dsh plugin list 可见）")
+
+    patch = Path.home() / ".dsh" / "profiles" / profile / "cordis.patch.yml"
+    block = ("- id: vod-devkit\n"
+             "  config:\n"
+             f"    product: {args.product}\n"
+             f"    apiBase: {args.java_api_base}\n")
+    try:
+        written = _upsert_dsh_patch(patch, block)
+    except Exception as e:
+        # 回滚/修复指引：插件已装但配置未写 = 半成品，给明确的手动修复格式
+        print(f"[vod-devkit] 插件已装入 profile={profile}，但配置写入失败"
+              f"（{e.__class__.__name__}）。请手动把下段并入 {patch}"
+              f"（顶层 YAML 数组元素，已有 - id: vod-devkit 段则原位替换）：\n"
+              f"{block}", file=sys.stderr)
+        sys.exit(1)
+    if written:
+        print(f"已写入归因/引擎配置（幂等 upsert）：{patch}")
+    else:
+        print(f"配置未变化（幂等跳过）：{patch}")
+    return patch
+
+
+def _upsert_dsh_patch(patch: Path, block: str) -> bool:
+    """幂等写 profile cordis.patch.yml：已存在 `- id: vod-devkit` 段则原位整块
+    替换（不重复插入）；无则追加。按行扫描块边界（下一行 `- ` 顶层元素或 EOF），
+    不引 YAML 依赖（本仓零第三方依赖红线）。返回是否有写入。"""
+    lines = patch.read_text(encoding="utf-8").splitlines() if patch.exists() else []
+    start = end = None
+    for i, ln in enumerate(lines):
+        if ln.strip() == "- id: vod-devkit" or ln.strip().startswith("- id: vod-devkit"):
+            start = i
+            end = len(lines)
+            for j in range(i + 1, len(lines)):
+                if lines[j].startswith("- "):  # 下一顶层元素：本块结束
+                    end = j
+                    break
+            break
+    if start is None:
+        new = lines + ([""] if lines and lines[-1].strip() else []) + block.splitlines()
+    else:
+        new = lines[:start] + block.splitlines() + lines[end:]
+    new_text = "\n".join(new).rstrip("\n") + "\n"
+    old_text = patch.read_text(encoding="utf-8") if patch.exists() else ""
+    if new_text == old_text:
+        return False
+    patch.parent.mkdir(parents=True, exist_ok=True)
+    patch.write_text(new_text, encoding="utf-8")
+    return True
+
+
 _INSTALLERS = {"hermes": _install_hermes, "opencode": _install_opencode,
-               "codex": _install_codex}
+               "codex": _install_codex, "dsh": _install_dsh}
 
 
 def detect_targets() -> list:
@@ -315,6 +392,8 @@ def detect_targets() -> list:
         found.append("opencode")
     if (Path.home() / ".codex").exists():
         found.append("codex")
+    if shutil.which("dsh"):
+        found.append("dsh")
     return found
 
 
@@ -427,6 +506,12 @@ def cmd_install(args):
             "    GET /external/products",
             file=sys.stderr)
         sys.exit(2)
+    # D-dsh-install-1：--profile 必填在进入任何安装动作前校验（先校验后写入）
+    if target == "dsh" and not (args.dsh_profile or "").strip():
+        print("[vod-devkit] --profile 必填：dsh 按 profile 组织插件与配置。\n"
+              "  例：npx vod-devkit install --target dsh --profile web --product CodeArts",
+              file=sys.stderr)
+        sys.exit(2)
     bound_product = args.product
     # D-product-id-2（2026-11-05 用户拍板 B，推翻"宿主名是显式合法值"宽容口径）：
     # 安装期产品硬校验——--product 必须命中 meta productCatalog（名字大小写不敏感
@@ -509,6 +594,7 @@ def cmd_install(args):
         "distribution": getattr(args, "distribution", "devkit"),
         "product": bound_product,
         "packs": packs,
+        "dshProfile": (getattr(args, "dsh_profile", "") or "").strip() or None,
         "mcpConfig": str(mcp_conf),
         "skillsDir": str(HERMES_SKILLS_DIR),
         # 名册对账（huaweicloud-devkit doctor 模式借鉴，2026-11-06）：
@@ -688,6 +774,31 @@ def cmd_uninstall(_args):
         if oc_cmd.exists():
             oc_cmd.unlink()
             print("removed:", oc_cmd)
+        # dsh 壳（D-dsh-install-1）：摘插件 + 从 profile patch 移除 config 段
+        dsh = shutil.which("dsh")
+        if dsh:
+            prof = (mf.get("dshProfile") or "").strip()
+            if prof:
+                subprocess.run([dsh, "plugin", "--profile", prof, "remove",
+                                "dsh-vod-devkit"], capture_output=True, text=True)
+            patch = Path.home() / ".dsh" / "profiles" / prof / "cordis.patch.yml"
+            if patch.exists():
+                lines = patch.read_text(encoding="utf-8").splitlines()
+                start = end = None
+                for i, ln in enumerate(lines):
+                    if ln.strip().startswith("- id: vod-devkit"):
+                        start = i
+                        end = len(lines)
+                        for j in range(i + 1, len(lines)):
+                            if lines[j].startswith("- "):
+                                end = j
+                                break
+                        break
+                if start is not None:
+                    patch.write_text(
+                        "\n".join(lines[:start] + lines[end:]).rstrip("\n") + "\n",
+                        encoding="utf-8")
+                    print("removed vod-devkit config block:", patch)
         p.unlink()
         print("removed:", p)
     else:
@@ -698,7 +809,8 @@ def main():
     ap = argparse.ArgumentParser(prog="vod-devkit")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("install")
-    sp.add_argument("--target", default="auto", help="hermes|opencode|codex|auto（默认探测）")
+    sp.add_argument("--target", default="auto",
+                    help="hermes|opencode|codex|dsh|auto（默认探测）")
     sp.add_argument("--preset", default="collect", choices=list(PRESETS),
                     help="collect=对外默认（采集者）；full=内部全量")
     sp.add_argument("--api-base", default="http://127.0.0.1:8000")
@@ -710,6 +822,8 @@ def main():
     sp.add_argument("--distribution", default="devkit", choices=["devkit", "preset"],
                     help="devkit=开发/运维自装（默认）；preset=产品随 agent 分发（禁 key 随包/"
                          "禁自更新/客户机首启重生成状态）")
+    sp.add_argument("--profile", dest="dsh_profile", default="",
+                    help="dsh 专用：profile 名（--target dsh 时必填）")
     sp.add_argument("--no-local-ledger", action="store_true",
                     help="关闭本地提交账本（企业数据驻留要求；vod_list_submitted 将不可用）")
     sp.set_defaults(fn=cmd_install)

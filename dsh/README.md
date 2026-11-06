@@ -16,16 +16,17 @@ VOD 用户声音采集插件 —— DeepSeek Harness (dsh) 薄壳。
 ## 安装
 
 ```
-dsh plugin --profile <name> add dsh-vod-devkit   # npm 发布后
-dsh plugin --profile <name> add github:yangaiwu/vod-devkit#dsh  # 亦可
+npx --yes vod-devkit install --target dsh --profile <name> --product <产品>   # 推荐（安装期硬校验+幂等写配置）
+dsh plugin --profile <name> add dsh-vod-devkit   # 直装（装后须手工配 product，见下）
 ```
 
-装后在 profile 的 cordis.patch.yml 激活（与包内 cordis.patch.yml 同语义）：
+装后产品归因必须落到 profile 的 cordis.patch.yml（npx 包装命令自动写入）：
 
 ```yaml
-- insert:
-    - id: vod-devkit
-      name: 'dsh-vod-devkit'
+- id: vod-devkit
+  config:
+    product: codearts        # 归因绑定（安装时定）；无运行期传参通道
+    # apiBase: https://vod-dev.topxtopx.com   # 缺省即此
 ```
 
 ## 配置（dsh 插件设置）
