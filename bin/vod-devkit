@@ -342,7 +342,11 @@ def _install_dsh(args, packs: str) -> Path:
     print(f"已安装 dsh 插件 dsh-vod-devkit（profile={profile}，dsh plugin list 可见）")
 
     patch = Path.home() / ".dsh" / "profiles" / profile / "cordis.patch.yml"
+    # name 行必须保留：cordis.patch.yml 的 insert 块靠 name 绑定 client 半
+    # （反馈按钮）——只写 id+config 会在重装幂等替换时把 name 吞掉，UI 静默
+    # 失激活（2026-11-06 真机实锤：重装后入口消失）
     block = ("- id: vod-devkit\n"
+             "  name: dsh-vod-devkit\n"
              "  config:\n"
              f"    product: {args.product}\n"
              f"    apiBase: {args.java_api_base}\n")

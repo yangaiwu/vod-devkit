@@ -575,6 +575,30 @@ def test_install_dsh_updates_existing_block(env_dsh):
     assert text.count("- id: vod-devkit") == 1  # 更新而非追加
 
 
+def test_install_dsh_block_carries_name_binding(env_dsh):
+    """name 行回归锁（2026-11-06 真机实锤）：cordis.patch.yml insert 块靠
+    name 绑定 client 半（反馈按钮）——installer 模板曾无 name 行，重装幂等
+    替换吞掉既有 name → UI 静默失激活（工具壳正常、入口消失）。"""
+    # 前置：模拟 dsh plugin add 自建的带 name 块
+    patch = _dsh_patch(env_dsh)
+    patch.parent.mkdir(parents=True)
+    patch.write_text(
+        "- insert:\n"
+        "    - id: vod-devkit\n"
+        "      name: dsh-vod-devkit\n"
+        "      config:\n"
+        "        product: Old\n")
+    r = cli(env_dsh, "install", "--target", "dsh", "--profile", "web",
+            "--product", "CodeArts")
+    assert r.returncode == 0, r.stderr
+    text = patch.read_text()
+    # upsert 后 name 绑定必须在（新块模板自带或保留既有值，二者皆可，不可消失）
+    assert "name: dsh-vod-devkit" in text, \
+        "重装吞掉 name 绑定 → client 半静默失激活（真机事故回归）"
+    assert "product: CodeArts" in text
+    assert "product: Old" not in text  # 配置值仍幂等更新
+
+
 def test_install_dsh_cli_missing_exits2(env):
     # 无 dsh（PATH 剥离到仅含桩目录+系统基础路径，本机真 dsh 不参与）→ 拒绝安装
     e = env["env"].copy()
