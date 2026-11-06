@@ -46,3 +46,44 @@ def test_h4_edge_inputs():
     assert router.route("") is None
     assert router.route("   ") is None
     assert router.route(12345) is None
+
+
+def test_r5_long_sentence_embedded_complaint():
+    """R5：长句内嵌抱怨词（非开头）→ 正则全文搜索命中。"""
+    msg = ("我昨天在客户现场演示的时候打开页面等了很久才加载出来，"
+           "整体响应速度也不行，同事们都觉得这个产品体验很糟糕")
+    out = router.route(msg)
+    assert out is not None and "vod-feedback-collect" in out
+
+
+def test_r6_multiline_combined_message():
+    """R6：多行组合消息（换行分隔）→ 归一后正常判定。"""
+    msg = "第一行是普通描述\n体验不好\n第三行还是普通描述"
+    out = router.route(msg)
+    assert out is not None and "vod-feedback-collect" in out
+
+
+def test_r7_regex_assembled_from_trigger_table():
+    """R7：单一事实源——正则由 TRIGGER_WORDS 自动组装，无第二处硬编码。"""
+    import re as _re
+    expected = _re.compile("|".join(_re.escape(w) for w in router.TRIGGER_WORDS))
+    assert expected.pattern == router._COMPLAINT_RE.pattern
+    # 表内每个词都能命中
+    for w in router.TRIGGER_WORDS:
+        if w == "提交反馈":
+            continue  # 前缀词走强指令分支
+        assert router._COMPLAINT_RE.search(f"测试{w}场景"), w
+
+
+def test_r8_register_wires_pre_llm_call():
+    """R8：register 契约——注册到 pre_llm_call，回调透传 user_message。"""
+    registered = {}
+
+    class FakeCtx:
+        def register_hook(self, event, cb):
+            registered[event] = cb
+
+    router.register(FakeCtx())
+    assert list(registered) == ["pre_llm_call"]
+    assert registered["pre_llm_call"]("体验不好") == router.route("体验不好")
+    assert registered["pre_llm_call"]("普通消息") is None

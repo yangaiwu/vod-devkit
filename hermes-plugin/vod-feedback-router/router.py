@@ -5,20 +5,29 @@
 从模型自由推理变成每轮结构化提醒。未命中返回 None（零注入零噪音）。
 
 设计依据：业界数据简单指令钩子激活率~20%（与无钩子无差异），结构化
-评估承诺注入 ~84%（见 vod-devkit docs/hermes-router.md 业界对表）。
+评估承诺注入 ~84%（见 vod-devkit docs/hermes-feedback-router/design.md 业界对表）。
+
+规则表维护纪律：新增触发词改 TRIGGER_WORDS（单一事实源），正则自动组装；
+指令文案改 DIRECTIVE 常量——两处都有回归锁（tests/test_router.py）。
 """
 import re
 
-# 确定性触发词表（短短语+口语变体；精确率优先，与采集技能 description 前置触发词同源）
-_COMPLAINT_RE = re.compile(
-    r"提交反馈|提单|体验(不好|差|糟|很差)|太慢|很慢|回复慢|响应慢|卡(顿|死)?|"
-    r"不好用|很难用|报错|有bug|有 bug|出bug|希望支持|建议增加|要是能|为什么不能"
+# ── 确定性触发词表（单一事实源；短短语+口语变体，与采集技能 description 前置触发词同源） ──
+TRIGGER_WORDS = (
+    "提交反馈", "提单",
+    "体验不好", "体验差", "体验很差", "体验糟", "很糟糕", "太糟糕",
+    "太慢", "很慢", "回复慢", "响应慢",
+    "卡顿", "卡死", "卡",
+    "不好用", "很难用",
+    "报错", "有bug", "有 bug", "出bug",
+    "希望支持", "建议增加", "要是能", "为什么不能",
 )
-
 _STRONG_PREFIX = "提交反馈"
 
+_COMPLAINT_RE = re.compile("|".join(re.escape(w) for w in TRIGGER_WORDS))
+
 _DIRECTIVE = (
-    "[vod-router] 确定性意图路由命中：本消息匹配产品反馈采集意图（规则规则命中，非模型判断）。"
+    "[vod-router] 确定性意图路由命中：本消息匹配产品反馈采集意图（规则命中，非模型判断）。"
     "必须按 vod-feedback-collect 技能流程处理：先承接用户，再征得提交同意"
     "（禁止询问产品归属——归因由安装绑定决定；禁止进入复现排查模式）。"
     "提交时 content=用户原话逐字，一次抱怨一条，回执按 echo 原样转述。"
