@@ -404,72 +404,16 @@ function FeedbackModal({ onClose }) {
           {busy ? '提交中…' : '提交'}
         </PrimaryBtn>
       )}>
-      <label htmlFor="vod-fb-content"
-        style={{ fontSize: 11, color: 'var(--dsw-alias-label-secondary, #666)', display: 'block', marginBottom: 4 }}>
-        描述你遇到的问题或想法（会原样转达给产品团队）
-      </label>
       <textarea id="vod-fb-content" style={S.textarea} value={content} maxLength={2000}
         placeholder="比如：对话响应慢、某个功能找不到入口" autoFocus
-        aria-describedby="vod-fb-content-hint"
         onChange={(e) => setContent(e.target.value)} />
-      <div id="vod-fb-content-hint"
-        style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary, #999)', margin: '2px 0 0' }}>
-        具体现象更容易被受理：哪一步慢、哪里答非所问、期待什么
-      </div>
-      <div style={{ fontSize: 11, textAlign: 'right', margin: '4px 0 0',
-        color: 'var(--dsw-alias-label-tertiary, #999)' }}>
-        {content.length}/2000
-      </div>
         {/* 场景输入已移除（T7h）：VOD-Project 全仓无独立 scene 字段（库无列/契约无键），
           场景由用户自然写进正文——云声表单同款引导 */}
       {done && <div style={S.result}>{done.msg}</div>}
-      {!LEDGER_DISABLED && <HistoryPanel />}
-      {LEDGER_DISABLED && <div style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary, #999)', marginTop: 8 }}>
-        本机提交记录已按部署策略停用
-      </div>}
     </SelfModal>
   );
 }
 
-/* ---------- 我的反馈（本机记录）——三主体边界：用户看自己的，仅本机 ---------- */
-
-function HistoryPanel() {
-  const [open, setOpen] = useState(false);
-  const rows = (() => {
-    try { return JSON.parse(localStorage.getItem(LS_LEDGER) || '[]'); } catch (e) { return []; }
-  })();
-  const label = (st) => st === 'accepted' ? '已收录'
-    : (st === 'failed' || st === 'stashed') ? '暂存，打开时自动重试' : (st || '');
-  return (
-    <div style={{ marginTop: 8, borderTop: '1px solid var(--dsw-alias-border-l2, #e5e5e5)', paddingTop: 6 }}>
-      <button onClick={() => setOpen(!open)} aria-label="我的反馈（本机记录）"
-        style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0,
-          fontSize: 11, color: 'var(--dsw-alias-label-tertiary, #888)' }}>
-        {open ? '▾' : '▸'} 我的反馈（本机记录，{rows.length}）
-      </button>
-      {open && (
-        rows.length === 0
-          ? <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary, #999)', padding: '4px 0' }}>本机暂无提交记录</div>
-          : <div style={{ maxHeight: 160, overflowY: 'auto' }}>
-              {rows.map((r, i) => (
-                <div key={i} style={{ fontSize: 11, padding: '4px 0',
-                  borderBottom: '1px dashed var(--dsw-alias-border-l2, #eee)' }}>
-                  <div style={{ color: 'var(--dsw-alias-label-secondary, #666)' }}>
-                    {(r.at || '').replace('T', ' ').slice(0, 16)}　{label(r.status)}
-                  </div>
-                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {(r.title || r.content || '').slice(0, 40)}
-                  </div>
-                </div>
-              ))}
-            </div>
-      )}
-      <div style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary, #999)', marginTop: 4 }}>
-        仅保存在当前浏览器；换浏览器或清除数据后不可见
-      </div>
-    </div>
-  );
-}
 
 /* ---------- 输入框右上角图标（自定位） ---------- */
 
