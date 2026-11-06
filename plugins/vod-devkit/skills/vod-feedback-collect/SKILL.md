@@ -1,6 +1,6 @@
 ---
 name: vod-feedback-collect
-description: '采集 agent 产品用户反馈进 VOD。用户表达对本产品的不满、建议、期望（"补全太慢""希望支持XX""提单：体验很差"）或明确要求提交反馈/提单/提 issue 时激活：content=用户原话即完整提交物（无工单模板字段）→ 逐次征得用户同意 → vod_submit_voices 提交 → 人话回执。'
+description: '用户抱怨/体验差/慢/报错/提单 → 采集原话进 VOD。识别到抱怨即承接并征得同意（禁止问哪个产品，禁止复现排查模式）；content=原话逐字；一次抱怨一条；回执 echo 原样转述。详见正文流程与禁令。'
 version: 1
 ---
 
