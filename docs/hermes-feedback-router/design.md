@@ -52,3 +52,27 @@ TRIGGER_WORDS 元组（提交反馈/提单/体验不好/体验差/体验很差/�
 - 路由规则与「复现排查」场景存在词面重叠（报错/卡）——接受误命中，
   由模型在技能流程内先确认意图二次消歧
 - 提交侧硬保障不在本层：方案 A 回显 + confirmed=false 护栏不变
+
+## 五、多宿主对表与来源分级（2026-11-06 复核，负责人确认）
+
+完整矩阵见 docs/hermes-router.md。要点：
+
+- **opencode**：强制评估可做已结案（官方通道=prompt admission hook +
+  session.prompt 合成消息注入；社区先例 opencode-skill-activation）——
+  P2 保留，缺的是自研实现不是能力
+- **codex**：钩子面存在（官方 Hooks 事件表含 UserPromptSubmit）但不做——
+  钩子输出自身截断（实测 ~4,866 tokens）+ 注入路径不一致（#37463）收益
+  不抵成本；预算参照官方默认 8,000 字符（2% 上下文，可调
+  skills.max_context_tokens；5,440 为本机实测值非官方常量）
+- **dsh**：500 字符描述窗口由 D-desc-budget-1 门禁锁死（先决条件<500）；
+  壳=工具常驻注册无激活环节；UI=部署注入形态天然免疫
+- **来源分级纪律**：官方文档可引用（codex/opencode）与内部拍板/实测
+  （hermes 57 字符预算、dsh 500 窗口）分行标注，不得混写
+
+### 场景用例（M1，测试承载 tests/test_desc_frontload.py）
+
+| 用例 | 场景 | 预期 | 测试承载 |
+|---|---|---|---|
+| M1a | 描述前置可见预算 | SKILL.md description 前 57 字符含核心触发词（体验差/提单/太慢） | test_m1_trigger_words_within_visible_budget |
+| M1b | 描述长度上限 | ≤400 字符（Anthropic 指南量级，防挤占预算） | test_m1b_description_length_bounded |
+| M1c | 词表一致性 | description 触发词 ⊆ router.TRIGGER_WORDS（两处防漂移） | test_m1c_description_triggers_aligned_with_router_table |
