@@ -1,5 +1,4 @@
 {
-  "product": "CodeArts",
   "version": "0.2.2",
   "source": {
     "type": "git",
@@ -11,6 +10,7 @@
   "installedAt": "<INSTALLED_AT>",
   "preset": "collect",
   "distribution": "devkit",
+  "product": "CodeArts",
   "packs": "core,collect",
   "mcpConfig": "<HOME>/.hermes/mcp/vod-devkit.json",
   "skillsDir": "<HOME>/.hermes/skills/devops/vod-devkit",

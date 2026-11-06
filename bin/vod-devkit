@@ -455,7 +455,6 @@ def cmd_install(args):
 
     bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
     manifest = {
-        "product": "vod-devkit",
         "version": bi["version"],
         "source": {"type": "git", "remote": bi["sourceRemote"],
                    "ref": subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
