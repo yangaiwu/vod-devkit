@@ -53,6 +53,26 @@ def test_s50_qualify_marked_as_understanding_with_correction_opening():
     assert "不加第三选项" in block, "S50 承载缺失：禁第三选项条款未落正文"
 
 
+def test_s50_correction_loop_closes():
+    """S50 纠正闭环（2026-11-06 用户补口子 2）：用户纠正定性后
+    不辩论、按纠正理解走，但 content 仍原话逐字——禁止拿「新定性」
+    改写原话（一次抱怨一条+原话红线不因纠正豁免）。"""
+    block = _qualify_block()
+    assert "不辩论" in block, "纠正后行为缺失：不辩论纪律未落正文"
+    assert "原话逐字" in block, "纠正后行为缺失：content 原话约束未落正文"
+    assert "不因纠正豁免" in block, "纠正后行为缺失：红线豁免禁令未落正文"
+    assert "我按你说的" in block and "不改写" in block, (
+        "话术模板尾句（纠正→按原话提交不改写）未落正文")
+
+
+def test_s50_extreme_option_has_fallback_not_a_sibling_choice():
+    """S50 兜底口子（2026-11-06 用户补口子 1）：只提交追加句的
+    极端选择有出口（括号兜底），但不作为并列选项抬高常规决策成本。"""
+    block = _qualify_block()
+    assert "只提交第二句" in block, "兜底出口缺失：极端选择（只提追加句）未落正文"
+    assert "不进并列选项" in block, "兜底形态缺失：兜底句未标注不进并列选项"
+
+
 def test_s51_no_empty_promise_options():
     """S51：无承载机制不得成为话术选项。
 
