@@ -324,3 +324,4 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - token 化立项表述（负责人纠偏，勿再写错）：token 化两段式=当前 MCP 层**最强摩擦+审计链**（强制 draft→commit 两步可观测、token 单次消费、重复 commit 被拒），**不是人类确认的硬保证**——agent 仍可自动完成 draft+commit 一个来回（MCP 层锁不死人类确认，既有结论）。真正堵死需宿主层 commit 前确认 UI（codex UserPromptSubmit 钩子有截断限制，需单独评估）。
 - 验收标准（按上述定性写，防预期落空）：①每次提交有 draft→commit 审计链 ②重复 commit 被拒 ③未确认提交可被检测账本识别。**不是**「模型不再自传 confirmed」。
 - 恢复门禁：恢复 codex 采集（packs 改回 core,collect）的前置条件=token 化已上线并通过上述回归——否则熔断解除即复发。门禁动作不只是改 packs 一个动作。
+- 深审收口（2026-11-06，外部深审四项全数确认并修复，23a7bb1）：P0-2 packs 命名漂移（PRESETS full 含 workflow/kb 而运行期 ALL_PACKS=core/collect/knowledge——kb→knowledge 别名归一+full 改 knowledge，安装口运行口单源+PRESETS↔ALL_PACKS 回归锁）；P0-3 uninstall 破坏性路径（codex manifest.mcpConfig 曾指向用户整份 config.toml，卸载即删光——改指插件 .mcp.json/None+config.toml 永不删+codex plugin remove best-effort）；P1-4 ack 解除后置（安装成功才落，失败安装不解熔断）；P1-5 codex .mcp.json env 随 --packs 对齐（原硬编码 core,collect 使 --packs 半失效）；P2 strip 精确表头+AGENTS END 缺失拒写盘。
