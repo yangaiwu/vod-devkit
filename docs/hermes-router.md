@@ -49,10 +49,21 @@ plugins.enabled 是显式同意门（第三方代码默认不运行），需手�
 | 宿主 | 激活现状（实测） | 截断暴露 | 强制评估可行性 | 结论 |
 |---|---|---|---|---|
 | hermes | 概率性，运维上下文实锤压过 | 57 字符索引预算（触发词已前置） | ✅ pre_llm_call 钩子（已落本插件） | 已覆盖 |
-| opencode | 实测自动激活成功一次（`→ Skill vod-feedback-collect`）；业界反馈自动触发概率低 | 工具输出通用截断（2000 行/50KiB），技能描述非独立窗口——本仓描述长度远低于该门槛，非瓶颈 | ✅ 可做：chat.message 钩子（UserPromptSubmit 等价）+ session.prompt 合成消息注入（noReply+synthetic）双通路；社区先例 opencode-skill-activation（主动建议候选技能）、opencode-cc-hooks（CC 钩子桥接） | P2 保留，前提高已结案——缺的是自研实现，不是能力 |
-| codex | 技能已装（~/.codex/skills，5 个远低于 #24299 的 20+ 截断阈值）；$ 显式调用已验证 | 技能少无忧；但注入路径不一致（#37463：MAX_SKILL_PROMPT_BYTES 只管 agent-plugin skills，host/repo/user 来源 SKILL.md body 可绕 2KiB 校验，子代理≠可靠绕行） | **不做：钩子面存在，但钩子输出自身被截断（~4,866 tokens）+ 注入路径不一致，收益不抵成本**；截断风险已记档，未来技能数上升优先评估惰性路由（#33945），不依赖子代理绕行 | 接受显式兜底（「提交反馈：」前缀），不上 wrapper |
+| opencode | 实测自动激活成功一次（`→ Skill vod-feedback-collect`）；业界反馈自动触发概率低 | 官方 Skills 文档：description 限 1–1024 字符（可断言上限）；工具输出另有 2000 行/50KiB 通用截断——本仓描述远低于两者，非瓶颈 | ✅ 可做：官方通道=prompt admission hook（钩子收到可变 draft，编辑即成持久化用户输入）+ session.prompt 合成消息注入（noReply+synthetic）；社区先例 opencode-skill-activation（主动建议候选技能） | P2 保留，前提高已结案——缺的是自研实现，不是能力 |
+| codex | 技能已装（~/.codex/skills，5 个远低于 #24299 的 20+ 截断阈值）；$ 显式调用是官方激活路径（Build skills 文档：/skills 或 $ 提及） | 技能少无忧（官方默认预算=上下文 2%/8,000 字符，可调 skills.max_context_tokens 至 10k tokens；5440 为本机实测值非官方常量）；注入路径不一致（#37463） | **不做：钩子面存在（官方 Hooks 文档列 UserPromptSubmit/PreToolUse/Stop 等事件），但钩子输出自身被截断（实测 ~4,866 tokens）+ 注入路径不一致（#37463），收益不抵成本**；官方同时推荐描述前置（截断时仍可匹配）与惰性路由方向（#33945） | 接受显式兜底（「提交反馈：」前缀），不上 wrapper |
 | dsh 壳 | MCP 工具常驻注册，无激活问题 | **500 字符描述窗口——D-desc-budget-1 门禁已锁**（先决条件<500） | cordis 侧理论可实现消息钩子 | 已由预算门禁覆盖；路由插件低优先 |
 | dsh UI | 部署注入形态（fail-fast 必配），无激活环节 | 不适用 | 不适用 | 天然免疫 |
 
 通用兜底（全宿主）：「提交反馈：」显式前缀 = 100% 确定性入口。
 语义路由不做（M5 相似度未校准红线同款）。
+
+## 来源分级（2026-11-06 复核）
+
+- **官方文档可引用**：codex（learn.chatgpt.com Build skills/Hooks：8000 字符默认预算、
+  UserPromptSubmit 等事件表、$ 显式调用、描述前置官方推荐）；opencode
+  （docs.opencode.ai skills：1–1024 字符 description、prompt admission hook、
+  skill tool 按需加载）
+- **内部拍板/实测（无公开官方文档，复核只能回到内部记录）**：hermes 57 字符
+  索引预算（实测观察）；dsh 500 字符描述窗口（D-desc-budget-1 门禁+实测）；
+  dsh 壳无激活环节/UI 免疫（架构设计推论）
+- 复核纪律：引用本矩阵时按行区分「官方依据」与「内部依据」，二者不得混写
