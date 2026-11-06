@@ -53,7 +53,7 @@ const S = {
     width: '100%', boxSizing: 'border-box', minHeight: 96,
     borderRadius: 'var(--dsw-radius-sm, 8px)',
     border: '1px solid var(--dsw-alias-border-l3, #ccc)',
-    padding: '8px 10px', fontSize: 13, resize: 'vertical',
+    padding: '8px 10px', fontSize: 13, resize: 'none', // 禁拉伸（2026-11-06 用户反馈：弹窗内输入框不该有 resize 角，拉拽顶破布局）
     background: 'var(--dsw-alias-bg-layer-1, transparent)',
     color: 'var(--dsw-alias-label-primary, #111)',
     outline: 'none',
@@ -311,7 +311,8 @@ function FeedbackModal({ onClose }) {
     try { rec = JSON.parse(localStorage.getItem(LS_RECOVERED) || 'null'); } catch (e) {}
     if (rec && rec.n > 0) {
       try { localStorage.removeItem(LS_RECOVERED); } catch (e) {}
-      setDone({ ok: true, msg: `你之前提交的 ${rec.n} 条反馈已自动重试成功（当时提交临时失败），产品团队会看到：${rec.items || ''}` });
+      const echo = rec.items ? `，产品团队会看到：${rec.items}` : '' // items 空=残句防护，话术降级为纯状态告知
+      setDone({ ok: true, msg: `你之前提交的 ${rec.n} 条反馈已自动重试成功（当时提交临时失败）${echo}` });
     }
   }, []);
 
