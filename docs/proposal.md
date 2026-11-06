@@ -645,6 +645,30 @@ S59 回执话术=行为实况（S51 在回执面的应用，用户抓出）
   回归锁：回执文案禁「审核后将以」；REJECTED 话术必须挂在
   sync.status==='REJECTED' 判断上。
 
+### codex 熔断与恢复门禁（S60-S62，2026-11-06，D-codex-circuit-breaker-1）
+
+S60 熔断切只读（检测账本触发）
+  codex 未确认提交检测账本累计 ≥2 次（7 天窗）→ 触发拍板 B
+  熔断：宿主副本 VOD_PACKS 去 collect（submit 摘除，只剩
+  vod_auth_status/vod_devkit_info 只读面）+写熔断标记
+  （~/.codex/vod-collect-suspended.json，含原因与恢复门禁说明）。
+
+S61 恢复门禁双层（安装面+运行期，缺一可绕）
+  ①安装面：标记存在时 codex 装 collect 被拒（exit 2，指引
+  token 化前置）；②运行期：serve 的 enabled_packs 同查标记，
+  `VOD_PACKS=core,collect serve` 强制降级摘除 collect（stderr
+  告警非静默）——缺②则安装门禁可被一条命令绕过（实锤）。
+  只读 packs（无 collect）不进门禁。
+
+S62 显式解除=删标记+审计（语义与实现一致）
+  --ack-suspension 解除 codex 采集熔断：删标记+追加审计行
+  （~/.codex/vod-collect-suspension-audit.log：时间戳+packs，
+  可追溯）。语义=真解除（后续安装不再拦），非「每次放行不
+  解除」。恢复前置不变：token 化上线并过回归（审计链/重复
+  commit 拒/未确认可检测——验收三件套，见
+  D-codex-circuit-breaker-1；token 化=最强摩擦+审计链，非
+  人类确认硬保证）。
+
 ## 四、验收用例清单（在目标环境执行，工具不入库）
 
 | # | 用例 | 预期 |

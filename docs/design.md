@@ -359,6 +359,16 @@ normalizeLoose 后不设白名单（未注册落 UNKNOWN 档+productRegistered
    双静默消失）。承载=bin/vod-devkit（块模板）+
    tests/test_installer.py name 断言 + ux-sync S51 回执锁。
 
+**codex 熔断与恢复门禁（S60-S62）**：检测账本 ≥2 次未确认提交
+   → 熔断切只读（packs 去 collect+标记）；恢复门禁双层=install
+   拒装 + serve 运行期 enabled_packs 强制降级（堵 VOD_PACKS 绕
+   过）；--ack-suspension=删标记+审计日志（真解除语义）。
+   承载=bin/vod-devkit（install 门禁+ack 解除）+
+   vod_mcp/packs.py（运行期降级）+
+   tests/test_installer.py（门禁四态+运行期降级两锁）+
+   docs/decisions.md D-codex-circuit-breaker-1（立项表述纠偏：
+   token 化=最强摩擦+审计链非硬保证；恢复门禁前置）。
+
 ## 四、安全护栏（声明式）## 四、安全护栏（声明式）
 
 policy.json 规则集（severity: deny / confirm / warn）：
