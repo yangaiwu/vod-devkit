@@ -306,3 +306,8 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 落地：hermes-plugin/vod-feedback-router（pre_llm_call 每轮确定性关键词判定，命中注入 vod-feedback-collect 激活指令，未命中零注入）；描述触发词前置（8bdc225，Hermes 索引仅前57字符可见，「体验差」原在截断边缘）。
 - 已知边界：「报错/卡」在纯排障对话也命中=错注入无害（指令不自动提交）；漏注入才是事故。注入仍是文本指令，不改变模型服从性天花板——提交硬保障仍是方案A回显+护栏。
 - opencode/codex 钩子面未调研（opencode 有 plugin 体系待查）。
+
+## D-desc-budget-1 description 截断预算门禁（2026-11-06 用户拍板落地）
+- 背景（业界实测对表，引用均核验）：宿主对工具/技能 description 普遍硬截断——dsh 固定 500 字符窗口、Codex 5440 字符硬预算且无排除机制（openai/codex#24299：119 技能 103 个被截断、均值 232 字符）、OpenCode 共用 2000 行/50KiB 通用截断。社区路由插件（opencode-skill-activation/lazy-skill-router/dsh-skill-router 系）治的是「激活可靠性/目录开销」，与我们已实锤的事故类（技能已加载仍不服从：codex 跳过确认/改写原话）不同层——服从性问题维持检测层防线（回执回显+e2e_behavior 熔断）不引入路由器。
+- 门禁（tests/test_desc_budget.py）：B1=同意先决条件存活于前 500 字符（最严窗口）；B2=description 总长 ≤1500（现状 contract 665/dsh 组合 ~1285）；先决条件前置阈值 contract<60（既有锁口径）/dsh<100（英文前导能力定位句 ~73 字）；双载体同测（contract JSON+ dsh/lib/index.js 逐字符扫描求值组合串）；漂移锁=禁旧宽容归因口径句回流。
+- 入 pytest 门禁随 pre-push 自动生效；proposal S45-S48+design 五/六节承载。

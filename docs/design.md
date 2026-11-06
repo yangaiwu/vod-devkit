@@ -346,7 +346,7 @@ policy.json 规则集（severity: deny / confirm / warn）：
 
 ## 五、安装器
 
-`vod-devkit install --target <hermes|opencode|codex> [--ref <git ref>]`：
+`vod-devkit install --target <hermes|opencode|codex|dsh> [--ref <git ref>]`：
 
 1. 探测目标（0/1/N 三分支，对齐 devkit 行为：交互式多选，非交互式报错列出目标）；
    探测依据=各产品特征目录/配置文件路径，探测结果即宿主感知的 target 值
@@ -362,6 +362,19 @@ policy.json 规则集（severity: deny / confirm / warn）：
 安装器自身不触网拉包（包来自仓库构建产物或本地目录），避免 devkit
 npx 浮动版本的来源不可控问题。
 
+### dsh target（D-dsh-install-1，2026-11-06 拍板 A）
+
+`install --target dsh --profile <p> --product <产品>`：--profile 必填
+（进入任何安装动作前校验）；产品安装期硬校验复用 _validate_product_or_exit
+（与三壳统一口径），校验先于 `dsh plugin add`（拒绝=无半成品）；add 后
+幂等 upsert `~/.dsh/profiles/<p>/cordis.patch.yml` 的
+`- id: vod-devkit: config: {product, apiBase}` 段——该 config override
+是 dsh 工具壳读取归因/引擎地址的唯一运行时通道（真机实证 dsh 0.2.1-rc.5，
+启动 banner+桩引擎提交链）。块边界扫描单一实现（_find_dsh_block）供
+upsert 与 uninstall 共用；dsh 缺失 exit 2、add 失败 exit 1、配置写失败
+exit 1 附可照抄的手动修复格式。manifest 增 dshProfile 键（golden 已重录）。
+退出码约定不变：用法/校验=2，环境/运行失败=1。
+
 ## 六、质量与验收
 
 - 交付纪律：仓库内只含插件产品代码 + 随 CI 跑的 pytest 用例 + 本对文档；
@@ -369,6 +382,14 @@ npx 浮动版本的来源不可控问题。
 - pytest：工具契约（mock api.py）+ 护栏规则命中 + packs 裁剪 + 安装器
   uninstall 幂等
 - 走完整调用链验证后断言才能落文档（入口路由→api.py→任务表）
+- description 截断预算门禁（tests/test_desc_budget.py，D-desc-budget-1，
+  2026-11-06）：①同意先决条件（确认纪律）必须落在前 500 字符内
+  （dsh 固定 500 字符窗口=最严截断；Codex 5440 硬预算曾把 119 技能中
+  103 个截到均值 232 字符——openai/codex#24299，被截断即对模型不可见）
+  ②description 总长 ≤1500（现状 contract 665/dsh 组合 ~1285，防无界
+  增长挤占宿主预算）③双载体同测（contract JSON=python 单一事实源 +
+  dsh/lib/index.js 组合串提取）④归因口径漂移锁（禁旧宽容口径句回流）。
+  随 pre-push 门禁自动生效
 
 ## 七、分发形态实现（D-key-guard-3，2026-11-05）
 

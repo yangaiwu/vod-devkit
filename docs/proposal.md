@@ -485,11 +485,12 @@ S10 滥用处置
 
 ### dsh 形态场景（S11-S16，2026-11-03 真机验证新增）
 
-S11 dsh 宿主安装与激活（实测链）
-  `dsh plugin --profile web add <tarball/npm包>` 装入依赖 → profile 层
-  cordis.patch.yml `- insert: [{id: vod-devkit, name: 'dsh-vod-devkit'}]`
-  激活 → `dsh --profile web` 启动日志出现
-  `[dsh-vod-devkit] Registered 3 tools`（缺 insert=只装不激活）
+S11 dsh 宿主安装与激活（实测链；2026-11-06 起走安装器 D-dsh-install-1）
+  `npx vod-devkit install --target dsh --profile <p> --product <产品>`
+  装入依赖+产品硬校验+幂等写 profile cordis.patch.yml config 段
+  （product/apiBase，工具壳唯一生效通道）→ `dsh --profile <p>` 启动
+  日志出现 `[dsh-vod-devkit] Registered 3 tools ... product=<绑定值>`
+  （直装 `dsh plugin add` 不写配置，装后须手工补 config 段）
 
 S12 dsh 对话式提交与审批门禁（真机回放，taskId=427）
   用户对 agent 说"提交一个 codearts 问题：速度慢，联系杨爱武" →
@@ -520,6 +521,35 @@ S16 双形态语义一致（架构约束回归）
   （配置绑定>显式传参>报错引导，禁止静默默认）、护栏同构（写须审批/
   单批≤50/content≤2000 逐条拒）。契约变更必须双形态同步——此为
   contract/tools.schema.json 单一事实源纪律在宿主适配层的延伸
+
+### dsh 安装硬校验与 description 截断预算（S45-S48，2026-11-06
+### D-dsh-install-1 / D-desc-budget-1 新增）
+
+S45 dsh 安装期产品硬校验（拒/放双路径，与三壳统一口径）
+  `npx vod-devkit install --target dsh --profile <p> --product <产品>`：
+  --product 必须命中引擎产品目录（复用 _validate_product_or_exit），
+  未命中/目录不可达一律 exit 2 拒装；校验先于 `dsh plugin add`——
+  拒绝时插件未装入、无「已装未配」半成品。dsh CLI 不在 PATH → exit 2。
+
+S46 dsh 配置幂等落盘与失败修复指引
+  add 成功后幂等 upsert profile cordis.patch.yml 的
+  `- id: vod-devkit: config: {product, apiBase}` 段（工具壳唯一生效
+  通道，真机实证 dsh 0.2.1-rc.5）：重复 install 原位替换不重复插入、
+  不吞其它插件段；写失败 exit 1 并输出手动修复格式（插件已装但配置
+  未写=半成品，指引必须可照抄）。uninstall 摘插件+移除配置段。
+
+S47 description 截断预算存活（业界截断实测对表）
+  宿主对工具 description 普遍硬截断：dsh 固定 500 字符窗口、Codex
+  5440 字符硬预算（openai/codex#24299：119 技能 103 个被截断、均值
+  232 字符）、OpenCode 共用通用截断。门禁锁死：同意先决条件必须落
+  在前 500 字符内（B1，最严窗口存活）、description 总长有上限（B2，
+  防挤占宿主预算）；contract 与 dsh 壳双载体同测（双载体漂移已实锤）。
+
+S48 归因口径单源（dsh 无运行期通道）
+  dsh 壳 schema 无 product 参数=归因部署配置权威的极限形态（无运行
+  期入口即无错归入口）；description 禁止再现旧宽容口径句
+  （「explicit arg → config → host identity」曾与实现矛盾——约束源
+  三层最陈旧一层生效的复发形态，漂移锁防回流）。
 
 ## 四、验收用例清单（在目标环境执行，工具不入库）
 
@@ -614,6 +644,8 @@ S16 双形态语义一致（架构约束回归）
 | 工具契约 | JSON Schema 契约文件为唯一事实源，实现侧生成/校验，跨语言边界不做双边手写（含将来 TS 适配壳） |
 | key 交付（2026-11-03 定稿） | 零字段自动令牌为默认入门（C 案）；B 自助注册降级为升级档；A 宿主代管为企业通道。比对分析见三·四节 |
 | 反馈采集（2026-11-03 拍板） | agent 产品用户反馈进 VOD 闭环。两项均选 A：独立囤积端点（入库不触发分析，引擎侧 VOD-VOI 立项，复用 R0 网关）；插件侧逐次 confirm。source 以握手宿主身份为准不可手填；voiceId 为第二类对账主键 |
+| dsh 壳安装硬校验（2026-11-06 D-dsh-install-1） | 方案 A：`install --target dsh` 包装命令——--profile 必填、产品安装期硬校验先于 plugin add、幂等写 profile cordis.patch.yml config 段（真机实证的唯一生效通道）；B（模板写全+README 标红）降级为配套防线。归因部署配置权威：dsh 壳无运行期 product 传参通道（7b 极限形态） |
+| description 截断预算门禁（2026-11-06 D-desc-budget-1） | 同意先决条件必须存活于最严截断窗口（500 字符）内 + description 总长上限；contract 与 dsh 壳双载体同测，入 pytest 门禁（随 pre-push 生效）。业界依据：dsh 500 字窗口/Codex 5440 预算（openai/codex#24299）/OpenCode 通用截断，均已实锤核验 |
 
 ## 六、待办
 
