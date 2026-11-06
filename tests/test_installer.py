@@ -204,6 +204,57 @@ def test_install_codex_native_plugin_and_legacy_cleanup(env):
     assert "marketplace" in calls and "add" in calls and "vod-devkit@vod-local" in calls
 
 
+def test_install_codex_circuit_breaker_gate(env):
+    """恢复门禁（D-codex-circuit-breaker-1）：熔断标记存在时 codex 装
+    collect 被拒（exit 2，指引 token 化前置）；--ack-suspension=显式解除
+    （删标记+审计行，非每次放行）；只读 packs 不进门禁；无标记不受影响。"""
+    home = env["home"]
+    marker = home / ".codex" / "vod-collect-suspended.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text('{"reason":"unconfirmed_submit>=2"}', encoding="utf-8")
+    # ① 标记在 + 默认 collect → 拒绝
+    r = cli(env, "install", "--target", "codex", "--product", "CodeArts")
+    assert r.returncode == 2 and "恢复门禁" in r.stderr
+    assert marker.is_file(), "拒绝路径不得动标记"
+    # ② 标记在 + 只读 packs → 放行（只读不进门禁）
+    r = cli(env, "install", "--target", "codex", "--packs", "core,kb",
+            "--product", "CodeArts")
+    assert r.returncode == 0, r.stderr
+    assert marker.is_file()
+    # ③ 标记在 + --ack-suspension + collect → 显式解除：删标记+审计行
+    r = cli(env, "install", "--target", "codex", "--product", "CodeArts",
+            "--ack-suspension")
+    assert r.returncode == 0, r.stderr
+    assert not marker.exists(), "ack 语义=解除：标记必须删除（否则=每次确认非解除）"
+    audit = home / ".codex" / "vod-collect-suspension-audit.log"
+    assert "ack_suspension" in audit.read_text(), "解除必须留审计行"
+    # ④ 标记已删 → collect 正常（门禁随标记解除）
+    r = cli(env, "install", "--target", "codex", "--product", "CodeArts")
+    assert r.returncode == 0, r.stderr
+
+
+def test_serve_runtime_breaker_downgrades_collect(monkeypatch, tmp_path):
+    """运行期熔断门禁：install 门禁可被 VOD_PACKS=core,collect serve 绕过——
+    enabled_packs 运行期同查标记，collect 强制摘除（stderr 告警非静默）。
+    HOME 隔离到 tmp（真实熔断标记不可被测试触碰）。"""
+    import importlib
+    home = tmp_path / "home"
+    home.mkdir()
+    marker = home / ".codex" / "vod-collect-suspended.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("VOD_PACKS", "core,collect,kb")
+    import vod_mcp.packs as packs_mod
+    m = importlib.reload(packs_mod)
+    downgraded = m.enabled_packs()
+    assert "collect" not in downgraded and "core" in downgraded
+    # 标记删除 → 恢复
+    marker.unlink()
+    m = importlib.reload(packs_mod)
+    assert "collect" in m.enabled_packs()
+
+
 # ---- hermes：官方 mcp add 通道 + 配置片段落盘 ----
 
 def test_install_hermes_official_cli_and_conf(env):
@@ -392,7 +443,10 @@ def test_stdio_probe_pack_gating_e2e(env):
     VOD_PACKS=core → tools/list 无写工具；core,collect → 含 submit。
     （in-process 锁见 test_tool_specs_follow_packs；本例锁 server.py 装配层）"""
     from tests.probe import Probe
-    base_env = {"VOD_JAVA_API_BASE": env["engine"]["base"]}
+    # HOME 隔离到 fake home：本机现挂 codex 熔断标记（D-codex-circuit-breaker-1），
+    # 运行期门禁会把 collect 摘掉——本用例验的是 packs 装配本身，须无标记环境
+    base_env = {"VOD_JAVA_API_BASE": env["engine"]["base"],
+                "HOME": str(env["home"])}
     with Probe(env_extra={**base_env, "VOD_PACKS": "core"}) as p:
         names = {t["name"] for t in p.list_tools()}
         assert "vod_devkit_info" in names and "vod_submit_voices" not in names

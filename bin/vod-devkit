@@ -529,6 +529,29 @@ def cmd_install(args):
         print(f"不支持目标: {target}（可选 hermes|opencode|codex|auto）", file=sys.stderr)
         sys.exit(2)
     packs = args.packs or PRESETS.get(args.preset, "")
+    # 恢复门禁（D-codex-circuit-breaker-1，2026-11-06 负责人确认）：
+    # 熔断标记存在（~/.codex/vod-collect-suspended.json）时，codex 装 collect
+    # 被拒——恢复采集的前置=token 化上线并过回归，不是改回 packs 一个动作；
+    # --ack-suspension=显式解除（删标记+写审计），非"每次放行不解除"。
+    if target == "codex" and "collect" in (packs or "").replace(" ", "").split(","):
+        marker = Path.home() / ".codex" / "vod-collect-suspended.json"
+        if marker.is_file() and getattr(args, "ack_suspension", False):
+            # 显式解除：删标记+审计行（谁/何时/packs 可追溯）
+            marker.unlink()
+            audit = Path.home() / ".codex" / "vod-collect-suspension-audit.log"
+            with audit.open("a", encoding="utf-8") as f:
+                f.write(f"{datetime.datetime.now().isoformat(timespec='seconds')}\t"
+                        f"ack_suspension\tpacks={packs}\n")
+            print("[vod-devkit] 已显式解除 codex 采集熔断，审计已记录："
+                  f"{audit}", file=sys.stderr)
+        elif marker.is_file():
+            print("[vod-devkit] 恢复门禁：codex 采集处于熔断状态"
+                  "（未确认提交 ≥2 次，详见 docs/decisions.md"
+                  " D-codex-circuit-breaker-1）。"
+                  "恢复前置=token 化两段式上线并通过回归"
+                  "（draft→commit 审计链/重复 commit 被拒/未确认可检测）。",
+                  file=sys.stderr)
+            sys.exit(2)
     # 归因绑定（T7d 统一：安装必配，与 dsh UI 加载必配同口径）：--product 必填——
     # 缺省宿主名在生态部署是错归陷阱（高校AI开发者平台 agent 底座=hermes，
     # 不填则反馈全归 hermes）。宿主名仍是合法值（自反馈场景显式传
@@ -838,6 +861,8 @@ def main():
     sp.add_argument("--java-api-base", default=None,
                     help="VOD 平台地址（缺省=https://vod-dev.topxtopx.com，勿用回环默认）")
     sp.add_argument("--packs", default="", help="显式覆盖 preset（逗号分隔）")
+    sp.add_argument("--ack-suspension", action="store_true",
+                     help="确认解除 codex 采集熔断（恢复门禁逃生口，D-codex-circuit-breaker-1）")
     sp.add_argument("--product", default="",
                     help="归因绑定：本 agent 服务的产品（codearts/aishell 等；采集反馈默认归属）")
     sp.add_argument("--distribution", default="devkit", choices=["devkit", "preset"],
