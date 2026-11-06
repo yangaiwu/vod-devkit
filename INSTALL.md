@@ -20,7 +20,7 @@ npx --yes vod-devkit install --target opencode --product codearts
 - `--product`：必填，采集反馈默认归属的产品（`--help` 内含权威名单；归因错误比报错糟，故 fail fast）
 - `--java-api-base`：VOD 平台地址（缺省 `https://vod-dev.topxtopx.com`；本机同机部署可用 `http://127.0.0.1:<port>`——传输守卫只拦"非回环明文 http"）
 - `--distribution preset`：产品随 agent 分发形态（禁 key 随包/禁自更新/客户机首启重生成状态；自装运维不要用）
-- 不传 key = 匿名档（推荐）。**不要手动塞 legacy 共用 key**（`vod-external-api-key-2026`）：带了就走 legacy 档，验不到新链路，且该 key 计划随 GTD 迁移下线（`external.legacy.enabled=false` 即 401）。
+- 不传 key = 匿名档（推荐）：首次提交自动签发零字段匿名令牌，无 key 配置、无凭据托管。legacy 共用 key 已随 VOD-KEY 上线进入兼容收尾（引擎 `external.legacy.enabled=false` 即关闭），自装场景不应也不会再拿到它——装了即匿名档。
 
 安装器做三件事：写宿主 MCP 配置段（无损合并，只动 vod-devkit 自己的键）、按 packs 拷贝技能、写 install-manifest.json（commitSHA 来源主键）。
 

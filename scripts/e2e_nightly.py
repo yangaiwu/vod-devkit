@@ -20,8 +20,10 @@ async def main() -> int:
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     params = StdioServerParameters(
         command=SERVER_PY, args=["/root/vod-devkit/vod_mcp/server.py"],
+        # 2026-11-06：legacy 共用 key 移除（D-key-guard 线+用户拍板"不合理逻辑去掉"）——
+        # nightly 验的应是对外主路径=匿名令牌链（零 key），legacy 属 GTD 兼容收尾
+        # 不进健康检查；顺带清 scene 残留字段（契约已删 scene）
         env={"VOD_JAVA_API_BASE": "https://vod-dev.topxtopx.com",
-             "VOD_JAVA_API_KEY": "vod-external-api-key-2026",
              "VOD_PACKS": "core,collect",
              "PATH": "/usr/bin:/bin", "HOME": "/root"})
     try:
@@ -32,7 +34,7 @@ async def main() -> int:
                 names = [t.name for t in tools.tools]
                 content = f"[nightly {stamp}] E2E 反馈，链路健康检查"
                 res = await s.call_tool("vod_submit_voices", {
-                    "voices": [{"content": content, "scene": "nightly-E2E"}],
+                    "voices": [{"content": content}],
                     "product": "codearts", "confirmed": True})
                 payload = json.loads(res.content[0].text)
                 lst = await s.call_tool("vod_list_submitted", {"limit": 1})

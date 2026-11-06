@@ -115,6 +115,8 @@ def test_submit_voices_calls_hoarding_endpoint(monkeypatch):
                 "productRegistered": True}
 
     monkeypatch.setattr(tools, "_http", fake_http)
+    # D-attrib-A：绑定显式桩定（不依赖环境 runtime.json 偶发内容）
+    monkeypatch.setitem(tools._RT, "product", "CodeArts")
     out = tools.submit_voices({"product": "codearts",
                                "voices": [{"content": "补全太慢，生成质量不稳定",
                                            "tags": ["problem_type:功能建议"]}],
@@ -177,6 +179,9 @@ def test_protocol_auth_header_and_paths(monkeypatch):
     monkeypatch.setattr(tools, "_load_meta", lambda force=False: META_OK)
     try:
         # 场景一：囤积主路径（201）——锁头/路径/批式载荷
+        # D-attrib-A（2026-11-06）：归因只由安装绑定决定——测试必须显式桩定绑定，
+        # 不得依赖环境 runtime.json 的偶发内容（曾因仓内 runtime 恰有 CodeArts 绑定而假绿）
+        tools._RT["product"] = "CodeArts"
         out = tools.submit_voices(
             {"voices": [{"content": "太慢了，希望优化补全速度",
                          "tags": ["problem_type:用户体验"]}],
@@ -190,8 +195,18 @@ def test_protocol_auth_header_and_paths(monkeypatch):
         assert jb["product"] == "CodeArts"
         assert jb["voices"][0]["tags"] == ["problem_type:用户体验"]
         assert "voiceId" not in jb["voices"][0]
+        # 无绑定分支：显式传参不采信（D-attrib-A）→ product 缺省，引擎 UNKNOWN 档兜底
+        tools._RT.pop("product", None)
+        _Recorder.requests = []
+        tools.submit_voices(
+            {"voices": [{"content": "无绑定归因测试"}],
+             "product": "codearts", "confirmed": True},
+            client_info={"name": "aishell"})
+        jb2 = json.loads(_Recorder.requests[0]["body"])
+        assert "product" not in jb2, "无安装绑定时显式传参必须被忽略（D-attrib-A）"
 
         # 场景二：囤积端点 404（引擎未部署）→ 自动回落老链（过渡语义）
+        tools._RT["product"] = "CodeArts"  # 恢复绑定（场景二回执 product 断言依赖）
         _Recorder.requests = []
         _Recorder.force404 = True
         out2 = tools.submit_voices(
