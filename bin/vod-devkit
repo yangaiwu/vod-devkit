@@ -424,6 +424,16 @@ def cmd_install(args):
 
     # G1 修复：技能全量拷贝（目录型技能+平铺规则文档），按 packs 过滤
     HERMES_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    # opencode 原生技能目录（2026-11-06 实测：opencode 自动发现
+    # ~/.config/opencode/skills/ 并经 skill 工具按需加载——此前安装器漏拷，
+    # opencode 只有工具描述一条约束通道，话术类约束全部失效）
+    oc_skills = None
+    if target == "opencode":
+        import platform as _pf
+        oc_base = Path.home() / (".config/opencode" if _pf.system() != "Windows"
+                                 else "AppData/Local/opencode")
+        oc_skills = oc_base / "skills"
+        oc_skills.mkdir(parents=True, exist_ok=True)
     pack_set = set(p for p in packs.split(",") if p)
     for entry in sorted((ROOT / "skills").iterdir()):
         if entry.is_dir():  # vod-core / vod-feedback-collect
@@ -436,6 +446,11 @@ def cmd_install(args):
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(entry, dst)
+            if oc_skills is not None:
+                dst_oc = oc_skills / skill
+                if dst_oc.exists():
+                    shutil.rmtree(dst_oc)
+                shutil.copytree(entry, dst_oc)
         # vendored 领域规则已由 vendor_rules.py 落成技能目录结构
 
     bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
