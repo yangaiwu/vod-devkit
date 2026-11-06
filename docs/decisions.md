@@ -286,3 +286,9 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 根因：MCP-only 宿主不加载 vod-feedback-collect 技能，工具 description 是唯一约束源；旧描述以「立即调用本工具…哪怕只有一句体验很差也原样提交，不要追问」开头，确认要求只埋在 confirmed 参数描述里——话术主动鼓励立即提交，与 confirm 纪律直接冲突
 - 修复：契约 description 确认纪律前置（先决条件优先于其余所有内容+用户陈述≠同意）；dsh 壳 lib/index.js 同步（confirmWrites 机械审批兜底仍在）；回归锁 test_submit_description_frontloads_consent（先决条件 60 字内+不构成同意+confirmed=true 三断言）
 - 边界声明：布尔 confirm 天然无法验证"用户真同意"（模型可代填），采集非破坏性可接受（沿用既有拍板）；若上破坏性写工具仍按 D-approval-upgrade 先 token 化
+
+## D-echo-A-1 提交回执原话回显（方案 A 默认）+ B 宿主级熔断定位（2026-11-06 用户拍板）
+- 背景：codex（deepseek 后端）对「逐次确认」「content=原话」双纪律文本约束不服从——实锤零确认直接提交+改写原话（"体验不好"→"产品体验不友好"入库）。加文本无效，转检测型。
+- A（默认防线，已实施）：vod_submit_voices 回执强制携带 echo{requiresUserEcho, instruction, contents[voiceId,content]}，agent 必须逐条原样转述「已收录原话：…」。边界：约束不了提交前行为，只让污染当场可见；真正锁死确认只能靠宿主 UI 弹窗。
+- B（不全局启用）：draft/commit 两段式 token 审批降级为按宿主可选熔断开关（未实现，仅定位留档）。注意 B 在 MCP 层也锁不死人类确认（agent 可自读 token 自动 commit），只能加摩擦。升级触发：同一宿主 7 天内 ≥2 次未确认提交，或 ≥1 次原话改写且用户不可接受→对该宿主启用 token 化或直接禁写切只读。破坏性工具继续按原口径 token 化。
+- 补强建议（未排期，需引擎侧端点）：短窗口 vod_correct_voice/vod_delete_voice，让用户看到改写后能当场更正/撤回——引擎 /external/** 无此端点，须走 VOD-Project 新需求。

@@ -254,6 +254,19 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
     if not items:
         return {"accepted": 0, "voiceIds": [], "taskIds": [], "rejected": rejected}
 
+    def _echo(vids):
+        """方案 A（2026-11-06 拍板）：提交回执强制携带原话回显。
+        检测型防线——宿主模型改写用户原话（实锤："体验不好"→"不友好"）
+        在回执处当场可见；agent 必须原样转述，改写露馅。"""
+        ok = [(vid, items[min(i, len(items) - 1)][2])
+              for i, vid in enumerate(vids) if vid]
+        return {
+            "requiresUserEcho": bool(ok),
+            "instruction": ("请向用户原样转述已收录内容：每条以「已收录原话：」开头，"
+                            "后接 content 全文。禁止改写、概括、增删字词。"),
+            "contents": [{"voiceId": vid, "content": c} for vid, c in ok],
+        }
+
     def _ledger(vids, tids):
         import time as _time
         entries = [{"voiceId": vid, "taskId": tid,
@@ -342,7 +355,8 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
         result = {"accepted": accepted, "voiceIds": voice_ids,
                   "taskIds": task_ids, "rejected": rejected + engine_rejected,
                   "analysis": "deferred",  # 囤积语义明示（V6 运营批量消费）
-                  "path": "hoarding"}
+                  "path": "hoarding",
+                  "echo": _echo(voice_ids)}
         if out.get("productRegistered") is not None:
             result["productRegistered"] = out.get("productRegistered")
         _ledger(voice_ids, task_ids)
@@ -383,7 +397,8 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
                 rejected.append({"index": i, "reason": msg[:120]})
     result = {"accepted": accepted, "voiceIds": voice_ids,
               "taskIds": task_ids, "rejected": rejected,
-              "path": "legacy-fallback"}
+              "path": "legacy-fallback",
+              "echo": _echo(voice_ids)}
     _ledger(voice_ids, task_ids)
     return result
 

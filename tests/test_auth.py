@@ -291,6 +291,45 @@ def test_hoarding_engine_rejected_passthrough(monkeypatch):
     assert any("NoSuchProduct" in str(r.get("reason", "")) for r in out["rejected"])
 
 
+def test_submit_echo_requires_verbatim_relay(monkeypatch):
+    """方案 A 回归锁：回执必须携带 echo（原话回显），content 与提交原话逐字一致。"""
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts"],
+                                             "stale": False, "source": "meta"})
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    monkeypatch.setattr(tools, "_http",
+                        lambda m, p, body=None, timeout=30, base=None, key=None:
+                        {"code": 201, "voiceIds": ["ext_vod-agent_e1"],
+                         "statuses": ["new"]})
+    out = tools.submit_voices(
+        {"voices": [{"content": "产品体验不好"}],
+         "product": "codearts", "confirmed": True},
+        client_info={"name": "t"})
+    e = out["echo"]
+    assert e["requiresUserEcho"] is True
+    assert e["contents"] == [{"voiceId": "ext_vod-agent_e1",
+                              "content": "产品体验不好"}]
+    assert "已收录原话" in e["instruction"]
+
+
+def test_submit_echo_absent_when_nothing_accepted(monkeypatch):
+    """整批被拒时 requiresUserEcho=false，无可回显内容。"""
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts"],
+                                             "stale": False, "source": "meta"})
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    monkeypatch.setattr(tools, "_http",
+                        lambda m, p, body=None, timeout=30, base=None, key=None:
+                        {"code": 200, "voiceIds": [],
+                         "rejected": [{"reason": "产品未注册"}]})
+    out = tools.submit_voices(
+        {"voices": [{"content": "x"}], "product": "NoSuchProduct",
+         "confirmed": True},
+        client_info={"name": "t"})
+    assert out["echo"]["requiresUserEcho"] is False
+    assert out["echo"]["contents"] == []
+
+
 def test_content_boundary_rejects_oversize(monkeypatch):
     """内容边界：超 2000 字的反馈逐条拒绝（契约 maxLength 落到代码）。"""
     monkeypatch.setattr(tools, "_load_meta",
