@@ -253,9 +253,9 @@ export function apply(ctx, config) {
                 const voices = Array.isArray(args.voices) ? args.voices : [];
                 if (!voices.length) return textResult({ error: 'voices 为空', code: -32001 });
                 if (voices.length > 50) return textResult({ error: '单批上限 50 条', code: -32001 });
-                // 归因（「宿主即产品」口径，2026-11-03 拍板·不设白名单）：显式传参 > 配置绑定
-                // （安装时默认=宿主名）> 缺省 DSH（本插件就装在 dsh 里）；白名单废除，
-                // 宿主自报产品原样上送（引擎宽松归一），不再 -32013 本地拦截
+                // 归因（D-attrib-A，2026-11-06 拍板，方案 A）：归因只由部署配置绑定
+                // 决定（安装时定），不读 args——宿主/模型传参自报不采信（对齐 vod_mcp
+                // effectiveBotPat 同款收紧；Python 侧实锤宽容口径被模型滥用后统一）
                 let product = String(c.product || '').trim(); // 部署配置权威（安装时定），无 args 覆盖
                 product = PRODUCT_MAP[product.toLowerCase()] || product;
                 product = await resolveProductId(product, c, exec?.signal); // T7i：主键化提交
