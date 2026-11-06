@@ -82,6 +82,31 @@ def _server_env(args, packs: str) -> dict:
     return env
 
 
+def _skill_installs(manifest_path: Path, oc_skills, cx_skills) -> list:
+    """多宿主技能落点并集（名册对账）：manifest 按「最近一次安装」覆盖会
+    互相冲掉落点（实锤：codex 装完 opencode 落点消失），按 host+dir
+    去重保留历史落点。"""
+    import json as _json
+    import os
+    home = str(Path.home()) + os.sep
+    prev = {}
+    if manifest_path.exists():
+        try:
+            for si in _json.loads(manifest_path.read_text(encoding="utf-8")).get("skillInstalls") or []:
+                d = si.get("dir") or ""
+                # 只保留「当前 HOME 之下且目录真实存在」的落点——隔离环境
+                # （fake-home 测试）不吞真实 HOME 的历史落点，卸载残留自动剪枝
+                if d.startswith(home) and Path(d).is_dir():
+                    prev[(si["host"], d)] = si
+        except Exception:
+            pass
+    for h, d in (("hermes", HERMES_SKILLS_DIR),
+                 ("opencode", oc_skills), ("codex", cx_skills)):
+        if d is not None:
+            prev[(h, str(d))] = {"host": h, "dir": str(d)}
+    return sorted(prev.values(), key=lambda x: (x["host"], x["dir"]))
+
+
 def _dir_hashes(base: Path) -> dict:
     """对既有目录树计算相对 sha256 指纹（roster 对账用）。"""
     import hashlib
@@ -488,12 +513,10 @@ def cmd_install(args):
         "skillsDir": str(HERMES_SKILLS_DIR),
         # 名册对账（huaweicloud-devkit doctor 模式借鉴，2026-11-06）：
         # 每个原生技能落点的独立指纹——漏装/漂移可被 doctor 逐落点抓出，
-        # 不再只盯 hermes 单目录（opencode 漏拷静默失效的针对性防线）
-        "skillInstalls": [
-            {"host": "hermes", "dir": str(HERMES_SKILLS_DIR)},
-            *[{"host": h, "dir": str(d)} for h, d in
-              (("opencode", oc_skills), ("codex", cx_skills)) if d is not None],
-        ],
+        # 不再只盯 hermes 单目录（opencode 漏拷静默失效的针对性防线）。
+        # 多宿主并集合并：manifest 按「最近一次安装」覆盖会互相冲掉落点
+        # （实锤：codex 装完 opencode 落点消失），按 host+dir 去重保留历史
+        "skillInstalls": _skill_installs(manifest_path(), oc_skills, cx_skills),
         "skillHashes": _skill_hashes(),
     }
     manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2),

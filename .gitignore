@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 install-manifest.json
 vod_mcp/runtime.json
+.e2e-behavior.json
