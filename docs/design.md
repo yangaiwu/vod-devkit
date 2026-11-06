@@ -335,11 +335,22 @@ normalizeLoose 后不设白名单（未注册落 UNKNOWN 档+productRegistered
    真实可执行选项（都提/只提原句），极端选择（只提追加句）走
    括号兜底不进并列选项（S52），用户纠正定性后不辩论、按纠正
    理解走但 content 仍原话逐字（S53）；禁空头承诺：无引擎/插件
-   承载的机制（如「过程反馈单独记录」）不得出现在话术选项里
-   （S51，泛化纪律=D-option-executability-1：写选项前逐项问
-   「用户选这项，代码路径在哪」，答不出=删）。承载=
+   制（如「过程反馈单独记录」）不得出现在话术选项里（S51，泛化
+   纪律=D-option-executability-1：写选项前逐项问「用户选这项，
+   代码路径在哪」，答不出=删）。承载=
    skills/vod-feedback-collect/SKILL.md 正文（双副本同步，
    test_collect_qualify 锁一致性与话术要素）。
+
+**暂存恢复提示（S54）**：后台自动重试成功=完成用户已确认的
+   提交指令（暂存仅产生于点提交后的技术失败分支），非新提交
+   行为——补提示含逐条原话回显（方案 A 覆盖恢复场景），voice-id
+   不出用户面（F2）、产品名不带（用户不感知归因）、无更正/撤回
+   承诺（S51）。items 空值时话术降级为纯状态告知（残句防护）。
+   承载=dsh/src/client.jsx（retryStashedSubmissions+FeedbackModal
+   恢复旗标），ux-sync 回归锁。
+
+**UI 形态**：弹窗 textarea resize:none（S55，用户拉伸角顶破布局）；
+   widget E_AUTH 草稿兜底对齐（S57）。
 
 ## 四、安全护栏（声明式）## 四、安全护栏（声明式）
 

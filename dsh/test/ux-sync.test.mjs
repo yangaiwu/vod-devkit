@@ -5,9 +5,11 @@
 //    （用户碰不到的边界=负面框架；maxLength 硬帽保留）；
 // 3. 「我的反馈」入口暂撤（2026-11-05 拍板）：HistoryPanel 入口不渲染，
 //    账本写入保留（saveHistory/E() 仍在，数据链不动）。
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'client.jsx'), 'utf8');
 const lib = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'client.js'), 'utf8');
@@ -34,3 +36,31 @@ for (const needle of ['会原样转达给产品团队', '具体现象更容易�
   assertAbsent(lib, esc(needle), 'lib/client.js');
 }
 console.log('dsh UX 定稿同步锁 OK');
+
+// 提交链 ReferenceError 回归锁（真机实锤 2026-11-06：05ce5fb 撤分类 chips
+// 时漏删 submit 请求体里的 tags: category ? ... 引用，UI 提交必抛
+// ReferenceError 走暂存分支）。锁：src 中不得再出现裸 category 引用。
+const bareCategory = [...src.matchAll(/(?<![.\w])category(?![\w])/g)];
+if (bareCategory.length > 0) {
+  throw new Error(`提交链回归：src 仍引用已删除的 category 变量（${bareCategory.length} 处）`);
+}
+console.log('category 残留锁 OK');
+
+// S55 resize 锁（2026-11-06 用户反馈：弹窗输入框不该有拉伸角）
+if (!/resize:\s*'none'/.test(src)) throw new Error('S55 回归：textarea 未设 resize:none');
+if (/resize:\s*'vertical'/.test(src)) throw new Error('S55 回归：resize:vertical 回流');
+
+// S54 恢复提示要素锁：原话回显在、voice-id/产品名不出用户面、空 items 残句防护
+if (!src.includes('已自动重试成功')) throw new Error('S54 回归：恢复补提示话术缺失');
+if (!src.includes('（当时提交临时失败）')) throw new Error('S54 回归：因果措辞缺失');
+if (!src.includes("rec.items ? `，产品团队会看到")) throw new Error('S54 回归：items 空值残句防护缺失');
+
+// S56 legacy key 明文清退锁（用户面 md 不得出现共用 key 明文）
+const userDocs = ['INSTALL.md', 'README.md', 'QUICKSTART.md']
+  .map(f => join(ROOT, f)).filter(p => { try { return existsSync(p) } catch { return false } });
+for (const p of userDocs) {
+  if (readFileSync(p, 'utf8').includes('vod-external-api-key-2026')) {
+    throw new Error(`S56 回归：${p} 泄漏 legacy 共用 key 明文`);
+  }
+}
+console.log('S55/S54/S56 锁 OK');
