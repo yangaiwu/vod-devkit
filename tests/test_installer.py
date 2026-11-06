@@ -277,7 +277,10 @@ def test_install_requires_product(env):
     assert r.returncode == 2 and "--product 必填" in r.stderr
 
 def test_install_binds_explicit_product(env):
-    cli(env, "install", "--target", "codex", "--product", "高校AI开发者平台")
+    # 指向桩引擎：默认平台地址依赖外网可达性（不可达=校验拒绝，属预期），
+    # 绑定断言须在受控 catalog 上跑
+    cli(env, "install", "--target", "codex", "--product", "高校AI开发者平台",
+        "--java-api-base", env["engine"]["base"])
     mf = json.loads((env["repo"] / "install-manifest.json").read_text())
     rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
     assert mf["product"] == "高校AI开发者平台" and rt["product"] == "高校AI开发者平台"
@@ -662,3 +665,68 @@ def test_install_dsh_cli_missing_exits2(env):
          "--target", "dsh", "--profile", "web", "--product", "CodeArts"],
         env=e, capture_output=True, text=True, timeout=120)
     assert r.returncode == 2 and "dsh CLI" in (r.stderr + r.stdout)
+
+
+def test_presets_full_uses_runtime_pack_names():
+    """深审 P0-2 回归锁：PRESETS 值必须都在运行期 ALL_PACKS 内（安装口与
+    运行口单源——workflow 已随净删消失、kb=knowledge 旧称，漂移=静默失效）。"""
+    import importlib.util
+    from importlib.machinery import SourceFileLoader
+    loader = SourceFileLoader("p", str(Path(__file__).resolve().parent.parent / "vod_mcp" / "packs.py"))
+    spec = importlib.util.spec_from_loader("p", loader)
+    m = importlib.util.module_from_spec(spec)
+    loader.exec_module(m)
+    # PRESETS 从安装器单源读取（bin 内定义，硬拷贝会漂移）
+    bin_loader = SourceFileLoader("vd", str(Path(__file__).resolve().parent.parent / "bin" / "vod-devkit"))
+    bin_spec = importlib.util.spec_from_loader("vd", bin_loader)
+    vd = importlib.util.module_from_spec(bin_spec)
+    bin_loader.exec_module(vd)
+    for name, packs in vd.PRESETS.items():
+        for pk in packs.split(","):
+            assert pk.strip() in m.ALL_PACKS, \
+                f"preset {name} 的 {pk} 不在运行期 ALL_PACKS（静默失效回归）"
+
+
+def test_kb_alias_normalizes_to_knowledge(monkeypatch):
+    """深审 P0-2 配套：kb 旧称在运行期归一为 knowledge（不静默丢弃）。"""
+    monkeypatch.setenv("VOD_PACKS", "core,kb")
+    import importlib
+    import vod_mcp.packs as packs_mod
+    m = importlib.reload(packs_mod)
+    assert "knowledge" in m.enabled_packs()
+
+
+def test_uninstall_never_deletes_user_config_toml(env, monkeypatch):
+    """深审 P0-3 破坏性路径回归锁：codex 的 manifest.mcpConfig 曾指向
+    ~/.codex/config.toml（用户整份配置），uninstall unlink=删光用户配置。
+    锁：uninstall 对 config.toml 必须跳过；codex 走 plugin remove。"""
+    home = env["home"]
+    conf = home / ".codex" / "config.toml"
+    conf.parent.mkdir(parents=True, exist_ok=True)
+    conf.write_text("[user_own]\nkey = 1\n", encoding="utf-8")
+    # manifest 落在 manifest_path() 的真实位置（repo 根），非 home
+    mf = env["repo"] / "install-manifest.json"
+    mf.write_text(json.dumps({
+        "target": "codex", "mcpConfig": str(conf),
+        "skillsDir": str(home / "skills-none"),
+        "source": {"commitSha": "x"}, "packs": "core,collect",
+    }), encoding="utf-8")
+    r = cli(env, "uninstall")
+    assert r.returncode == 0, r.stderr
+    assert conf.exists(), "uninstall 删除了用户 config.toml（P0-3 破坏性回归）"
+    assert "skip（用户配置文件" in r.stdout or "skip" in r.stdout
+    assert "plugin remove" in env["codex_calls"].read_text()
+
+
+def test_agents_markdown_missing_end_refuses_cleanup(env):
+    """深审 P2 回归锁：AGENTS.md 只有 BEGIN 无 END 时拒绝自动清理
+    （宁可不装不可静默吞掉用户文件剩余内容），exit 2 不落盘。"""
+    home = env["home"]
+    agents = home / ".codex" / "AGENTS.md"
+    agents.parent.mkdir(parents=True, exist_ok=True)
+    agents.write_text("# 用户内容\n<!-- vod-devkit:feedback-skill BEGIN -->\n无 END\n",
+                      encoding="utf-8")
+    r = cli(env, "install", "--target", "codex", "--product", "CodeArts")
+    assert r.returncode == 2
+    assert "END 标记" in r.stderr
+    assert "无 END" in agents.read_text(), "拒绝清理时不得写盘"

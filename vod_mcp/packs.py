@@ -25,7 +25,11 @@ def enabled_packs() -> tuple:
     raw = os.environ.get("VOD_PACKS", "").strip()
     if not raw:
         return ALL_PACKS
-    packs = tuple(p.strip() for p in raw.split(",") if p.strip() in ALL_PACKS)
+    # kb=knowledge 旧称别名（历史文档/用户习惯；深审 P0-2 配套：安装口
+    # 旧值不因运行口改名而静默失效）
+    packs = tuple(p.strip() for p in raw.split(","))
+    packs = tuple("knowledge" if p == "kb" else p for p in packs)
+    packs = tuple(p for p in packs if p in ALL_PACKS)
     if "core" not in packs:
         packs = ("core",) + packs
     if "collect" in packs and any(os.path.isfile(m) for m in BREAKER_MARKERS):

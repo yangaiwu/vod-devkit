@@ -62,8 +62,12 @@ def manifest_path() -> Path:
 PRESETS = {
     # 对外默认：开发者=反馈采集者（workflow 不进对外默认集）
     "collect": "core,collect",
-    # 内部：运营/可信第三方全量（含分析发起）
-    "full": "core,workflow,kb,collect",
+    # 内部：运营/可信第三方全量。2026-11-06 修正（深审 P0-2）：原值
+    # "core,workflow,kb,collect" 与运行期 ALL_PACKS=(core,collect,knowledge)
+    # 命名漂移——workflow 包已随"运营归 vod-system 前端"净删、kb 是
+    # knowledge 的旧称，按原值安装 workflow/kb 被静默丢弃（安装口说装了
+    # 运行口不认=挪到别处而非消除）
+    "full": "core,collect,knowledge",
 }
 
 
@@ -234,7 +238,9 @@ def _strip_codex_vod_blocks(text: str) -> str:
     out, skipping = [], False
     for line in text.splitlines():
         s = line.strip()
-        if s.startswith("[mcp_servers.vod-devkit"):
+        # P2（深审 2026-11-06）：精确匹配表头——startswith("…vod-devkit")
+        # 会误删 [mcp_servers.vod-devkit2] 等无关表
+        if s == "[mcp_servers.vod-devkit]":
             skipping = True
             continue
         if skipping and s.startswith("["):
@@ -249,7 +255,11 @@ _AGENTS_MARKER_END = "<!-- vod-devkit:feedback-skill END -->"
 
 
 def _strip_agents_vod_block(text: str) -> str:
-    """幂等剥离 AGENTS.md 中带标记的 vod-devkit 技能块（历史方案清理）。"""
+    """幂等剥离 AGENTS.md 中带标记的 vod-devkit 技能块（历史方案清理）。
+
+    P2（深审 2026-11-06）：只有 BEGIN 没有 END 时不得静默吞掉文件剩余
+    全部内容——抛错拒绝（调用方 exit 2 不落盘），宁可装不上不可删用户文件。
+    """
     lines, skipping, out = text.splitlines(), False, []
     for line in lines:
         if line.strip() == _AGENTS_MARKER_BEGIN:
@@ -260,6 +270,10 @@ def _strip_agents_vod_block(text: str) -> str:
             continue
         if not skipping:
             out.append(line)
+    if skipping:
+        raise RuntimeError(
+            "AGENTS.md 存在 vod-devkit BEGIN 标记但缺失 END 标记"
+            "（文件可能被手动截断）——拒绝自动清理，请手动检查该文件")
     return "\n".join(out).rstrip()
 
 
@@ -284,7 +298,11 @@ def _install_codex(args, packs: str) -> Path:
     agents = Path.home() / ".codex" / "AGENTS.md"
     if agents.exists():  # 历史遗留：AGENTS.md 技能块已被原生 skill 取代
         text = agents.read_text(encoding="utf-8")
-        cleaned = _strip_agents_vod_block(text)
+        try:
+            cleaned = _strip_agents_vod_block(text)
+        except RuntimeError as e:
+            print(f"[vod-devkit] {e}", file=sys.stderr)
+            sys.exit(2)
         if cleaned != text.rstrip():
             agents.write_text(cleaned + "\n", encoding="utf-8")
             print(f"已移除旧 AGENTS.md 技能块（原生 skill 取代）：{agents}")
@@ -310,7 +328,33 @@ def _install_codex(args, packs: str) -> Path:
         print(f"已注册本地 marketplace：{mp_root}")
     _run([codex, "plugin", "add", f"vod-devkit@{mp_name}"])
     print("已安装 codex 原生插件 vod-devkit（skills + MCP，重启 Codex 会话生效）")
-    return conf
+    # P1-5（深审 2026-11-06）：插件自带的 .mcp.json 硬编码 env.VOD_PACKS=
+    # core,collect——--packs 对 codex 半失效（运行期仍注册 collect 工具）。
+    # plugin add 后把缓存内 .mcp.json 的 packs 对齐本次安装值。
+    import glob as _glob
+    mcp_jsons = sorted(
+        _glob.glob(str(Path.home() / ".codex" / "plugins" / "cache"
+                       / mp_name / "vod-devkit" / "*" / ".mcp.json")),
+        key=lambda p: Path(p).stat().st_mtime, reverse=True)
+    if mcp_jsons:
+        try:
+            mj = json.loads(Path(mcp_jsons[0]).read_text(encoding="utf-8"))
+            srv = mj.get("mcpServers", {}).get("vod-devkit")
+            if srv is not None:
+                srv.setdefault("env", {})["VOD_PACKS"] = packs
+                Path(mcp_jsons[0]).write_text(
+                    json.dumps(mj, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8")
+                print(f"已对齐插件 MCP packs：{mcp_jsons[0]}（VOD_PACKS={packs}）")
+        except Exception as e:
+            print(f"[vod-devkit] warn: 插件 .mcp.json packs 对齐失败（{e}）——"
+                  "运行期熔断门禁仍会兜底", file=sys.stderr)
+        return Path(mcp_jsons[0])
+    # 深审 P0-3：绝不再返回 ~/.codex/config.toml——它是用户整份 codex 配置，
+    # uninstall 对 mcpConfig 是删除语义，指向它=卸载删光用户配置（破坏性）
+    print("[vod-devkit] warn: 未定位到插件 .mcp.json（uninstall 将跳过 MCP 清理，"
+          "可手动删除插件缓存目录）", file=sys.stderr)
+    return None
 
 
 def _install_dsh(args, packs: str) -> Path:
@@ -532,18 +576,13 @@ def cmd_install(args):
     # 恢复门禁（D-codex-circuit-breaker-1，2026-11-06 负责人确认）：
     # 熔断标记存在（~/.codex/vod-collect-suspended.json）时，codex 装 collect
     # 被拒——恢复采集的前置=token 化上线并过回归，不是改回 packs 一个动作；
-    # --ack-suspension=显式解除（删标记+写审计），非"每次放行不解除"。
+    # --ack-suspension=显式解除（P1-4 修正：解除动作后置到安装成功之后——
+    # 若产品校验/安装中途失败，熔断不得已被解除）。
+    pending_ack = False
     if target == "codex" and "collect" in (packs or "").replace(" ", "").split(","):
         marker = Path.home() / ".codex" / "vod-collect-suspended.json"
         if marker.is_file() and getattr(args, "ack_suspension", False):
-            # 显式解除：删标记+审计行（谁/何时/packs 可追溯）
-            marker.unlink()
-            audit = Path.home() / ".codex" / "vod-collect-suspension-audit.log"
-            with audit.open("a", encoding="utf-8") as f:
-                f.write(f"{datetime.datetime.now().isoformat(timespec='seconds')}\t"
-                        f"ack_suspension\tpacks={packs}\n")
-            print("[vod-devkit] 已显式解除 codex 采集熔断，审计已记录："
-                  f"{audit}", file=sys.stderr)
+            pending_ack = True  # 解除后置：安装成功才落
         elif marker.is_file():
             print("[vod-devkit] 恢复门禁：codex 采集处于熔断状态"
                   "（未确认提交 ≥2 次，详见 docs/decisions.md"
@@ -604,6 +643,18 @@ def cmd_install(args):
 
     mcp_conf = installer(args, packs)
 
+    # P1-4 修正：ack 解除后置——安装全部成功才落（解除先于安装=失败安装
+    # 也绕过了恢复门禁语义）
+    if pending_ack:
+        marker = Path.home() / ".codex" / "vod-collect-suspended.json"
+        if marker.is_file():
+            marker.unlink()
+        audit = Path.home() / ".codex" / "vod-collect-suspension-audit.log"
+        with audit.open("a", encoding="utf-8") as f:
+            f.write(f"{datetime.datetime.now().isoformat(timespec='seconds')}\t"
+                    f"ack_suspension\tpacks={packs}\n")
+        print(f"[vod-devkit] 已显式解除 codex 采集熔断（安装成功），审计已记录：{audit}")
+
     # G1 修复：技能全量拷贝（目录型技能+平铺规则文档），按 packs 过滤
     HERMES_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
     # opencode 原生技能目录（2026-11-06 实测：opencode 自动发现
@@ -654,7 +705,7 @@ def cmd_install(args):
         "product": bound_product,
         "packs": packs,
         "dshProfile": (getattr(args, "dsh_profile", "") or "").strip() or None,
-        "mcpConfig": str(mcp_conf),
+        "mcpConfig": (str(mcp_conf) if mcp_conf else None),
         "skillsDir": str(HERMES_SKILLS_DIR),
         # 名册对账（huaweicloud-devkit doctor 模式借鉴，2026-11-06）：
         # 每个原生技能落点的独立指纹——漏装/漂移可被 doctor 逐落点抓出，
@@ -702,7 +753,7 @@ def cmd_doctor(_args):
         bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
         if mf["source"]["commitSha"] != bi.get("commitSha"):
             problems.append("install-manifest 与 build-info 的 commitSHA 不一致")
-        if not Path(mf["mcpConfig"]).exists():
+        if mf.get("mcpConfig") and not Path(mf["mcpConfig"]).exists():
             problems.append("MCP 配置文件缺失")
         if not Path(mf["skillsDir"]).exists():
             problems.append("skills 目录缺失")
@@ -825,10 +876,28 @@ def cmd_uninstall(_args):
     if p.exists():
         mf = json.loads(p.read_text(encoding="utf-8"))
         for key in ("mcpConfig", "skillsDir"):
-            path = Path(mf[key])
+            path_s = mf.get(key)
+            if not path_s:
+                continue  # codex 等宿主 mcpConfig 可为 None（P0-3：无托管配置文件）
+            path = Path(path_s)
+            # 深审 P0-3（破坏性路径一票否决）：config.toml 是用户整份 codex
+            # 配置，永不在 uninstall 删除——旧版 manifest 曾把它记成 mcpConfig
+            if path.name == "config.toml":
+                print(f"skip（用户配置文件，uninstall 永不删除）：{path}")
+                continue
             if path.exists():
                 shutil.rmtree(path) if path.is_dir() else path.unlink()
                 print("removed:", path)
+        # codex 原生插件摘除（best-effort：CLI 命令名随版本可能变化，失败不阻塞）
+        if mf.get("target") == "codex":
+            codex = shutil.which("codex")
+            if codex:
+                r = subprocess.run([codex, "plugin", "remove",
+                                    "vod-devkit@vod-local"],
+                                   capture_output=True, text=True, timeout=120)
+                print("codex plugin remove:",
+                      "OK" if r.returncode == 0
+                      else (r.stderr or r.stdout).strip()[-120:])
         oc_cmd = Path.home() / ".config/opencode/command/vod-doctor.md"
         if oc_cmd.exists():
             oc_cmd.unlink()
