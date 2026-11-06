@@ -73,3 +73,11 @@ if (src.includes('反馈经审核未采纳') && !src.includes("sync.status === '
   throw new Error('S51 回归：REJECTED 话术失去引擎状态承载');
 }
 console.log('S51 回执实况锁 OK');
+
+// S63 追问前置锁（D-followup-design-1）：引擎无 supplement 承载，采集话术
+// 不得出现"追问复现步骤"类承诺（先有承载再进话术）。立项落地（引擎
+// supplement 字段+独立存储+来源标注）后应有意识地更新本锁。
+if (src.includes('复现步骤') || src.includes('当时在做什么')) {
+  throw new Error('S63 回归：采集话术出现追问承诺，但引擎无 supplement 承载（S51 空头支票）');
+}
+console.log('S63 追问前置锁 OK');

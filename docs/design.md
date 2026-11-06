@@ -369,6 +369,12 @@ normalizeLoose 后不设白名单（未注册落 UNKNOWN 档+productRegistered
    docs/decisions.md D-codex-circuit-breaker-1（立项表述纠偏：
    token 化=最强摩擦+审计链非硬保证；恢复门禁前置）。
 
+**复现步骤 AI 追问（S63，当期不落）**：未来填充通道的前置规范
+   （业界对表 D-followup-design-1：可选增强/话术固定化/数据分层/
+   诚实回退四约束）；当期采集话术不得出现追问承诺（引擎无
+   supplement 承载=空头支票），ux-sync S63 锁 tripwire——立项落地
+   时随引擎承载有意识更新。
+
 ## 四、安全护栏（声明式）## 四、安全护栏（声明式）
 
 policy.json 规则集（severity: deny / confirm / warn）：
