@@ -28,6 +28,7 @@ const LS_TOKEN = 'vod_dshui_token';
 const LS_DEVICE = 'vod_dshui_device';
 const LS_LEDGER = 'vod_dshui_ledger';
 const LS_DRAFT = 'vod_dshui_draft';
+const LS_RECOVERED = 'vod_dshui_recovered'; // 后台重试成功的条数（下次打开弹窗补提示）
 const LEDGER_CAP = 200;
 // 企业数据驻留（--no-local-ledger）：server 半经 index-inject 注入禁用旗标，
 // UI 停写账本 + 隐藏历史入口（显式不可用，不显示空列表——三主体边界拍板）
@@ -235,6 +236,7 @@ let retrySweepDone = false;  // 每会话一次
 async function retryStashedSubmissions() {
   if (retrySweepDone) return;
   retrySweepDone = true;
+  let recovered = 0;
   const rows = JSON.parse(localStorage.getItem(LS_LEDGER) || '[]')
     .filter((r) => r.status === 'pending-endpoint' || r.status === 'failed');
   for (const row of rows.slice(0, 5)) {  // cap 5 防风暴
@@ -244,6 +246,7 @@ async function retryStashedSubmissions() {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
+          'X-Vod-Device-Id': getDeviceId(), // 设备锚点随所有请求（令牌按设备签发，漏带=401）
           authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
@@ -260,6 +263,7 @@ async function retryStashedSubmissions() {
         const body = await r.json().catch(() => ({}));
         row.serverVoiceId = (body.voiceIds || body.data?.voiceIds || [])[0] || '';
         row.retriedAt = new Date().toISOString();
+        recovered++; // 2026-11-06 UX 修复：后台重试成功不再静默——计数落旗标，下次打开弹窗补提示
       } else if (r.status !== 404) {
         row.error = `retry ${r.status}`;
       }
@@ -268,6 +272,16 @@ async function retryStashedSubmissions() {
     }
   }
   const kept = rows.filter((r) => r.status !== 'accepted');
+  if (recovered > 0) {
+    // 后台重试成功补提示（2026-11-06 UX 修复）：失败提示不随静默重试更新的事故形态。
+    // 回显明细走账本原话（方案 A 覆盖恢复场景）；voice-id 不出用户面（F2）；
+    // 措辞「已自动重试成功」说清因果=完成用户此前点提交的指令，非绕过确认
+    // （暂存仅发生在用户点提交后的技术失败分支，同意前提成立）
+    const items = rows.filter((r) => r.status === 'accepted' && r.retriedAt)
+      .map((r) => `“${(r.content || r.title || '').slice(0, 60)}”`)
+      .join('、');
+    try { localStorage.setItem(LS_RECOVERED, JSON.stringify({ n: recovered, items })); } catch (e) {}
+  }
   if (kept.length !== rows.length || rows.length) {
     // 回写账本：成功的从暂存态转 accepted，其余原样保留
     const all = JSON.parse(localStorage.getItem(LS_LEDGER) || '[]');
@@ -290,6 +304,16 @@ function FeedbackModal({ onClose }) {
   }, [content]);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null); // {ok, msg}
+  // 后台重试成功补提示（2026-11-06 UX 修复）：打开弹窗时若暂存反馈已被静默重试
+  // 成功，把账本状态翻译成人话告诉用户——失败提示不更新=用户以为还在失败
+  useEffect(() => {
+    let rec = null;
+    try { rec = JSON.parse(localStorage.getItem(LS_RECOVERED) || 'null'); } catch (e) {}
+    if (rec && rec.n > 0) {
+      try { localStorage.removeItem(LS_RECOVERED); } catch (e) {}
+      setDone({ ok: true, msg: `你之前提交的 ${rec.n} 条反馈已自动重试成功（当时提交临时失败），产品团队会看到：${rec.items || ''}` });
+    }
+  }, []);
 
   async function pollForReceipt(serverVoiceId, setDoneRef) {
     if (!serverVoiceId) return;
@@ -359,7 +383,8 @@ function FeedbackModal({ onClose }) {
             voices: [{
               title: text.slice(0, 60),
               content: text,
-              tags: category ? ['problem_type:' + category] : [],
+              // 分类不预选（D-anon-ui 极简）：tags 不传，n01 引擎全量重判
+              // （05ce5fb 撤 chips 时漏删本行引用，ReferenceError 实锤修复+回归锁）
             }],
             // 产品=加载必配（T7d）：入口仅在注入后激活，product 恒有值
             // T7i：注入名→meta 目录解析平台 id 后提交（主键化，名字漂移不进链路）
