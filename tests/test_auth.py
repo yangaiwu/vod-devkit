@@ -198,7 +198,7 @@ def test_product_attribution_layers(monkeypatch):
     captured = {}
     monkeypatch.setattr(tools, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
-                        captured.update(body=body) or {"code": 200, "data": {"taskId": 1}})
+                        captured.update(body=body) or {"code": 201, "voiceIds": ["ext_vod-agent_t1"], "statuses": ["new"]})
     out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
                                 "confirmed": True}, client_info={"name": "t"})
     assert out["accepted"] == 1 and "product" not in captured["body"]
@@ -213,7 +213,7 @@ def test_product_attribution_layers(monkeypatch):
     monkeypatch.setattr(tools, "_RT", {"product": "aishell"})
     monkeypatch.setattr(tools, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
-                        {"code": 200, "data": {"taskId": 1}})
+                        {"code": 201, "voiceIds": ["ext_vod-agent_t1"], "statuses": ["new"]})
     out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
                                "confirmed": True}, client_info={"name": "t"})
     assert out["accepted"] == 1
@@ -253,6 +253,44 @@ def test_meta_unreachable_falls_back_snapshot(monkeypatch):
     assert "codearts" in m["products"]
 
 
+def test_hoarding_missing_voiceids_not_counted_success(monkeypatch):
+    """回归锁（2026-11-06 codex 实锤）：引擎回执无 voiceIds 时不得兜底计成功
+    ——旧行为 accepted=len(voices)、voiceId 填空串、账本记成功，宿主据此谎报已提交。"""
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts"],
+                                             "stale": False, "source": "meta"})
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    monkeypatch.setattr(tools, "_http",
+                        lambda m, p, body=None, timeout=30, base=None, key=None:
+                        {"code": 200, "message": "已入库"})  # 回执缺 voiceIds
+    out = tools.submit_voices(
+        {"voices": [{"content": "体验不好的一条反馈"}],
+         "product": "codearts", "confirmed": True},
+        client_info={"name": "t"})
+    assert out["accepted"] == 0, "回执缺 voiceIds 必须计 0 成功"
+    assert out["voiceIds"] == [""]
+    assert out["rejected"], "必须透出 rejected 说明结果未知"
+    assert out["path"] == "hoarding"
+
+
+def test_hoarding_engine_rejected_passthrough(monkeypatch):
+    """引擎侧 rejected（产品校验拒绝等）必须透出到工具回执，不得吞掉。"""
+    monkeypatch.setattr(tools, "_load_meta",
+                        lambda force=False: {"products": ["codearts"],
+                                             "stale": False, "source": "meta"})
+    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    monkeypatch.setattr(tools, "_http",
+                        lambda m, p, body=None, timeout=30, base=None, key=None:
+                        {"code": 200, "voiceIds": [],
+                         "rejected": [{"reason": "产品未注册：NoSuchProduct"}]})
+    out = tools.submit_voices(
+        {"voices": [{"content": "一条会被拒的反馈"}],
+         "product": "NoSuchProduct", "confirmed": True},
+        client_info={"name": "t"})
+    assert out["accepted"] == 0
+    assert any("NoSuchProduct" in str(r.get("reason", "")) for r in out["rejected"])
+
+
 def test_content_boundary_rejects_oversize(monkeypatch):
     """内容边界：超 2000 字的反馈逐条拒绝（契约 maxLength 落到代码）。"""
     monkeypatch.setattr(tools, "_load_meta",
@@ -261,7 +299,7 @@ def test_content_boundary_rejects_oversize(monkeypatch):
     monkeypatch.setattr(tools, "JAVA_KEY", "k")
     monkeypatch.setattr(tools, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
-                        {"code": 200, "data": {"taskId": 1}})
+                        {"code": 201, "voiceIds": ["ext_vod-agent_t1"], "statuses": ["new"]})
     out = tools.submit_voices(
         {"voices": [{"content": "x" * 2001}, {"content": "正常长度的一条反馈"}],
          "product": "codearts", "confirmed": True},
