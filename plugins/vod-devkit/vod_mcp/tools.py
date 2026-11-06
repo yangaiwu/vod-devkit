@@ -324,11 +324,23 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
     if not fallback:
         server_ids = (out.get("voiceIds") or out.get("data", {}).get("voiceIds")
                       or [])
-        accepted = len(server_ids) or len(hoard_voices)
-        voice_ids.extend(server_ids if server_ids else [""] * len(hoard_voices))
+        # 引擎侧 rejected（产品校验拒绝等）透出，不吞（对齐 widget rejected 口径）
+        engine_rejected = ((out or {}).get("rejected")
+                           or ((out or {}).get("data") or {}).get("rejected")
+                           or [])
+        if server_ids:
+            accepted = len(server_ids)
+            voice_ids.extend(server_ids)
+        else:
+            # 回执缺失/整批被拒 → 不得兜底计成功（实锤缺陷：空 voiceId 记成功
+            # 且宿主模型据此谎报"已提交"）。accepted 以真实回执为准。
+            accepted = 0
+            voice_ids.extend([""] * len(hoard_voices))
+            if not engine_rejected:
+                engine_rejected = [{"reason": "引擎回执未含 voiceIds（提交结果未知），请勿视为已收录"}]
         task_ids.extend([None] * len(hoard_voices))  # 囤积语义：无即时任务
         result = {"accepted": accepted, "voiceIds": voice_ids,
-                  "taskIds": task_ids, "rejected": rejected,
+                  "taskIds": task_ids, "rejected": rejected + engine_rejected,
                   "analysis": "deferred",  # 囤积语义明示（V6 运营批量消费）
                   "path": "hoarding"}
         if out.get("productRegistered") is not None:
