@@ -9,7 +9,8 @@ ALL_PACKS = ("core", "collect", "knowledge")
 
 PACK_TOOLS = {
     "core": ["vod_devkit_info", "vod_auth_status"],
-    "collect": ["vod_submit_voices", "vod_list_submitted"],
+    # 两段式（D-token-approval-2 极简形态）随 collect 下发；codex 话术走 draft→commit
+    "collect": ["vod_submit_voices", "vod_draft_voices", "vod_commit_voices", "vod_list_submitted"],
     "knowledge": [],  # 纯技能包：3 个领域规则技能，零工具零依赖
 }
 
