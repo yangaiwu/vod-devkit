@@ -14,5 +14,11 @@
   "packs": "core,collect",
   "mcpConfig": "<HOME>/.hermes/mcp/vod-devkit.json",
   "skillsDir": "<HOME>/.hermes/skills/devops/vod-devkit",
+  "skillInstalls": [
+    {
+      "host": "hermes",
+      "dir": "<HOME>/.hermes/skills/devops/vod-devkit"
+    }
+  ],
   "skillHashes": "<SKILL_HASHES>"
 }

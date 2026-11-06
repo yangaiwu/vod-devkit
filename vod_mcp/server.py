@@ -35,6 +35,13 @@ def handle(message: dict) -> dict | None:
         return _result(req_id, {
             "protocolVersion": _PROTOCOL_VERSION,
             "capabilities": {"tools": {}},
+            "instructions": (
+                "vod-devkit 采集资产与纪律：技能 vod-feedback-collect 处理用户对"
+                "本产品的不满/建议/期望（触发词：慢/报错/体验差/希望支持/提单等）。"
+                "提交前必须征得用户明确同意（用户抱怨本身不构成同意）；提交回执"
+                "echo.contents 必须逐条原样转述给用户（「已收录原话：<content>」），"
+                "禁止改写、概括、增删字词。product 归因由安装绑定完成，禁止询问用户。"
+            ),
             "serverInfo": {
                 "name": "vod-devkit",
                 "version": tools.load_contract()["version"],

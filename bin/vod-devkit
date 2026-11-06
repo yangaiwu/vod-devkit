@@ -82,6 +82,19 @@ def _server_env(args, packs: str) -> dict:
     return env
 
 
+def _dir_hashes(base: Path) -> dict:
+    """对既有目录树计算相对 sha256 指纹（roster 对账用）。"""
+    import hashlib
+    out = {}
+    for skill in sorted(Path(base).iterdir()):
+        if skill.is_dir():
+            for f in sorted(skill.rglob("*")):
+                if f.is_file():
+                    out[f"{skill.name}/{f.relative_to(skill)}"] = (
+                        hashlib.sha256(f.read_bytes()).hexdigest())
+    return out
+
+
 def _skill_hashes() -> dict:
     """技能拷贝件指纹（D-drift-lock）：安装时记录 sha256，verify/doctor 比对
     ——拷贝件与安装产物漂移可检（vendor 规则漂移实锤的针对性防线）。"""
@@ -428,13 +441,18 @@ def cmd_install(args):
     # ~/.config/opencode/skills/ 并经 skill 工具按需加载——此前安装器漏拷，
     # opencode 只有工具描述一条约束通道，话术类约束全部失效）
     oc_skills = None
+    cx_skills = None
     if target == "opencode":
         import platform as _pf
         oc_base = Path.home() / (".config/opencode" if _pf.system() != "Windows"
                                  else "AppData/Local/opencode")
         oc_skills = oc_base / "skills"
         oc_skills.mkdir(parents=True, exist_ok=True)
+    elif target == "codex":
+        cx_skills = Path.home() / ".codex" / "skills"
+        cx_skills.mkdir(parents=True, exist_ok=True)
     pack_set = set(p for p in packs.split(",") if p)
+    extra_skill_dirs = [d for d in (oc_skills, cx_skills) if d is not None]
     for entry in sorted((ROOT / "skills").iterdir()):
         if entry.is_dir():  # vod-core / vod-feedback-collect
             skill = entry.name
@@ -446,11 +464,11 @@ def cmd_install(args):
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(entry, dst)
-            if oc_skills is not None:
-                dst_oc = oc_skills / skill
-                if dst_oc.exists():
-                    shutil.rmtree(dst_oc)
-                shutil.copytree(entry, dst_oc)
+            for oc_dst in extra_skill_dirs:
+                dst2 = oc_dst / skill
+                if dst2.exists():
+                    shutil.rmtree(dst2)
+                shutil.copytree(entry, dst2)
         # vendored 领域规则已由 vendor_rules.py 落成技能目录结构
 
     bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
@@ -468,6 +486,14 @@ def cmd_install(args):
         "packs": packs,
         "mcpConfig": str(mcp_conf),
         "skillsDir": str(HERMES_SKILLS_DIR),
+        # 名册对账（huaweicloud-devkit doctor 模式借鉴，2026-11-06）：
+        # 每个原生技能落点的独立指纹——漏装/漂移可被 doctor 逐落点抓出，
+        # 不再只盯 hermes 单目录（opencode 漏拷静默失效的针对性防线）
+        "skillInstalls": [
+            {"host": "hermes", "dir": str(HERMES_SKILLS_DIR)},
+            *[{"host": h, "dir": str(d)} for h, d in
+              (("opencode", oc_skills), ("codex", cx_skills)) if d is not None],
+        ],
         "skillHashes": _skill_hashes(),
     }
     manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
@@ -516,6 +542,21 @@ def cmd_doctor(_args):
         if drifted:
             problems.append("技能拷贝件与安装产物漂移（D-drift-lock）："
                             + "、".join(drifted) + "——重跑 install 恢复")
+        # 名册对账（逐原生落点）：漏装/漂移按宿主点名（借鉴 devkit doctor）
+        for si in mf.get("skillInstalls") or []:
+            d = Path(si["dir"])
+            if not d.exists():
+                problems.append(f"技能原生副本缺失（{si['host']}）：{d} 不存在"
+                                "——重跑 install 恢复")
+                continue
+            import hashlib
+            expect = mf.get("skillHashes") or {}
+            for rel, sha in expect.items():
+                f = d / rel
+                if not f.exists():
+                    problems.append(f"技能文件缺失（{si['host']}）：{rel}")
+                elif hashlib.sha256(f.read_bytes()).hexdigest() != sha:
+                    problems.append(f"技能文件漂移（{si['host']}）：{rel}")
     if problems:
         for x in problems:
             print("FAIL:", x)
