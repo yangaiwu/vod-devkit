@@ -64,3 +64,12 @@ for (const p of userDocs) {
   }
 }
 console.log('S55/S54/S56 锁 OK');
+
+// S51 话术=行为实况锁（2026-11-06 用户抓出）：匿名直建模式无人工审核闸，
+// 回执禁止出现「审核后将以 issue 形式跟进」类空头承诺（issue 链接由
+// pollForReceipt 在引擎真实建成后补出）
+if (src.includes('审核后将以')) throw new Error('S51 回归：回执含不存在的审核跟进承诺');
+if (src.includes('反馈经审核未采纳') && !src.includes("sync.status === 'REJECTED'")) {
+  throw new Error('S51 回归：REJECTED 话术失去引擎状态承载');
+}
+console.log('S51 回执实况锁 OK');

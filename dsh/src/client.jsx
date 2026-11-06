@@ -408,8 +408,11 @@ function FeedbackModal({ onClose }) {
         row.taskId = body.taskIds?.[0] || '';
         ledgerAppend(row);
         const reg = body.productRegistered === undefined ? true : body.productRegistered;
+        // 话术=行为实况（S51）：匿名直建模式下 issue 由引擎自动建（轮询到
+        // issue_sync CREATED 后补 issue 链接，pollForReceipt），不存在
+        // 「人工审核后跟进」闸——旧句是空头承诺（2026-11-06 用户抓出）
         setDone(reg
-          ? { ok: true, msg: '已收录，产品团队会看到这条反馈；审核后将以 issue 形式跟进。' }
+          ? { ok: true, msg: '已收录，产品团队会看到这条反馈。' }
           : { ok: true, msg: '已收录。注意：产品名尚未在平台注册，这条反馈暂不进产品分析，请联系部署方核对。' });
         // U-S2：后台轮询 issue_sync（引擎建成 issue 后补链接）
         pollForReceipt(row.serverVoiceId, setDone);
