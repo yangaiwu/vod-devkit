@@ -49,9 +49,8 @@ plugins.enabled 是显式同意门（第三方代码默认不运行），需手�
 | 宿主 | 激活现状（实测） | 截断暴露 | 强制评估可行性 | 结论 |
 |---|---|---|---|---|
 | hermes | 概率性，运维上下文实锤压过 | 57 字符索引预算（触发词已前置） | ✅ pre_llm_call 钩子（已落本插件） | 已覆盖 |
-| opencode | 实测自动激活成功一次（`→ Skill vod-feedback-collect`）；业界反馈自动触发概率低 | 工具输出通用截断（2000 行/50KiB），技能描述非独立窗口 | ✅ 可做：chat.message 钩子（UserPromptSubmit 等价）+ session.prompt 合成消息注入（noReply+synthetic）双通路；社区先例 opencode-skill-activation（主动建议候选技能）、opencode-cc-hooks（CC 钩子桥接） | P2 保留，前提高已结案——缺的是自研实现，不是能力 |
-| codex（补充风险） | 技能数少 | **注入路径不一致**：#37463 实锤 MAX_SKILL_PROMPT_BYTES 只管 agent-plugin skills，host/repo/user 来源的 SKILL.md body 可绕过 2KiB 校验——不同来源截断规则不同，子代理≠可靠绕行 | UserPromptSubmit 钩子输出本身会被截断（~4866 tokens）——未来上钩子注入有独立预算层 | 若技能数上升，优先评估惰性路由方向（#33945：按任务选少量相关技能注入），不依赖子代理绕行 |
-| codex | 技能已装（~/.codex/skills，5 个远低于 5440 字符预算——大规模截断发生在 20+ 技能场景）；$ 显式调用已验证 | 本仓技能数少，预算无忧 | 无已知消息级钩子面；社区方案是外部 wrapper（lazy-skill-router） | 接受显式兜底（「提交反馈：」前缀），不上 wrapper |
+| opencode | 实测自动激活成功一次（`→ Skill vod-feedback-collect`）；业界反馈自动触发概率低 | 工具输出通用截断（2000 行/50KiB），技能描述非独立窗口——本仓描述长度远低于该门槛，非瓶颈 | ✅ 可做：chat.message 钩子（UserPromptSubmit 等价）+ session.prompt 合成消息注入（noReply+synthetic）双通路；社区先例 opencode-skill-activation（主动建议候选技能）、opencode-cc-hooks（CC 钩子桥接） | P2 保留，前提高已结案——缺的是自研实现，不是能力 |
+| codex | 技能已装（~/.codex/skills，5 个远低于 #24299 的 20+ 截断阈值）；$ 显式调用已验证 | 技能少无忧；但注入路径不一致（#37463：MAX_SKILL_PROMPT_BYTES 只管 agent-plugin skills，host/repo/user 来源 SKILL.md body 可绕 2KiB 校验，子代理≠可靠绕行） | **不做：钩子面存在，但钩子输出自身被截断（~4,866 tokens）+ 注入路径不一致，收益不抵成本**；截断风险已记档，未来技能数上升优先评估惰性路由（#33945），不依赖子代理绕行 | 接受显式兜底（「提交反馈：」前缀），不上 wrapper |
 | dsh 壳 | MCP 工具常驻注册，无激活问题 | **500 字符描述窗口——D-desc-budget-1 门禁已锁**（先决条件<500） | cordis 侧理论可实现消息钩子 | 已由预算门禁覆盖；路由插件低优先 |
 | dsh UI | 部署注入形态（fail-fast 必配），无激活环节 | 不适用 | 不适用 | 天然免疫 |
 
