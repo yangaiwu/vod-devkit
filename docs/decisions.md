@@ -326,3 +326,12 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 恢复门禁：恢复 codex 采集（packs 改回 core,collect）的前置条件=token 化已上线并通过上述回归——否则熔断解除即复发。门禁动作不只是改 packs 一个动作。
 - 深审收口（2026-11-06，外部深审四项全数确认并修复，23a7bb1）：P0-2 packs 命名漂移（PRESETS full 含 workflow/kb 而运行期 ALL_PACKS=core/collect/knowledge——kb→knowledge 别名归一+full 改 knowledge，安装口运行口单源+PRESETS↔ALL_PACKS 回归锁）；P0-3 uninstall 破坏性路径（codex manifest.mcpConfig 曾指向用户整份 config.toml，卸载即删光——改指插件 .mcp.json/None+config.toml 永不删+codex plugin remove best-effort）；P1-4 ack 解除后置（安装成功才落，失败安装不解熔断）；P1-5 codex .mcp.json env 随 --packs 对齐（原硬编码 core,collect 使 --packs 半失效）；P2 strip 精确表头+AGENTS END 缺失拒写盘。
 - B 方案（bundle patch 接管配置）可行性修正（2026-11-06 负责人确认的分析结论）：dsh 配置模型中 bundle 层 patch 由 dsh.profile.bundles 清单管理（非手工 profile 块），持久化机制是设计内的——此前"半天调研块保留规则"目标修正为两件事：①确认 product/apiBase 为安装期静态部署值（已确认——恰好落在 bundle patch 适合静态值的安全区；运行期动态变更不走此通道）②cordis.patch.yml 必须写全该行全部期望 config 字段（bundle 层整行替换不深度合并）。落地路径=installer 在 dsh plugin add 后对缓存副本的 bundle patch 写全 config（与 P1-5 .mcp.json env 对齐同模式，缓存每部署一份）。doctor 自愈（A，e6a7d32）先落：检测块缺失/打平→按 manifest product/apiBase 重建嵌套块。
+
+## D-followup-design-1 复现步骤"AI 追问"前置规范（2026-11-06 业界对表，负责人确认）
+- 结论：对话式调研（Sprig/CloudResearch/Culture Amp）交叉共识——追问是"获取真实补充信息"的通道，不是"补全模板"的工具。当期不落追问话术（S51：引擎无 supplement 承载，先有承载再进话术）；本条是将来"复现步骤填充"立项的前置规范。
+- 四条硬约束（立项时全部落实，缺一不批）：
+  1. 可选增强非默认流程：默认不追问直接按原话提交；按反馈类型开关（功能异常类可开，体验差类不开）；上限 1 次追问、只问一个问题（业界：Sprig 1-2 次/CloudResearch ≤3 且一次一问；追问是交互成本，Typeform 完成率 47.3% vs 21.5% 的前提是负担前置可见）。
+  2. 话术固定化禁自由生成：固定模板（如"方便说一句当时在做什么操作吗？不方便也没关系，我按原话提交。"）；若动态生成必须过中立性规则校验——禁具体操作名/禁是非问/禁"是不是有没有"引导结构。依据：LLM assistance bias（过早给方案/泛泛确认）+ 引导性追问制造"被暗示的复现步骤"，表面是用户说的、实际是 agent 锚定的，比不问更糟且违反不编造红线。
+  3. 数据分层：追问回答独立存储（supplement 字段，来源标注"用户追问补充"），永不回流 content 原话——原话=用户主动说的，追问补充=经引导后说的，混字段=可信度稀释+声量基线污染。issue 复现段只引用 supplement 并注明来源。
+  4. 失败诚实回退：问不到就留空不出现（可选段形态），不注记不强填——与"用户未提供"拍板同向，业界同口径（无法生成安全追问就自动跳过；答"记不清"给 best guess 不施压）。
+- 与既有拍板的关系：不回流原话=原话红线；固定话术=F3 模糊话术纪律同构；诚实回退=用户未提供拍板；本条新增的只有中立性约束与来源分层两个增量。
