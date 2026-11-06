@@ -51,7 +51,7 @@ def route(user_message) -> str | None:
     text = user_message.strip()
     if not text:
         return None
-    if text.startswith(_STRONG_PREFIX) or _STRONG_PREFIX in text[:20]:
+    if _STRONG_PREFIX in text[:20]:  # startswith 的超集，单条件即可（冗余判断合并）
         return _STRONG_DIRECTIVE
     if _COMPLAINT_RE.search(text):
         return _DIRECTIVE
