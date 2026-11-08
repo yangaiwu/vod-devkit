@@ -106,6 +106,7 @@ git add package.json pyproject.toml vod_mcp/__init__.py contract/tools.schema.js
         plugins/vod-devkit/vod_mcp CHANGELOG.md
 git commit -qm "release: v$BUMP"
 git tag "v$BUMP"
-git push origin main --tags 2>/dev/null && echo "已推送 GitCode" || echo "GitCode 推送跳过"
-git push github main --tags 2>/dev/null && echo "已推送 GitHub 镜像" || echo "GitHub 镜像推送跳过（token 权限待补）"
+git push origin main --tags || { echo "FAIL: GitCode 推送失败（pre-push 门禁或网络），发版未完成"; exit 1; }
+echo "已推送 GitCode"
+if git push github main --tags 2>/dev/null; then echo "已推送 GitHub 镜像"; else echo "WARN: GitHub 镜像推送跳过（token 权限待补）"; fi
 echo "发版完成 v$BUMP（npm publish --access public 一键发布；缓存分发约 1-3 分钟）"
