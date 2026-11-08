@@ -54,15 +54,15 @@ def test_followup_fields_passthrough(hoard_capture):
 
 def test_followup_absent_keys_unchanged(hoard_capture):
     """未追问/未答 → 载荷键集合与旧流程完全一致（字节级/键集合断言，非空值断言）。"""
-    out = _submit(tools, [{"content": "补全响应有点慢，希望优化一下"}])
+    _submit(tools, [{"content": "补全响应有点慢，希望优化一下"}])
     hv = hoard_capture["body"]["voices"][0]
     assert set(hv.keys()) == {"title", "content"}, f"键集合漂移: {sorted(hv.keys())}"
 
 
 def test_followup_declined_or_blank_omitted(hoard_capture):
     """答"没有"（话术层挡后的兜底）/空白/None → 两键均不出现。"""
-    out = _submit(tools, [{"content": "补全响应有点慢，希望优化一下",
-                           "reproSteps": "没有", "expectedBehavior": "   "}])
+    _submit(tools, [{"content": "补全响应有点慢，希望优化一下",
+                     "reproSteps": "没有", "expectedBehavior": "   "}])
     hv = hoard_capture["body"]["voices"][0]
     assert "reproSteps" not in hv and "expectedBehavior" not in hv
     assert hv["content"] == "补全响应有点慢，希望优化一下"
@@ -71,7 +71,7 @@ def test_followup_declined_or_blank_omitted(hoard_capture):
 def test_followup_oversize_truncated_engine_aligned(hoard_capture):
     """超 2000：按引擎同口径截断（非报错非丢弃），截断值不得混入 content。"""
     long_text = "步" * 2500
-    out = _submit(tools, [{"content": "补全响应有点慢", "reproSteps": long_text}])
+    _submit(tools, [{"content": "补全响应有点慢", "reproSteps": long_text}])
     hv = hoard_capture["body"]["voices"][0]
     assert len(hv["reproSteps"]) == 2000
     assert hv["content"] == "补全响应有点慢"
