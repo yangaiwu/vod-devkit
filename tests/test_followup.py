@@ -147,3 +147,12 @@ def test_followup_skill_judgment_block_locked():
                 and "原样带出固定问句至多一次" in s)
     # 双副本一致（md5 语义由安装器纪律锁，此处锁判定块同源）
     assert blocks[0] == blocks[1], "SKILL 双副本必须逐字节一致"
+
+
+def test_followup_skip_clause_in_contract():
+    """S67-S70：契约 description 跳过句（引导补充已获实质内容不再追问）
+    逐字在位——判定块三层与契约/SKILL 三载体同源。"""
+    c = json.load(open("contract/tools.schema.json"))
+    desc = c["tools"]["vod_submit_voices"]["description"]
+    assert ("引导补充（说下具体现象）已获实质内容并并入 content 时不再追问、直接提交" in desc)
+    assert ("仅引导补充未获回应或仅泛化抱怨且用户确认提交时才带出固定问句" in desc)
