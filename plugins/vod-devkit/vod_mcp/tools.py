@@ -30,12 +30,17 @@ _FOLLOWUP_DECLINES = frozenset({
 
 def _followup_fields(voice: dict) -> dict:
     """D-followup-impl-2 单源提取（submit 主路径与 draft 暂存共用，禁双边漂移）：
-    仅 trim 非空且非拒答词才含键；引擎同口径截 2000；内容永不回流 content。"""
+    仅 trim 非空且非拒答词才含键；引擎同口径截 2000；内容永不回流 content。
+    followupStatus（评审八点 #3 引擎侧承载的插件上报）：三态白名单归一
+    （strip+lower），白名单外/缺失省键——引擎侧降 NULL 不拒收，插件侧同口径双保险。"""
     out = {}
     for _f in ("reproSteps", "expectedBehavior"):
         _val = str(voice.get(_f) or "").strip()
         if _val and _val.lower() not in _FOLLOWUP_DECLINES:
             out[_f] = _val[:2000]
+    _st = str(voice.get("followupStatus") or "").strip().lower()
+    if _st in ("not_asked", "declined", "answered"):
+        out["followupStatus"] = _st
     return out
 
 _CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract" / "tools.schema.json"

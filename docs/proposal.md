@@ -941,3 +941,24 @@ S72 落地后首次真实观测即抓到拼接层裁量：用户两轮原话"产
 | # | 用例 | 断言 | 承载 |
 |---|---|---|---|
 | S73 | 拼接逐字 | 各轮原话逐字保留（含语气词/标点），轮次衔接用换行或空格不新增标点，拼接结果可逐字符还原回各轮原文 | SKILL 拼接判定例 + test_concat_verbatim_judgment_example_locked |
+
+## S74-S76 追问环节状态上报（followupStatus，2026-11-08 引擎侧 V55-V57 的插件对接）
+
+引擎契约增量（VOD-Project fc54cca3）：voices[].followupStatus 可选三态，囤积列
+followup_status 平台侧承载（issue 不渲染）。插件侧对齐：
+
+S74 三态判定映射随行上送
+  判定块三层结果→followupStatus：not_asked（已有实质回应/泛化未触发）/ 
+  declined（问了未答或答"没有"）/ answered（已答随两字段）。SKILL 判定块
+  第 5 条话术锁；契约 draft/submit 双工具 items 增可选枚举字段。
+  回归：test_followup#followup_status_passthrough_submit / #followup_status_stashed_in_draft。
+
+S75 白名单归一双保险
+  插件侧与引擎侧同口径：strip+lower 归一，白名单外/缺失省键（不拒收不报错）。
+  单源 _followup_fields（submit/draft 共用，禁双边漂移——S64 实锤教训的机制化）。
+  回归：test_followup#followup_status_invalid_omitted。
+
+S76 dsh 壳行为对齐、desc 不宣讲
+  dsh/lib/index.js 透传循环同口径扩展；desc 1495/1500 无预算不宣讲
+  （宿主技能层 SKILL 第 5 条承载口径显式化）。
+  回归：node --test 全绿 + dsh desc 预算门禁不回退。

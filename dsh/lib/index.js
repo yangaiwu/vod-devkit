@@ -273,11 +273,14 @@ export function apply(ctx, config) {
                     if (content.length > 2000) { rejected.push({ index: i, reason: `content 超 2000 字（${content.length}）` }); continue; }
                     const hv = { title: content.slice(0, 128), content }; // R3：title=用户原文
                     // D-followup-impl-2 追问补充透传：仅 trim 非空才含键（未追问/答"没有"=键集合与旧流程一致）；引擎同口径截 2000
+                    // followupStatus（评审八点 #3）：三态白名单归一透传，白名单外省键（desc 无预算不宣讲，行为对齐 vod_mcp 单源）
                     const DECLINES = new Set(['没有', '无', '没有。', '没了', '跳过', '不方便', '不用了', '不用', '不补充', '算了', '没有了', '没有了。', '不方便说', 'no', 'none', 'skip', 'n/a']);
                     for (const f of ['reproSteps', 'expectedBehavior']) {
                         const val = String(v[f] ?? '').trim();
                         if (val && !DECLINES.has(val.toLowerCase())) hv[f] = val.slice(0, 2000);
                     }
+                    const st = String(v.followupStatus ?? '').trim().toLowerCase();
+                    if (['not_asked', 'declined', 'answered'].includes(st)) hv.followupStatus = st;
                     hoard.push(hv);
                 }
                 if (hoard.length) {

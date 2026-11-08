@@ -561,3 +561,13 @@ manifest（归一化 HOME/REPO/ORIGIN/SHA/installedAt，skillHashes 值不锁—
 漂移由 D-drift-lock 专项覆盖）；探针手法沉淀 tests/probe.py（护栏拒止按
 error 字段分流的教训入注释），pack 门控补真实装配层锁（stdio probe 对
 VOD_PACKS 两种取值的 tools/list 断言）。
+
+## 承载补充：followupStatus 插件对接（S74-S76，2026-11-08）
+
+- 单源：_followup_fields 扩展（submit 主路径/draft 暂存共用）——三态白名单
+  strip+lower 归一，白名单外/缺失省键（引擎侧降 NULL 不拒收，插件同口径双保险）
+- 契约：tools.schema.json draft/submit 双工具 voices[].followupStatus
+  （enum 白名单，maxLength 32）；工具 description 零增量（预算门禁不回退）
+- dsh 壳：透传循环同口径扩展；desc 无预算不宣讲（SKILL 宿主技能层承载）
+- SKILL：判定块第 5 条=三态映射话术锁（双副本+宿主副本 md5 对齐）
+- 边界：commit 复用 draft 暂存 payload，followupStatus 随 draft 冻结（防调包语义不变）

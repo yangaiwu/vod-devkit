@@ -38,6 +38,16 @@
                   "type": "string",
                   "maxLength": 2000,
                   "description": "用户追问补充（可选）：期望表现，来源与纪律同 reproSteps"
+                },
+                "followupStatus": {
+                  "type": "string",
+                  "enum": [
+                    "not_asked",
+                    "declined",
+                    "answered"
+                  ],
+                  "maxLength": 32,
+                  "description": "追问环节状态（可选，按 S67-S70 判定结果上送）：not_asked=未触发追问；declined=问了未答/拒答；answered=已答并随 reproSteps/expectedBehavior。白名单外值引擎降 NULL 不拒收"
                 }
               },
               "required": [
@@ -253,6 +263,16 @@
                   "type": "string",
                   "maxLength": 2000,
                   "description": "用户追问补充（可选）：期望表现，来源与纪律同 reproSteps"
+                },
+                "followupStatus": {
+                  "type": "string",
+                  "enum": [
+                    "not_asked",
+                    "declined",
+                    "answered"
+                  ],
+                  "maxLength": 32,
+                  "description": "追问环节状态（可选，按 S67-S70 判定结果上送）：not_asked=未触发追问；declined=问了未答/拒答；answered=已答并随 reproSteps/expectedBehavior。白名单外值引擎降 NULL 不拒收"
                 }
               },
               "required": [

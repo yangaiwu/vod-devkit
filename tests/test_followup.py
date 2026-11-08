@@ -6,10 +6,13 @@
 固定问句逐字锁防话术漂移（话术固定化约束②）。
 """
 import json
+from pathlib import Path
 
 import pytest
 
 from vod_mcp import tools
+
+_ROOT = Path(__file__).resolve().parent.parent
 
 FIXED_QUESTION = ("方便的话，补充一下遇到这个问题时的操作步骤或期望的表现吗？"
                   "不方便回复\"没有\"，我直接提交。")
@@ -223,3 +226,70 @@ def test_concat_verbatim_judgment_example_locked():
         assert "拼接判定例" in s
         assert "禁删语气词" in s and "禁补标点" in s and "禁规范措辞" in s
         assert "逐字符比对还原回各轮原文" in s
+
+
+def test_followup_status_passthrough_submit(monkeypatch):
+    """S74/S75：followupStatus 三态归一透传（submit 主路径）；非法值省键不报错。"""
+    captured = {}
+
+    def fake_http(method, path, body=None, timeout=30, base=None, key=None):
+        if path.endswith("/external/voices"):
+            captured["body"] = body
+            n = len(body.get("voices", []))
+            return {"code": 200, "voiceIds": [f"ext_vod-agent_t{i}" for i in range(n)]}
+        return {}
+
+    monkeypatch.setattr(tools, "JAVA_KEY", "k-test")
+    monkeypatch.setattr(tools, "_http", fake_http)
+    out = _submit(tools, [
+        {"content": "问题一", "followupStatus": " ANSWERED "},
+        {"content": "问题二", "followupStatus": "declined"},
+        {"content": "问题三", "followupStatus": "not_asked"},
+        {"content": "问题四", "followupStatus": "yes-please"},  # 白名单外
+        {"content": "问题五"},  # 缺失
+    ])
+    assert out["accepted"] == 5
+    vs = captured["body"]["voices"]
+    assert vs[0]["followupStatus"] == "answered"
+    assert vs[1]["followupStatus"] == "declined"
+    assert vs[2]["followupStatus"] == "not_asked"
+    assert "followupStatus" not in vs[3], "白名单外省键（引擎侧降 NULL，插件双保险）"
+    assert "followupStatus" not in vs[4]
+
+
+def test_followup_status_stashed_in_draft(tmp_path, monkeypatch):
+    """S74：draft 暂存 followupStatus（commit 复用 payload 原样上送）；
+    非法值不进暂存；payload sha 链不断。"""
+    import hashlib, json as _json
+    monkeypatch.setattr(tools, "_runtime_path", lambda: tmp_path / "runtime.json")
+    monkeypatch.setattr(tools, "JAVA_KEY", "k-test")
+    out = tools.draft_voices(
+        {"voices": [
+            {"content": "导出卡住", "followupStatus": "Answered"},
+            {"content": "搜索不准", "followupStatus": "bogus"},
+         ], "product": "codearts"},
+        client_info={"name": "t"})
+    d = (tools._runtime_cfg().get(tools._DRAFT_KEY) or {})[out["draftId"]]
+    v0, v1 = d["payload"]["voices"]
+    assert v0["followupStatus"] == "answered"
+    assert "followupStatus" not in v1
+    assert hashlib.sha256(_json.dumps(d["payload"], sort_keys=True,
+                                      ensure_ascii=False).encode()).hexdigest() == d["payloadSha256"]
+
+
+def test_followup_status_skill_mapping_locked():
+    """S74：SKILL 判定块三态映射话术锁（双副本）。"""
+    for p in ("skills/vod-feedback-collect/SKILL.md",
+              "plugins/vod-devkit/skills/vod-feedback-collect/SKILL.md"):
+        s = open(p, encoding="utf-8").read()
+        assert "followupStatus" in s
+        assert "not_asked" in s and "declined" in s and "answered" in s
+        assert "不确定就不带键" in s
+
+
+def test_followup_status_contract_enum_locked():
+    """S74：契约 draft/submit 双工具 items 均含 followupStatus 白名单枚举。"""
+    c = json.loads((_ROOT / "contract" / "tools.schema.json").read_text("utf-8"))
+    for tn in ("vod_submit_voices", "vod_draft_voices"):
+        prop = c["tools"][tn]["input"]["properties"]["voices"]["items"]["properties"]["followupStatus"]
+        assert prop["enum"] == ["not_asked", "declined", "answered"]

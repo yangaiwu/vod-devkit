@@ -112,6 +112,10 @@ version: 1
    符合诚实回退。**
    4. 引擎侧承载已就绪（t_vod_voice_inbox.repro_steps/expected_behavior，
       issue 渲染带「用户追问补充」来源注记）——本话术非空头承诺（S51 自审过）。
+   5. 追问环节状态随行上送（followupStatus，引擎指标字段、issue 不渲染）：
+      not_asked=未触发追问（已有实质回应/泛化未触发）；declined=问了未答
+      或答"没有/不方便"；answered=已答并随两字段上送。三态白名单，
+      不确定就不带键（引擎降 NULL）。
 
    **反截断红线（2026-11-08 opencode 实锤）**：用户在引导补充后给出的
    补充句是**完整提交物**，content=该句逐字全量上送，禁止摘取其中片段
