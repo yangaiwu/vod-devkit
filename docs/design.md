@@ -380,6 +380,7 @@ normalizeLoose 后不设白名单（未注册落 UNKNOWN 档+productRegistered
 | S65 键集合零漂移 | 拒答词集兜底（_FOLLOWUP_DECLINES）+ test_followup 键集合断言（{title,content}）+ 超 2000 截断例 |
 | S66 话术固定化 | 固定问句逐字锁（contract description 恰 1 次）+ SKILL 双副本 + dsh 壳描述；desc 预算门禁（≤1500）复验 |
 | S67-S70 触发判定块 | SKILL 三层判定块逐字锁（test_followup_skill_judgment_block_locked）+ 契约跳过句（test_followup_skip_clause_in_contract）；dsh 壳 desc 预算 1495/1500 无余量不塞跳过句——dsh 宿主由原生技能层（判定块全量）承载 |
+| S67-S70 二次微调 | 跳过条件收窄（新字段来源唯一=固定追问原样回答，引导补充的操作/期望留 content 不回溯）+「未回应/泛化抱怨」判定例+一句话口径可测原文（payload 键/issue 补充段/来源注记三处诚实回退）——边界锁 test_followup_boundary_refinement_locked；契约 939/1500 |
 
    数据分层：追问答案只进 reproSteps/expectedBehavior 独立字段
    （引擎 V20261106110000003 列 → issue 渲染带「（用户追问补充）」来源
