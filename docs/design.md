@@ -381,6 +381,7 @@ normalizeLoose 后不设白名单（未注册落 UNKNOWN 档+productRegistered
 | S66 话术固定化 | 固定问句逐字锁（contract description 恰 1 次）+ SKILL 双副本 + dsh 壳描述；desc 预算门禁（≤1500）复验 |
 | S67-S70 触发判定块 | SKILL 三层判定块逐字锁（test_followup_skill_judgment_block_locked）+ 契约跳过句（test_followup_skip_clause_in_contract）；dsh 壳 desc 预算 1495/1500 无余量不塞跳过句——dsh 宿主由原生技能层（判定块全量）承载 |
 | S72 反截断红线 | SKILL 补充句整体=content 逐字锁（test_anti_truncation_redline_locked）——宿主会话日志取证（opencode.db part 表） |
+| S73 拼接判定例 | 逐字=含语气词/标点，禁删啊补句号式改写（test_concat_verbatim_judgment_example_locked） |
 | S71 问卷化 tripwire | 话术载体结构词黑名单锁（test_followup_questionnaire_structure_words_banned）——自由生成追问清单的门禁化拦截 |
 | S67-S70 二次微调 | 跳过条件收窄（新字段来源唯一=固定追问原样回答，引导补充的操作/期望留 content 不回溯）+「未回应/泛化抱怨」判定例+一句话口径可测原文（payload 键/issue 补充段/来源注记三处诚实回退）——边界锁 test_followup_boundary_refinement_locked；契约 939/1500 |
 

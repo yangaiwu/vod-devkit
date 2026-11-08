@@ -211,3 +211,15 @@ def test_anti_truncation_redline_locked():
         assert "禁止摘取其中片段" in s
         assert "整句才是原话" in s
         assert "按序拼接为 content" in s
+
+
+def test_concat_verbatim_judgment_example_locked():
+    """S72 拼接判定例（第二次实锤）：多轮拼接禁删语气词/禁补标点——
+    实锤"产品体验很差劲啊"被拼成"产品体验很差劲。"（删啊补句号）。
+    双副本判定例逐字在位。"""
+    for p in ("skills/vod-feedback-collect/SKILL.md",
+              "plugins/vod-devkit/skills/vod-feedback-collect/SKILL.md"):
+        s = open(p, encoding="utf-8").read()
+        assert "拼接判定例" in s
+        assert "禁删语气词" in s and "禁补标点" in s and "禁规范措辞" in s
+        assert "逐字符比对还原回各轮原文" in s
