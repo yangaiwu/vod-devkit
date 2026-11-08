@@ -494,6 +494,12 @@ def probe_key(key: str | None = None, timeout: int = 8) -> dict:
     except ToolError as ex:
         code = ex.code
         if code == 401 or code == -32012:
+            # 匿名令牌 401 ≠ 配置错误：报"过期待重领"而非"rejected"，
+            # 避免 runtime 残留过期匿名令牌时被误读为正式 key 失效
+            # （显式 key 被拒仍报 rejected——fail fast 口径不变）
+            if not _explicit_key():
+                return {"ok": False, "reason": "expired-anonymous", "fingerprint": fp,
+                        "note": "匿名令牌已过期：下次提交自动重领，无需操作"}
             return {"ok": False, "reason": "rejected", "fingerprint": fp}
         return {"ok": None, "reason": "unreachable", "fingerprint": fp}
 

@@ -530,6 +530,7 @@ def test_save_runtime_write_after_verify_0600(tmp_path, monkeypatch):
 
 def test_probe_key_three_verdicts(monkeypatch):
     """探针三态：200=有效 / 401=无效 / 网络错误=不判定（网络问题不是 key 问题）。"""
+    monkeypatch.setenv("VOD_JAVA_API_KEY", "k-test")  # 显式 key 档（401=fail fast rejected）
     monkeypatch.setattr(tools, "JAVA_KEY", "k-test")
 
     def ok_http(method, path, body=None, timeout=30, base=None, key=None):
@@ -556,6 +557,24 @@ def test_probe_key_three_verdicts(monkeypatch):
     monkeypatch.setattr(tools, "JAVA_KEY", "")
     out = tools.probe_key()
     assert out == {"ok": None, "reason": "no-key", "fingerprint": None}
+
+
+def test_probe_key_expired_anonymous_token(monkeypatch):
+    """匿名令牌 401 → expired-anonymous（非 rejected）：runtime 残留过期匿名
+    令牌不得被误读为正式 key 失效；note 指明下次提交自动重领。"""
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
+    monkeypatch.setattr(tools, "JAVA_KEY", "anon-token-stale")
+
+    def denied(method, path, body=None, timeout=30, base=None, key=None):
+        raise tools.ToolError("401", code=401)
+
+    monkeypatch.setattr(tools, "_http", denied)
+    tier = str(tools._RT.get("token_tier") or "")
+    if tier != "anonymous":  # 仓内 runtime.json 若非匿名档则本用例前提不成立
+        monkeypatch.setattr(tools, "_RT", {**tools._RT, "token_tier": "anonymous"})
+    out = tools.probe_key()
+    assert out["ok"] is False and out["reason"] == "expired-anonymous"
+    assert "重领" in out["note"] and tools._fingerprint("anon-token-stale") == out["fingerprint"]
 
 
 def test_auth_status_no_key_material_anywhere(monkeypatch):
