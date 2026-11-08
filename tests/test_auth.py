@@ -657,3 +657,13 @@ def test_legacy_key_removed_falls_to_anon_chain_e2e(monkeypatch):
     assert out["accepted"] == 1 and out["path"] == "hoarding"
     assert saved.get("token_tier") == "anonymous"
     assert any(p.endswith("/external/token") for m, p, _ in calls), "必须先取令牌"
+
+
+def test_legacy_key_hint_contains_version_and_reinstall_command():
+    """旧版残留凭据自愈提示（评审拍板项）：错误路径与 auth_status 检测位都带可操作指引。"""
+    from vod_mcp import tools as t
+    hint = t._legacy_key_hint()
+    assert "npx vod-devkit@latest install" in hint
+    assert "当前 v" in hint  # 版本号在位
+    src = (t.__file__ and open(t.__file__, encoding="utf-8").read()) or ""
+    assert src.count("_legacy_key_hint()") >= 4  # 两处提交失败路径 + auth_status 检测位 + 定义调用

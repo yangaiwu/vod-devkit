@@ -238,6 +238,15 @@ def _voice_id(source: str, content: str, nonce: str) -> str:
     return f"ext_{source}_{hashlib.sha1((content + nonce).encode('utf-8')).hexdigest()[:12]}"
 
 
+def _legacy_key_hint() -> str:
+    """旧版残留凭据自愈提示（评审拍板项）：出错时给可操作路径，不发公告靠用户撞。
+    含当前插件版本与重装命令——重装会刷新 runtime/清掉旧 key 残留。"""
+    version = getattr(__import__("vod_mcp"), "__version__", "unknown")
+    return ("若为旧版安装残留凭据：更新插件（当前 v" + version + "）并重装即可清除——"
+            "npx vod-devkit@latest install --target <宿主> --product <产品名>；"
+            "或移除 VOD_JAVA_API_KEY 环境变量走匿名档")
+
+
 def _explicit_key() -> bool:
     """当前 JAVA_KEY 是否为显式配置（正式/宿主 key）而非本会话自动领取的匿名令牌。
 
@@ -354,8 +363,8 @@ def submit_voices(params: dict, client_info: dict | None = None,
                 #（归因错位比报错更糟，同 AIShell 错归病根）
                 raise ToolError(
                     f"注入的 key 被引擎拒绝（指纹 {_fingerprint(JAVA_KEY)}）："
-                    "请核对 key 是否过期/被吊销，或移除 key 走匿名档（删除 "
-                    "VOD_JAVA_API_KEY 环境变量与 runtime.json java_key）",
+                    "请核对 key 是否过期/被吊销，或移除 key 走匿名档。"
+                    + _legacy_key_hint(),
                     code=-32012)
             # 缺 key/匿名令牌失效 → 零字段匿名令牌 → 落 runtime.json → 重试一次
             token = _fetch_anon_token()
@@ -417,7 +426,8 @@ def submit_voices(params: dict, client_info: dict | None = None,
                     # 显式 key 被拒 → fail fast（同囤积主路径口径，防静默降级）
                     raise ToolError(
                         f"注入的 key 被引擎拒绝（指纹 {_fingerprint(JAVA_KEY)}）："
-                        "请核对 key 是否过期/被吊销，或移除 key 走匿名档", code=-32012)
+                        "请核对 key 是否过期/被吊销，或移除 key 走匿名档。"
+                        + _legacy_key_hint(), code=-32012)
                 # 零字段匿名令牌：缺 key/401 → 自动取令牌 → 落 runtime.json → 重试一次
                 token = _fetch_anon_token()
                 if token:
@@ -504,6 +514,10 @@ def auth_status(params: dict, client_info: dict | None = None) -> dict:
     if JAVA_KEY:
         # 主动探针（devkit auth init 真调 IAM 的廉价版）：用户问"key 好没好"有确定答案
         out["keyCheck"] = probe_key()
+        if _explicit_key():
+            # 旧版残留凭据检测位（评审拍板项）：显式 key 存活即在位提示自愈路径，
+            # 不等提交撞 401 才发现（codex 0.2.3 残留 key 挡匿名链的实锤教训）
+            out["legacyKeyHint"] = _legacy_key_hint()
     if not JAVA_KEY:
         out["guidance"] = _KEY_GUIDANCE
         out["tokenReady"] = "首次提交时将自动申请匿名令牌（零字段，日限额低）"
