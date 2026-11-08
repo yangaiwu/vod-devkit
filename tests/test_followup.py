@@ -111,3 +111,13 @@ def test_followup_two_phase_draft_carries_fields(tmp_path, monkeypatch):
     payload = d["payload"]
     assert hashlib.sha256(_json.dumps(payload, sort_keys=True,
                                       ensure_ascii=False).encode()).hexdigest() == d["payloadSha256"]
+
+
+def test_followup_fields_helper_single_source():
+    """重构回归锁：单源 _followup_fields 的词集/截断/空白语义
+    （submit 与 draft 双路径共用本函数，行为断言见上两路径用例）。"""
+    out = tools._followup_fields({"reproSteps": " 没有了 ", "expectedBehavior": " 应出文件 "})
+    assert out == {"expectedBehavior": "应出文件"}  # "没有了"含拒答词但非精确命中——精确词集语义
+    assert tools._followup_fields({"reproSteps": "没有"}) == {}
+    assert tools._followup_fields({"expectedBehavior": "x" * 2500}) == {"expectedBehavior": "x" * 2000}
+    assert tools._followup_fields({}) == {}

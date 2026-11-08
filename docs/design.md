@@ -369,13 +369,24 @@ normalizeLoose 后不设白名单（未注册落 UNKNOWN 档+productRegistered
    docs/decisions.md D-codex-circuit-breaker-1（立项表述纠偏：
    token 化=最强摩擦+审计链非硬保证；恢复门禁前置）。
 
-**复现步骤 AI 追问（S63，当期不落）**：未来填充通道的前置规范
+**复现步骤 AI 追问（S63 → S64-S66 已落地，D-followup-impl-2）**：前置规范
    （业界对表 D-followup-design-1：可选增强/话术固定化/数据分层/
-   诚实回退四约束）；当期采集话术不得出现追问承诺（引擎无
-   supplement 承载=空头支票），ux-sync S63 锁 tripwire——立项落地
-   时随引擎承载有意识更新。
+   诚实回退四约束）——引擎承载就绪后经负责人批准落地（2026-11-08，
+   A1 确认环节合并一问 / A2 MCP+dsh 壳，UI 壳红线不动）。承载映射：
 
-## 四、安全护栏（声明式）## 四、安全护栏（声明式）
+| 用例 | 承载 |
+|---|---|
+| S64 透传正例 | tools.py `_followup_fields`（单源）+ tests/test_followup.py 透传/两段式两例 + dsh/test/followup.test.mjs 行为级 |
+| S65 键集合零漂移 | 拒答词集兜底（_FOLLOWUP_DECLINES）+ test_followup 键集合断言（{title,content}）+ 超 2000 截断例 |
+| S66 话术固定化 | 固定问句逐字锁（contract description 恰 1 次）+ SKILL 双副本 + dsh 壳描述；desc 预算门禁（≤1500）复验 |
+
+   数据分层：追问答案只进 reproSteps/expectedBehavior 独立字段
+   （引擎 V20261106110000003 列 → issue 渲染带「（用户追问补充）」来源
+   注记），content 原话逐字不变（回归断言）。诚实回退：未答/拒答=字段
+   不上送，issue 侧整段不出现不注记（引擎 I21/I22 对应）。ux-sync S63
+   tripwire 保留：禁的是"承诺未来会追问"的空头话术，实际问句不触雷。
+
+## 四、安全护栏（声明式）
 
 policy.json 规则集（severity: deny / confirm / warn）：
 

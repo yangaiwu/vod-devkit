@@ -24,8 +24,19 @@ from vod_mcp import DEFAULT_JAVA_BASE
 # 键集合仍零漂移（test_followup_declined_or_blank_omitted 回归锁）。
 _FOLLOWUP_DECLINES = frozenset({
     "没有", "无", "没有。", "没了", "跳过", "不方便", "不用了", "不用",
-    "不补充", "算了", "no", "none", "skip", "n/a",
+    "不补充", "算了", "没有了", "没有了。", "不方便说", "no", "none", "skip", "n/a",
 })
+
+
+def _followup_fields(voice: dict) -> dict:
+    """D-followup-impl-2 单源提取（submit 主路径与 draft 暂存共用，禁双边漂移）：
+    仅 trim 非空且非拒答词才含键；引擎同口径截 2000；内容永不回流 content。"""
+    out = {}
+    for _f in ("reproSteps", "expectedBehavior"):
+        _val = str(voice.get(_f) or "").strip()
+        if _val and _val.lower() not in _FOLLOWUP_DECLINES:
+            out[_f] = _val[:2000]
+    return out
 
 _CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract" / "tools.schema.json"
 
@@ -322,14 +333,9 @@ def submit_voices(params: dict, client_info: dict | None = None,
         ut = v.get("userType")
         if ut:
             hv["userType"] = ut
-        # D-followup-impl-2 追问补充透传：仅 trim 非空才含键（未追问/答"没有"=键集合
-        # 与旧流程完全一致，零漂移）；引擎同口径 truncate 2000；内容禁回流 content。
-        # DECLINES=拒答语义词集（话术承诺了"回复没有"，客户端必须兜底拦——
-        # 模型不守话术纪律时键集合仍零漂移）
-        for _f in ("reproSteps", "expectedBehavior"):
-            _val = str(v.get(_f) or "").strip()
-            if _val and _val.lower() not in _FOLLOWUP_DECLINES:
-                hv[_f] = _val[:2000]
+        # D-followup-impl-2 追问补充透传：单源 _followup_fields（拒答词集兜底+
+        # 引擎同口径截 2000+禁回流 content；未追问/答"没有"=键集合零漂移）
+        hv.update(_followup_fields(v))
         hoard_voices.append(hv)
     body = {"voices": hoard_voices}
     if product:  # 无归因不带 product（引擎 UNKNOWN 档），不本地拦截
@@ -720,12 +726,9 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
             item["tags"] = v["tags"]
         if v.get("userType"):
             item["userType"] = v["userType"]
-        # D-followup-impl-2：追问补充随 draft 暂存（commit 复用 payload 原样上送）；
-        # 同主路径口径：trim 非空+拒答词集拦截+引擎同口径截 2000，禁回流 content
-        for _f in ("reproSteps", "expectedBehavior"):
-            _val = str(v.get(_f) or "").strip()
-            if _val and _val.lower() not in _FOLLOWUP_DECLINES:
-                item[_f] = _val[:2000]
+        # D-followup-impl-2：追问补充随 draft 暂存（commit 复用 payload 原样上送），
+        # 单源 _followup_fields 与主路径同口径
+        item.update(_followup_fields(v))
         clean.append(item)
     if not clean:
         raise ToolError("voices 为必填且至少 1 条", code=-32602)
