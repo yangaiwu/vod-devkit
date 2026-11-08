@@ -7,4 +7,6 @@ echo "[pre-push] lint..."
 "$PY" -m pyflakes vod_mcp/*.py tests/*.py || { echo "[pre-push] FAIL: lint 未过，禁止推送"; exit 1; }
 echo "[pre-push] pytest..."
 "$PY" -m pytest tests/ -q || { echo "[pre-push] FAIL: 测试未过，禁止推送"; exit 1; }
+echo "[pre-push] secret/high-risk scan..."
+"$PY" scripts/secret_scan.py || { echo "[pre-push] FAIL: 凭据/高危扫描未过，禁止推送"; exit 1; }
 echo "[pre-push] OK"

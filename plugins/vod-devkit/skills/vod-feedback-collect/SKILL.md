@@ -1,6 +1,6 @@
 ---
 name: vod-feedback-collect
-description: '用户抱怨/体验差/太慢/报错/提单 → 采集原话进 VOD。识别到抱怨即承接并征得同意（禁止问哪个产品，禁止复现排查模式）；content=原话逐字；一次抱怨一条；回执 echo 原样转述。详见正文流程与禁令。'
+description: '用户抱怨/体验差/太慢/报错/提单 → 采集原话进 VOD。识别到抱怨即承接并征得同意（禁止问哪个产品，禁止复现排查模式）；content=原话逐字；一次抱怨一条；回执 echo 原样转述。详见正文流程与禁令。Triggers: "体验差","太难用","太慢","报错了","出bug了","有bug","反馈问题","反馈建议","提个单","报告问题","不生效","不好使","操作不方便","卡住了","崩溃了","report a problem","bug report","poor experience","feedback"'
 version: 1
 ---
 

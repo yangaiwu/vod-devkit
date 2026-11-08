@@ -560,7 +560,7 @@ def test_probe_key_three_verdicts(monkeypatch):
 
 def test_auth_status_no_key_material_anywhere(monkeypatch):
     """脱敏复查（D-key-guard-1③）：auth_status/账本全输出面 grep 不到 key 明文。"""
-    secret = "super-secret-key-value-9f2e"
+    secret = "super-secret-key-value-9f2e"  # secret-scan:allow 测试夹具
     monkeypatch.setattr(tools, "JAVA_KEY", secret)
     monkeypatch.setattr(tools, "probe_key", lambda: {"ok": None, "reason": "unreachable"})
     out = json.dumps(tools.auth_status({}, client_info={"name": "t"}))
