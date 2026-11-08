@@ -14,15 +14,15 @@ def _hit(patterns, line):
 
 
 def test_url_token_detected():
-    assert _hit(secret_scan.SECRET_PATTERNS, "https://oauth2:vpTOKEN1234567890abcdef1234@gitcode.com/x.git")
+    assert _hit(secret_scan.SECRET_PATTERNS  # secret-scan:allow 正例载体, "https://oauth2:vpTOKEN1234567890abcdef1234@gitcode.com/x.git")
 
 
 def test_private_key_detected():
-    assert _hit(secret_scan.SECRET_PATTERNS, "-----BEGIN RSA PRIVATE KEY-----")
+    assert _hit(secret_scan.SECRET_PATTERNS  # secret-scan:allow 正例载体, "-----BEGIN RSA PRIVATE KEY-----")
 
 
 def test_bearer_token_detected():
-    assert _hit(secret_scan.SECRET_PATTERNS, "Authorization: Bearer abcdef0123456789abcdef0123456789ab")
+    assert _hit(secret_scan.SECRET_PATTERNS  # secret-scan:allow 正例载体, "Authorization: Bearer abcdef0123456789abcdef0123456789ab")
 
 
 def test_benign_line_not_hit():
