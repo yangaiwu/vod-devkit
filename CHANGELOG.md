@@ -209,3 +209,10 @@
 - 1ac4b48 fix(release): GitCode 推送失败改硬失败 exit 1——本次发版 push 被 pre-push 拦后脚本吞错仍误报'发版完成'的实锤修复
 - 87ac1ee test: golden status 版本快照随 v0.3.0 发版重录——release.sh 推送失败被 '|| echo 跳过' 吞掉的实锤（本次 push 被 pre-push 拦后仍误报发版完成，脚本待修：push 失败应 exit 1）
 
+
+## v0.4.0（2026-11-09）
+
+- 3c54786 feat(two-phase): D-resume-commit-1 断回合续提交+确认收口话术锁——实锤：agent draft 后收工，用户两次说提交仍无下文（approvalToken 只存于 draft 响应文本，回合断即丢失）。①draft 将 token 随草稿落盘（runtime 0600，与 java_key 同级；token 威胁模型=防载荷改写非同意凭证，落盘不放大）；commit 允许省略 token/sha 由本地未过期草稿恢复，显式传错仍拒（语义不放宽）；契约 required 收窄为 draftId。②SKILL 真源加话术锁：用户确认后当回合必须 commit、不成必须明告未提交（真源生成+sync 同步，禁自由裁量）。+4 回归锁（恢复成功/错 sha 仍拒/过期拒/token 落盘+0600）；pytest 159 绿+node 9 绿
+- ca84c3a test: conftest autouse runtime 隔离——test_followup 等 _submit 用例桩了 _http 未重定向 _runtime_path，账本追加写穿仓内真实 runtime.json（本机 200 条账本被测试数据灌满实锤）；autouse 重定向 tmp，用例内显式 setattr 仍可覆盖；pytest 155 绿
+- f35cd0e test: golden status 版本快照随 v0.3.1 重录（仅 version 字段，diff 已过目）
+
