@@ -734,6 +734,11 @@ def _drafts_purge(store: dict) -> dict:
             if v.get("expiresAt", 0) > now}
 
 
+def _drafts_load() -> dict:
+    """草稿库现读 + 过期惰性清除（draft/commit 单源共用，禁双边漂移）。"""
+    return _drafts_purge(_runtime_cfg().get(_DRAFT_KEY) or {})
+
+
 def draft_voices(params: dict, client_info: dict | None = None) -> dict:
     """两段式第一步：校验+暂存草稿+签发一次性令牌（不提交任何数据）。"""
     import time as _time
@@ -769,8 +774,7 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
     payload_sha = hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
-    fresh = _runtime_cfg()
-    store = _drafts_purge(fresh.get(_DRAFT_KEY) or {})
+    store = _drafts_load()
     store[draft_id] = {
         "payload": payload, "payloadSha256": payload_sha, "tokenHash": _sha256(token),
         # D-resume-commit-1：token 明文随草稿落盘（runtime.json 0600，与 java_key
@@ -810,8 +814,7 @@ def commit_voices(params: dict, client_info: dict | None = None) -> dict:
     if not draft_id:
         raise ToolError("draftId 为必填（取自 vod_draft_voices 返回原样透传）", code=-32602)
 
-    fresh = _runtime_cfg()
-    store = _drafts_purge(fresh.get(_DRAFT_KEY) or {})
+    store = _drafts_load()
     draft = store.get(draft_id)
     if draft is None:
         raise ToolError("草稿不存在或已过期（10 分钟 TTL），请重新 vod_draft_voices", code=-32011)

@@ -154,3 +154,52 @@ def test_draft_persists_token_for_resume(isolated_rt, monkeypatch):
     assert len(draft.get("token", "")) == 32 and draft["tokenHash"] == tools._sha256(draft["token"])
     import os
     assert oct(os.stat(isolated_rt).st_mode & 0o777) == "0o600"
+
+
+# ---- 场景用例（S83-S86，D-resume-commit-1，proposal.md 同名清单的测试侧映射）----
+
+def test_s83_full_chain_echo_verbatim(isolated_rt, monkeypatch):
+    """S83 正常确认提交全链：draft→commit→回执 echo 原话逐字（改写即违规）。"""
+    captured = []
+    _stub_engine(monkeypatch, captured, voice_ids=["ext_resume_s83"])
+    original = "产品体验很糟糕呢\n反正不太好好用"
+    d = tools.draft_voices({"voices": [{"content": original, "tags": ["易用性"]}]},
+                           client_info={"name": "t"})
+    assert d["contents"][0]["content"] == original
+    out = tools.commit_voices({"draftId": d["draftId"],
+                               "approvalToken": d["approvalToken"],
+                               "payloadSha256": d["payloadSha256"]},
+                              client_info={"name": "t"})
+    echo_content = out["echo"]["contents"][0]["content"]
+    assert echo_content == original, "回执 echo 必须与用户原话逐字一致"
+    sent = captured[0]["body"]["voices"][0]["content"]
+    assert sent == original, "上送 payload 必须与用户原话逐字一致"
+
+
+def test_s85_expired_then_redraft_commits(isolated_rt, monkeypatch):
+    """S85 草稿过期→SKILL 话术锁的重开链：过期拒→重新 draft→commit 成功。"""
+    import time as _time
+    captured = []
+    _stub_engine(monkeypatch, captured)
+    d1 = tools.draft_voices({"voices": [{"content": "导出卡住"}]}, client_info={"name": "t"})
+    rt = json.loads(isolated_rt.read_text(encoding="utf-8"))
+    rt["drafts"][d1["draftId"]]["expiresAt"] = _time.time() - 1
+    isolated_rt.write_text(json.dumps(rt, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(tools.ToolError):
+        tools.commit_voices({"draftId": d1["draftId"]}, client_info={"name": "t"})
+    d2 = tools.draft_voices({"voices": [{"content": "导出卡住"}]}, client_info={"name": "t"})
+    out = tools.commit_voices({"draftId": d2["draftId"]}, client_info={"name": "t"})
+    assert out["accepted"] == 1 and len(captured) == 1
+
+
+def test_s86_consumed_draft_not_resurrectable(isolated_rt, monkeypatch):
+    """S86 单次消费对恢复路径同径：commit 成功后凭同一 draftId 再恢复=拒（防二次提交）。"""
+    captured = []
+    _stub_engine(monkeypatch, captured)
+    d = tools.draft_voices({"voices": [{"content": "补全慢"}]}, client_info={"name": "t"})
+    out = tools.commit_voices({"draftId": d["draftId"]}, client_info={"name": "t"})
+    assert out["accepted"] == 1
+    with pytest.raises(tools.ToolError) as ei:
+        tools.commit_voices({"draftId": d["draftId"]}, client_info={"name": "t"})
+    assert "不存在或已过期" in str(ei.value)
+    assert len(captured) == 1, "消费后恢复路径不得二次提交"

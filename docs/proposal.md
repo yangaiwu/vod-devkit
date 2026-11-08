@@ -962,3 +962,36 @@ S76 dsh 壳行为对齐、desc 不宣讲
   dsh/lib/index.js 透传循环同口径扩展；desc 1495/1500 无预算不宣讲
   （宿主技能层 SKILL 第 5 条承载口径显式化）。
   回归：node --test 全绿 + dsh desc 预算门禁不回退。
+
+## 断回合续提交与确认收口（S83-S86，D-resume-commit-1，2026-11-09 负责人确认）
+
+实锤：agent draft 后收工，用户两次说"提交"仍无下文，反馈 40 分钟未进引擎
+（approvalToken 只存在于 draft 响应文本，agent 回合中断即丢失，只能重开草稿）。
+
+S83 正常确认提交全链
+  draft→commit→回执 echo 与上送 payload 均与用户原话逐字一致（改写即违规）。
+  回归：test_two_phase#test_s83_full_chain_echo_verbatim。
+
+S84 断回合续提交（机制层）
+  agent 回合中断后，凭 draftId 即可 commit（token/sha 由本地未过期草稿恢复）。
+  语义不放宽：显式传错 sha 照拒；过期草稿照拒；token 落盘 runtime.json 0600
+  （与 java_key 同级保护；token 威胁模型=防载荷改写，非同意凭证，落盘不放大）。
+  契约：vod_commit_voices required 收窄为 draftId。
+  回归：test_two_phase#test_commit_resumes_from_local_draft /
+  #test_commit_resume_wrong_explicit_sha_still_rejected /
+  #test_commit_resume_expired_draft_rejected / #test_draft_persists_token_for_resume。
+
+S85 草稿过期重开链
+  过期 commit 拒收→重新 draft→commit 成功（SKILL 话术锁"失败就重开草稿"的
+  机制可行性验证）。
+  回归：test_two_phase#test_s85_expired_then_redraft_commits。
+
+S86 单次消费对恢复路径同径
+  commit 成功后凭同一 draftId 再恢复=拒（防二次提交；先消费后提交的既有
+  语义对省略参数路径同等生效）。
+  回归：test_two_phase#test_s86_consumed_draft_not_resurrectable。
+
+边界（明示）：用户"是否同意"是对话语义，无法确定性判定——同意环节仍由
+SKILL 软层承载（D-resume-commit-1 话术锁：确认后当回合必须 commit，不成
+必须明告未提交）；完全确定性同意需宿主 UI 结构化确认，属宿主侧协议改动，
+不在插件单方范围内。

@@ -571,3 +571,23 @@ VOD_PACKS 两种取值的 tools/list 断言）。
 - dsh 壳：透传循环同口径扩展；desc 无预算不宣讲（SKILL 宿主技能层承载）
 - SKILL：判定块第 5 条=三态映射话术锁（双副本+宿主副本 md5 对齐）
 - 边界：commit 复用 draft 暂存 payload，followupStatus 随 draft 冻结（防调包语义不变）
+
+## 承载补充：两段式断回合续提交（D-resume-commit-1，2026-11-09）
+
+- 单源改动点：`vod_mcp/tools.py` draft_voices（草稿条目新增 `token` 明文落盘）、
+  commit_voices（approvalToken/payloadSha256 可省略，draftId 命中本地未过期草稿
+  即恢复）；`contract/tools.schema.json` vod_commit_voices required 收窄为
+  `draftId`。附带重构 `_drafts_load()`：draft/commit 草稿库读写单源
+  （现读+TTL 惰性清除），禁双边漂移。
+- 安全语义：token 威胁模型=防 draft→commit 间载荷改写（sha 比对），非同意
+  凭证——落盘不放大风险；runtime.json 0600 与 java_key 同级保护。显式传入
+  参数仍走原校验（错 sha/错 token 照拒），恢复路径只是"省略即取签发值"。
+- 分层治理口径（对齐业界软硬分层共识）：
+  - 规则真源：SKILL 五副本由仓源 skills/ 经 sync_plugin.py 确定性生成，
+    test_skill_drift_lock 在 pre-push 质量门内做新鲜度检查——副本不手工维护。
+  - 软约束：SKILL 收口话术锁（确认后当回合必须 commit、不成必须明告未提交）——
+    引导模型走向正确路径。
+  - 硬约束：机制层已有 payloadSha256+approvalToken 防调包闸、单次消费闸；
+    本次补断回合可恢复。"用户是否同意"是对话语义，插件侧无法确定性判定，
+    明示为边界（完全确定性同意=宿主 UI 结构化确认，属宿主协议改动）。
+- 验收映射：场景用例 S83-S86（proposal.md），回归 tests/test_two_phase.py。
