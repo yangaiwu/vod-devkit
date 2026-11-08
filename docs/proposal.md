@@ -847,3 +847,32 @@ S63 追问=可选增强，四条硬约束前置（D-followup-design-1）
   可再生，拒启会把误判放大成全功能瘫痪）
 - 问题 3（共享服务器部署的令牌模型）落为红线约束（共享部署走服务端
   代理），代码不提前写死——插件侧 base URL 覆盖项已支持代理形态
+
+### 复现/预期追问补充落地（S64-S66，D-followup-impl-2，2026-11-08 负责人确认开工）
+
+引擎承载已就绪（V20261106110000003 repro_steps/expected_behavior 列 + I21/I22
+issue 渲染「用户追问补充」来源注记 + NULL 诚实回退），S63「当期不落」前提解除，
+本节落插件侧生产端。A1=确认环节合并一问（拍板）；A2=MCP 宿主+dsh agent 壳，
+UI 壳不加输入框（UX 红线：直达表单不藏门槛）。四约束逐条兑现：
+①可选增强非默认流程——仅确认环节内、至多 1 次、一次一问；
+②话术固定化——固定问句逐字锁死（回归锁禁改写）：「方便的话，补充一下遇到
+  这个问题时的操作步骤或期望的表现吗？不方便回复"没有"，我直接提交。」
+  （"不方便回复没有"替代原稿"不方便就直接提交"——减少用户误解，负责人认可）；
+③数据分层——答案只进 reproSteps/expectedBehavior 独立字段，只摘录不改写不
+  总结，无法拆分落最相关字段，任何内容禁回填 content（content 与旧流程逐字
+  一致断言）；issue 侧引擎渲染带「（用户追问补充）」来源注记（I21）；
+④诚实回退——答"没有/跳过/不方便"/空白/NULL=两字段不上送立即提交；客户端
+  技术兜底拒答词集（_FOLLOWUP_DECLINES/DECLINES），模型不守话术纪律时键集合
+  仍零漂移。
+
+验收：
+- S64 透传正例：双字段非空 → 囤积载荷含键+trim+content 原话逐字不污染
+- S65 键集合零漂移：未追问/未答/拒答/空白 → 载荷键集合={title,content(,tags,userType)}
+  与旧流程完全一致（键集合断言非空值断言）；超 2000 引擎同口径截断
+- S66 话术锁：固定问句逐字出现在契约 description（恰好 1 次）+SKILL.md 双副本
+  +dsh 壳描述；dsh 组合 desc 总长 ≤1500（desc 预算门禁既有锁复验通过）
+
+承载：contract/tools.schema.json（submit+draft 双工具 voices[] 新增可选字段
+maxLength 2000）+vod_mcp/tools.py+dsh/lib/index.js+skills/vod-feedback-collect
+（双副本 md5 同步+四宿主装机副本已刷）。tests/test_followup.py（5 例）+
+dsh/test/followup.test.mjs（行为级 stub fetch）。引擎零改动、旧路径不变。

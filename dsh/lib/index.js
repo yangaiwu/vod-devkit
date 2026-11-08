@@ -237,11 +237,13 @@ export function apply(ctx, config) {
                 + 'NEVER invent sentiment (e.g. 体验不好) or fabricate content the user did not say. '
                 +                'A bare product name or a question is NOT feedback - ask what the user wants to report. ' +
                 'Product attribution is bound at install/deploy time (config product; no runtime product argument exists). ' +
+                'Fixed one-time follow-up at confirmation, verbatim: 「方便的话，补充一下遇到这个问题时的操作步骤或期望的表现吗？不方便回复"没有"，我直接提交。」' +
+                'Answer → reproSteps/expectedBehavior verbatim excerpt, never into content; "没有/跳过"=omit both. ' +
                 'Batch ≤50. Returns voiceIds (reconciliation key) + taskIds.',
             parameters: buildParameters({
                 voices: {
                     type: 'array', required: true,
-                    description: 'Array of 1-50 voices: {content (required, ≤2000), userType (optional 企业|个人|未知)}',
+                    description: 'Array of 1-50 voices: {content (required, ≤2000), userType (optional 企业|个人|未知), reproSteps/expectedBehavior (optional 用户追问补充, only when the fixed one-time follow-up got an answer; never merge into content)}',
                 },
             }),
             output: { schema: { type: 'object', additionalProperties: true }, render: renderText },
@@ -269,7 +271,14 @@ export function apply(ctx, config) {
                     const content = String(v.content ?? '').trim();
                     if (!content) { rejected.push({ index: i, reason: 'content 为空' }); continue; }
                     if (content.length > 2000) { rejected.push({ index: i, reason: `content 超 2000 字（${content.length}）` }); continue; }
-                    hoard.push({ title: content.slice(0, 128), content }); // R3：title=用户原文
+                    const hv = { title: content.slice(0, 128), content }; // R3：title=用户原文
+                    // D-followup-impl-2 追问补充透传：仅 trim 非空才含键（未追问/答"没有"=键集合与旧流程一致）；引擎同口径截 2000
+                    const DECLINES = new Set(['没有', '无', '没有。', '没了', '跳过', '不方便', '不用了', '不用', '不补充', '算了', 'no', 'none', 'skip', 'n/a']);
+                    for (const f of ['reproSteps', 'expectedBehavior']) {
+                        const val = String(v[f] ?? '').trim();
+                        if (val && !DECLINES.has(val.toLowerCase())) hv[f] = val.slice(0, 2000);
+                    }
+                    hoard.push(hv);
                 }
                 if (hoard.length) {
                     let out = await http('POST', HOARD_PATH, { voices: hoard, product },
