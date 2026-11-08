@@ -773,6 +773,11 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
     store = _drafts_purge(fresh.get(_DRAFT_KEY) or {})
     store[draft_id] = {
         "payload": payload, "payloadSha256": payload_sha, "tokenHash": _sha256(token),
+        # D-resume-commit-1：token 明文随草稿落盘（runtime.json 0600，与 java_key
+        # 同级保护）。token 的威胁模型是"防载荷改写"而非"同意凭证"——落盘不放大
+        # 风险，换断回合可续：agent 回合中断后凭 draftId 即可恢复提交（此前
+        # approvalToken 只存在于 draft 响应文本，回合断即丢失，只能重开草稿）
+        "token": token,
         "product": product, "createdAt": _time.strftime("%Y-%m-%dT%H:%M:%S"),
         "expiresAt": _time.time() + _DRAFT_TTL,
     }
@@ -795,19 +800,23 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
 
 
 def commit_voices(params: dict, client_info: dict | None = None) -> dict:
-    """两段式第二步：令牌校验→单次消费→复用 submit_voices 既有提交链。"""
+    """两段式第二步：令牌校验→单次消费→复用 submit_voices 既有提交链。
+
+    D-resume-commit-1：approvalToken/payloadSha256 可省略——draftId 命中本地
+    未过期草稿时自动恢复（断回合续提交）。显式传入仍走原校验（传了假 sha
+    照样拒），恢复路径的完整性由签发时落盘的 sha/token 保证，语义不放宽。
+    """
     draft_id = str(params.get("draftId", ""))
-    token = str(params.get("approvalToken", ""))
-    payload_sha = str(params.get("payloadSha256", ""))
-    if not draft_id or not token or not payload_sha:
-        raise ToolError("draftId/approvalToken/payloadSha256 为必填（取自 vod_draft_voices 返回原样透传）",
-                        code=-32602)
+    if not draft_id:
+        raise ToolError("draftId 为必填（取自 vod_draft_voices 返回原样透传）", code=-32602)
 
     fresh = _runtime_cfg()
     store = _drafts_purge(fresh.get(_DRAFT_KEY) or {})
     draft = store.get(draft_id)
     if draft is None:
         raise ToolError("草稿不存在或已过期（10 分钟 TTL），请重新 vod_draft_voices", code=-32011)
+    token = str(params.get("approvalToken", "")) or str(draft.get("token", ""))
+    payload_sha = str(params.get("payloadSha256", "")) or str(draft["payloadSha256"])
     if draft["tokenHash"] != _sha256(token):
         raise ToolError("审批令牌不匹配（draft 返回的 approvalToken 原样透传）", code=-32011)
     if draft["payloadSha256"] != payload_sha:

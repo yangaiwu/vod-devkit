@@ -310,17 +310,15 @@
           "approvalToken": {
             "type": "string",
             "minLength": 8,
-            "description": "vod_draft_voices 返回的 approvalToken 原样透传"
+            "description": "vod_draft_voices 返回的 approvalToken 原样透传；断回合场景可省略——插件从本地暂存草稿恢复"
           },
           "payloadSha256": {
             "type": "string",
-            "description": "vod_draft_voices 返回的 payloadSha256 原样透传"
+            "description": "vod_draft_voices 返回的 payloadSha256 原样透传；断回合场景可省略——插件从本地暂存草稿恢复"
           }
         },
         "required": [
-          "draftId",
-          "approvalToken",
-          "payloadSha256"
+          "draftId"
         ],
         "additionalProperties": false
       }

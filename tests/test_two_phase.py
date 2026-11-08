@@ -109,3 +109,48 @@ def test_draft_cap_ring_and_purge(isolated_rt, monkeypatch):
     isolated_rt.write_text(_json.dumps({"drafts": store}), encoding="utf-8")
     tools.draft_voices({"voices": [{"content": "新反馈"}]}, client_info={"name": "t"})
     assert first not in tools._runtime_cfg()["drafts"], "过期草稿须被惰性清除"
+
+
+def test_commit_resumes_from_local_draft(isolated_rt, monkeypatch):
+    """D-resume-commit-1：断回合续提交——只传 draftId，token/sha 由本地草稿恢复。"""
+    captured = []
+    _stub_engine(monkeypatch, captured)
+    d = tools.draft_voices({"voices": [{"content": "搜索不准，中文词搜不到"}]},
+                           client_info={"name": "t"})
+    # 模拟回合中断：approvalToken/payloadSha256 全部缺失
+    out = tools.commit_voices({"draftId": d["draftId"]}, client_info={"name": "t"})
+    assert out["accepted"] == 1 and out["twoPhase"] is True
+    assert out["voiceIds"] == ["ext2_vod-agent_test1"]
+
+
+def test_commit_resume_wrong_explicit_sha_still_rejected(isolated_rt, monkeypatch):
+    """恢复语义不放宽：显式传错 sha 照样拒（完整性校验不因省略参数而旁路）。"""
+    _stub_engine(monkeypatch, [])
+    d = tools.draft_voices({"voices": [{"content": "导出卡住"}]}, client_info={"name": "t"})
+    with pytest.raises(tools.ToolError) as ei:
+        tools.commit_voices({"draftId": d["draftId"],
+                             "payloadSha256": "0" * 64}, client_info={"name": "t"})
+    assert "载荷校验不符" in str(ei.value)
+
+
+def test_commit_resume_expired_draft_rejected(isolated_rt, monkeypatch):
+    """过期草稿不可恢复提交（TTL 语义不因恢复路径放宽）。"""
+    import time as _time
+    _stub_engine(monkeypatch, [])
+    d = tools.draft_voices({"voices": [{"content": "补全慢"}]}, client_info={"name": "t"})
+    rt = json.loads(isolated_rt.read_text(encoding="utf-8"))
+    rt["drafts"][d["draftId"]]["expiresAt"] = _time.time() - 1
+    isolated_rt.write_text(json.dumps(rt, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(tools.ToolError) as ei:
+        tools.commit_voices({"draftId": d["draftId"]}, client_info={"name": "t"})
+    assert "已过期" in str(ei.value)
+
+
+def test_draft_persists_token_for_resume(isolated_rt, monkeypatch):
+    """draft 落盘含 token（恢复凭据）；runtime 文件权限 0600（与 java_key 同级保护）。"""
+    tools.draft_voices({"voices": [{"content": "问题一"}]}, client_info={"name": "t"})
+    rt = json.loads(isolated_rt.read_text(encoding="utf-8"))
+    draft = next(iter(rt["drafts"].values()))
+    assert len(draft.get("token", "")) == 32 and draft["tokenHash"] == tools._sha256(draft["token"])
+    import os
+    assert oct(os.stat(isolated_rt).st_mode & 0o777) == "0o600"
