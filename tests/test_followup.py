@@ -135,16 +135,17 @@ def test_followup_skill_judgment_block_locked():
         blocks.append(s)
         # 触发前置
         assert "仅在用户明确说" in s and "至多一次" in s and "不得与引导补充连续两轮问" in s
-        # 跳过条件（已并入 content 不再触发 + 不上送）
-        assert "不再触发固定追问" in s
+        # 跳过条件（已并入 content 不再触发 + 不上送；不回溯摘入=来源唯一）
+        assert "不触发固定追问" in s and "不回溯摘入新字段" in s
         assert "reproSteps/expectedBehavior 不上送" in s
-        # 触发条件（泛化抱怨/未回应才带出）
-        assert "泛化抱怨" in s and "未获回应" in s
+        # 触发条件（泛化抱怨/未回应才带出，判定例可执行）
+        assert "泛化抱怨" in s and '"未回应"=用户未针对引导补充给出任何具体信息' in s
         # 拒答即提交不追问
-        assert "答\"没有/不方便\"立即提交、不追问" in s
-        # 一句话口径完整在位
-        assert ("引导补充已获得具体现象、场景、报错、操作或期望等实质" in s
-                and "原样带出固定问句至多一次" in s)
+        assert '答"没有/' in s and "立即提交、不追问" in s
+        # 一句话口径完整在位（可测原文：payload 键+issue 段+来源注记）
+        assert ("跳过固定追问时，reproSteps/expectedBehavior 不上送，" in s
+                and "payload 不含对应键" in s
+                and "不作来源注记" in s)
     # 双副本一致（md5 语义由安装器纪律锁，此处锁判定块同源）
     assert blocks[0] == blocks[1], "SKILL 双副本必须逐字节一致"
 
@@ -156,3 +157,24 @@ def test_followup_skip_clause_in_contract():
     desc = c["tools"]["vod_submit_voices"]["description"]
     assert ("引导补充（说下具体现象）已获实质内容并并入 content 时不再追问、直接提交" in desc)
     assert ("仅引导补充未获回应或仅泛化抱怨且用户确认提交时才带出固定问句" in desc)
+
+
+def test_followup_boundary_refinement_locked():
+    """2026-11-08 二次微调（负责人确认）：①跳过条件不含"回溯摘入"歧义——
+    新字段来源唯一=固定追问原样回答；②"未回应/泛化抱怨"可执行判定例；
+    ③一句话口径=可测原文（payload 键+issue 段+来源注记三处诚实回退）。
+    三载体（SKILL 双副本/契约/proposal）锚点断言。"""
+    skill = open("skills/vod-feedback-collect/SKILL.md", encoding="utf-8").read()
+    assert "不回溯摘入新字段" in skill
+    assert "新字段仅承载固定追问的原样回答" in skill
+    assert '"未回应"=用户未针对引导补充给出任何具体信息' in skill
+    assert '"泛化抱怨"=仅表达负面评价、无具体现象/' in skill
+    assert ("跳过固定追问时，reproSteps/expectedBehavior 不上送，" in skill
+            and "payload 不含对应键" in skill
+            and "不作来源注记" in skill
+            and "符合诚实回退" in skill)
+    c = json.load(open("contract/tools.schema.json"))
+    assert "不回溯摘入新字段" in c["tools"]["vod_submit_voices"]["description"]
+    # proposal 与 SKILL 口径同源
+    prop = open("docs/proposal.md", encoding="utf-8").read()
+    assert "不回溯摘入新字段" in prop and "判定例" in prop
