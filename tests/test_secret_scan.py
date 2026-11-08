@@ -13,16 +13,26 @@ def _hit(patterns, line):
     return any(re.search(p, line) for p, _ in patterns)
 
 
+_SAMPLE_URL = "https://oauth2:vpTOKEN1234567890abcdef1234@gitcode.com/x.git"  # secret-scan:allow 正例载体
+_SAMPLE_KEY = "-----BEGIN RSA PRIVATE KEY-----"  # secret-scan:allow 正例载体
+_SAMPLE_BEARER = "Authorization: Bearer abcdef0123456789abcdef0123456789ab"  # secret-scan:allow 正例载体
+
+
 def test_url_token_detected():
-    assert _hit(secret_scan.SECRET_PATTERNS  # secret-scan:allow 正例载体, "https://oauth2:vpTOKEN1234567890abcdef1234@gitcode.com/x.git")
+    assert _hit(secret_scan.SECRET_PATTERNS, _SAMPLE_URL)
+
+
+def test_query_token_detected():
+    sample = "https://gitcode.com/x/y?access_token=abcdefgh1234567890abc"  # secret-scan:allow 正例载体
+    assert _hit(secret_scan.SECRET_PATTERNS, sample)
 
 
 def test_private_key_detected():
-    assert _hit(secret_scan.SECRET_PATTERNS  # secret-scan:allow 正例载体, "-----BEGIN RSA PRIVATE KEY-----")
+    assert _hit(secret_scan.SECRET_PATTERNS, _SAMPLE_KEY)
 
 
 def test_bearer_token_detected():
-    assert _hit(secret_scan.SECRET_PATTERNS  # secret-scan:allow 正例载体, "Authorization: Bearer abcdef0123456789abcdef0123456789ab")
+    assert _hit(secret_scan.SECRET_PATTERNS, _SAMPLE_BEARER)
 
 
 def test_benign_line_not_hit():
