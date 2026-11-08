@@ -198,3 +198,16 @@ def test_followup_questionnaire_structure_words_banned():
         # 给 agent 的规则层不是对用户话术层——话术载体白名单外禁编号清单）
         hits = [w for w in banned if w in s]
         assert not hits, f"{p} 出现问卷结构词: {hits}"
+
+
+def test_anti_truncation_redline_locked():
+    """opencode 实锤（2026-11-08）：用户补充"操作不方便，流程合理"被模型
+    截成"操作不方便"提交——SKILL 反截断红线钉死：补充句整体=content，
+    禁摘片段；多轮分散表达=按序拼接。双副本逐字在位。"""
+    for p in ("skills/vod-feedback-collect/SKILL.md",
+              "plugins/vod-devkit/skills/vod-feedback-collect/SKILL.md"):
+        s = open(p, encoding="utf-8").read()
+        assert "反截断红线" in s
+        assert "禁止摘取其中片段" in s
+        assert "整句才是原话" in s
+        assert "按序拼接为 content" in s
