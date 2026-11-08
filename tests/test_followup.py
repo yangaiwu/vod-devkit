@@ -121,3 +121,29 @@ def test_followup_fields_helper_single_source():
     assert tools._followup_fields({"reproSteps": "没有"}) == {}
     assert tools._followup_fields({"expectedBehavior": "x" * 2500}) == {"expectedBehavior": "x" * 2000}
     assert tools._followup_fields({}) == {}
+
+
+def test_followup_skill_judgment_block_locked():
+    """S64-S66 话术固定化补强（2026-11-08 负责人确认）：追问触发判定块必须
+    在 SKILL 双副本逐字在位（三层判定=可执行规则，禁 agent 自由裁量）。
+    四行为用例（已有现象不问/泛化抱怨问一次/未答引导补充问一次/答没有直接
+    提交）属 agent 行为，文本锁钉死判定规则本身防漂移。"""
+    blocks = []
+    for p in ("skills/vod-feedback-collect/SKILL.md",
+              "plugins/vod-devkit/skills/vod-feedback-collect/SKILL.md"):
+        s = open(p, encoding="utf-8").read()
+        blocks.append(s)
+        # 触发前置
+        assert "仅在用户明确说" in s and "至多一次" in s and "不得与引导补充连续两轮问" in s
+        # 跳过条件（已并入 content 不再触发 + 不上送）
+        assert "不再触发固定追问" in s
+        assert "reproSteps/expectedBehavior 不上送" in s
+        # 触发条件（泛化抱怨/未回应才带出）
+        assert "泛化抱怨" in s and "未获回应" in s
+        # 拒答即提交不追问
+        assert "答\"没有/不方便\"立即提交、不追问" in s
+        # 一句话口径完整在位
+        assert ("引导补充已获得具体现象、场景、报错、操作或期望等实质" in s
+                and "原样带出固定问句至多一次" in s)
+    # 双副本一致（md5 语义由安装器纪律锁，此处锁判定块同源）
+    assert blocks[0] == blocks[1], "SKILL 双副本必须逐字节一致"
