@@ -1,6 +1,6 @@
 {
   "name": "vod-devkit",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "VOD user-feedback collection: structured voice capture and submission to the VOD hoarding endpoint.",
   "keywords": [
     "feedback",

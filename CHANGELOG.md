@@ -199,3 +199,13 @@
 - f90e130 UX 修复：后台重试成功不再静默——暂存反馈自动重试成功后落旗标，下次打开弹窗补提示（逐条原话回显，voice-id 不出用户面 F2；措辞「已自动重试成功」说清=完成用户此前点提交的指令非绕过确认；产品名不带——用户不感知归因拍板）
 - a3cdd6d dsh 壳 UX 定稿同步（web widget 拍板漏同步各壳漂移实锤）：提示语去括号后缀与受理引导句、撤 maxlength 计数器（硬帽保留）、撤「我的反馈」入口（账本写入保留）；+ux-sync 回归锁（src+构建产物双级）
 
+
+## v0.3.1（2026-11-09）
+
+- 141dce4 fix(auth): probe_key 匿名令牌 401 报 expired-anonymous 而非 rejected——runtime 残留过期匿名令牌曾被误读为正式 key 失效（本机实锤：指纹 712c0ae4 实为 anonymous 档过期令牌）；显式 key 被拒仍 rejected（fail fast 口径不变），note 指明下次提交自动重领；+回归锁（匿名档 expired-anonymous+重领提示、显式档 rejected 保持）
+- 84cc6f1 fix(installer+dsh): 四宿主全链模拟两项实锤修复——①重装吃掉配置：dsh plugin add 模板含字面量 [] 顶层行，幂等追加块后 = 非法 YAML 整 profile 启动崩溃（upsert 追加路径清除空数组占位+回归锁）；②headless 审批死锁：dsh 原生 ask 门禁无通道永久阻断写工具（requires approval, but no approval channel 实锤，此前靠 11-06 手工配置 confirmWrites:false 残留掩盖）——installer 显式写 confirmWrites:false（同意由 SKILL 话术层承担，web 端按 profile 覆盖回 true）；dsh 真机重装→提交成功复验 ✅
+- 9b87594 feat(followup-status): 插件侧 followupStatus 上报对接（引擎 V55-V57 契约增量，proposal S74-S76）——单源 _followup_fields 扩展三态白名单归一（strip+lower，白名单外/缺失省键，submit/draft 双路径共用禁双边漂移；commit 随 draft 暂存冻结防调包语义不变）；契约 draft/submit 双工具 items 增枚举字段（工具 description 零增量，预算门禁不回退）；dsh 壳透传同口径扩展（desc 1495/1500 无预算不宣讲，SKILL 宿主技能层承载）；SKILL 判定块第 5 条三态映射话术锁（七副本 md5 对齐）；+5 回归锁；pytest 153 绿+node 9 绿
+- e40fafe fix(auth): 旧版残留凭据检测与自愈提示（评审拍板项，优先于公告）——codex 0.2.3 残留 legacy key 挡匿名链四宿主实测实锤；三处提交失败路径错误消息追加可操作自愈指引（_legacy_key_hint：当前版本+npx 重装命令+匿名档出口，不发公告靠用户撞）；vod_auth_status 显式 key 在位即挂 legacyKeyHint 检测位（不等提交撞 401 才发现）；不静默删 key 不静默重装（提示用户确认更新口径）；+回归锁（提示含版本与重装命令+四处调用点在位）；pytest 148 绿
+- 1ac4b48 fix(release): GitCode 推送失败改硬失败 exit 1——本次发版 push 被 pre-push 拦后脚本吞错仍误报'发版完成'的实锤修复
+- 87ac1ee test: golden status 版本快照随 v0.3.0 发版重录——release.sh 推送失败被 '|| echo 跳过' 吞掉的实锤（本次 push 被 pre-push 拦后仍误报发版完成，脚本待修：push 失败应 exit 1）
+

@@ -1,6 +1,6 @@
 [project]
 name = "vod-devkit"
-version = "0.3.0"
+version = "0.3.1"
 description = "VOD 插件包：MCP server + 技能 + 声明式护栏，供 AI agent/外部应用集成 VOD 分析能力"
 requires-python = ">=3.10"
 dependencies = []
