@@ -780,3 +780,32 @@ def test_doctor_repairs_dsh_patch_block(monkeypatch, tmp_path):
     before = patch.read_text()
     assert mod._repair_dsh_patch_block(mf) is None
     assert patch.read_text() == before
+
+
+def test_upsert_dsh_patch_clears_empty_array_placeholder(tmp_path):
+    """四宿主实测实锤回归锁：模板字面量 `[]` 顶层行 + 追加块 = 非法 YAML
+    （dsh profile 启动崩溃）。upsert 追加路径必须清除空数组占位。"""
+    import importlib.util
+    from importlib.machinery import SourceFileLoader
+    bin_path = Path(__file__).resolve().parent.parent / "bin" / "vod-devkit"
+    mod = importlib.util.module_from_spec(
+        importlib.util.spec_from_loader("vod_devkit_bin",
+                                        SourceFileLoader("vod_devkit_bin", str(bin_path))))
+    sys.modules.setdefault("vod_devkit_bin", mod)
+    mod.__loader__.exec_module(mod)
+    patch = tmp_path / "cordis.patch.yml"
+    patch.write_text(
+        "# comment header\n"
+        "[]\n"
+        "\n", encoding="utf-8")
+    block = ("- id: vod-devkit\n"
+             "  name: dsh-vod-devkit\n"
+             "  config:\n"
+             "    product: CodeArts\n"
+             "    apiBase: https://example.com\n")
+    assert mod._upsert_dsh_patch(patch, block) is True
+    out = patch.read_text(encoding="utf-8")
+    assert not any(ln.strip() == "[]" for ln in out.splitlines()), "空数组占位必须清除"
+    assert "- id: vod-devkit" in out
+    # 幂等：第二次写入无变化
+    assert mod._upsert_dsh_patch(patch, block) is False

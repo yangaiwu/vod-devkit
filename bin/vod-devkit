@@ -394,7 +394,12 @@ def _install_dsh(args, packs: str) -> Path:
              "  name: dsh-vod-devkit\n"
              "  config:\n"
              f"    product: {args.product}\n"
-             f"    apiBase: {args.java_api_base}\n")
+             f"    apiBase: {args.java_api_base}\n"
+             "    # headless 无审批通道：原生 ask 门禁会永久阻断写工具（四宿主实测实锤：\n"
+             "    # requires approval, but no approval channel）。同意确认由 SKILL 话术层\n"
+             "    # 承担（draft→用户确认→commit / 明确指令直发），web 端如需硬门禁按\n"
+             "    # profile 覆盖回 true。\n"
+             "    confirmWrites: false\n")
     try:
         written = _upsert_dsh_patch(patch, block)
     except Exception as e:
@@ -434,6 +439,10 @@ def _upsert_dsh_patch(patch: Path, block: str) -> bool:
     lines = patch.read_text(encoding="utf-8").splitlines() if patch.exists() else []
     start, end = _find_dsh_block(lines)
     if start is None:
+        # 空数组占位清除（四宿主实测实锤：dsh plugin add 自建的模板含字面量
+        # `[]` 顶层行，直接追加块 = `[]` 后跟 `- id:` 顶层元素 = 非法 YAML，
+        # 整个 profile 启动崩溃）。`[]` 语义=空数组，被块 entries 取代即删。
+        lines = [ln for ln in lines if ln.strip() != "[]"]
         new = lines + ([""] if lines and lines[-1].strip() else []) + block.splitlines()
     else:
         new = lines[:start] + block.splitlines() + lines[end:]
