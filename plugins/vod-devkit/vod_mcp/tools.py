@@ -19,6 +19,25 @@ from pathlib import Path
 from vod_mcp import provenance
 from vod_mcp import DEFAULT_JAVA_BASE
 
+# D-followup-impl-2：追问拒答语义词集（答"没有"类=两字段不上送）。
+# 契约话术承诺了"不方便回复没有"，客户端必须技术兜底——模型不守话术纪律时
+# 键集合仍零漂移（test_followup_declined_or_blank_omitted 回归锁）。
+_FOLLOWUP_DECLINES = frozenset({
+    "没有", "无", "没有。", "没了", "跳过", "不方便", "不用了", "不用",
+    "不补充", "算了", "没有了", "没有了。", "不方便说", "no", "none", "skip", "n/a",
+})
+
+
+def _followup_fields(voice: dict) -> dict:
+    """D-followup-impl-2 单源提取（submit 主路径与 draft 暂存共用，禁双边漂移）：
+    仅 trim 非空且非拒答词才含键；引擎同口径截 2000；内容永不回流 content。"""
+    out = {}
+    for _f in ("reproSteps", "expectedBehavior"):
+        _val = str(voice.get(_f) or "").strip()
+        if _val and _val.lower() not in _FOLLOWUP_DECLINES:
+            out[_f] = _val[:2000]
+    return out
+
 _CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract" / "tools.schema.json"
 
 
@@ -232,7 +251,8 @@ def _explicit_key() -> bool:
     return bool(JAVA_KEY) and str(_RT.get("token_tier") or "") != "anonymous"
 
 
-def submit_voices(params: dict, client_info: dict | None = None) -> dict:
+def submit_voices(params: dict, client_info: dict | None = None,
+                  ledger_extra: dict | None = None) -> dict:
     """V16 切换：主路径=囤积端点 POST /external/voices（Bearer，批式，不触发分析）；
     引擎未部署（404）自动回落老链 /external/voice/submit（提交即分析，过渡语义，
     部署后 404 分支自然失效）。
@@ -281,6 +301,9 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
                     "title": items[min(i, len(items) - 1)][2][:40],
                     "product": product, "at": _time.strftime("%Y-%m-%dT%H:%M:%S")}
                    for i, (vid, tid) in enumerate(zip(vids, tids))]
+        if ledger_extra:
+            for e in entries:
+                e.update(ledger_extra)  # 两段式：stage=committed + draftId 关联（验收③）
         _ledger_append(entries)
 
     def _legacy_submit(i, v, content):
@@ -310,6 +333,9 @@ def submit_voices(params: dict, client_info: dict | None = None) -> dict:
         ut = v.get("userType")
         if ut:
             hv["userType"] = ut
+        # D-followup-impl-2 追问补充透传：单源 _followup_fields（拒答词集兜底+
+        # 引擎同口径截 2000+禁回流 content；未追问/答"没有"=键集合零漂移）
+        hv.update(_followup_fields(v))
         hoard_voices.append(hv)
     body = {"voices": hoard_voices}
     if product:  # 无归因不带 product（引擎 UNKNOWN 档），不本地拦截
@@ -662,11 +688,128 @@ def devkit_info(params: dict, client_info: dict | None = None) -> dict:
 
 
 # 工具名 → 处理器（是否接收 client_info）
+
+
+# ---- 两段式提交（D-token-approval-2 极简形态：插件本地 draft→commit，引擎零改动）----
+# 定性：最强摩擦+审计链，非人类确认硬保证（decisions 既有纠偏）。
+# draft 暂存 runtime.json（cap 10 环形+TTL 600s），commit 单次消费后内部复用
+# submit_voices 既有链——配额/幂等/归因/回显语义零新增。stage=draft/committed
+# 入账本：绕过两段式的直接提交在账本层面可检测（验收③）。
+
+_DRAFT_KEY = "drafts"
+_DRAFT_CAP = 10
+_DRAFT_TTL = 600  # 秒；过期 commit 拒收，草稿自动作废
+
+
+def _drafts_purge(store: dict) -> dict:
+    """过期草稿清除（读时惰性，无后台任务）。"""
+    import time as _time
+    now = _time.time()
+    return {k: v for k, v in store.items()
+            if v.get("expiresAt", 0) > now}
+
+
+def draft_voices(params: dict, client_info: dict | None = None) -> dict:
+    """两段式第一步：校验+暂存草稿+签发一次性令牌（不提交任何数据）。"""
+    import time as _time
+    product, ignored_runtime = _resolve_product(params)
+    voices_in = params.get("voices", [])
+    clean = []
+    for i, v in enumerate(voices_in):
+        content = str(v.get("content", "")).strip()
+        if not content:
+            raise ToolError(f"第 {i + 1} 条 content 为空", code=-32602)
+        if len(content) > 2000:
+            raise ToolError(f"第 {i + 1} 条 content 超 2000 字（{len(content)}）", code=-32602)
+        item = {"content": content}
+        if v.get("tags"):
+            item["tags"] = v["tags"]
+        if v.get("userType"):
+            item["userType"] = v["userType"]
+        # D-followup-impl-2：追问补充随 draft 暂存（commit 复用 payload 原样上送），
+        # 单源 _followup_fields 与主路径同口径
+        item.update(_followup_fields(v))
+        clean.append(item)
+    if not clean:
+        raise ToolError("voices 为必填且至少 1 条", code=-32602)
+
+    import secrets
+    draft_id = "draft_" + secrets.token_hex(8)
+    token = secrets.token_hex(16)
+    payload = {"voices": clean}
+    if product:
+        payload["product"] = product
+    # 载荷 sha（防 draft→commit 间改写：commit 校验插件侧重算值一致）
+    import hashlib
+    payload_sha = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+    fresh = _runtime_cfg()
+    store = _drafts_purge(fresh.get(_DRAFT_KEY) or {})
+    store[draft_id] = {
+        "payload": payload, "payloadSha256": payload_sha, "tokenHash": _sha256(token),
+        "product": product, "createdAt": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "expiresAt": _time.time() + _DRAFT_TTL,
+    }
+    while len(store) > _DRAFT_CAP:  # 环形：最旧先淘汰
+        store.pop(next(iter(store)))
+    _save_runtime({_DRAFT_KEY: store})
+
+    if ignored_runtime:  # D-attrib-A 可观测：模型试图改归因留痕
+        _warn(f"draft: runtime product 被忽略（绑定权威）: {ignored_runtime}")
+    return {
+        "draftId": draft_id,
+        "approvalToken": token,
+        "payloadSha256": payload_sha,
+        "expiresInSeconds": _DRAFT_TTL,
+        "contents": [{"index": i, "content": it["content"]} for i, it in enumerate(clean)],
+        "instruction": ("把 contents 逐条原样展示给用户核对（禁止改写概括），明确问"
+                        "「确认提交吗」。用户明确同意前禁止调用 vod_commit_voices；"
+                        "不同意则停（草稿 10 分钟后自动作废）。"),
+    }
+
+
+def commit_voices(params: dict, client_info: dict | None = None) -> dict:
+    """两段式第二步：令牌校验→单次消费→复用 submit_voices 既有提交链。"""
+    draft_id = str(params.get("draftId", ""))
+    token = str(params.get("approvalToken", ""))
+    payload_sha = str(params.get("payloadSha256", ""))
+    if not draft_id or not token or not payload_sha:
+        raise ToolError("draftId/approvalToken/payloadSha256 为必填（取自 vod_draft_voices 返回原样透传）",
+                        code=-32602)
+
+    fresh = _runtime_cfg()
+    store = _drafts_purge(fresh.get(_DRAFT_KEY) or {})
+    draft = store.get(draft_id)
+    if draft is None:
+        raise ToolError("草稿不存在或已过期（10 分钟 TTL），请重新 vod_draft_voices", code=-32011)
+    if draft["tokenHash"] != _sha256(token):
+        raise ToolError("审批令牌不匹配（draft 返回的 approvalToken 原样透传）", code=-32011)
+    if draft["payloadSha256"] != payload_sha:
+        raise ToolError("载荷校验不符（payloadSha256 与 draft 签发值不一致，禁止改写已确认内容）",
+                        code=-32011)
+    # 单次消费：先摘除再提交——提交中途崩溃也不会二次提交（宁可丢一单重走流程）
+    store.pop(draft_id)
+    _save_runtime({_DRAFT_KEY: store})
+
+    out = submit_voices(dict(draft["payload"]), client_info,
+                        ledger_extra={"stage": "committed", "draftId": draft_id})
+    out["twoPhase"] = True
+    out["draftId"] = draft_id
+    return out
+
+
+def _sha256(s: str) -> str:
+    import hashlib
+    return hashlib.sha256(s.encode()).hexdigest()
+
 _HANDLERS = {
     "vod_submit_voices": submit_voices,
     "vod_list_submitted": list_submitted,
     "vod_devkit_info": devkit_info,
     "vod_auth_status": auth_status,
+    "vod_draft_voices": draft_voices,
+    "vod_commit_voices": commit_voices,
 }
 
 
@@ -674,5 +817,5 @@ def dispatch(name: str, params: dict, client_info: dict | None = None) -> dict:
     handler = _HANDLERS.get(name)
     if handler is None:
         raise ToolError(f"未知工具: {name}", code=-32601)
-    needs_host = handler in (devkit_info, submit_voices, auth_status)
+    needs_host = handler in (devkit_info, submit_voices, auth_status, draft_voices, commit_voices)
     return handler(params, client_info) if needs_host else handler(params)

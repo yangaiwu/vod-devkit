@@ -162,3 +162,40 @@
 - bb312e3 test: golden status 重录版本号 0.2.1→0.2.2（v0.2.2 发版漏重录，pre-push 门禁被存量红挡）
 - b111900 fix(D-consent-desc-1): 确认纪律前置进工具描述——opencode 把用户陈述反馈当同意直提单实锤（契约 description 立即调用话术与 confirm 纪律冲突，MCP-only 宿主不加载技能唯描述可依）+dsh 壳同步+回归锁
 
+
+## v0.3.0（2026-11-08）
+
+- 370ee37 fix(gate): secret_scan 测试正例改常量承载+行内豁免——门禁拦自测样例的自指问题终解（正例即豁免机制的真实用法自证）；新增 query token 模式用例
+- 2600638 fix(gate): secret_scan 正例载体行内豁免——测试自身样例串被门禁拦推的 自指问题（gitleaks 同款 allow 标注机制首用即验证）
+- 0bffc9b feat(gate): pre-push 第三检查=凭据泄漏+高危运行模式静态扫描（对标 huaweicloud-skills 市场采纳清单①）——零依赖 secret_scan.py（oauth2:token@host/query token/私钥块/AK-SK/Bearer 等模式+eval/exec/pickle/shell=True 高危面；行内 secret-scan:allow 豁免留痕；测试正例反例双锁抓出首版 URL token 模式顺序反写缺陷已修）；vod-feedback-collect description 补显式 Triggers 词表（中英 19 词，市场惯例=显式词表比散文召回稳，采纳清单②；SKILL 双副本+五宿主装机副本 md5 对齐）；pytest 147 绿+node 9 绿+scan OK
+- 350b0a8 fix(skill): S73 拼接判定例——逐字=含语气词/标点，禁删'啊'补句号式改写（opencode 第二次实锤：S72 拼接生效但标点裁量漏网）；轮次衔接换行/空格分隔不新增标点+可逐字符还原判据；SKILL 双副本+四宿主副本刷齐；proposal S73+design+decisions 同构序列第四次记档；pytest 141 绿
+- ef1ebbd docs(decisions): S72 附带发现闭环——负责人确认输入原文即'流程合理'，DB 记录准确，opencode 输入链路无缺陷，移交项不存在
+- f4681bd fix(skill): S72 反截断红线——引导补充句整体=content 逐字上送禁摘片段（opencode 实锤：'操作不方便，流程合理'被截成'操作不方便'，reasoning 日志取证）；多轮分散表达按序拼接；SKILL 双副本+四宿主副本刷齐；proposal S72+design 承载+decisions 取证链；pytest 140 绿
+- f3fde9e feat(followup): S71 问卷化追问 tripwire——话术载体结构词黑名单锁（自由生成四维追问清单实锤复盘：分叉示例+频率刻度+期望vs实际三红线全破）；数字编号不锁（规则层/话术层分层）；proposal S71 用例+design 承载+decisions 记档；pytest 139 绿
+- d158bad chore(lint): test_followup 未使用变量清理（pre-push pyflakes 门禁）
+- e223467 docs(followup): 二次微调落档 design 承载行+decisions 决策记录（跳过条件收窄依据/判定例先于行为验收/一句话口径三处诚实回退与 I22 对齐）；pytest 138 绿
+- 6f16aad docs(followup): 判定块二次微调（负责人确认）——跳过条件收窄去"操作/期望"回溯歧义（新字段来源唯一=固定追问原样回答，引导补充自然出现的操作/期望留在 content）；"未回应/泛化抱怨"补可执行判定例；一句话口径改可测原文（payload 键+issue 段+来源注记三处诚实回退）；契约跳过句补不回溯边界（939/1500）；SKILL 判定块锁+边界锁双更新；四宿主副本刷齐；pytest 138 绿
+- e7e8c48 docs(followup): S67-S70 追问触发判定块场景用例落档——proposal 判定块三层+四场景表（S67 已有实质回应不触发/S68 泛化+确认出现一次/S69 未回应+答没有键不存在/S70 防漂移锁）；契约 description 补跳过句（831→903/1500）；design S67-S70 承载行（dsh desc 无余量由宿主技能层承载的边界显式化）；+契约跳过句回归锁；pytest 137 绿
+- 716371e feat(followup): SKILL 追问触发判定块三层显式化（触发前置/跳过条件/触发条件，负责人确认）——引导补充已有实质回应并入 content 则不再触发固定追问（reproSteps/expectedBehavior 不上送=诚实回退）；仅泛化抱怨或未回应且确认提交才原样带出至多一次；+SKILL 判定块文本回归锁（双副本逐字一致+四行为用例口径）；四宿主装机副本已刷齐；pytest 136 绿
+- adee656 refactor(followup): 透传逻辑单源化 _followup_fields（submit/draft 双路径共用，禁双边漂移）+拒答词集补全（没有了/不方便说）+design §三 S63→S64-S66 落地承载映射表（含重复节头修复）+helper 单元回归锁；pytest 135 绿+node 9 绿
+- 4b43427 feat(followup): D-followup-impl-2 复现/预期追问补充插件侧落地（S64-S66，负责人确认开工，A1 确认环节合并一问/A2 MCP+dsh 壳）——契约 submit+draft 双工具 voices[] 增可选 reproSteps/expectedBehavior（maxLength 2000）；固定问句逐字锁死+拒答词集技术兜底（_FOLLOWUP_DECLINES/DECLINES，模型不守话术键集合仍零漂移）；仅 trim 非空含键+超 2000 引擎同口径截断+content 原话禁污染；draft 路径随 payload 暂存 commit 原样上送；SKILL 双副本+四宿主装机副本 md5 对账齐；引擎零改动旧路径不变；pytest 134 绿+node 9 绿
+- 44218db feat(two-phase): 两段式提交插件本地极简形态（D-token-approval-2 解冻，负责人拍板方案 2）——vod_draft_voices（暂存+一次性令牌+contents 原话回显）+vod_commit_voices（令牌校验/单次消费/载荷 sha 防调包，内部复用 submit 既有链零新增语义）；draft cap10 环形+TTL600s 惰性清除；账本 stage=draft/committed+draftId 关联（验收③绕过两段式可检测）；SKILL 话术改两步流程（双副本 md5 同步）；128 pytest+8 node 绿
+- 31908e0 decisions: D-token-approval-2 token 化暂缓（负责人拍板 A）——触发条件=codex 真实消费需求；复杂度收益失衡裁剪（引擎写表面不值），恢复门禁口径不变（暂缓=codex 保持只读）
+- fec386e docs+test：S63 复现步骤 AI 追问前置规范落档（业界对表 D-followup-design-1 四约束：可选增强/话术固定化/数据分层/诚实回退；当期不落话术——引擎无 supplement 承载 S51）+S63 tripwire 锁（采集话术禁追问承诺，立项随承载更新）
+- 7a9eb08 decisions: D-followup-design-1 复现步骤 AI 追问前置规范（业界对表，负责人确认）——四条硬约束（可选增强/话术固定化/数据分层/诚实回退），当期不落话术（无承载 S51），立项前置
+- 0ab66ce decisions: B 方案（bundle patch 接管）可行性修正落档——机制确定（bundles 清单管理），调研目标收敛为静态值确认+整行 config 完整性；A 自愈已落（e6a7d32）
+- e6a7d32 feat(doctor): dsh patch 块自愈（A 止血，用户拍板）——doctor 检测 vod 块缺失/打平后按 manifest product/apiBase 重建嵌套块；manifest 补记 apiBase；status 输出归一化动态端口（golden 稳定性）；+三态自愈回归锁（123 绿）
+- 6afeb4e decisions: D-codex-circuit-breaker-1 补深审收口记录（P0-2/P0-3/P1-4/P1-5/P2 修复清单）
+- 23a7bb1 fix(installer+packs): 深审四项收口——P0-2 packs 命名漂移（PRESETS full 对齐 ALL_PACKS+kb→knowledge 别名归一，安装口与运行口单源）；P0-3 uninstall 破坏性路径（codex mcpConfig 改指插件 .mcp.json/None+config.toml 永不删+codex plugin remove best-effort+doctor None 守卫）；P1-4 ack 解除后置到安装成功（失败安装不解熔断）；P1-5 codex .mcp.json env 对齐本次 packs；P2 strip 精确表头+AGENTS END 缺失拒写盘；+5 回归锁（122 绿）
+- 4309a41 docs：S60-S62 codex 熔断与恢复门禁场景用例落档（熔断触发/双层门禁安装+运行期/显式解除语义与审计）+design 承载映射（D-codex-circuit-breaker-1）；118 绿
+- 525826f feat(breaker): codex 熔断恢复门禁代码化（D-codex-circuit-breaker-1 收口）——①install 门禁：标记在+collect 拒装 exit2 ②--ack-suspension=显式解除（删标记+审计日志，语义与实现一致）③运行期门禁：serve enabled_packs 同查标记强制降级只读（堵 VOD_PACKS 绕过）④probe/packs 测试 HOME 隔离（真实标记不可被测试触碰）；118 绿
+- f30d0d8 decisions: D-codex-circuit-breaker-1 落档——熔断执行记录+token 化立项表述纠偏（最强摩擦+审计链，非人类确认硬保证）+恢复门禁（token 化上线前禁恢复采集）+验收标准改写
+- 3a4a519 docs：S58（dsh patch 块 name 绑定+嵌套铁律，入口消失事故）/S59（回执话术=行为实况，S51 回执面应用）落档 proposal+design；116 pytest+8 node 绿
+- 76a3c9d fix(UI): 回执话术=行为实况（S51，用户抓出）——删「审核后将以 issue 形式跟进」空头承诺（匿名直建无人工审核闸，issue 链接由 pollForReceipt 真实建成后补出）；+回执实况回归锁（禁审核跟进句/REJECTED 须有引擎状态承载）
+- 87cc0d0 fix(installer): dsh patch 块模板补 name 绑定行——重装幂等替换吞掉 name=client 半静默失激活（入口消失真机实锤：工具壳正常而按钮不在）；+name 回归锁（116 绿）
+- 43c57ee docs+test：S54-S57 场景用例落档（暂存恢复补提示/禁拉伸/legacy 清退/widget E_AUTH 兜底）+design 话术分层承载节；ux-sync 回归锁扩容（resize none/恢复话术要素/用户面 key 明文禁令），115 pytest+8 node 绿
+- 856b1db legacy 共用 key 用户面清退（负责人拍板'不合理逻辑去掉'）：INSTALL 删明文 legacy key 警告句（公开文档泄露 key 值+教唆反效果）；nightly E2E 切匿名令牌主路径（legacy 属 GTD 兼容收尾不进健康检查）+清 scene 残留字段；测试归因绑定显式桩定（曾依赖仓内 runtime 偶发绑定假绿，D-attrib-A 无绑定分支新增回归锁）；115 绿
+- 592999e UI：弹窗输入框禁拉伸（resize none，用户反馈拉角顶破布局）——随后台重试补提示一版
+- f90e130 UX 修复：后台重试成功不再静默——暂存反馈自动重试成功后落旗标，下次打开弹窗补提示（逐条原话回显，voice-id 不出用户面 F2；措辞「已自动重试成功」说清=完成用户此前点提交的指令非绕过确认；产品名不带——用户不感知归因拍板）
+- a3cdd6d dsh 壳 UX 定稿同步（web widget 拍板漏同步各壳漂移实锤）：提示语去括号后缀与受理引导句、撤 maxlength 计数器（硬帽保留）、撤「我的反馈」入口（账本写入保留）；+ux-sync 回归锁（src+构建产物双级）
+
