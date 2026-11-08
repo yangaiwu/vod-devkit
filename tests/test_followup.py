@@ -178,3 +178,23 @@ def test_followup_boundary_refinement_locked():
     # proposal 与 SKILL 口径同源
     prop = open("docs/proposal.md", encoding="utf-8").read()
     assert "不回溯摘入新字段" in prop and "判定例" in prop
+
+
+def test_followup_questionnaire_structure_words_banned():
+    """S63 扩展 tripwire（2026-11-08 实况复盘）：采集话术载体（SKILL 双副本+
+    契约 description）禁出现问卷结构词——自由生成多维度追问清单（分叉示例/
+    频率刻度/期望vs实际框架）制造"被暗示的复现步骤"，比不问更糟。
+    现有话术只有固定问句+引导补充句两个合规通道，结构词出现=有人往话术里
+    塞自由生成问卷，门禁当场拦。"""
+    # 仅锁话术语义结构词；数字编号不锁（判定块规则层合法使用编号清单，
+    # 禁的是对用户话术层的问卷化措辞——语义词命中才是问卷化信号）
+    banned = ["偶尔还是每次", "大概频率", "期望 vs 实际", "期望vs实际",
+              "找不到入口", "步骤太多", "哪个功能难用", "打开页面慢"]
+    for p in ("skills/vod-feedback-collect/SKILL.md",
+              "plugins/vod-devkit/skills/vod-feedback-collect/SKILL.md",
+              "contract/tools.schema.json"):
+        s = open(p, encoding="utf-8").read()
+        # 数字编号列表在话术载体中出现=问卷化信号（判定块用 1.2.3. 但那是
+        # 给 agent 的规则层不是对用户话术层——话术载体白名单外禁编号清单）
+        hits = [w for w in banned if w in s]
+        assert not hits, f"{p} 出现问卷结构词: {hits}"
