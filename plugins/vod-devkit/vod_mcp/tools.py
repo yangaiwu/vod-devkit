@@ -272,6 +272,133 @@ def _explicit_key() -> bool:
     return bool(JAVA_KEY) and str(_RT.get("token_tier") or "") != "anonymous"
 
 
+# ── D-pending-1：无通道期 pending 反馈 flush（方案 A，2026-11-09）──
+
+def _flush_pending(product):
+    """补提交 ~/.vod-devkit/pending-feedback.jsonl 里 status=pending 的条目。
+
+    口径（D-pending-1 定稿）：同步执行但失败只记日志、绝不回滚主提交；
+    幂等键=条目级（sha1(content+confirmAt+source)），内容级去重由引擎
+    uk_voice_id 承担（同内容重提=skipped）；重写+原子 rename，失败条目
+    保留 pending；单次上限 100 条最早优先，超 30 天标记 expired 剔除。
+    双通道消息分离：本函数结果只进工具内部诊断（result.pendingFlush），
+    用户侧话术由 skill 层承担（已暂存/自动补交，禁止出现路径）。
+    """
+    from vod_mcp import pending as _pq
+    path = _pq.default_path()
+    entries = _pq.load_entries(path)
+    if not entries:
+        return {"scanned": 0}
+    plan = _pq.plan_flush(entries)
+    kept = list(plan["kept"])
+    flushed, failed, corrected = 0, 0, 0
+    for e in plan["to_flush"]:
+        content = _pq.canonical_content(e)  # D-pending-1 补强：originalLines 权威拼接，剥模型加的标点
+        if content != str(e.get("content", "")):
+            corrected += 1
+            _log("pending flush: content 与 originalLines 拼接不一致，以 originalLines 为准（剥除模型拼接改动）")
+        hv = {"title": str(content)[:60], "content": str(content)}
+        if e.get("tags"):
+            hv["tags"] = e["tags"]
+        body = {"voices": [hv]}
+        if product:
+            body["product"] = product
+        try:
+            out = _http("POST", _SUBMIT_HOARDING, body, base=JAVA_BASE, key=JAVA_KEY)
+            ids = (out or {}).get("voiceIds") or ((out or {}).get("data") or {}).get("voiceIds")
+            if ids is None:
+                failed += 1
+                kept.append(e)
+                _log("pending flush: 回执未含 voiceIds，条目保留")
+            else:
+                flushed += 1  # 含幂等 skipped（同内容重提=引擎 skipped，零重复）
+        except Exception as err:
+            failed += 1
+            kept.append(e)
+            _log(f"pending flush failed (kept pending): {err}")
+    _pq.save_entries(path, kept)
+    return {"scanned": len(entries), "flushed": flushed,
+            "failed": failed, "expired": len(plan["expired"]),
+            "corrected": corrected}
+
+
+
+def _collect_voice_items(params: dict) -> tuple[list, list]:
+    """校验段：content 非空+≤2000 字（契约 maxLength，防超大 payload）。
+    返回 (items[(index, voice, content)], rejected 明细)。"""
+    items, rejected = [], []
+    for i, v in enumerate(params.get("voices", [])):
+        content = str(v.get("content", "")).strip()
+        if not content:
+            rejected.append({"index": i, "reason": "content 为空"})
+        elif len(content) > 2000:
+            rejected.append({"index": i, "reason": f"content 超 2000 字（{len(content)}）"})
+        else:
+            items.append((i, v, content))
+    return items, rejected
+
+
+def _echo_plan(items: list, vids: list) -> dict:
+    """回显段（方案 A，2026-11-06 拍板）：提交回执强制携带原话回显。
+    检测型防线——宿主模型改写用户原话（实锤："体验不好"→"不友好"）
+    在回执处当场可见；agent 必须原样转述，改写露馅。"""
+    ok = [(vid, items[min(i, len(items) - 1)][2])
+          for i, vid in enumerate(vids) if vid]
+    return {
+        "requiresUserEcho": bool(ok),
+        "instruction": ("请向用户原样转述已收录内容：每条以「已收录原话：」开头，"
+                        "后接 content 全文。禁止改写、概括、增删字词。"),
+        "contents": [{"voiceId": vid, "content": c} for vid, c in ok],
+    }
+
+
+def _ledger_submit(items: list, vids: list, tids: list, product: str | None,
+                    extra: dict | None = None) -> None:
+    """账本段：回执 voiceIds/taskIds 逐条落本地账本（层级①查询的源）。"""
+    import time as _time
+    entries = [{"voiceId": vid, "taskId": tid,
+                "title": items[min(i, len(items) - 1)][2][:40],
+                "product": product, "at": _time.strftime("%Y-%m-%dT%H:%M:%S")}
+               for i, (vid, tid) in enumerate(zip(vids, tids))]
+    if extra:
+        for e in entries:
+            e.update(extra)  # 两段式：stage=committed + draftId 关联（验收③）
+    _ledger_append(entries)
+
+
+def _hoard_voice(v: dict, content: str) -> dict:
+    """载荷段：单条囤积端点 voice 载荷（title/content + tags/userType +
+    D-followup-impl-2 追问补充透传：单源 _followup_fields，拒答词集兜底）。"""
+    hv = {"title": content[:60], "content": content}
+    if v.get("tags"):  # 采集层三分类（problem_type:值）→正式入库
+        hv["tags"] = v["tags"]
+    if v.get("userType"):
+        hv["userType"] = v["userType"]
+    hv.update(_followup_fields(v))
+    return hv
+
+
+def _raise_explicit_key_rejected(key: str) -> None:
+    """显式 key（安装注入/正式档）被引擎 401 拒绝 → fail fast：
+    不取匿名令牌、不覆盖配置——静默降级匿名档=配置错误被吞
+    （归因错位比报错更糟，同 AIShell 错归病根）。囤积/legacy 两路径同口径。"""
+    raise ToolError(
+        f"注入的 key 被引擎拒绝（指纹 {_fingerprint(key)}）："
+        "请核对 key 是否过期/被吊销，或移除 key 走匿名档。"
+        + _legacy_key_hint(),
+        code=-32012)
+
+
+def _acquire_anon_token_or_raise() -> str:
+    """缺 key/匿名令牌失效 → 领零字段匿名令牌；端点不可用则如实报错。"""
+    token = _fetch_anon_token()
+    if not token:
+        raise ToolError(
+            "未配置接入 key 且匿名令牌端点不可用。引导："
+            + "；".join(g["label"] for g in _KEY_GUIDANCE), code=-32012)
+    return token
+
+
 def submit_voices(params: dict, client_info: dict | None = None,
                   ledger_extra: dict | None = None) -> dict:
     """V16 切换：主路径=囤积端点 POST /external/voices（Bearer，批式，不触发分析）；
@@ -287,45 +414,11 @@ def submit_voices(params: dict, client_info: dict | None = None,
     import uuid
     host = (client_info or {}).get("name") or "unknown-host"
     product, ignored_runtime = _resolve_product(params)
-    accepted, voice_ids, task_ids, rejected = 0, [], [], []
     global JAVA_KEY
-    voices_in = params.get("voices", [])
-    items = []  # (index, voice_map, content)
-    for i, v in enumerate(voices_in):
-        content = str(v.get("content", "")).strip()
-        if not content:
-            rejected.append({"index": i, "reason": "content 为空"})
-            continue
-        if len(content) > 2000:  # 契约 maxLength 2000：内容边界（防超大 payload）
-            rejected.append({"index": i, "reason": f"content 超 2000 字（{len(content)}）"})
-            continue
-        items.append((i, v, content))
+    accepted, voice_ids, task_ids = 0, [], []
+    items, rejected = _collect_voice_items(params)
     if not items:
         return {"accepted": 0, "voiceIds": [], "taskIds": [], "rejected": rejected}
-
-    def _echo(vids):
-        """方案 A（2026-11-06 拍板）：提交回执强制携带原话回显。
-        检测型防线——宿主模型改写用户原话（实锤："体验不好"→"不友好"）
-        在回执处当场可见；agent 必须原样转述，改写露馅。"""
-        ok = [(vid, items[min(i, len(items) - 1)][2])
-              for i, vid in enumerate(vids) if vid]
-        return {
-            "requiresUserEcho": bool(ok),
-            "instruction": ("请向用户原样转述已收录内容：每条以「已收录原话：」开头，"
-                            "后接 content 全文。禁止改写、概括、增删字词。"),
-            "contents": [{"voiceId": vid, "content": c} for vid, c in ok],
-        }
-
-    def _ledger(vids, tids):
-        import time as _time
-        entries = [{"voiceId": vid, "taskId": tid,
-                    "title": items[min(i, len(items) - 1)][2][:40],
-                    "product": product, "at": _time.strftime("%Y-%m-%dT%H:%M:%S")}
-                   for i, (vid, tid) in enumerate(zip(vids, tids))]
-        if ledger_extra:
-            for e in entries:
-                e.update(ledger_extra)  # 两段式：stage=committed + draftId 关联（验收③）
-        _ledger_append(entries)
 
     def _legacy_submit(i, v, content):
         """过渡回落：老链单条提交（提交即分析语义，仅 404 触发）。"""
@@ -345,20 +438,7 @@ def submit_voices(params: dict, client_info: dict | None = None,
         return vid, (out.get("data") or {}).get("taskId")
 
     # ---- 主路径：囤积端点批式提交 ----
-    hoard_voices = []
-    for i, v, content in items:
-        hv = {"title": content[:60], "content": content}
-        tags = v.get("tags")  # 采集层三分类（problem_type:值）→【类型名】标题前缀正式入库
-        if tags:
-            hv["tags"] = tags
-        ut = v.get("userType")
-        if ut:
-            hv["userType"] = ut
-        # D-followup-impl-2 追问补充透传：单源 _followup_fields（拒答词集兜底+
-        # 引擎同口径截 2000+禁回流 content；未追问/答"没有"=键集合零漂移）
-        hv.update(_followup_fields(v))
-        hoard_voices.append(hv)
-    body = {"voices": hoard_voices}
+    body = {"voices": [_hoard_voice(v, content) for _, v, content in items]}
     if product:  # 无归因不带 product（引擎 UNKNOWN 档），不本地拦截
         body["product"] = product
     out = None
@@ -370,20 +450,9 @@ def submit_voices(params: dict, client_info: dict | None = None,
             fallback = True  # 囤积端点未部署 → 落到下方 legacy 回落
         elif not JAVA_KEY or ex.code == -32012:
             if _explicit_key():
-                # 显式 key（安装注入/正式档）被引擎 401 拒绝 → fail fast：
-                # 不取匿名令牌、不覆盖配置——静默降级匿名档=配置错误被吞
-                #（归因错位比报错更糟，同 AIShell 错归病根）
-                raise ToolError(
-                    f"注入的 key 被引擎拒绝（指纹 {_fingerprint(JAVA_KEY)}）："
-                    "请核对 key 是否过期/被吊销，或移除 key 走匿名档。"
-                    + _legacy_key_hint(),
-                    code=-32012)
+                _raise_explicit_key_rejected(JAVA_KEY)
             # 缺 key/匿名令牌失效 → 零字段匿名令牌 → 落 runtime.json → 重试一次
-            token = _fetch_anon_token()
-            if not token:
-                raise ToolError(
-                    "未配置接入 key 且匿名令牌端点不可用。引导：" +
-                    "；".join(g["label"] for g in _KEY_GUIDANCE), code=-32012)
+            token = _acquire_anon_token_or_raise()
             JAVA_KEY = token
             _save_runtime({"java_key": token, "token_tier": "anonymous"})
             out = _http("POST", _SUBMIT_HOARDING, body, base=JAVA_BASE, key=JAVA_KEY)
@@ -403,22 +472,23 @@ def submit_voices(params: dict, client_info: dict | None = None,
             # 回执缺失/整批被拒 → 不得兜底计成功（实锤缺陷：空 voiceId 记成功
             # 且宿主模型据此谎报"已提交"）。accepted 以真实回执为准。
             accepted = 0
-            voice_ids.extend([""] * len(hoard_voices))
+            voice_ids.extend([""] * len(items))
             if not engine_rejected:
                 engine_rejected = [{"reason": "引擎回执未含 voiceIds（提交结果未知），请勿视为已收录"}]
-        task_ids.extend([None] * len(hoard_voices))  # 囤积语义：无即时任务
+        task_ids.extend([None] * len(items))  # 囤积语义：无即时任务
         result = {"accepted": accepted, "voiceIds": voice_ids,
                   "taskIds": task_ids, "rejected": rejected + engine_rejected,
                   "analysis": "deferred",  # 囤积语义明示（V6 运营批量消费）
                   "path": "hoarding",
-                  "echo": _echo(voice_ids)}
+                  "echo": _echo_plan(items, voice_ids)}
         if out.get("productRegistered") is not None:
             result["productRegistered"] = out.get("productRegistered")
         # D-attrib-A 可观测：模型试图改归因留痕，不静默吞
         result["productSource"] = "install_binding"
         if ignored_runtime:
             result["ignoredRuntimeProduct"] = ignored_runtime
-        _ledger(voice_ids, task_ids)
+        _ledger_submit(items, voice_ids, task_ids, product, ledger_extra)
+        result["pendingFlush"] = _flush_pending(product)
         return result
     # ---- 过渡回落：老链单条提交（仅囤积端点 404 触发） ----
     for i, v, content in items:
@@ -435,46 +505,24 @@ def submit_voices(params: dict, client_info: dict | None = None,
                 task_ids.append(None)
             elif (not JAVA_KEY or e.code == -32012) and not voice_ids:
                 if _explicit_key():
-                    # 显式 key 被拒 → fail fast（同囤积主路径口径，防静默降级）
-                    raise ToolError(
-                        f"注入的 key 被引擎拒绝（指纹 {_fingerprint(JAVA_KEY)}）："
-                        "请核对 key 是否过期/被吊销，或移除 key 走匿名档。"
-                        + _legacy_key_hint(), code=-32012)
+                    _raise_explicit_key_rejected(JAVA_KEY)
                 # 零字段匿名令牌：缺 key/401 → 自动取令牌 → 落 runtime.json → 重试一次
-                token = _fetch_anon_token()
-                if token:
-                    JAVA_KEY = token
-                    _save_runtime({"java_key": token, "token_tier": "anonymous"})
-                    vid, tid = _legacy_submit(i, v, content)
-                    accepted += 1
-                    voice_ids.append(vid)
-                    task_ids.append(tid)
-                else:
-                    raise ToolError(
-                        "未配置接入 key 且匿名令牌端点不可用。引导：" +
-                        "；".join(g["label"] for g in _KEY_GUIDANCE), code=-32012)
+                token = _acquire_anon_token_or_raise()
+                JAVA_KEY = token
+                _save_runtime({"java_key": token, "token_tier": "anonymous"})
+                vid, tid = _legacy_submit(i, v, content)
+                accepted += 1
+                voice_ids.append(vid)
+                task_ids.append(tid)
             else:
                 rejected.append({"index": i, "reason": msg[:120]})
     result = {"accepted": accepted, "voiceIds": voice_ids,
               "taskIds": task_ids, "rejected": rejected,
               "path": "legacy-fallback",
-              "echo": _echo(voice_ids)}
-    _ledger(voice_ids, task_ids)
+              "echo": _echo_plan(items, voice_ids)}
+    _ledger_submit(items, voice_ids, task_ids, product, ledger_extra)
+    result["pendingFlush"] = _flush_pending(product)
     return result
-
-    # 本地账本落账（层级①查询的源）
-    import time as _time
-    _contents = [str(v.get("content", ""))[:40]
-                 for v in params.get("voices", []) if str(v.get("content", "")).strip()]
-    ledger_entries = [
-        {"voiceId": vid, "taskId": tid,
-         "title": (_contents[i] if i < len(_contents) else ""),
-         "product": product, "at": _time.strftime("%Y-%m-%dT%H:%M:%S")}
-        for i, (vid, tid) in enumerate(zip(voice_ids, task_ids))
-    ]
-    _ledger_append(ledger_entries)
-    return {"accepted": accepted, "voiceIds": voice_ids,
-            "taskIds": task_ids, "rejected": rejected}
 
 
 def _fingerprint(key: str) -> str | None:
@@ -627,23 +675,33 @@ def _ensure_first_boot(rt_path: Path | None = None) -> dict:
     return {"action": "stamped"}
 
 
+def _uptime_seconds() -> float:
+    """本机 uptime（秒）。独立函数：测试可 monkeypatch，消除对宿主机器的依赖
+    （实锤：test_clone_image_detection_warns 曾硬编码 boot_age=7 天与真机
+    /proc/uptime 实值比较，uptime>7 天的机器必红——环境相关测试缺陷）。"""
+    return float(open("/proc/uptime").read().split()[0])
+
+
 def _warn_if_cloned(cfg: dict, p: Path) -> None:
     """preset 克隆镜像检测（D-key-guard-3①延伸，仅告警不阻断）：
     firstBootAt 距今显著超过本机 uptime（>1h 容差）→ 本机状态大概率来自
     母机镜像克隆——所有克隆机共享同一 device 锚点/账本，声量与配额会收敛。
     判据：firstBootAt 的"年龄" > uptime+容差 ⇒ 首启发生在"这台机器"存在之前。"""
     import time as _t
+    if _distribution() != "preset":
+        return
     try:
-        if _distribution() != "preset":
-            return
         boot = _t.mktime(_t.strptime(cfg["firstBootAt"], "%Y-%m-%dT%H:%M:%S"))
-        uptime_s = float(open("/proc/uptime").read().split()[0])
-        if _t.time() - boot > uptime_s + 3600:
-            _warn("疑似镜像克隆机：firstBootAt 早于本机 uptime——克隆分发未清 "
-                  "runtime.json，所有克隆机共享同一设备锚点/账本。请在镜像冻结前 "
-                  "uninstall 或删除 runtime.json（装机 checklist ②）")
-    except Exception:
-        pass
+        uptime_s = _uptime_seconds()
+    except (KeyError, ValueError, OSError) as ex:
+        # 收窄捕获（原 except Exception: pass 吞掉真实异常，告警失效不可见）：
+        # 只吞解析类异常（缺字段/格式坏/读不到 /proc），其余如实上抛
+        _log(f"clone 检测跳过（无法解析 firstBootAt/uptime）：{ex}")
+        return
+    if _t.time() - boot > uptime_s + 3600:
+        _warn("疑似镜像克隆机：firstBootAt 早于本机 uptime——克隆分发未清 "
+              "runtime.json，所有克隆机共享同一设备锚点/账本。请在镜像冻结前 "
+              "uninstall 或删除 runtime.json（装机 checklist ②）")
 
 
 def _save_runtime(update: dict, replace: bool = False) -> None:

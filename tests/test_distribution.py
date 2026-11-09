@@ -178,7 +178,9 @@ def test_log_rotation_cap(tmp_path):
 
 
 def test_clone_image_detection_warns(tmp_path, monkeypatch):
-    """preset + firstBootAt 早于本机 uptime → 克隆告警（仅日志，不阻断）。"""
+    """preset + firstBootAt 早于本机 uptime → 克隆告警（仅日志，不阻断）。
+    uptime 源必须 monkeypatch（实锤教训：曾直接读真机 /proc/uptime，
+    宿主 uptime>7 天时判据必假、测试必红——环境相关缺陷，与被测逻辑无关）。"""
     from vod_mcp import tools
     import time as _t
     boot_age = 3600 * 24 * 7  # 首启发生在 7 天前
@@ -187,6 +189,7 @@ def test_clone_image_detection_warns(tmp_path, monkeypatch):
     warned = []
     monkeypatch.setattr(tools, "_distribution", lambda: "preset")
     monkeypatch.setattr(tools, "_warn", lambda m: warned.append(m))
+    monkeypatch.setattr(tools, "_uptime_seconds", lambda: 3600.0)  # 本机刚开机 1h
     tools._warn_if_cloned(cfg, tmp_path / "runtime.json")
     assert any("克隆" in w for w in warned), "镜像克隆机必须告警"
     assert tools._ensure_first_boot.__doc__  # 只告警不清理（firstBootAt 保留）
@@ -199,5 +202,18 @@ def test_no_clone_warning_on_fresh_boot(tmp_path, monkeypatch):
     warned = []
     monkeypatch.setattr(tools, "_distribution", lambda: "preset")
     monkeypatch.setattr(tools, "_warn", lambda m: warned.append(m))
+    monkeypatch.setattr(tools, "_uptime_seconds", lambda: 3600.0 * 24 * 365)  # 长寿机
     tools._warn_if_cloned(cfg, tmp_path / "runtime.json")
     assert not warned, "首启晚于 uptime（正常新装机）不得误报"
+
+
+def test_clone_detection_skips_on_bad_cfg(tmp_path, monkeypatch):
+    """firstBootAt 缺失/格式坏 → 只跳过不崩溃（except 收窄后的行为锁：
+    解析类异常吞掉并记日志，非解析异常必须如实上抛）。"""
+    from vod_mcp import tools
+    warned = []
+    monkeypatch.setattr(tools, "_distribution", lambda: "preset")
+    monkeypatch.setattr(tools, "_warn", lambda m: warned.append(m))
+    tools._warn_if_cloned({}, tmp_path / "runtime.json")  # 缺 firstBootAt
+    tools._warn_if_cloned({"firstBootAt": "not-a-date"}, tmp_path / "runtime.json")
+    assert not warned, "解析失败=检测跳过，不产生克隆告警"

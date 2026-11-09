@@ -685,4 +685,7 @@ def test_legacy_key_hint_contains_version_and_reinstall_command():
     assert "npx vod-devkit@latest install" in hint
     assert "当前 v" in hint  # 版本号在位
     src = (t.__file__ and open(t.__file__, encoding="utf-8").read()) or ""
-    assert src.count("_legacy_key_hint()") >= 4  # 两处提交失败路径 + auth_status 检测位 + 定义调用
+    # 拆分后口径：两条提交失败路径统一走 _raise_explicit_key_rejected
+    # （内部含 hint），它被囤积/legacy 两路径各调用一次 + auth_status 检测位。
+    assert src.count("_raise_explicit_key_rejected(") >= 3  # 定义 + 两条失败路径调用
+    assert src.count("_legacy_key_hint()") >= 2  # 助手内 + auth_status 检测位
