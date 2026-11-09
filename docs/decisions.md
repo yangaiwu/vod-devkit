@@ -388,3 +388,16 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - **插件侧零改动定音**：插件不硬编码任何配额数值（grep 实证 vod_mcp 零配额字面量），配额语义全在引擎——429 拒绝文案/引导由引擎回执透传，插件只搬运。引擎提额/改配置后插件无需发版，这是「数值放引擎不放插件」的设计收益兑现。
 - 文档同步面：proposal 信任模型表 / INSTALL / SECURITY / SUPPORT（面向用户的数值口径）随拍板更新；decisions.md 历史节落的 500/50 为旧值不改写（历史拍板记录保持原样）。
 - 引擎侧实现与验证记录：VOD-Project feat/kb-query-auth 2c1c7223（5000）→ d9b0caa5（可配置+500）→ b9b5f7b5（1000）→ 300afbd2（文档+T38 锁）→ 4a6915ab（@Mapper 真机启动崩修复）；本地真机端到端验证 dailyLimit=500→env 覆盖 1000 双向实证。
+
+## D-inbox-direct-ui-1 dsh UI issue_sync 轮询拆除（2026-11-09，负责人拍板）
+
+- 背景：引擎侧 D-inbox-DIRECT 单表收口（/external/voices 直写 t_vod_source_data，
+  不建 issue、回执无 issue_sync 节）后，dsh UI 的 U-S2 轮询
+  （GET /external/voices?limit=50 找 voiceId 的 issue_sync）永远拿不到数据——静默失效面。
+- 拍板：轮询整体拆除，提交成功（201）即终态提示「已收录，产品团队会看到这条反馈。」；
+  不把建单链路加回来（与引擎拍板矛盾）。
+- 改动面：src/client.jsx 净删 pollIssueSync/pollForReceipt 及调用点；lib/client.js 随构建重出；
+  dsh-ui-collect.md §六/§七/U-S 用例表同步。
+- 回归锁：test/no-issue-sync-poll.test.mjs（src/lib 双侧禁 issue_sync 与「已建成 issue」话术；
+  提交链本体 VOICES_PATH/retryStashedSubmissions 保留锁）。
+- 验收：dsh node --test 10/10 绿。

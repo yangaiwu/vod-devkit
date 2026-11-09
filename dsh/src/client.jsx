@@ -210,25 +210,6 @@ function PrimaryBtn({ disabled, onClick, children }) {
   );
 }
 
-/* ---------- 回执轮询（U-S2/U-S5/U-S6：issue 建成后展示链接） ---------- */
-
-async function pollIssueSync(serverVoiceId, onFound) {
-  // GET /external/voices 按本机 key 查回执；issue_sync 节随声音返回
-  try {
-    const token = await ensureToken();
-    const r = await fetch(BASE + VOICES_PATH + '?limit=50', {
-      headers: { authorization: `Bearer ${token}` },
-    });
-    if (r.status !== 200) return null;
-    const body = await r.json().catch(() => ({}));
-    const list = body.voices || body.data?.voices || [];
-    const hit = list.find((v) => v.voiceId === serverVoiceId);
-    return hit ? (hit.issue_sync || null) : null;
-  } catch (e) {
-    return null;
-  }
-}
-
 /* ---------- 暂存自动重试（U-S3：断线/未上线的反馈下次打开自动补提） ---------- */
 
 let retrySweepDone = false;  // 每会话一次
@@ -316,23 +297,6 @@ function FeedbackModal({ onClose }) {
     }
   }, []);
 
-  async function pollForReceipt(serverVoiceId, setDoneRef) {
-    if (!serverVoiceId) return;
-    for (let i = 0; i < 6; i++) {
-      await new Promise((res) => setTimeout(res, 10000));
-      const sync = await pollIssueSync(serverVoiceId);
-      if (!sync) continue;
-      if (sync.status === 'CREATED' && sync.issue_url) {
-        setDoneRef({ ok: true, msg: `已建成 issue：${sync.issue_url}` });
-        return;
-      }
-      if (sync.status === 'REJECTED') {
-        setDoneRef({ ok: false, msg: '反馈经审核未采纳，感谢你的提交。' });
-        return;
-      }
-    }
-  }
-
   // T7i（方案 A，2026-11-05 拍板）：产品归因主键化——meta productCatalog 按名解析
   // 平台 id 后提交；纯数字=平台 id 透传；目录无此名/不可达 → 名字兼容通道（不静默丢）。
   // 进程内缓存一次，页内刷新即重取。
@@ -408,14 +372,12 @@ function FeedbackModal({ onClose }) {
         row.taskId = body.taskIds?.[0] || '';
         ledgerAppend(row);
         const reg = body.productRegistered === undefined ? true : body.productRegistered;
-        // 话术=行为实况（S51）：匿名直建模式下 issue 由引擎自动建（轮询到
-        // issue_sync CREATED 后补 issue 链接，pollForReceipt），不存在
-        // 「人工审核后跟进」闸——旧句是空头承诺（2026-11-06 用户抓出）
+        // 话术=行为实况（S51，D-inbox-DIRECT 收口）：引擎直达主声音表、不建 issue，
+        // 提交成功即终态提示——无「轮询回执补链接」后续（原 U-S2 轮询随
+        // 引擎建单层退场一并拆除，2026-11-09 拍板）
         setDone(reg
           ? { ok: true, msg: '已收录，产品团队会看到这条反馈。' }
           : { ok: true, msg: '已收录。注意：产品名尚未在平台注册，这条反馈暂不进产品分析，请联系部署方核对。' });
-        // U-S2：后台轮询 issue_sync（引擎建成 issue 后补链接）
-        pollForReceipt(row.serverVoiceId, setDone);
       } catch (e) {
         row.error = String(e && e.message || e);
         ledgerAppend(row);
