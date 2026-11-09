@@ -23,7 +23,7 @@ def _resolve_ref(policy: dict, value):
     return value
 
 
-def _match_tool_rule(rule: dict, tool: str, params: dict) -> bool:
+def _match_tool_rule(policy: dict, rule: dict, tool: str, params: dict) -> bool:
     m = rule["match"]
     if m.get("tool") != tool:
         return False
@@ -36,7 +36,7 @@ def _match_tool_rule(rule: dict, tool: str, params: dict) -> bool:
     if "equals" in m:
         return actual == m["equals"]
     if "gt" in m:
-        limit = _resolve_ref(load_policy(), m["gt"])
+        limit = _resolve_ref(policy, m["gt"])
         try:
             if isinstance(actual, list):
                 return len(actual) > int(limit)
@@ -44,7 +44,7 @@ def _match_tool_rule(rule: dict, tool: str, params: dict) -> bool:
         except (TypeError, ValueError):
             return False
     if "notIn" in m:
-        whitelist = _resolve_ref(load_policy(), m["notIn"])
+        whitelist = _resolve_ref(policy, m["notIn"])
         if not isinstance(whitelist, (list, tuple)):
             return False
         return actual not in whitelist
@@ -56,7 +56,7 @@ def check_tool_call(policy: dict, tool: str, params: dict) -> list:
     hits = []
     for rule in policy.get("rules", []):
         if "tool" in rule.get("match", {}):
-            if _match_tool_rule(rule, tool, params):
+            if _match_tool_rule(policy, rule, tool, params):
                 hits.append(rule)
     return hits
 

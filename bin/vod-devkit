@@ -666,6 +666,16 @@ def cmd_install(args):
         print(f"[vod-devkit] 已显式解除 codex 采集熔断（安装成功），审计已记录：{audit}")
 
     # G1 修复：技能全量拷贝（目录型技能+平铺规则文档），按 packs 过滤
+    oc_skills, cx_skills = _install_skills(target, packs)
+
+    _write_install_manifest(args, target, packs, bound_product, mcp_conf,
+                             oc_skills, cx_skills)
+
+
+def _install_skills(target: str, packs: str):
+    """技能段：全量拷贝（目录型技能+平铺规则文档），按 packs 过滤，落
+    hermes 主目录 + opencode/codex 原生目录。返回 (oc_skills, cx_skills)
+    落点（供 manifest 名册对账）。"""
     HERMES_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
     # opencode 原生技能目录（2026-11-06 实测：opencode 自动发现
     # ~/.config/opencode/skills/ 并经 skill 工具按需加载——此前安装器漏拷，
@@ -700,7 +710,13 @@ def cmd_install(args):
                     shutil.rmtree(dst2)
                 shutil.copytree(entry, dst2)
         # vendored 领域规则已由 vendor_rules.py 落成技能目录结构
+    return oc_skills, cx_skills
 
+
+def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
+                            oc_skills, cx_skills) -> None:
+    """manifest 段：落安装名册（版本/来源/归因/落点指纹），并给出 key
+    配置提示。名册对账口径见各字段注释（原 cmd_install 尾段，整段平移）。"""
     bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
     manifest = {
         "version": bi["version"],
