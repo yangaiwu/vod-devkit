@@ -363,8 +363,11 @@ def _install_dsh(args, packs: str) -> Path:
     --product 安装期硬校验（cmd_install 已先行，到达此处必已过）+ 校验先于
     add + 幂等写 profile cordis.patch.yml config override。
     生效通道真机实测（2026-11-06，dsh 0.2.1-rc.5）：profile cordis.patch.yml
-    的 id-targeted config override 是工具壳读取 product/apiBase/confirmWrites
-    的唯一运行时通道（启动 banner + 桩引擎提交链实证）。dsh plugin add 会自建
+    的 id-targeted config override 是工具壳读取 product/apiBase/uiBase/
+    confirmWrites 的唯一运行时通道（启动 banner + 桩引擎提交链实证）。
+    uiBase（D-uiBase-direct）：浏览器半（反馈按钮）直连引擎——apiBase 是
+    server 半（Node）自用，浏览器同源策略下用不上；缺 uiBase 时 UI 提交
+    发往 dsh 同源（404→本地暂存），嵌入方真机实锤。dsh plugin add 会自建
     profile，无需前置。"""
     dsh = shutil.which("dsh")
     profile = (getattr(args, "dsh_profile", "") or "").strip()
@@ -390,16 +393,20 @@ def _install_dsh(args, packs: str) -> Path:
     # name 行必须保留：cordis.patch.yml 的 insert 块靠 name 绑定 client 半
     # （反馈按钮）——只写 id+config 会在重装幂等替换时把 name 吞掉，UI 静默
     # 失激活（2026-11-06 真机实锤：重装后入口消失）
-    block = ("- id: vod-devkit\n"
-             "  name: dsh-vod-devkit\n"
-             "  config:\n"
-             f"    product: {args.product}\n"
-             f"    apiBase: {args.java_api_base}\n"
-             "    # headless 无审批通道：原生 ask 门禁会永久阻断写工具（四宿主实测实锤：\n"
-             "    # requires approval, but no approval channel）。同意确认由 SKILL 话术层\n"
-             "    # 承担（draft→用户确认→commit / 明确指令直发），web 端如需硬门禁按\n"
-             "    # profile 覆盖回 true。\n"
-             "    confirmWrites: false\n")
+    # 嵌套铁律（2026-11-10 真机实锤）：块必须缩进在 `- insert:` 之下——平铺
+    # 形态被 dsh 组合层丢弃，插件掉出组合树（banner/工具/UI 全消失）。
+    block = ("- insert:\n"
+             "    - id: vod-devkit\n"
+             "      name: dsh-vod-devkit\n"
+             "      config:\n"
+             f"        product: {args.product}\n"
+             f"        apiBase: {args.java_api_base}\n"
+             f"        uiBase: {args.java_api_base}\n"  # D-uiBase-direct：浏览器半直连引擎
+             "        # headless 无审批通道：原生 ask 门禁会永久阻断写工具（四宿主实测实锤：\n"
+             "        # requires approval, but no approval channel）。同意确认由 SKILL 话术层\n"
+             "        # 承担（draft→用户确认→commit / 明确指令直发），web 端如需硬门禁按\n"
+             "        # profile 覆盖回 true。\n"
+             "        confirmWrites: false\n")
     try:
         written = _upsert_dsh_patch(patch, block)
     except Exception as e:
@@ -417,18 +424,28 @@ def _install_dsh(args, packs: str) -> Path:
 
 
 def _find_dsh_block(lines):
-    """定位 cordis.patch.yml 中 `- id: vod-devkit` 顶层块的 (start, end)；
-    不存在返回 (None, None)。块边界=下一顶层元素行（`- ` 开头）或 EOF。
-    install 的幂等 upsert 与 uninstall 的摘除共用同一边界语义（单一实现，
-    防两处扫描规则漂移——双载体漂移已在本仓 dsh/UI 壳实锤过）。"""
+    """定位 cordis.patch.yml 中 vod-devkit 块的 (start, end)；不存在返回
+    (None, None)。块边界=下一顶层元素行（`- ` 开头）或 EOF。
+    嵌套铁律（真机实锤，2026-11-10 复现）：dsh 只认缩进在 `- insert:` 下
+    的块——平铺 `- id:` 会被组合层丢弃=插件整个掉出组合树（banner/工具/
+    UI 全消失）。当命中行是嵌套形态（带缩进）时，start 向上归并到其
+    `- insert:` 组头，整组替换；平铺旧形态（历史安装器写的）按原语义
+    顶格替换。install 的幂等 upsert 与 uninstall 的摘除共用本边界语义
+    （单一实现，防两处扫描规则漂移——双载体漂移已在本仓 dsh/UI 壳实锤过）。"""
     for i, ln in enumerate(lines):
         if ln.strip().startswith("- id: vod-devkit"):
+            start = i
+            if ln[:1] == " ":  # 嵌套形态：向上归并组头（- insert: 或其它顶层 -）
+                for k in range(i - 1, -1, -1):
+                    if lines[k].startswith("- "):
+                        start = k
+                        break
             end = len(lines)
-            for j in range(i + 1, len(lines)):
+            for j in range(start + 1, len(lines)):
                 if lines[j].startswith("- "):  # 下一顶层元素：本块结束
                     end = j
                     break
-            return i, end
+            return start, end
     return None, None
 
 
@@ -447,6 +464,17 @@ def _upsert_dsh_patch(patch: Path, block: str) -> bool:
     else:
         new = lines[:start] + block.splitlines() + lines[end:]
     new_text = "\n".join(new).rstrip("\n") + "\n"
+    # 空 `- insert:` 组头清理（损坏态自愈）：孤儿组头（下一个顶层元素前无
+    # 子项）来自历史平铺替换的残留——留它在 dsh 组合层是空组，可能拖垮
+    # 整个 patch 解析。upsert 后顺手摘除（幂等，不碰正常组）。
+    cleaned = []
+    for idx, ln in enumerate(new):
+        if ln.strip() == "- insert:":
+            nxt = new[idx + 1] if idx + 1 < len(new) else ""
+            if nxt.startswith("- ") or (not nxt.strip() and idx + 2 >= len(new)):
+                continue  # 孤儿组头：下一行已是新顶层元素（无子项）→ 摘除
+        cleaned.append(ln)
+    new_text = "\n".join(cleaned).rstrip("\n") + "\n"
     old_text = patch.read_text(encoding="utf-8") if patch.exists() else ""
     if new_text == old_text:
         return False
@@ -814,6 +842,7 @@ def _repair_dsh_patch_block(mf: dict) -> str | None:
         "      config:",
         f"        product: {product}",
         f"        apiBase: {api_base}",
+        f"        uiBase: {api_base}",  # D-uiBase-direct：浏览器半直连，与 install 同口径
     ]
     patch.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
     return str(patch)

@@ -517,3 +517,31 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
   tail 归属到用例并计 content_rewritten（tests 回归锁在位）。
 - **部署形态**：定时 cron 方案否决（插件无宿主机器概念，负责人拍板
   删除）；工具留仓随需手跑（改话术后/发版前，任意装 codex 的开发机）。
+
+## D-uiBase-direct dsh 浏览器半 uiBase 直连（2026-11-10，负责人条件确认）
+
+- **背景实锤**：嵌入方真机——UI 反馈按钮提交报"已暂存"。根因=安装器只写
+  product/apiBase，不写 uiBase：apiBase 是工具半（Node 服务端）自用，浏览器半
+  （反馈按钮）在同源策略下用不上绝对地址；缺 uiBase 时 fetch 发相对路径 →
+  打到 dsh 同源 → 404 → client.js 落 pending-endpoint 本地暂存（设计内兜底，
+  数据不丢但发不出去）。
+- **形态**：浏览器半直连引擎（uiBase），安装器 install --target dsh 与 doctor
+  重建块（_repair_dsh_patch_block）同口径写入；README 写明部署前提二选一
+  （uiBase 直连 / 宿主代理）。
+- **依赖与触发条件**：引擎 CORS 收敛（白名单制）落地时，白名单必须含 dsh
+  本地源（http://127.0.0.1:<port>），随引擎上线同步验证——本决策的挂账钩子。
+- **红线重申（同案）**：产品归因禁止任何默认值兜底——嵌入方 agent 曾本地热修
+  给 product 默认 CodeArts，违反 D-attrib-A/D-product-id-2（宁 UNKNOWN 不错归），
+  仓内无此默认值（grep 实证），装机副本由嵌入方自行回滚。
+- **回归锁**：test_install_dsh_valid_product_writes_config 断言 uiBase 落盘；
+  doctor 重建用例同断言。
+
+### D-uiBase-direct 补充：dsh patch 块嵌套铁律（2026-11-10 真机实锤）
+
+- 实锤：安装器曾写平铺块（`- id: vod-devkit` 顶格）——dsh 组合层只认
+  缩进在 `- insert:` 下的嵌套块，平铺块被静默丢弃=插件整个掉出组合树
+  （banner/工具/UI 全消失）。修复：install 与 doctor 统一嵌套口径，
+  _find_dsh_block 嵌套命中时向上归并组头整组替换，upsert 附带孤儿
+  `- insert:` 组头自愈清理；回归锁并入 test_install_dsh_valid_product
+  _writes_config。此前 11-09 真机实证能过，是当时 dsh 重序列化把平铺块
+  收编了——依赖宿主宽容=非稳定通道，此坑在宿主行为变化时爆发。

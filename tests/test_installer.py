@@ -576,6 +576,12 @@ def test_install_dsh_valid_product_writes_config(env_dsh):
     text = patch.read_text()
     assert "- id: vod-devkit" in text
     assert "product: CodeArts" in text
+    # D-uiBase-direct 回归锁：安装必须写 uiBase——缺它浏览器半提交发 dsh
+    # 同源（404→暂存），嵌入方真机实锤；apiBase 是 server 半自用不顶替
+    assert "uiBase: " in text
+    # 嵌套铁律回归锁：块必须缩进在 - insert: 下——平铺被 dsh 组合层丢弃，
+    # 插件整个掉出组合树（banner/工具/UI 全消失，2026-11-10 真机实锤）
+    assert "    - id: vod-devkit" in text and "      name: dsh-vod-devkit" in text
     mf = json.loads((env_dsh["repo"] / "install-manifest.json").read_text())
     assert mf["dshProfile"] == "web"
 
@@ -764,6 +770,7 @@ def test_doctor_repairs_dsh_patch_block(monkeypatch, tmp_path):
     t = patch.read_text()
     assert "    - id: vod-devkit" in t and "      name: dsh-vod-devkit" in t
     assert "product: VOD" in t and "apiBase: http://127.0.0.1:18080" in t
+    assert "uiBase: http://127.0.0.1:18080" in t  # doctor 重建与 install 同口径
     assert "- id: ui-settings-general" in t and "k: 1" in t  # 不吞他人段
 
     # ② 打平（未缩进在 - insert: 下）→ 重建为嵌套

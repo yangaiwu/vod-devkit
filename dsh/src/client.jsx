@@ -472,6 +472,12 @@ function SmileyButton() {
 
 /* ---------- 插件入口（官方 activity pill 同款注册模式） ---------- */
 
+// 服务声明（dsh cordis runner 声明守卫，2026-11-10 真机实锤）：当前 dsh 版本
+// 的 client runner 要求插件在返回对象上显式声明 `inject: ['slots']` 才能访问
+// ctx.slots——缺声明=rejectGuard 静默中止 apply，反馈按钮不渲染且控制台
+// 无痕迹（web 实测：全局注入在位/client.js 已加载/按钮 0 DOM 痕迹）。
+export const inject = ['slots'];
+
 export function apply(ctx) {
   // 产品归因=加载必配（T7d）：嵌入方（产品部署方）装前必须注入
   // __VOD_DSH_UI_PRODUCT__。无注入=入口不激活+控制台报错（fail fast）——

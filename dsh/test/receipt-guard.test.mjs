@@ -95,3 +95,13 @@ test('接线: 提交载荷不带 guard 字段（引擎契约零变更，guard �
   assert.ok(!/hv\.receiptGuard|hoard\[\d\]\.receiptGuard|\{\.\.\.hv, receiptGuard/.test(indexSrc),
     '不得把 guard 字段混入引擎载荷——契约变更须走双仓评审');
 });
+
+test('client.jsx 声明 inject: [slots]（dsh runner 声明守卫，2026-11-10 真机实锤）', () => {
+  const src = readFileSync(new URL('../src/client.jsx', import.meta.url), 'utf8');
+  assert.ok(/export const inject = \['slots'\]/.test(src),
+    '缺 slots 服务声明——rejectGuard 会静默中止 apply，反馈按钮不渲染');
+  const lib = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  // lib 级码点转义断言：esbuild 会把键名压缩，但导出表必须含 slots 声明
+  assert.ok(lib.includes('slots') || lib.includes('inject'),
+    'lib/client.js 构建后须保留 slots 声明痕迹');
+});
