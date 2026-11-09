@@ -401,3 +401,16 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 回归锁：test/no-issue-sync-poll.test.mjs（src/lib 双侧禁 issue_sync 与「已建成 issue」话术；
   提交链本体 VOICES_PATH/retryStashedSubmissions 保留锁）。
 - 验收：dsh node --test 10/10 绿。
+
+## D-dev-nonce-sync-1 首装 nonce 内存态同步（2026-11-09 真机实锤）
+
+- 现象：全新安装（无 runtime.json）首次提交必失败且冒给用户——领令牌（设备 A）
+  与提交（设备 B）引擎设备绑定校验 401，插件自动重试仍新 nonce（设备 C）再 401；
+  第二次提交才成功。存量安装不受影响（runtime.json 已有 nonce）。
+- 根因：_install_nonce 首次生成只 _save_runtime 落盘、不回写模块级 _RT
+  （仅导入时加载一次）→ 同进程内每次调用生成新 nonce。
+- 修复：生成后同步 _RT["install_nonce"]（领令牌/提交/重试全程同设备，
+  401→领令牌→重试对用户完全无感）。
+- 回归锁：tests/test_install_nonce_sync.py（fresh _RT 下多次调用同值+落盘一致）。
+- 验证：本地 e2e 修复后干净沙箱首提一次成功；pytest 163 绿（162+1）。
+- 关联：本地部署验证会话（VOD-Project feat/kb-query-auth 209174b9 同日）。

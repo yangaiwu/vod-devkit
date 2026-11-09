@@ -226,6 +226,13 @@ def _install_nonce() -> str:
     if not n:
         import uuid
         n = uuid.uuid4().hex[:8]
+        # 首装 nonce 必须同步回写内存态 _RT（D-dev-nonce-sync，2026-11-09 真机实锤）：
+        # _RT 仅模块导入时加载一次，_save_runtime 只落盘——不同步则同进程内每次调用
+        # 生成新 nonce：领令牌（设备 A）与提交（设备 B）设备绑定校验失败，重试仍
+        # 新 nonce（设备 C）再 401——全新安装首次提交必失败冒给用户（存量安装
+        # runtime.json 已有 nonce 不受影响）。同步后领令牌/提交同设备，401→领令牌
+        # →重试全程进程内无感。
+        _RT["install_nonce"] = n
         try:
             _save_runtime({"install_nonce": n})
         except Exception:
