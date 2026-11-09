@@ -272,6 +272,52 @@ def _explicit_key() -> bool:
     return bool(JAVA_KEY) and str(_RT.get("token_tier") or "") != "anonymous"
 
 
+# ── D-pending-1：无通道期 pending 反馈 flush（方案 A，2026-11-09）──
+
+def _flush_pending(product):
+    """补提交 ~/.vod-devkit/pending-feedback.jsonl 里 status=pending 的条目。
+
+    口径（D-pending-1 定稿）：同步执行但失败只记日志、绝不回滚主提交；
+    幂等键=条目级（sha1(content+confirmAt+source)），内容级去重由引擎
+    uk_voice_id 承担（同内容重提=skipped）；重写+原子 rename，失败条目
+    保留 pending；单次上限 100 条最早优先，超 30 天标记 expired 剔除。
+    双通道消息分离：本函数结果只进工具内部诊断（result.pendingFlush），
+    用户侧话术由 skill 层承担（已暂存/自动补交，禁止出现路径）。
+    """
+    from vod_mcp import pending as _pq
+    path = _pq.default_path()
+    entries = _pq.load_entries(path)
+    if not entries:
+        return {"scanned": 0}
+    plan = _pq.plan_flush(entries)
+    kept = list(plan["kept"])
+    flushed, failed = 0, 0
+    for e in plan["to_flush"]:
+        hv = {"title": str(e.get("content", ""))[:60], "content": str(e.get("content", ""))}
+        if e.get("tags"):
+            hv["tags"] = e["tags"]
+        body = {"voices": [hv]}
+        if product:
+            body["product"] = product
+        try:
+            out = _http("POST", _SUBMIT_HOARDING, body, base=JAVA_BASE, key=JAVA_KEY)
+            ids = (out or {}).get("voiceIds") or ((out or {}).get("data") or {}).get("voiceIds")
+            if ids is None:
+                failed += 1
+                kept.append(e)
+                _log("pending flush: 回执未含 voiceIds，条目保留")
+            else:
+                flushed += 1  # 含幂等 skipped（同内容重提=引擎 skipped，零重复）
+        except Exception as err:
+            failed += 1
+            kept.append(e)
+            _log(f"pending flush failed (kept pending): {err}")
+    _pq.save_entries(path, kept)
+    return {"scanned": len(entries), "flushed": flushed,
+            "failed": failed, "expired": len(plan["expired"])}
+
+
+
 def submit_voices(params: dict, client_info: dict | None = None,
                   ledger_extra: dict | None = None) -> dict:
     """V16 切换：主路径=囤积端点 POST /external/voices（Bearer，批式，不触发分析）；
@@ -419,6 +465,7 @@ def submit_voices(params: dict, client_info: dict | None = None,
         if ignored_runtime:
             result["ignoredRuntimeProduct"] = ignored_runtime
         _ledger(voice_ids, task_ids)
+        result["pendingFlush"] = _flush_pending(product)
         return result
     # ---- 过渡回落：老链单条提交（仅囤积端点 404 触发） ----
     for i, v, content in items:
@@ -460,6 +507,7 @@ def submit_voices(params: dict, client_info: dict | None = None,
               "path": "legacy-fallback",
               "echo": _echo(voice_ids)}
     _ledger(voice_ids, task_ids)
+    result["pendingFlush"] = _flush_pending(product)
     return result
 
     # 本地账本落账（层级①查询的源）

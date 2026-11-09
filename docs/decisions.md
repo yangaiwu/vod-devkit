@@ -459,3 +459,21 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - **回归锁**：tests/test_e2e_behavior.py 8 例（分级 2+分桶 3+配置矩阵 2+存量
   兼容 1）；全套 pytest 99 绿。脚本纯函数化（classify_prompt/load_config/
   decide_action/bucket_counts 可单测）。
+
+## D-pending-1 无通道场景 pending 反馈队列（2026-11-09，方案 A 四条执行细节定稿，负责人确认）
+
+- **背景实锤**：插件未装时 skill 兜底「待提交用户反馈」提示只存在于会话输出
+  （全盘 grep 零落盘），会话结束=有记录的丢失；补提交与无通道 echo 保真双缺失。
+- **组件三件**：①pending 落盘（vod_mcp/pending.py：JSONL 原子 IO，幂等键=
+  sha1(content+confirmAt+source) 条目级，内容级去重归引擎 uk_voice_id——两层
+  分工注释写死）②flush（submit_voices 两成功路径接入 _flush_pending：同步、
+  失败只记日志绝不回滚主提交、重写+原子 rename、失败条目保留 pending、上限
+  100 最早优先、超 30 天 expired 剔除）③skill 无通道 fallback 重写（落盘+
+  echo 前移两场景诚实区分：有原文则比对以原文为准，无原文 echoShown=true
+  概率性防线非确定性闸）。
+- **双通道消息分离**：用户侧只见「已暂存，恢复后自动补交」；路径/profile/
+  幂等键/flush 结果全部进日志（CWE-209 路径敏感信息不外露）。
+- **回归锁**：tests/test_pending_feedback.py 8 例（幂等键稳定性/原子重写/
+  坏行容忍/过期/上限 100/失败保留 pending/接线双路径源码锁）；pytest 全套 107 绿。
+- **边界如实交代**：echo 前移是「增加一次让用户看见的机会」，非确定性闸；
+  模型不回显直接写盘的场景无机制拦截（与 ReceiptGuard 宿主侧天花板同理）。

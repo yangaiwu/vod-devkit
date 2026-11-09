@@ -174,6 +174,20 @@ version: 1
 4. 拿到回执 → 对用户说人话："已收录，产品团队会看到这条反馈"——
    **voiceId 不展示给终端用户**（编号噪音），仅供 agent 对账用；
    用户追问"提交了吗"时 agent 用 voiceId/taskId 核对后回答状态
+5. **无通道 fallback（D-pending-1，插件未安装/无 vod 工具时）**：
+   - 落盘：把反馈追加写入 `~/.vod-devkit/pending-feedback.jsonl`（JSONL 一行
+     一条，字段 idempotencyKey=sha1(content+confirmAt+source)/content/tags/
+     confirmAt/createdAt=当前时间/source=宿主名/echoShown/status="pending"）。
+     **条目级幂等键，内容级去重归引擎**（同内容重提=skipped），禁止用本键
+     判"用户重复反馈"。
+   - echo 前移（两场景诚实区分）：能拿到用户输入原文 → 落盘前与 content
+     比对，不一致以原文为准；拿不到 → 先向用户逐字回显将暂存的内容再落盘、
+     echoShown=true——这是概率性防线非确定性闸，不假装解决保真。
+   - 对用户只说人话："反馈已暂存（内容：……）。当前环境暂不支持直接提交，
+     恢复后会自动补交。" **禁止出现文件路径/profile/工具名/幂等键**（内部
+     细节进日志不进用户提示；路径属 CWE-209 敏感信息）。
+   - 补交：插件恢复后任一次 vod_submit_voices 成功会自动 flush pending
+     （引擎幂等防重，用户无需操作）；超 30 天未补交的条目会被标记过期。
 
 ## 纪律
 
