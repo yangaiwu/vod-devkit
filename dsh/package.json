@@ -1,6 +1,6 @@
 {
   "name": "dsh-vod-devkit",
-  "version": "0.2.2",
+  "version": "0.4.3",
   "description": "VOD user-voice collection tools for DeepSeek Harness (dsh). Thin shell over the VOD external HTTP API — mirrors vod-devkit (MCP) collect semantics.",
   "type": "module",
   "main": "lib/index.js",

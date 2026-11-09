@@ -242,3 +242,15 @@
 - fb62b74 feat(dsh): D-rguard-1 ReceiptGuard 提交侧原文比对闸——会话日志 user 轮原文为真源
 - 3dfdb1c chore(release): golden 随 v0.4.1 重录（仅版本值漂移，人工过目合规）
 
+
+## v0.4.3（2026-11-10）
+
+- b09a98a fix(dsh): 反馈按钮宽度自测量竞态自锁——右缘锚定根治（只剩文字症状）
+- 5fb7246 fix(dsh): D-uiBase-direct——安装器写 uiBase（浏览器半直连）+ patch 块嵌套铁律
+- 0bbe0dd fix(release): dsh 壳并进发版流程——版本落点表+同版 pack 自证+双包发布清单（实锤：dsh 游离发版外 npm 停 0.1.1 半月，按包名装机全旧）
+- fc32138 fix(behavior): reconcile 双锚点归属——剥前缀行不再误归 fabricated（首夜校准债清偿）
+- 75eda86 feat(behavior): D-behavior-adversarial-1 C 档反例集+引擎接口对账+首夜实测记档
+- 3cd4939 fix(packaging): test_packaging 去未用 import（pyflakes 门禁）
+- 21777fc chore(sync): build-info 对齐 HEAD（golden 重录提交后补跑 sync，包指纹=HEAD 纪律）
+- cb79134 chore(release): golden 随 v0.4.2 重录（仅版本值漂移，人工过目合规）
+
