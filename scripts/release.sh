@@ -121,15 +121,16 @@ git push origin main --tags || { echo "FAIL: GitCode 推送失败（pre-push 门
 echo "已推送 GitCode"
 if git push github main --tags 2>/dev/null; then echo "已推送 GitHub 镜像"; else echo "WARN: GitHub 镜像推送跳过（token 权限待补）"; fi
 
-# npm 包自证（P0 复发根治：npm 0.4.1 实锤——包内 build-info.commitSha=a0cf5c2
-# 落后 HEAD 10 提交）：现场 pack 并断言包内容指纹=刚推送的 tag，之后只允许发布
-# 这颗已验证的 tarball，禁止另起目录重打。
+# npm 包自证（P0 复发根治：npm 0.4.1 实锤——包内缺 pending.py：files 白名单
+# 逐文件枚举漏新模块 + 曾以旧插件副本打出）：现场 pack 并断言包内代码指纹
+# == tag 父提交（build-info 由 sync 在发版前写入，sha=发版起点提交——自指
+# 不可能，等式只能对 tag^ 成立），之后只允许发布这颗已验证的 tarball。
 TGZ="vod-devkit-$BUMP.tgz"
 npm pack --silent >/dev/null
-SHA=$(git rev-parse HEAD)
-if ! tar xzOf "$TGZ" package/plugins/vod-devkit/build-info.json | grep -q "\"commitSha\": \"$SHA\""; then
-  echo "FAIL: pack 出的 tarball 不含当前 HEAD（$SHA）——禁止发布这颗包" >&2
+TAG_PARENT=$(git rev-parse "v$BUMP^")
+if ! tar xzOf "$TGZ" package/plugins/vod-devkit/build-info.json | grep -q "\"commitSha\": \"$TAG_PARENT\""; then
+  echo "FAIL: pack 出的 tarball 代码指纹（应=$TAG_PARENT，即 v$BUMP 父提交）不符——禁止发布这颗包" >&2
   exit 1
 fi
-echo "npm tarball 已验证：$TGZ（commitSha=$SHA）"
+echo "npm tarball 已验证：$TGZ（代码指纹=$TAG_PARENT）"
 echo "发版完成 v$BUMP（发布：npm publish $TGZ --access public；缓存分发约 1-3 分钟）"
