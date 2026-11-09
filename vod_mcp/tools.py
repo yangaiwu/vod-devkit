@@ -296,7 +296,7 @@ def _flush_pending(product):
         content = _pq.canonical_content(e)  # D-pending-1 补强：originalLines 权威拼接，剥模型加的标点
         if content != str(e.get("content", "")):
             corrected += 1
-            _log(f"pending flush: content 与 originalLines 拼接不一致，以 originalLines 为准（剥除模型拼接改动）")
+            _log("pending flush: content 与 originalLines 拼接不一致，以 originalLines 为准（剥除模型拼接改动）")
         hv = {"title": str(content)[:60], "content": str(content)}
         if e.get("tags"):
             hv["tags"] = e["tags"]
