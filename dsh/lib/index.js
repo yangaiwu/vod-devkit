@@ -33,6 +33,7 @@ export const Config = z.object({
     product: z.string().default('').volatile(),
     confirmWrites: z.boolean().default(true).volatile(),
     timeoutSec: z.number().default(30).volatile(),
+    receiptGuard: z.string().default('report').volatile(), // D-rguard-1：off|report|enforce，默认 report（零危害只标注）
 });
 
 function readCfg(v, fallback) {
@@ -164,6 +165,79 @@ function voiceId(source, content, nonce) {
     return `ext_${source}_${h}`;
 }
 
+// ── D-rguard-1 ReceiptGuard（提交侧原文比对，2026-11-09 验证立项）──
+// 通道实测（dsh-tools 0.2.0 类型源）：exec.agent.session.deriveMessages() 的
+// user 轮消息 = 用户逐字原文（append-only 会话日志投影，不经模型）——模型改写
+// 只发生在 args 侧，比对 args.content 与日志原文即可抓改写（dsh headless echo
+// 改字两次实锤均在 args 侧，正是本闸覆盖面）。模型无往日志写用户轮的通道
+// （ToolRunContext.deferContext 是插件自铸上下文，不产生用户轮）。
+// 三档：off=不校验；report（默认）=只标注零危害；enforce=mismatch/unavailable 拒收。
+export function normalizeForGuard(s) {
+    return String(s ?? '').replace(/\s+/g, '').toLowerCase();
+}
+
+export function bigramSimilarity(a, b) {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    const grams = (s) => {
+        const m = new Map();
+        for (let i = 0; i < s.length - 1; i++) {
+            const g = s.slice(i, i + 2);
+            m.set(g, (m.get(g) || 0) + 1);
+        }
+        return m;
+    };
+    const ga = grams(a), gb = grams(b);
+    let inter = 0, total = 0;
+    for (const v of ga.values()) total += v;
+    for (const [g, v] of gb) {
+        total += v;
+        if (ga.has(g)) inter += Math.min(v, ga.get(g));
+    }
+    return total ? (2 * inter) / total : 0;
+}
+
+/** 从会话日志取全部用户轮逐字文本（text 块；tool_result 也是 user role，按块型过滤）；不可得=null */
+export function collectUserTurns(session) {
+    if (!session || typeof session.deriveMessages !== 'function') return null;
+    const msgs = session.deriveMessages();
+    const turns = [];
+    for (const m of Array.isArray(msgs) ? msgs : []) {
+        if (!m || m.role !== 'user' || !Array.isArray(m.content)) continue;
+        const text = m.content.filter((b) => b && b.type === 'text').map((b) => b.text).join('\n');
+        if (text) turns.push(text);
+    }
+    return turns.length ? turns : null;
+}
+
+/** 单条 content 判定：规范化整串命中任一用户轮=verified；跨轮忠实聚合按拼接语料命中；
+ *  字符二元组相似度 ≥0.5 且规范化长度 ≥10=fuzzy（短内容必须逐字，防止相似度阈值吞掉短改写）；
+ *  否则 mismatch；原文不可得=unavailable。 */
+export function evaluateVoiceGuard(userTurns, content) {
+    if (!Array.isArray(userTurns)) return 'unavailable';
+    const c = normalizeForGuard(content);
+    if (!c) return 'mismatch';
+    const corpus = normalizeForGuard(userTurns.join('\n'));
+    if (corpus.includes(c)) return 'verified';
+    if (c.length < 10) return 'mismatch'; // 短内容不享受相似度豁免（'A问题。补充B' 型胶水词改写）
+    let best = 0;
+    for (const t of userTurns) best = Math.max(best, bigramSimilarity(c, normalizeForGuard(t)));
+    return best >= 0.5 ? 'fuzzy' : 'mismatch';
+}
+
+export const RG_MODES = ['off', 'report', 'enforce'];
+
+/** 回执汇总：mode + 逐条判定（对账主键=voiceId 顺序位；纯函数可单测） */
+export function rgGuardSummary(verdictMap, total) {
+    const verdicts = [];
+    for (let i = 0; i < total; i++) verdicts.push(verdictMap.get(i) ?? 'unavailable');
+    return {
+        verdicts,
+        mismatch: verdicts.filter((v) => v === 'mismatch').length,
+        unavailable: verdicts.filter((v) => v === 'unavailable').length,
+    };
+}
+
 function buildParameters(specs) {
     const properties = {};
     const required = [];
@@ -216,6 +290,8 @@ export function apply(ctx, config) {
         product: readCfg(config?.product, '') || '',
         confirmWrites: readCfg(config?.confirmWrites, true) !== false,
         timeoutSec: readCfg(config?.timeoutSec, 30),
+        receiptGuard: RG_MODES.includes(readCfg(config?.receiptGuard, 'report'))
+            ? readCfg(config?.receiptGuard, 'report') : 'report',
     });
 
     const tools = [
@@ -261,6 +337,11 @@ export function apply(ctx, config) {
                 product = PRODUCT_MAP[product.toLowerCase()] || product;
                 product = await resolveProductId(product, c, exec?.signal); // T7i：主键化提交
                 const source = 'dsh';
+                // D-rguard-1：原文比对（whitelist 通道=会话日志 user 轮）。enforce 档
+                // mismatch/unavailable 拒收；report（默认）只标注；off 全跳过。
+                const rgMode = c.receiptGuard;
+                const userTurns = rgMode === 'off' ? null : collectUserTurns(exec?.agent?.session);
+                const rgVerdict = new Map(); // index → verified|fuzzy|mismatch|unavailable
                 const accepted = [], taskIds = [], rejected = [];
                 let key = c.key;
                 // V16 切换（囤积端点）：批量一次 POST，title=原文截取、content=用户原话
@@ -271,6 +352,16 @@ export function apply(ctx, config) {
                     const content = String(v.content ?? '').trim();
                     if (!content) { rejected.push({ index: i, reason: 'content 为空' }); continue; }
                     if (content.length > 2000) { rejected.push({ index: i, reason: `content 超 2000 字（${content.length}）` }); continue; }
+                    if (rgMode !== 'off') {
+                        const st = evaluateVoiceGuard(userTurns, content);
+                        rgVerdict.set(i, st);
+                        if (rgMode === 'enforce' && st !== 'verified' && st !== 'fuzzy') {
+                            rejected.push({ index: i, reason: st === 'mismatch'
+                                ? 'ReceiptGuard: content 与会话用户原文不一致'
+                                : 'ReceiptGuard: 会话原文不可得，无法校验' });
+                            continue;
+                        }
+                    }
                     const hv = { title: content.slice(0, 128), content }; // R3：title=用户原文
                     // D-followup-impl-2 追问补充透传：仅 trim 非空才含键（未追问/答"没有"=键集合与旧流程一致）；引擎同口径截 2000
                     // followupStatus（评审八点 #3）：三态白名单归一透传，白名单外省键（desc 无预算不宣讲，行为对齐 vod_mcp 单源）
@@ -321,6 +412,7 @@ export function apply(ctx, config) {
                             return textResult({
                                 accepted: accepted.length, voiceIds: accepted,
                                 taskIds, rejected, path: 'hoarding',
+                                ...(rgMode !== 'off' ? { receiptGuard: rgGuardSummary(rgVerdict, hoard.length) } : {}),
                                 ...(d.productRegistered !== undefined ? { productRegistered: d.productRegistered } : {}),
                             });
                         }
@@ -375,7 +467,8 @@ export function apply(ctx, config) {
                     title: String((voices[i] || {}).content ?? '').slice(0, 40),
                     product, at: now,
                 })));
-                return textResult({ accepted: accepted.length, voiceIds: accepted, taskIds, rejected });
+                return textResult({ accepted: accepted.length, voiceIds: accepted, taskIds, rejected,
+                    ...(rgMode !== 'off' ? { receiptGuard: rgGuardSummary(rgVerdict, voices.length) } : {}) });
             },
         },
         {

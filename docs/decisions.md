@@ -414,3 +414,24 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 回归锁：tests/test_install_nonce_sync.py（fresh _RT 下多次调用同值+落盘一致）。
 - 验证：本地 e2e 修复后干净沙箱首提一次成功；pytest 163 绿（162+1）。
 - 关联：本地部署验证会话（VOD-Project feat/kb-query-auth 209174b9 同日）。
+
+## D-rguard-1 ReceiptGuard 提交侧原文比对闸（2026-11-09，验证立项+负责人确认继续）
+
+- **验证结论（dsh-tools 0.2.0 类型源实测）**：原文透传通道成立——
+  `exec.agent.session.deriveMessages()` 的 user 轮消息 = 用户逐字原文
+  （append-only 会话日志投影，不经模型；Session 注释自证 "durable source of
+  truth"）。模型改写只发生在 args 侧（dsh headless echo 改字两次实锤同型），
+  比对 args.content 与日志原文即可抓；模型无往日志写用户轮的通道
+  （deferContext 是插件自铸上下文，不产生用户轮）——闸门钥匙不在被测方手里。
+- **实现（dsh/lib/index.js）**：纯函数四件 normalizeForGuard/bigramSimilarity/
+  collectUserTurns/evaluateVoiceGuard + rgGuardSummary 回执汇总。判定四态：
+  verified（规范化子串命中）/fuzzy（≥0.5 相似且规范化长度≥10——短内容必须逐字，
+  防 "A问题。补充B" 型胶水词改写靠阈值溜过）/mismatch（编造，含模型自加连接词的
+  跨轮超集）/unavailable（exec.agent 不可得）。
+- **三档配置 receiptGuard**：off / **report（默认，零危害只标注）** / enforce
+  （mismatch+unavailable 拒收，理由串 "ReceiptGuard: …"）。非法配置值回落 report。
+- **契约边界**：guard 结果只在插件回执层（receiptGuard 字段），提交载荷不带
+  guard 字段——引擎契约零变更；引擎侧对账字段（防宿主整体作恶的天花板兜底）
+  留第二阶段评估。回归锁 test/receipt-guard.test.mjs 11 例（纯函数 8+接线 3）。
+- **边界如实交代**：宿主程序本身恶意/被替换时日志不可信，本闸不覆盖（宿主侧
+  方案共同天花板）；exec.agent 可选，unavailable 态 enforce 下明确拒收不静默放行。
