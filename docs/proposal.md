@@ -816,7 +816,7 @@ S63 追问=可选增强，四条硬约束前置（D-followup-design-1）
 
 | 档位 | 主体 | key 位置 | 说明 |
 |---|---|---|---|
-| 匿名令牌 | 终端用户（对外分发形态） | 客户机每机自领 | 30 天/500 条+UA 绑定+per-install 命名空间；归因靠 install --product |
+| 匿名令牌 | 终端用户（对外分发形态） | 客户机每机自领 | 30 天/5000 条+日 500 条（引擎默认值，vod.external.* 可配置，2026-11-09 提额，见 D-quota-raise-1）+设备锚点绑定+per-install 命名空间；归因靠 install --product |
 | host key | 宿主平台 | 宿主服务端/运维管控面 | 插件经代理访问 VOD，key 不落客户机 |
 | formal key | VOD 运营 | 运营自有 | 内部自用 |
 

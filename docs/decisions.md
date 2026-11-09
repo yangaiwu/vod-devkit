@@ -381,3 +381,10 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - 话术层（软约束）：SKILL 真源加收口锁——用户确认后当回合必须 commit，失败/过期重开草稿再 commit，提交不成必须明告未提交（禁"好的"收工）。经 sync_plugin 生成器同步，dsh 侧 SKILL 同源受益。
 - 附带重构：_drafts_load() 单源化 draft/commit 草稿库读写（禁双边漂移）。
 - 验收：pytest 162 绿 + dsh node 9 绿；场景用例 S83-S86（proposal.md 同名清单）。
+
+## D-quota-raise-1 匿名档配额提额+引擎侧全量可配置化（2026-11-09，负责人拍板）
+- 拍板：匿名令牌累计天花板 500→**5000 条**（30 天不变）、日配额 50→**500 条**（签发 100/h 与日 50 提交倒挂，用户实锤）、锚点日签发天花板 5→**1000 次/天**（该闸只挡换锚点刷令牌，装机调试永不触顶；IP 层日闸 100/天仍兜底）。
+- 引擎侧全量可配置化：`vod.external.*` 七项（anonymous-ttl-days:30 / anonymous-submit-cap:5000 / anonymous-daily-quota:500 / token-ip-rate-per-hour:100 / device-ip-rate-per-hour:60 / profile-issue-daily-cap:1000 / rotating-grace-hours:72）——不配置即默认（零配置部署行为不变），常量=默认值真源+默认值三方对账回归锁（VOD-Project 300afbd2 T38）。
+- **插件侧零改动定音**：插件不硬编码任何配额数值（grep 实证 vod_mcp 零配额字面量），配额语义全在引擎——429 拒绝文案/引导由引擎回执透传，插件只搬运。引擎提额/改配置后插件无需发版，这是「数值放引擎不放插件」的设计收益兑现。
+- 文档同步面：proposal 信任模型表 / INSTALL / SECURITY / SUPPORT（面向用户的数值口径）随拍板更新；decisions.md 历史节落的 500/50 为旧值不改写（历史拍板记录保持原样）。
+- 引擎侧实现与验证记录：VOD-Project feat/kb-query-auth 2c1c7223（5000）→ d9b0caa5（可配置+500）→ b9b5f7b5（1000）→ 300afbd2（文档+T38 锁）→ 4a6915ab（@Mapper 真机启动崩修复）；本地真机端到端验证 dailyLimit=500→env 覆盖 1000 双向实证。
