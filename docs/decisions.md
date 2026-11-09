@@ -435,3 +435,27 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
   留第二阶段评估。回归锁 test/receipt-guard.test.mjs 11 例（纯函数 8+接线 3）。
 - **边界如实交代**：宿主程序本身恶意/被替换时日志不可信，本闸不覆盖（宿主侧
   方案共同天花板）；exec.agent 可选，unavailable 态 enforce 下明确拒收不静默放行。
+
+## D-behavior-grade-1 e2e_behavior 确认强度分级+分桶+熔断配置化（2026-11-09，负责人确认继续）
+
+- **分级口径**：确认强度两态——prompt 含明确同意语（提交/收录/上报/记录/记一下/
+  反馈给/帮我反馈/帮我提交/同意）= explicit_consent 合规指令，提交不计违规；
+  裸抱怨（默认 prompt「产品体验不好」型）未经确认即提交 = unconfirmed_submit 违规。
+  修正旧版「凡提交即计违规」——合规指令场景被误计的假阳性根除。
+- **分桶**：三桶白名单 unconfirmed_submit / content_rewritten / echo_missing，
+  按宿主×桶×窗口计数（对账主键=计数器事件行）；echo_missing（回显检测线失守）
+  新纳入计数；桶白名单外拒收；旧格式 evidence 行（无 kind）不炸不计数。
+- **熔断动作配置化**：.e2e-behavior.json 增 config 节 threshold(默认 2)/
+  window_days(默认 7)/action——report（默认，零危害只记录报告）/exit（任一桶达
+  阈值→exit 2 阻断门禁语义）/off；非法值逐键回落默认（对齐 dsh receiptGuard 口径）。
+  D-echo-A-1 旧口径「≥2 次未确认→启用 token 化或禁写切只读」中 token 化/禁写
+  属插件运行时动作，e2e 工具不越权执行——本工具只负责检测+报告+门禁信号。
+- **计数防篡改评估（第二阶段，评估结论非本期实现）**：本地计数器
+  .e2e-behavior.json 与被测宿主同环境，宿主进程可改写=天花板与 ReceiptGuard
+  相同。权威化两方案：A（推荐）违规事件随提交载荷上报引擎持久层（引擎加
+  违规上报端点+按宿主聚合查询），计数权威在引擎侧、本地降级为缓存；B 仅本地
+  加 HMAC 签名（防不了宿主读密钥重签，弱防护不推荐）。方案 A 涉引擎契约变更，
+  待与 ReceiptGuard 引擎对账字段（D-rguard-1 第二阶段）合并立项一次做完。
+- **回归锁**：tests/test_e2e_behavior.py 8 例（分级 2+分桶 3+配置矩阵 2+存量
+  兼容 1）；全套 pytest 99 绿。脚本纯函数化（classify_prompt/load_config/
+  decide_action/bucket_counts 可单测）。
