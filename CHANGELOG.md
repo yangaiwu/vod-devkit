@@ -226,3 +226,19 @@
 - fa9c92b refactor(two-phase)+docs: D-resume-commit-1 文档化+场景用例 S83-S86+草稿库读写单源化——docs: decisions.md 决策条目/design.md 承载补充（分层治理口径）/proposal.md 场景用例清单（S83 全链回执逐字、S84 断回合恢复、S85 过期重开链、S86 消费后不可复活）；refactor: _drafts_load() 单源化 draft/commit 草稿库读写（现读+TTL 惰性清除，禁双边漂移）；+3 场景回归锁；pytest 162 绿+node 9 绿
 - 9b5e6ec test: golden status 版本快照随 v0.4.0 重录（仅 version 字段，diff 已过目）
 
+
+## v0.4.2（2026-11-10）
+
+- 8d59aa7 chore(ci): 双副本同步门禁三处落地——CI diff 步骤+release.sh 双门禁+npm 包自证
+- 5a8cb00 fix(tools): _warn_if_cloned 可测化——uptime 源注入 + except Exception:pass 收窄
+- a906e82 refactor(tools): 复杂度收敛——submit_voices 四段拆分(207→126 行)+cmd_install 技能/manifest 段抽出+policy 逐规则重读盘收口
+- fdb2f43 docs(pending): D-pending-1 需求/设计文档四件套收尾——S87-S90 场景用例+设计承载补充
+- 03cc4b8 fix(pending): pyflakes f-string 无占位符
+- 4532dee feat(pending): D-pending-1 补强——originalLines 权威拼接，机械剥除模型拼接改字
+- e7660c0 chore(sync): plugins/ 副本同步 D-pending-1 skill 段（双副本同步锁）
+- 14027c4 feat(pending): D-pending-1 无通道场景 pending 反馈队列——落盘+flush+echo 前移（方案 A 四条细节定稿）
+- 53fc675 chore(dsh-release): dsh-vod-devkit 0.2.1——ReceiptGuard 随包（tgz 本地重打包不入 git，dsh-vod-devkit-0.2.1.tgz）
+- baa60b6 feat(scripts): D-behavior-grade-1 e2e_behavior 确认强度分级+分桶+熔断配置化
+- fb62b74 feat(dsh): D-rguard-1 ReceiptGuard 提交侧原文比对闸——会话日志 user 轮原文为真源
+- 3dfdb1c chore(release): golden 随 v0.4.1 重录（仅版本值漂移，人工过目合规）
+
