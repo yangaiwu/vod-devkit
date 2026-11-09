@@ -17,7 +17,20 @@ stages:
             uses: checkout-action@0.0.1
           - name: install deps
             run: python3 -m pip install pytest pyflakes
+          # 目录定位必须可失败（原 `cd repo_workspace 2>/dev/null || true` 在目录名
+          # 不对时静默跑错地方，门禁形同虚设）：找不到仓库根=直接红
+          - name: 定位仓库目录（不可静默）
+            run: >-
+              cd repo_workspace 2>/dev/null;
+              ls vod_mcp/tools.py >/dev/null
+              || { echo "FAIL: 未定位到仓库根（repo_workspace 与当前目录均无 vod_mcp/）"; exit 1; }
+          - name: 双副本一致性（vod_mcp + skills 同步锁）
+            run: >-
+              cd repo_workspace 2>/dev/null;
+              diff -r -x 'runtime.json' -x '__pycache__' -x '*.log' vod_mcp plugins/vod-devkit/vod_mcp
+              && diff -r -x '__pycache__' skills plugins/vod-devkit/skills
+              || { echo "FAIL: 双副本漂移——先跑 scripts/sync_plugin.py 再提交（实锤：npm 包曾以旧插件副本发出）"; exit 1; }
           - name: lint (pyflakes)
-            run: cd repo_workspace 2>/dev/null || true; python3 -m pyflakes vod_mcp/*.py tests/*.py
+            run: cd repo_workspace 2>/dev/null; python3 -m pyflakes vod_mcp/*.py tests/*.py
           - name: run tests
-            run: cd repo_workspace 2>/dev/null || true; python3 -m pytest tests/ -q
+            run: cd repo_workspace 2>/dev/null; python3 -m pytest tests/ -q

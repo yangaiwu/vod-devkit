@@ -17,6 +17,11 @@ jobs:
         run: python3 -m pip install pytest pyflakes
       - name: lint（pyflakes）
         run: python3 -m pyflakes vod_mcp/*.py tests/*.py
+      - name: 双副本一致性（vod_mcp + skills 同步锁）
+        run: >-
+          diff -r -x 'runtime.json' -x '__pycache__' -x '*.log' vod_mcp plugins/vod-devkit/vod_mcp
+          && diff -r -x '__pycache__' skills plugins/vod-devkit/skills
+          || { echo "FAIL: 双副本漂移——先跑 scripts/sync_plugin.py 再提交"; exit 1; }
       - name: 测试（25 用例：单元+护栏+packs+协议级+回环+meta+账本）
         run: python3 -m pytest tests/ -q
       - name: 安装器烟雾

@@ -39,6 +39,16 @@ PY=$(ls /root/.hermes/tools/python-3.14.7*/bin/python3 2>/dev/null || command -v
 export PYTHONPATH="/root/.hermes/cache/scratch/pylibs:$PYTHONPATH"
 "$PY" -m pyflakes vod_mcp/*.py tests/*.py && "$PY" -m pytest tests/ -q || { echo "FAIL: 质量门未过，拒绝发版"; exit 1; }
 
+# 双副本同步门（实锤教训：npm 0.4.1 曾以滞后 10 提交的旧插件副本发出——
+# pending 队列缺失、包内 build-info 落后 HEAD）：发版起点必须双副本零漂移。
+# sync 重跑一遍，若产生未提交变更=提交前忘了同步，拒绝发版（sync 结果应单独
+# 提交）。build-info 每次重写时间戳，不参与本检查（随发版提交再生）。
+python3 scripts/sync_plugin.py
+if ! git diff --quiet -- plugins/vod-devkit/vod_mcp plugins/vod-devkit/skills; then
+  echo "FAIL: 双副本漂移——sync 产生了未提交变更。请先提交 sync 结果（git add plugins/vod-devkit/vod_mcp plugins/vod-devkit/skills）再发版" >&2
+  exit 1
+fi
+
 if [ "$DRY" = "--dry-run" ]; then echo "[dry-run] 止步于此（质量门已过）"; exit 0; fi
 
 python3 - "$CUR" "$BUMP" <<'EOF'
@@ -101,12 +111,25 @@ RANGE="${PREV_TAG}..HEAD" && [ -z "$PREV_TAG" ] && RANGE="HEAD"
 } >> CHANGELOG.md
 
 # 显式文件列表提交（纪律：禁 git add -A——曾误收垃圾文件）
+# plugins/vod-devkit/skills 也在提交清单（双副本同步的 skills 半边，此前漏加）
 git add package.json pyproject.toml vod_mcp/__init__.py contract/tools.schema.json \
         plugins/vod-devkit/.codex-plugin/plugin.json plugins/vod-devkit/build-info.json \
-        plugins/vod-devkit/vod_mcp CHANGELOG.md
+        plugins/vod-devkit/vod_mcp plugins/vod-devkit/skills CHANGELOG.md
 git commit -qm "release: v$BUMP"
 git tag "v$BUMP"
 git push origin main --tags || { echo "FAIL: GitCode 推送失败（pre-push 门禁或网络），发版未完成"; exit 1; }
 echo "已推送 GitCode"
 if git push github main --tags 2>/dev/null; then echo "已推送 GitHub 镜像"; else echo "WARN: GitHub 镜像推送跳过（token 权限待补）"; fi
-echo "发版完成 v$BUMP（npm publish --access public 一键发布；缓存分发约 1-3 分钟）"
+
+# npm 包自证（P0 复发根治：npm 0.4.1 实锤——包内 build-info.commitSha=a0cf5c2
+# 落后 HEAD 10 提交）：现场 pack 并断言包内容指纹=刚推送的 tag，之后只允许发布
+# 这颗已验证的 tarball，禁止另起目录重打。
+TGZ="vod-devkit-$BUMP.tgz"
+npm pack --silent >/dev/null
+SHA=$(git rev-parse HEAD)
+if ! tar xzOf "$TGZ" package/plugins/vod-devkit/build-info.json | grep -q "\"commitSha\": \"$SHA\""; then
+  echo "FAIL: pack 出的 tarball 不含当前 HEAD（$SHA）——禁止发布这颗包" >&2
+  exit 1
+fi
+echo "npm tarball 已验证：$TGZ（commitSha=$SHA）"
+echo "发版完成 v$BUMP（发布：npm publish $TGZ --access public；缓存分发约 1-3 分钟）"
