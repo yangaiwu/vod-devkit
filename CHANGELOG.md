@@ -216,3 +216,13 @@
 - ca84c3a test: conftest autouse runtime 隔离——test_followup 等 _submit 用例桩了 _http 未重定向 _runtime_path，账本追加写穿仓内真实 runtime.json（本机 200 条账本被测试数据灌满实锤）；autouse 重定向 tmp，用例内显式 setattr 仍可覆盖；pytest 155 绿
 - f35cd0e test: golden status 版本快照随 v0.3.1 重录（仅 version 字段，diff 已过目）
 
+
+## v0.4.1（2026-11-09）
+
+- a0cf5c2 chore(dsh-release): dsh-vod-devkit 0.2.0——首装 nonce 同步+issue_sync 轮询拆除随包（tgz 本地重打包不入 git，嵌入方经 dsh plugin add <tgz> 或重装升级）
+- 4e9a015 fix(nonce-sync): D-dev-nonce-sync-1 首装 nonce 内存态同步——真机实锤：全新安装首次提交必失败冒给用户（_install_nonce 首次生成只落盘不回写 _RT，同进程每次新 nonce→领令牌与提交设备不同→绑定校验 401，重试仍新 nonce 再 401；二次提交才成功）；修复=生成后同步 _RT[install_nonce]，领令牌/提交/重试同设备 401→领令牌→重试全程无感；存量安装不受影响；回归锁 tests/test_install_nonce_sync.py；pytest 163 绿（162+1）+ 本地 e2e 修复后干净沙箱首提一次成功；decisions.md D-dev-nonce-sync-1
+- b8eed60 feat(dsh-ui)+docs: D-inbox-direct-ui-1 issue_sync 轮询拆除——引擎单表收口后回执无 issue_sync 节，原 U-S2 轮询（GET ?limit=50 找 voiceId）永远空转静默失效；净删 pollIssueSync/pollForReceipt 及调用点，提交成功（201）即终态提示「已收录，产品团队会看到」（对齐 D-inbox-DIRECT 不建 issue 拍板）；提交链本体（POST+断线自动重提）保留不动；lib 随构建重出；docs：dsh-ui-collect §六/§七/U-S 用例表同步、decisions.md D-inbox-direct-ui-1 决策条目；回归锁 +1（no-issue-sync-poll.test.mjs：src/lib 双侧禁 issue_sync 与已建成 issue 话术+提交链本体保留锁）；dsh node --test 10/10 绿
+- b0f121c docs(quota): D-quota-raise-1 匿名档配额提额+引擎侧可配置化文档化——面向用户数值口径同步（5000/日500），proposal 信任模型表/decisions 决策条目/design 数值归属节（插件零配额数值，429 文案引擎透传）
+- fa9c92b refactor(two-phase)+docs: D-resume-commit-1 文档化+场景用例 S83-S86+草稿库读写单源化——docs: decisions.md 决策条目/design.md 承载补充（分层治理口径）/proposal.md 场景用例清单（S83 全链回执逐字、S84 断回合恢复、S85 过期重开链、S86 消费后不可复活）；refactor: _drafts_load() 单源化 draft/commit 草稿库读写（现读+TTL 惰性清除，禁双边漂移）；+3 场景回归锁；pytest 162 绿+node 9 绿
+- 9b5e6ec test: golden status 版本快照随 v0.4.0 重录（仅 version 字段，diff 已过目）
+
