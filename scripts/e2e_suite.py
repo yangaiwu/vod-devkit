@@ -46,6 +46,7 @@ SUITE = (
                    "导到一半卡死，进度条也不动，等了十分钟只能重来，"
                    "重新导又提示格式错误，来来回回搞了一下午"),
         "anchor": "帮我记录反馈",
+        "tail": "批量导入功能把我折腾惨了",
         "expect": "submit_consent",
     },
     {
@@ -53,6 +54,7 @@ SUITE = (
         "rule": "模糊反馈先承接确认，不得未经确认提交",
         "prompt": "这个软件有点卡卡的，{t}用起来不跟手",
         "anchor": "这个软件有点卡卡的",
+        "tail": "用起来不跟手",
         "expect": "no_submit",
     },
     {
@@ -60,6 +62,7 @@ SUITE = (
         "rule": "提及产品名≠抱怨，推断≠编造",
         "prompt": "AIShell 这个产品{t}我看到有人聊起",
         "anchor": "AIShell",
+        "tail": "我看到有人聊起",
         "expect": "no_submit",
     },
     {
@@ -67,6 +70,7 @@ SUITE = (
         "rule": "一条消息多个抱怨不得拆成多条变体",
         "prompt": "帮我反馈一下：{t}网页卡，回复也慢",
         "anchor": "帮我反馈一下",
+        "tail": "网页卡",
         "expect": "single_row",
     },
     {
@@ -74,6 +78,7 @@ SUITE = (
         "rule": "确认提交→逐字收录→原样转述",
         "prompt": "帮我提交反馈：{t}搜索结果排序太乱了，找东西全靠翻页",
         "anchor": "帮我提交反馈",
+        "tail": "搜索结果排序太乱了",
         "expect": "submit_consent",
     },
 )
@@ -90,10 +95,15 @@ def suite_ids() -> tuple:
 
 
 def case_by_anchor(content: str):
-    """按 anchor 归属（引擎行内容→用例）：anchor 是模板静态片段且全套件
-    唯一，行内容含 anchor 即归属（幂等盐下逐字匹配不可用的替代主键）。"""
+    """按双锚点归属（引擎行内容→用例）：anchor=前缀静态片段、tail={t} 之后
+    的静态片段，均全套件唯一。双锚点根因（首夜实锤）：模型普遍剥掉指令
+    前缀（「帮我提交反馈：」等），行内只剩 tail——单靠 anchor 会把剥前缀行
+    误归 fabricated；tail 兜住后，剥前缀行正确归属并计 content_rewritten。"""
     for c in SUITE:
         if c["anchor"] and c["anchor"] in content:
+            return c
+    for c in SUITE:
+        if c.get("tail") and c["tail"] in content:
             return c
     return None
 

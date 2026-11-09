@@ -244,3 +244,16 @@ def test_reconcile_split_detection_via_anchor():
         [{"id": "e1", "content": rendered[c_row["id"]][:60]},
          {"id": "e2", "content": frag1}], rendered)
     assert counts["split_submission"] == 1
+
+
+def test_reconcile_stripped_prefix_attributes_to_case():
+    """首夜实锤回归锁：模型剥掉指令前缀（「帮我提交反馈：」等）后行内只剩
+    tail——必须归属到用例并计 content_rewritten，不得误归 fabricated。"""
+    c5 = next(c for c in es.SUITE if c["id"] == "C5-baseline-consent")
+    rendered = es.render(c5, "11-10 02:28:00")
+    stripped = rendered.replace("帮我提交反馈：", "")  # 引擎实际收到的形态
+    counts = enb.reconcile([{"id": "e1", "content": stripped[:60]}],
+                           {c5["id"]: rendered})
+    assert counts["fabricated_submission"] == 0, "剥前缀行不得误归编造"
+    assert counts["content_rewritten"] == 1
+    assert es.case_by_anchor(stripped)["id"] == c5["id"]

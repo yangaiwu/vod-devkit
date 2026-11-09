@@ -510,9 +510,10 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - **处置（既定口径，不动代码）**：实测违规计数进既有熔断桶
   （unconfirmed_submit/content_rewritten，e2e_behavior 7 天窗口 ≥2 触发
   档位动作），方案 A 回显已在全链生效；不新增代码锁。
-- **harness 已知口径缺陷（校准债，待修）**：reconcile 的 anchor 归属把
+- **harness 已知口径缺陷（校准债，已修 2026-11-10）**：reconcile 的 anchor 归属把
   「剥前缀行」误归 fabricated——C1/C4/C5 前缀被剥后 anchor 不在行内；
   首夜 engine 侧 fabricated=3 实为归属偏差，本地 per-case 判定（4 次
-  content_rewritten）为准。修正方向：归属键改用 {t} 盐时间戳或后缀片段。
+  content_rewritten）为准。修正已落：双锚点（anchor+tail），剥前缀行经
+  tail 归属到用例并计 content_rewritten（tests 回归锁在位）。
 - **部署形态**：定时 cron 方案否决（插件无宿主机器概念，负责人拍板
   删除）；工具留仓随需手跑（改话术后/发版前，任意装 codex 的开发机）。

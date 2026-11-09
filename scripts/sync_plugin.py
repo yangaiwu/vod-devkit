@@ -2,7 +2,7 @@
 """插件自包含同步：vod_mcp/ → plugins/vod-devkit/vod_mcp/（发版前/提交前跑）。
 插件被 codex 缓存隔离安装，.mcp.json 相对路径只够到插件包内——server 必须
 随包携带（对齐 devkit 的 dist 自包含形态）。幂等整目录覆盖。"""
-import json, shutil, sys
+import json, shutil
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 src = ROOT / "vod_mcp"
