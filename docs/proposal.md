@@ -995,3 +995,23 @@ S86 单次消费对恢复路径同径
 SKILL 软层承载（D-resume-commit-1 话术锁：确认后当回合必须 commit，不成
 必须明告未提交）；完全确定性同意需宿主 UI 结构化确认，属宿主侧协议改动，
 不在插件单方范围内。
+
+## 无通道 pending 队列与拼接保真（S87-S90，D-pending-1 及补强，2026-11-09 负责人拍板方案 A）
+
+需求背景：插件未安装/无 vod 工具时，agent 兜底「暂存」只存在于会话输出
+（实锤：即兴 JSON 零落盘），会话结束=有记录的丢失；且拼接改字（S73 家族）
+在无通道场景无任何比对。拍板方案 A：落盘+flush+echo 前移，四条执行细节
+（幂等键分工/原子重写/echo 诚实边界/过期策略）定稿后落码。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S87 | 无通道暂存落盘 | 反馈追加写入 pending-feedback.jsonl（字段含 idempotencyKey=sha1(content+confirmAt+source)/originalLines/echoShown/status）；对用户只说人话禁路径 |
+| S88 | 恢复后自动补交 | 任一次 vod_submit_voices 成功触发 flush：pending 条目补交落库，文件重写后仅剩未完成项（原子 rename） |
+| S89 | 拼接改字机械剥除 | 条目带 originalLines 时 flush 以 `
+` 拼接为权威 content（模型新增标点被剥除，corrected 计数）；无 originalLines 条目行为不变 |
+| S90 | 失败与生命周期 | flush 失败条目保留 pending 不标已处理；单次上限 100 最早优先；超 30 天标记 expired 剔除；坏行容忍不炸 |
+
+回归：tests/test_pending_feedback.py 11 例（幂等键/原子重写/坏行/过期/上限/
+失败保留/接线源码锁/originalLines 三例）；pytest 全套 110 绿。
+边界（明示）：echo 前移为概率性防线非确定性闸；宿主程序整体恶意时 pending
+文件本身不可信（与 ReceiptGuard 宿主侧天花板同理）。

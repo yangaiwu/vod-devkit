@@ -601,3 +601,16 @@ VOD_PACKS 两种取值的 tools/list 断言）。
   零改动即随新值生效；插件发版周期与配额运营解耦。
 - 边界：签发时 daily_quota 烧进 key 行——存量令牌的日配额不随引擎配置变更
   （换发新令牌才吃新默认）；累计/限频类读实时值即时生效。
+
+## 承载补充：无通道 pending 队列（D-pending-1 及补强，2026-11-09）
+
+- 承载：vod_mcp/pending.py（原子 IO/幂等键/plan_flush 纯函数）+
+  tools.py `_flush_pending`（submit_voices 两成功路径接线，同步、失败
+  不回滚主提交、corrected/expired 进内部诊断）+ skills 真源无通道 fallback
+  段（三副本同步：skills//plugins//hermes profile）。
+- 决策：幂等键=条目级 sha1(content+confirmAt+source)，内容级去重归引擎
+  uk_voice_id（两层分工）；flush 同步非异步（单进程竞态成本>收益，异步留
+  扩展点）；originalLines 权威拼接=S73 家族的技术层下沉（规则锁不死的行为
+  改机械锁）；双通道消息分离（用户人话/日志全量，路径属 CWE-209）。
+- 定性边界：通道方三问（确认/原话/送达），不问第四个；内容价值判断归
+  引擎（幂等/R2/人工归因）与运营侧。
