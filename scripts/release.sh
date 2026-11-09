@@ -74,6 +74,7 @@ sub_line("contract/tools.schema.json", r'(?m)^  "version": ".*",$', f'  "version
 EXTRA_FILES = [
     ("plugins/vod-devkit/.codex-plugin/plugin.json", "json"),
     ("plugins/vod-devkit/build-info.json", "json"),
+    ("dsh/package.json", "json"),
 ]
 for f, kind in EXTRA_FILES:
     try:
@@ -114,7 +115,7 @@ RANGE="${PREV_TAG}..HEAD" && [ -z "$PREV_TAG" ] && RANGE="HEAD"
 # plugins/vod-devkit/skills 也在提交清单（双副本同步的 skills 半边，此前漏加）
 git add package.json pyproject.toml vod_mcp/__init__.py contract/tools.schema.json \
         plugins/vod-devkit/.codex-plugin/plugin.json plugins/vod-devkit/build-info.json \
-        plugins/vod-devkit/vod_mcp plugins/vod-devkit/skills CHANGELOG.md
+        plugins/vod-devkit/vod_mcp plugins/vod-devkit/skills dsh/package.json CHANGELOG.md
 git commit -qm "release: v$BUMP"
 git tag "v$BUMP"
 git push origin main --tags || { echo "FAIL: GitCode 推送失败（pre-push 门禁或网络），发版未完成"; exit 1; }
@@ -133,4 +134,20 @@ if ! tar xzOf "$TGZ" package/plugins/vod-devkit/build-info.json | grep -q "\"com
   exit 1
 fi
 echo "npm tarball 已验证：$TGZ（代码指纹=$TAG_PARENT）"
-echo "发版完成 v$BUMP（发布：npm publish $TGZ --access public；缓存分发约 1-3 分钟）"
+
+# dsh 壳同版发布（2026-11-10 实锤教训：dsh 壳游离在发版流程外，npm 停在
+# 0.1.1 半个月，期间所有按包名安装的 dsh 装机全拿旧包——安装器内部就是
+# `dsh plugin add dsh-vod-devkit` 按包名走 npm）。版本随主包同 bump（落点表），
+# pack 后断言包内 lib 指纹 == 工作区（防 stale build 产物随包发出），并与
+# 主包一起给出发布命令——两个包都必须发布，缺一即复发。
+DSH_TGZ="dsh/dsh-vod-devkit-$BUMP.tgz"
+( cd dsh && npm pack --silent >/dev/null )
+if ! tar xzOf "$DSH_TGZ" package/lib/index.js | diff -q - dsh/lib/index.js >/dev/null 2>&1; then
+  echo "FAIL: dsh tarball lib/index.js 与工作区不一致（src 改后未 build-client？）——禁止发布" >&2
+  exit 1
+fi
+echo "dsh tarball 已验证：$DSH_TGZ（lib 指纹=工作区）"
+echo "发版完成 v$BUMP，待发布两颗包（发布后 npm view 双断言 latest）："
+echo "  1) npm publish $TGZ --access public"
+echo "  2) npm publish $DSH_TGZ --access public"
+echo "  验证: npm view vod-devkit version && npm view dsh-vod-devkit version  （均应=$BUMP）"
