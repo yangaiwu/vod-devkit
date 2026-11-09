@@ -177,7 +177,10 @@ version: 1
 5. **无通道 fallback（D-pending-1，插件未安装/无 vod 工具时）**：
    - 落盘：把反馈追加写入 `~/.vod-devkit/pending-feedback.jsonl`（JSONL 一行
      一条，字段 idempotencyKey=sha1(content+confirmAt+source)/content/tags/
-     confirmAt/createdAt=当前时间/source=宿主名/echoShown/status="pending"）。
+     confirmAt/createdAt=当前时间/source=宿主名/echoShown/status="pending"/
+     originalLines=用户原话逐行数组（多轮/多行原话必填——flush 以它拼接为
+     权威 content，机械剥除模型拼接时新增的标点连接词，S73 改字技术锁；
+     模型自拟 content 仅供比对））。
      **条目级幂等键，内容级去重归引擎**（同内容重提=skipped），禁止用本键
      判"用户重复反馈"。
    - echo 前移（两场景诚实区分）：能拿到用户输入原文 → 落盘前与 content
@@ -224,3 +227,13 @@ version: 1
 - 渠道/来源一律不提交、不向用户提及（引擎按链路固定赋值）
 - 提单/工单类诉求：不需要"复现步骤/严重程度/优先级"等开发者工单字段——
   用户原话即完整提交物，缺什么由运营侧补充
+
+## 教训（D-pending-1 落地过程实锤）
+
+- **skill 留白即兴实锤**：无通道场景旧版 skill 未规定任何格式，agent 即兴
+  发明 JSON「暂存记录」输出到对话（工具名/枚举外露+伪落盘=有记录的丢失）。
+  定律再次验证：凡留白处模型必自由裁量——fallback/异常路径必须在 skill 里
+  格式定死，能格式锁的绝不交给话术。
+- **拼接改字第 N 次实锤与机械锁**：模型把两行无标点原话拼成「差劲。使用
+  …不流畅。」（S73 判定例在仍违）——originalLines 字段+flush 权威拼接=
+  确定性剥除，规则层锁不死的行为下沉技术层。

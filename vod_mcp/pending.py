@@ -51,7 +51,7 @@ def entry_key(content: str, confirm_at: str, source: str) -> str:
 
 
 def make_entry(content: str, tags: list | None, confirm_at: str, source: str,
-               echo_shown: bool = False) -> dict:
+               echo_shown: bool = False, original_lines: list | None = None) -> dict:
     now = datetime.datetime.now().isoformat(timespec="seconds")
     return {
         "idempotencyKey": entry_key(content, confirm_at, source),
@@ -62,7 +62,20 @@ def make_entry(content: str, tags: list | None, confirm_at: str, source: str,
         "source": str(source),
         "echoShown": bool(echo_shown),
         "status": STATUS_PENDING,
+        **({"originalLines": [str(x) for x in original_lines]}
+           if original_lines else {}),
     }
+
+
+def canonical_content(entry: dict) -> str:
+    """权威 content：带 originalLines 的条目以分行原文 `\n` 拼接为真源
+    （S73 判定例的技术锁——模型拼接时新增的标点/连接词在此被机械剥除，
+    实锤：模型把两行无标点原话拼成「差劲。使用…不流畅。」）。无
+    originalLines 的条目回落 entry 自身 content（行为不变）。"""
+    lines = entry.get("originalLines")
+    if isinstance(lines, list) and lines:
+        return "\n".join(str(x) for x in lines)
+    return str(entry.get("content", ""))
 
 
 def load_entries(path: Path) -> list[dict]:

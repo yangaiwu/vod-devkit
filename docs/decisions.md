@@ -477,3 +477,14 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
   坏行容忍/过期/上限 100/失败保留 pending/接线双路径源码锁）；pytest 全套 107 绿。
 - **边界如实交代**：echo 前移是「增加一次让用户看见的机会」，非确定性闸；
   模型不回显直接写盘的场景无机制拦截（与 ReceiptGuard 宿主侧天花板同理）。
+
+### D-pending-1 补强：originalLines 权威拼接（2026-11-09 深夜，实锤驱动）
+
+- 实锤：无通道兜底 JSON 里模型把两行无标点原话拼成「差劲。使用…不流畅。」
+  （S73 判定例在仍违）；同时该 JSON 即兴结构未落盘（skill 留白即兴）。
+- 落码：pending 条目增 originalLines 字段（skill 要求多行原话必填）；
+  flush 以 canonical_content（originalLines 拼接）为权威，不一致机械剥除
+  模型拼接改动并计 corrected 进诊断；无 originalLines 条目行为不变。
+- 锁：tests/test_pending_feedback.py +3 例（剥标点/回落不变/接线）全套 110 绿。
+- 定性：通道职责=原话保真+送达确认，内容价值判断归引擎/运营侧——通道方
+  不问第四个问题。

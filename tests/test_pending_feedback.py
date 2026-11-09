@@ -108,3 +108,26 @@ def test_submit_voices_wires_flush():
     assert src.count('result["pendingFlush"] = _flush_pending(product)') == 2, "囤积+legacy 回落两处"
     assert "绝不回滚主提交" in src or "绝不回滚" in (ROOT / "vod_mcp" / "pending.py").read_text(encoding="utf-8"), \
         "flush 失败不得影响主提交口径在位"
+
+
+# ── D-pending-1 补强：originalLines 权威拼接（S73 拼接改字技术锁）──
+
+def test_canonical_content_strips_model_glue():
+    """实锤复现锁：模型把两行无标点原话拼成「差劲。使用…不流畅。」——
+    flush 以 originalLines 拼接为真源，机械剥除模型加的标点。"""
+    e = pq.make_entry("产品体验很差劲。使用起来不流畅。", [], "2026-11-09T20:00:00",
+                      "opencode", original_lines=["产品体验很差劲", "使用起来不流畅"])
+    assert pq.canonical_content(e) == "产品体验很差劲\n使用起来不流畅"
+
+
+def test_canonical_content_without_lines_falls_back():
+    """无 originalLines 的条目（存量/手工行）行为不变，回落 content。"""
+    e = pq.make_entry("普通条目", [], "2026-11-09T20:00:00", "opencode")
+    assert pq.canonical_content(e) == "普通条目"
+    assert "originalLines" not in pq.make_entry("x", [], "t", "s"), "无分行时不写空字段"
+
+
+def test_flush_wiring_uses_canonical_content():
+    src = (ROOT / "vod_mcp" / "tools.py").read_text(encoding="utf-8")
+    assert "canonical_content(e)" in src, "flush 必须走权威拼接"
+    assert '"corrected": corrected' in src, "纠正计数进 flush 诊断"

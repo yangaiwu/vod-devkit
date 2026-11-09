@@ -291,9 +291,13 @@ def _flush_pending(product):
         return {"scanned": 0}
     plan = _pq.plan_flush(entries)
     kept = list(plan["kept"])
-    flushed, failed = 0, 0
+    flushed, failed, corrected = 0, 0, 0
     for e in plan["to_flush"]:
-        hv = {"title": str(e.get("content", ""))[:60], "content": str(e.get("content", ""))}
+        content = _pq.canonical_content(e)  # D-pending-1 补强：originalLines 权威拼接，剥模型加的标点
+        if content != str(e.get("content", "")):
+            corrected += 1
+            _log(f"pending flush: content 与 originalLines 拼接不一致，以 originalLines 为准（剥除模型拼接改动）")
+        hv = {"title": str(content)[:60], "content": str(content)}
         if e.get("tags"):
             hv["tags"] = e["tags"]
         body = {"voices": [hv]}
@@ -314,7 +318,8 @@ def _flush_pending(product):
             _log(f"pending flush failed (kept pending): {err}")
     _pq.save_entries(path, kept)
     return {"scanned": len(entries), "flushed": flushed,
-            "failed": failed, "expired": len(plan["expired"])}
+            "failed": failed, "expired": len(plan["expired"]),
+            "corrected": corrected}
 
 
 
