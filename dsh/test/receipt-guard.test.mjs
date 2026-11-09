@@ -105,3 +105,15 @@ test('client.jsx 声明 inject: [slots]（dsh runner 声明守卫，2026-11-10 �
   assert.ok(lib.includes('slots') || lib.includes('inject'),
     'lib/client.js 构建后须保留 slots 声明痕迹');
 });
+
+test('按钮定位无宽度自锁（右缘锚定，2026-11-10 竞态实锤）', () => {
+  const src = readFileSync(new URL('../src/client.jsx', import.meta.url), 'utf8');
+  // 病灶禁入锁：style.width 赋值=宽度自测量回归（0 测 24 自锁，只剩文字症状）
+  assert.ok(!/\.style\.width\s*=/.test(src), 'client.jsx 不得写 style.width（自锁病灶）');
+  // 0 宽守卫 + 右缘锚定在位
+  assert.ok(/offsetWidth === 0\) return/.test(src), '需 offsetWidth===0 守卫');
+  assert.ok(/style\.right\s*=/.test(src), '需右缘锚定（style.right）');
+  assert.ok(/style\.left\s*=\s*'auto'/.test(src), 'left 须清 auto（防 left+right 拉伸）');
+  const lib = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.ok(!/\.style\.width=/.test(lib), 'lib 构建后同样不得含 style.width 赋值');
+});

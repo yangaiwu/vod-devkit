@@ -425,12 +425,16 @@ function SmileyButton() {
         '[contenteditable=true][role=textbox], [contenteditable=true]');
       if (!input) return;
       const r = input.getBoundingClientRect();
-      // 宽度自适应（图标+文字标签）：place 在 render 后跑，读实测 offsetWidth
-      const w = btn.offsetWidth || 24, h = 24;
-      btn.style.left = Math.round(r.right - w - 8) + 'px';
-      btn.style.top = Math.round(r.top - h - 6) + 'px';  // 框外上方（用户实测纠偏：+5 仍在框内）
-      btn.style.width = w + 'px';
-      btn.style.height = h + 'px';
+      // 0 宽守卫：未布局（display:none 祖先/重渲染间隙）不定位——曾在此
+      // 把 0 测成 24 兜底并写入 style.width 自锁（越测越错，直到重挂载）
+      if (btn.offsetWidth === 0) return;
+      // 右缘锚定（根治 2026-11-10 竞态实锤）：right 锚输入框右缘，不测
+      // 自身宽度——宽度锁定环节整个消失；left 必须清成 auto（fixed 元素
+      // left+right 同设且 width auto 会被拉伸填满）
+      btn.style.left = 'auto';
+      btn.style.right = Math.round(window.innerWidth - r.right + 8) + 'px';
+      btn.style.top = Math.round(r.top - 30) + 'px';  // 框外上方（高24+间距6，用户实测纠偏口径）
+      btn.style.height = '24px';
     };
     place();
     const ro = new ResizeObserver(place);
