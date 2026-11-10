@@ -254,3 +254,9 @@
 - 21777fc chore(sync): build-info 对齐 HEAD（golden 重录提交后补跑 sync，包指纹=HEAD 纪律）
 - cb79134 chore(release): golden 随 v0.4.2 重录（仅版本值漂移，人工过目合规）
 
+
+## v0.4.4（2026-11-10）
+
+- 1e55b12 fix(dsh): 反馈按钮静默不渲染根治——dock 槽名跨版本漂移，双候选注册+互斥锁
+- 79c2296 chore(release): golden 随 v0.4.3 重录（仅版本值漂移，人工过目合规）
+
