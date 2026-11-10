@@ -12,15 +12,27 @@ POST /external/voices（囤积，不触发分析）→ 引擎按档建 issue
 ## 二、前置验证结论（2026-11-04 真机 boot dsh web + 包实读）
 
 1. **UI 扩展机制实证（T-VER-1 完成）**：本机 boot `dsh --profile web`
-   实测。笑脸按钮落点=**`conversation.composer.dock`** 槽（输入框
-   dock 区，多 entry 按 order 排，官方 activity pill 即注册于此）。
-   注册模式（照抄官方插件）：
-   `ctx.slots.inject("conversation.composer.dock", function* () {
-     yield ctx.slots.register({ name, id, order, locale, inject },
-                              SmileyButton); })`
+   实测。笑脸按钮落点=**composer dock 槽**（输入框 dock 区，多 entry 按
+   order 排，官方 activity pill 即注册于此）。
+   **槽名跨版本漂移（2026-11-10 真机实锤，0.2.1-rc.5）**：该版本真正渲染
+   的 dock 名是 `conversation.input.dock`；老名 `conversation.composer.dock`
+   注册后 `register` 正常返回 disposer、控制台零痕迹、组件永不渲染
+   （静默失效）。且 `ctx.slots.spec()` 不能当探针——实测对 input.dock
+   返回 undefined（动态槽），对永不渲染的 composer.dock 反而有 spec。
+   现行口径：**双候选都注册**（未渲染的槽=无害空挂载），组件侧用模块级
+   互斥锁保证同一时刻只出一个按钮。
+   注册模式（照抄官方插件，逐候选）：
+   `for (const candidate of DOCK_SLOT_CANDIDATES)
+      ctx.slots.inject(candidate, function* () {
+        yield ctx.slots.register({ name: candidate, id, order },
+                                 dockEntry(candidate)); })`
+   候选表=`['conversation.input.dock', 'conversation.composer.dock']`。
    相邻槽：conversation.input.overlay（斜杠菜单）/input.attachments。
    浏览器半=client.js 经 dsh.client 行下发（/plugins/<id>/client.js），
    node 半不动——插件带 UI 是官方支持形态，**无降级路径需要**。
+   排障口径：按钮不出现且 console 干净时，先扫 `document.querySelectorAll('[data-slot]')`
+   看实际渲染的 dock 名，再核对 `lib/client.js` 里注册名——「register 成功」
+   不等于「渲染成功」。
 2. **账号面实证（T-VER-2 升级）**：dsh **有账号体系**——settings-account
    插件含平台授权 URL（login/authorize-url/browser-login）、
    account.view.status（credential-stored 等）、avatar/details 快照。

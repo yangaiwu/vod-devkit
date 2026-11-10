@@ -106,6 +106,20 @@ test('client.jsx 声明 inject: [slots]（dsh runner 声明守卫，2026-11-10 �
     'lib/client.js 构建后须保留 slots 声明痕迹');
 });
 
+test('dock slot 双候选注册（slot 名跨版本漂移，2026-11-10 真机实锤）', () => {
+  const src = readFileSync(new URL('../src/client.jsx', import.meta.url), 'utf8');
+  // 0.2.1-rc.5 真正渲染的是 conversation.input.dock；composer.dock 注册成功但
+  // 组件永不渲染（register 返回 disposer、控制台零痕迹 = 静默失效），故两边都注册。
+  assert.ok(src.includes('conversation.input.dock'), '候选表须含新渲染位 input.dock');
+  assert.ok(src.includes('conversation.composer.dock'), '候选表须含旧位 composer.dock');
+  assert.ok(/for \(const candidate of DOCK_SLOT_CANDIDATES\)/.test(src),
+    '须遍历候选逐个 inject/register（单点名=版本漂移即静默失效）');
+  assert.ok(/name: candidate/.test(src), 'register 的 name 必须取候选值');
+  const lib = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.ok(lib.includes('conversation.input.dock'), 'lib 构建产物须含 input.dock（ASCII 字面量）');
+  assert.ok(lib.includes('conversation.composer.dock'), 'lib 构建产物须含 composer.dock（ASCII 字面量）');
+});
+
 test('按钮定位无宽度自锁（右缘锚定，2026-11-10 竞态实锤）', () => {
   const src = readFileSync(new URL('../src/client.jsx', import.meta.url), 'utf8');
   // 病灶禁入锁：style.width 赋值=宽度自测量回归（0 测 24 自锁，只剩文字症状）

@@ -496,12 +496,46 @@ export function apply(ctx) {
       'Skills门户/GTD/VOD）');
     return;
   }
-  ctx.slots.inject('conversation.composer.dock', function* () {
-    yield ctx.slots.register(
-      { name: 'conversation.composer.dock', id: 'vod-feedback', order: 20 },
-      SmileyButton,
-    );
-  });
+  // dock 位名在 dsh 版本间漂移（2026-11-10 真机实锤：0.2.1-rc.5 真正渲染的是
+  // conversation.input.dock；conversation.composer.dock 注册成功但组件永不
+  // 渲染，控制台零痕迹）。且 slots.spec() 不能当探针——实测对 input.dock
+  // 返回 undefined（动态 slot），对永不渲染的 composer.dock 反而有 spec。
+  // 所以两边都注册：未渲染的 slot 是无害空挂载，DockHost 互斥锁保证同一时刻
+  // 只出一个按钮（防未来某版本两个 dock 同时渲染出两个入口）。
+  for (const candidate of DOCK_SLOT_CANDIDATES) {
+    ctx.slots.inject(candidate, function* () {
+      yield ctx.slots.register(
+        { name: candidate, id: 'vod-feedback', order: 20 },
+        dockEntry(candidate),
+      );
+    });
+  }
+}
+
+// composer 停靠位的候选名（新→旧）。见 apply 内注释的漂移实锤。
+const DOCK_SLOT_CANDIDATES = ['conversation.input.dock', 'conversation.composer.dock'];
+
+// 互斥锁：同一运行时只会有一个 dock 真渲染；后渲染者让位，避免双按钮。
+let activeDockSlot = null;
+
+function DockHost({ slot }) {
+  useEffect(() => () => {
+    if (activeDockSlot === slot) activeDockSlot = null;
+  }, [slot]);
+  if (activeDockSlot !== null && activeDockSlot !== slot) return null;
+  activeDockSlot = slot;
+  return <SmileyButton />;
+}
+
+// 每个 slot 一个稳定组件身份（register 拿到的是组件引用，不能每次现造）。
+const DOCK_ENTRIES = new Map();
+function dockEntry(slot) {
+  if (!DOCK_ENTRIES.has(slot)) {
+    DOCK_ENTRIES.set(slot, function VodFeedbackDock() {
+      return <DockHost slot={slot} />;
+    });
+  }
+  return DOCK_ENTRIES.get(slot);
 }
 
 export const name = 'vod-devkit-ui';
