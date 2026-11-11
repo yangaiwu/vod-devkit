@@ -21,7 +21,7 @@ MCP / skills / packs / policy），面向"服务面插件"的护栏更保守。
 
 ```bash
 # 任意 MCP 宿主（Hermes / OpenCode / Codex 客户端等）：npm 公网已发布
-npx --yes vod-devkit install --target opencode --product codearts
+npx --yes vod-devkit install --target opencode --product codearts   # --product 可选先验（归因默认从用户原话解析）
 
 # WorkBuddy / CodeBuddy（GitHub 仓即市场，无审核）：
 /plugin marketplace add yangaiwu/vod-devkit

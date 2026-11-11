@@ -17,6 +17,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+from vod_mcp import attribution as _attrib
 from vod_mcp import provenance
 from vod_mcp import DEFAULT_JAVA_BASE
 
@@ -103,6 +104,8 @@ def _load_meta(force: bool = False) -> dict:
     if not force and cache.get("data") and now - cache.get("fetchedAt", 0) < _META_TTL:
         return {"products": cache["data"].get("products", _META_SNAPSHOT["products"]),
                 "catalog": cache["data"].get("productCatalog") or [],
+                "aliases": cache["data"].get("aliases") or {},
+                "nameAliases": cache["data"].get("nameAliases") or {},
                 "stale": False, "source": "cache"}
     try:
         out = _http("GET", _META_PATH, None, base=JAVA_BASE, key=_eff_key(), timeout=10)
@@ -111,10 +114,13 @@ def _load_meta(force: bool = False) -> dict:
             _save_runtime({"meta_cache": {"fetchedAt": int(now), "data": data}})
             return {"products": data["products"],
                     "catalog": data.get("productCatalog") or [],
+                    "aliases": data.get("aliases") or {},
+                    "nameAliases": data.get("nameAliases") or {},
                     "stale": False, "source": "meta"}
     except ToolError:
         pass
     return {"products": _META_SNAPSHOT["products"], "catalog": [],
+            "aliases": {}, "nameAliases": {},
             "stale": True, "source": "snapshot"}
 
 
@@ -192,35 +198,68 @@ _PRODUCT_MAP = {
 }
 
 
-def _resolve_product(params: dict) -> tuple[str | None, str | None]:
-    """归因（D-attrib-A：2026-11-06 负责人拍板，方案 A 收紧）：
-    归因只由 install 绑定（runtime.json product）决定——运行期显式传参
-    仅当与绑定一致（忽略大小写）才采信；不一致=宿主模型自报，一律忽略
-    回退绑定值（实锤：hermes 会话模型传 product="hermes" 覆盖 CodeArts
-    绑定，[HERMES] 未注册错归）。无绑定 → None（引擎 UNKNOWN 档兜底）。
-    返回 (product, ignored_runtime_product)。
-    T7i（方案 A，2026-11-05 拍板）：产品归因主键化——
-    ①纯数字串=平台主键 id，原样透传（引擎 selectById 精确命中）
-    ②名字→meta productCatalog 按名解析出平台 id 后提交（对账主键化，
-    归一化/改名漂移不进提交链路）；_PRODUCT_MAP 先归一短码再查目录
-    ③目录无此名/目录不可用→规范名原样上送（引擎 name 兼容通道，
-    命中同样补落 product_id）——不静默丢提交。"""
-    binding = str(_RT.get("product") or "").strip()
+def _attribute_product(items: list, params: dict) -> dict:
+    """归因（D-attrib-B，2026-11-11 负责人拍板 A/A/A/A；推翻 D-attrib-A 的
+    绑定独占与 D-product-id-2 的安装必配）：
+
+    优先级=用户原话字面证据 > 记忆（TTL 30 分钟）> 安装先验 > UNKNOWN。
+    - 唯一命中才采信；多产品命中=歧义 → UNKNOWN + 全部命中片段留痕
+    - 模型自报 product 一律不采信（事故语义不解除），只回执 ignoredRuntimeProduct
+    - 记忆只在 0 命中时启用，且只复用「有字面证据」的历史归因
+    返回 {"product","productName","source","evidence","ignored"}。
+    """
     raw = str(params.get("product") or "").strip()
-    ignored = None
-    if raw and (not binding or raw.lower() != binding.lower()):
-        ignored = raw  # 运行期自报≠绑定（或无绑定）→ 忽略留痕，不采信
-        raw = ""
-    product = raw or binding or None
-    if not product:
-        return None, ignored
-    if product.isdigit():
-        return product, ignored
-    name = _PRODUCT_MAP.get(product.lower(), product)
-    for item in (_load_meta().get("catalog") or []):
-        if str(item.get("name") or "").lower() == name.lower():
-            return str(item.get("id")), ignored
-    return name, ignored
+    result = _attrib.attribute(
+        "\n".join(content for _i, _v, content in items),
+        _load_meta(),
+        memory=_RT.get("attribution_memory") or {},
+        binding=str(_RT.get("product") or "").strip() or None,
+    )
+    result["ignored"] = raw or None
+    return result
+
+
+def _attach_attribution(result: dict, attr: dict) -> None:
+    """回执留痕：来源 + 证据（S99）。模型自报只留 ignoredRuntimeProduct，
+    不进 productSource（自报永远不是归因来源）。"""
+    result["productSource"] = attr.get("source") or "unknown"
+    if attr.get("evidence"):
+        result["productEvidence"] = attr["evidence"]
+    if attr.get("ignored"):
+        result["ignoredRuntimeProduct"] = attr["ignored"]
+
+
+def _merge_ledger(extra: dict | None, attr: dict) -> dict:
+    """账本条目带上归因来源与证据：错归可回溯到用户原话（S99）。"""
+    out = dict(extra or {})
+    out["productSource"] = attr.get("source") or "unknown"
+    if attr.get("evidence"):
+        out["productEvidence"] = attr["evidence"]
+    return out
+
+
+_ATTR_HISTORY_CAP = 10
+
+
+def _remember_attribution(result: dict) -> None:
+    """写记忆：只接受「字面证据唯一命中」，歧义/无证据/记忆本身不写（S100）。
+
+    覆盖时留快照（D-attrib-B 追加，评审意见采纳项）：旧条目进
+    attribution_history（cap 10，带 replacedAt），事后能回答「当时为什么归
+    到 A 而不是 B」——单条记忆被覆盖后判据不可追是排障黑洞。
+    """
+    mem = _attrib.remember_if_evidenced(result)
+    if not mem:
+        return
+    prev = _RT.get("attribution_memory") or {}
+    if prev and prev.get("product"):
+        hist = list(_RT.get("attribution_history") or [])
+        hist.append({**prev, "replacedAt": mem["at"]})
+        hist = hist[-_ATTR_HISTORY_CAP:]
+        _save_runtime({"attribution_history": hist})
+        _RT["attribution_history"] = hist  # 进程内同步：否则同会话读不到新记忆
+    _save_runtime({"attribution_memory": mem})
+    _RT["attribution_memory"] = mem
 
 
 _SUBMIT_HOARDING = "/rest/developer/manager/hdvodmngservice/v1/external/voices"
@@ -430,12 +469,14 @@ def submit_voices(params: dict, client_info: dict | None = None,
     """
     import uuid
     host = (client_info or {}).get("name") or "unknown-host"
-    product, ignored_runtime = _resolve_product(params)
     global JAVA_KEY
     accepted, voice_ids, task_ids = 0, [], []
     items, rejected = _collect_voice_items(params)
     if not items:
         return {"accepted": 0, "voiceIds": [], "taskIds": [], "rejected": rejected}
+    # 归因（D-attrib-B）：证据来自用户原话，模型自报不参战
+    attr = _attribute_product(items, params)
+    product = attr["product"]
 
     def _legacy_submit(i, v, content):
         """过渡回落：老链单条提交（提交即分析语义，仅 404 触发）。"""
@@ -516,11 +557,10 @@ def submit_voices(params: dict, client_info: dict | None = None,
                   "echo": _echo_plan(items, voice_ids)}
         if out.get("productRegistered") is not None:
             result["productRegistered"] = out.get("productRegistered")
-        # D-attrib-A 可观测：模型试图改归因留痕，不静默吞
-        result["productSource"] = "install_binding"
-        if ignored_runtime:
-            result["ignoredRuntimeProduct"] = ignored_runtime
-        _ledger_submit(items, voice_ids, task_ids, product, ledger_extra)
+        _attach_attribution(result, attr)      # 来源+证据留痕（S99）
+        _remember_attribution(attr)            # 只记有字面证据的归因（S95/S100）
+        _ledger_submit(items, voice_ids, task_ids, product,
+                        _merge_ledger(ledger_extra, attr))
         result["pendingFlush"] = _flush_pending(product)
         return result
     # ---- 过渡回落：老链单条提交（仅囤积端点 404 触发） ----
@@ -557,7 +597,11 @@ def submit_voices(params: dict, client_info: dict | None = None,
               "taskIds": task_ids, "rejected": rejected,
               "path": "legacy-fallback",
               "echo": _echo_plan(items, voice_ids)}
-    _ledger_submit(items, voice_ids, task_ids, product, ledger_extra)
+    _attach_attribution(result, attr)
+    if accepted:
+        _remember_attribution(attr)
+    _ledger_submit(items, voice_ids, task_ids, product,
+                   _merge_ledger(ledger_extra, attr))
     result["pendingFlush"] = _flush_pending(product)
     return result
 
@@ -844,7 +888,6 @@ def _drafts_load() -> dict:
 def draft_voices(params: dict, client_info: dict | None = None) -> dict:
     """两段式第一步：校验+暂存草稿+签发一次性令牌（不提交任何数据）。"""
     import time as _time
-    product, ignored_runtime = _resolve_product(params)
     voices_in = params.get("voices", [])
     clean = []
     for i, v in enumerate(voices_in):
@@ -864,6 +907,10 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
         clean.append(item)
     if not clean:
         raise ToolError("voices 为必填且至少 1 条", code=-32602)
+    # 归因（D-attrib-B）：草稿与提交同一优先级链，证据入库可审
+    attr = _attribute_product([(i, v, v["content"]) for i, v in enumerate(clean)], params)
+    product = attr["product"]
+    _remember_attribution(attr)
 
     import secrets
     draft_id = "draft_" + secrets.token_hex(8)
@@ -884,16 +931,16 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
         # 风险，换断回合可续：agent 回合中断后凭 draftId 即可恢复提交（此前
         # approvalToken 只存在于 draft 响应文本，回合断即丢失，只能重开草稿）
         "token": token,
-        "product": product, "createdAt": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "product": product, "productSource": attr.get("source"),
+        "productEvidence": attr.get("evidence") or [],
+        "createdAt": _time.strftime("%Y-%m-%dT%H:%M:%S"),
         "expiresAt": _time.time() + _DRAFT_TTL,
     }
     while len(store) > _DRAFT_CAP:  # 环形：最旧先淘汰
         store.pop(next(iter(store)))
     _save_runtime({_DRAFT_KEY: store})
 
-    if ignored_runtime:  # D-attrib-A 可观测：模型试图改归因留痕
-        _warn(f"draft: runtime product 被忽略（绑定权威）: {ignored_runtime}")
-    return {
+    out = {
         "draftId": draft_id,
         "approvalToken": token,
         "payloadSha256": payload_sha,
@@ -903,6 +950,8 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
                         "「确认提交吗」。用户明确同意前禁止调用 vod_commit_voices；"
                         "不同意则停（草稿 10 分钟后自动作废）。"),
     }
+    _attach_attribution(out, attr)  # 草稿阶段也让归因来源可审（commit 回执沿用）
+    return out
 
 
 def commit_voices(params: dict, client_info: dict | None = None) -> dict:

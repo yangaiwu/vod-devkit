@@ -133,37 +133,40 @@ def test_voice_volume_preserved_across_calls(monkeypatch):
                         client_info={"name": "mcp"})
 
 
-def test_product_id_resolution_t7i(monkeypatch):
-    """T7i（方案 A，2026-11-05 拍板）：产品归因主键化——
-    ①名字+meta productCatalog → 解析出平台 id 提交（对账主键化）
-    ②纯数字=平台 id 原样透传（引擎 selectById 精确命中）
-    ③目录无此名/目录不可用 → 规范名上送（引擎 name 兼容通道，不静默丢）"""
-    cat = [{"id": 31, "name": "CodeArts"}, {"id": 42, "name": "AIShell"}]
+def test_attribution_literal_match_resolves_catalog_id(monkeypatch):
+    """D-attrib-B：字面证据（含中文/长别名/短码）→ catalog 主键 id。
+    T7i 的主键化语义保留：目录命中给 id，目录不可用给规范名（name 兼容通道）。"""
+    meta = {"products": ["CodeArts", "AIShell"],
+            "catalog": [{"id": 31, "name": "CodeArts"}, {"id": 42, "name": "AIShell"}],
+            "nameAliases": {"CODEARTS": ["码道", "CodeArts", "软件开发生产线 CodeArts"],
+                            "AISHELL": ["AIShell", "AI shell"]},
+            "aliases": {"modelarts": "maas"}, "stale": False, "source": "meta"}
+    monkeypatch.setattr(tools, "_load_meta", lambda force=False: meta)
+    monkeypatch.setattr(tools, "_RT", {})  # 纯归因链：不受本机安装绑定干扰
 
-    def fake_meta(force=False):
-        return {"products": ["codearts"], "catalog": cat,
-                "stale": False, "source": "cache"}
+    def run(text):
+        return tools._attribute_product([(0, {}, text)], {})
 
-    monkeypatch.setattr(tools, "_load_meta", fake_meta)
-    # D-attrib-A：显式传参仅在与安装绑定一致时进入解析路径（逐用例设绑定）
-    # ① 短码先归一再查目录 → id
-    monkeypatch.setattr(tools, "_RT", {"product": "CodeArts"})
-    assert tools._resolve_product({"product": "codearts"}) == ("31", None)
-    assert tools._resolve_product({"product": "CodeArts"}) == ("31", None)
-    monkeypatch.setattr(tools, "_RT", {"product": "AIShell"})
-    assert tools._resolve_product({"product": "aishell"}) == ("42", None)
-    # ② 纯数字=平台 id 透传（不查目录）
-    monkeypatch.setattr(tools, "_RT", {"product": "31"})
-    assert tools._resolve_product({"product": "31"}) == ("31", None)
-    # ③ 目录无此名 → 规范名原样（兼容回落；绑定名同样走此路径）
-    monkeypatch.setattr(tools, "_RT", {"product": "hermes"})
-    assert tools._resolve_product({}) == ("hermes", None)
-    # ③' 目录不可用（快照/老引擎 catalog 空）→ 名字通道
+    for text in ("码道导出转圈两分钟", "用 CodeArts 导出很慢",
+                 "软件开发生产线 CodeArts 登录失败", "codearts 打不开"):
+        out = run(text)
+        assert out["product"] == "31", (text, out)
+        assert out["source"] == "user_input" and out["evidence"], out
+    assert run("AI shell 卡住")["product"] == "42"
+    # 别名表（modelarts→maas）随目录缺失回落规范名通道：不静默丢
+    out = run("modelarts 模型部署失败")
+    assert out["product"] in ("MaaS", "maas"), out
+    # 目录不可用（快照/老引擎）：只短码可匹配，命中仍走 name 兼容通道
+    # 目录不可用：回退 _META_SNAPSHOT 的短码清单（快照里是小写短码）→ 命中
+    # 后无 id，走 name 兼容通道原样上送，不静默丢
     monkeypatch.setattr(tools, "_load_meta",
-                        lambda force=False: {"products": [], "catalog": [],
+                        lambda force=False: {"products": list(tools._META_SNAPSHOT["products"]),
+                                             "catalog": [], "aliases": {}, "nameAliases": {},
                                              "stale": True, "source": "snapshot"})
-    monkeypatch.setattr(tools, "_RT", {"product": "CodeArts"})
-    assert tools._resolve_product({"product": "codearts"}) == ("CodeArts", None)
+    out = run("codearts 打不开")
+    assert out["product"].lower() == "codearts", out
+    # 快照里没有中文别名原料 → 中文点名不猜（S98）
+    assert run("码道打不开")["source"] == "unknown"
 
 
 def test_meta_catalog_cached_t7i(monkeypatch):
@@ -298,13 +301,13 @@ def test_hoarding_engine_rejected_passthrough(monkeypatch):
     assert any("NoSuchProduct" in str(r.get("reason", "")) for r in out["rejected"])
 
 
-def test_attribution_install_binding_only(monkeypatch):
-    """D-attrib-A（2026-11-06 拍板，方案 A）：归因只由安装绑定决定——
-    运行期显式传参仅当与绑定一致才采信；宿主名自报一律忽略并留痕。"""
-    monkeypatch.setattr(tools, "_load_meta",
-                        lambda force=False: {"products": ["codearts"],
-                                             "stale": False, "source": "meta",
-                                             "catalog": [{"id": "1", "name": "CodeArts"}]})
+def test_attribution_chain_evidence_over_binding(monkeypatch):
+    """D-attrib-B 优先级链：字面证据 > 记忆 > 安装先验 > UNKNOWN；
+    模型自报 product 永远不参战（D-attrib-A 事故语义不解除）。"""
+    meta = {"products": ["CodeArts"], "stale": False, "source": "meta",
+            "catalog": [{"id": "1", "name": "CodeArts"}],
+            "nameAliases": {"CODEARTS": ["码道", "CodeArts"]}, "aliases": {}}
+    monkeypatch.setattr(tools, "_load_meta", lambda force=False: meta)
     captured = {}
     monkeypatch.setattr(tools, "JAVA_KEY", "k")
     monkeypatch.setattr(tools, "_RT", {"product": "CodeArts"})
@@ -313,27 +316,18 @@ def test_attribution_install_binding_only(monkeypatch):
                         captured.update(body=body) or
                         {"code": 201, "voiceIds": ["ext_v1"], "statuses": ["new"]})
 
-    # ①运行期传参与绑定不一致（宿主名自报）→ 忽略，落绑定值，回执留痕
-    out = tools.submit_voices({"voices": [{"content": "反馈一"}],
+    # ① 无字面证据 → 安装先验（主键化）
+    out = tools.submit_voices({"voices": [{"content": "导出转圈两分钟"}],
+                               "confirmed": True}, client_info={"name": "t"})
+    assert captured["body"]["product"] == "1" and out["productSource"] == "install_binding"
+    # ② 字面证据（中文别名）压过先验；自报仍留痕不采信
+    out = tools.submit_voices({"voices": [{"content": "码道导出转圈两分钟"}],
                                "product": "hermes", "confirmed": True},
                               client_info={"name": "t"})
-    assert captured["body"]["product"] == "1", "回退安装绑定并主键化（目录命中）"
-    assert out.get("ignoredRuntimeProduct") == "hermes"
-    assert out.get("productSource") == "install_binding"
-
-    # ②运行期传参与绑定一致（忽略大小写）→ 采信，无留痕
-    out = tools.submit_voices({"voices": [{"content": "反馈二"}],
-                               "product": "codearts", "confirmed": True},
-                              client_info={"name": "t"})
-    assert captured["body"]["product"] == "1"  # 目录主键化命中
-    assert "ignoredRuntimeProduct" not in out
-
-    # ③运行期不传 → 走绑定（同样主键化）
-    out = tools.submit_voices({"voices": [{"content": "反馈三"}],
-                               "confirmed": True},
-                              client_info={"name": "t"})
     assert captured["body"]["product"] == "1"
-    assert "ignoredRuntimeProduct" not in out
+    assert out["productSource"] == "user_input"
+    assert out["ignoredRuntimeProduct"] == "hermes"
+    assert out["productEvidence"][0]["alias"] == "码道"
 
 
 def test_attribution_no_binding_ignores_runtime_param(monkeypatch):

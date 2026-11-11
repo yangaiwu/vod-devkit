@@ -50,9 +50,11 @@ VOD Java backend（唯一上游：/external/voice/submit + /external/token）
 
 ## 对外交付形态
 
-开发者拿到三样：git 仓地址 + 一条 install 命令（--product 归因绑定）+
-匿名令牌自动获取（零交互，量大升级）。装完即用：知识层匿名可用，
-提交声音那一步自动领令牌——引导（devkit error-table 模式）内建。
+开发者拿到三样：git 仓地址 + 一条 install 命令 + 匿名令牌自动获取
+（零交互，量大升级）。装完即用：知识层匿名可用，提交声音那一步自动领令牌
+——引导（devkit error-table 模式）内建。归因（D-attrib-B，2026-11-11）：
+产品由插件从用户原话解析（引擎名录别名，唯一命中才采信；歧义落 UNKNOWN 不
+猜），install 的 `--product` 是可选先验，仅在无字面证据且无记忆时兜底。
 
 **分发红线（D-key-guard-2，2026-11-05 拍板）**：key 落在哪台机器，哪台
 机器就是信任边界——对外分发的插件产物禁止预置任何 key（env/配置/install

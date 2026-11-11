@@ -677,3 +677,60 @@ test/remote-mcp-server.test.ts 是参照物），只在我们有身份/写面的
 | `tools/call` 省略 `arguments` | 在 JSON 边界补 `{}`（其 zod 层拒 undefined） | **不补**：Python SDK 的 `CallToolRequestParams.arguments` 本就可空，实测不补即 200 | 不复制——那段代码补的是 JS schema 的洞，属无收益复杂度；wire 契约仍由 `test_tools_call_without_arguments_*` 钉住 |
 | initialize 副作用 | 预热 user hash（3s 超时）+ 上报 agent/telemetry | 本仓无 telemetry/hash 子系统 | 不适用（不是"没做"，是没有对应对象） |
 | dsh 壳 | 不走 MCP | 同 | 范围外（它有自己的工具面，不经 MCP 传输） |
+
+## 归因：运行期字面解析（D-attrib-B，2026-11-11 负责人拍板 A/A/A/A）
+
+产品不再由安装/启动配置决定。install `--product` 由必填降为可选先验；归因在
+提交/起草时由插件从**用户原话**解析，证据落账本。推翻面：D-product-id-2 的
+「--product 必填 + 硬校验」→ 只保留「给了就必须对」（提供时仍校验，不给不拦装）；
+D-attrib-A 的「只认安装绑定」→ 绑定降为第三顺位先验，模型自报仍不采信。
+
+### 归因优先级链（证据强度降序）
+
+| 顺位 | 来源 | 判据 | productSource |
+|---|---|---|---|
+| 1 | 用户原话字面证据 | 命中产品名录别名且**唯一** | `user_input` |
+| 2 | 记忆 | TTL 30 分钟内最近一次**有字面证据**的归因 | `memory` |
+| 3 | 安装先验 | install --product（可选，提供即校验） | `install_binding` |
+| 4 | 未知 | 以上皆空或多产品歧义 | `unknown` |
+
+硬规则：
+- **唯一命中才采信**；≥2 个不同产品命中 → product 留空 + `reason=ambiguous`，
+  全部命中片段进 productEvidence（人工归因要有上下文，S94）。
+- **模型自报不采信**：契约删除 product 参数；调用方仍塞值时忽略并回执
+  `ignoredRuntimeProduct`（D-attrib-A 的可观测性保留，S97）。
+- **记忆只复用有证据的归因**，且只在 0 命中时启用；新字面证据无条件覆盖；
+  歧义/无证据调用不写记忆（S100）。
+- **名录不可用不猜**：meta 不可达或老引擎（无 catalog/nameAliases）时只走短码
+  匹配，仍无证据 → unknown 并在回执明示（S98）。
+- 记忆是机器级（runtime.json），同机换人/换项目靠 30 分钟 TTL 收敛；回执
+  productSource=memory 且 evidence 回指历史命中，便于追污染（负责人风险 #2）。
+
+### 别名索引与误命中判定例
+
+数据源全部来自引擎 meta（单一真源，插件零手写别名表）：
+`productCatalog[{id,name}]`（提交主键）＋`products`（显示名）＋
+`nameAliases{CODEARTS:[码道, CodeArts, 软件开发生产线 CodeArts, ...]}`＋
+`aliases{modelarts: maas}`。
+
+| 规则 | 判定例 |
+|---|---|
+| 中文别名按子串匹配 | 「码道导出转圈」命中 CodeArts；「对象存储服务 OBS 上传失败」命中 OBS |
+| 拉丁别名大小写不敏感 + 词边界（前后不得为 `[A-Za-z0-9_-]`） | `CodeArts`/`codearts` 命中；`codearts.yaml`、`mycodearts` 不命中 |
+| 短别名（<5 字符，如 obs/maas）只认强形态，不收小写裸词 | 只认 `OBS`、`对象存储服务 OBS`；`obs://bucket`、小写 `obs` 不命中 |
+| 长别名优先，重叠命中合并同产品 | 「软件开发生产线 CodeArts」优先于其子串 `CodeArts`，证据保留最长片段 |
+
+### 证据与留痕（承载）
+
+`productEvidence` 为结构化列表，每条 `{product, alias, snippet, reason?}`：
+单命中一条、歧义多条、记忆来源带 `at` 回指。落点=工具回执（模型与账本双可见）
+＋本机账本条目字段（`productSource`/`productEvidence`）。引擎侧本期不加列
+（负责人拍板 P4-A：等错归率报表需求明确再评估）。
+
+### 用例承载
+
+S91-S100（proposal）→ 承载：`vod_mcp/attribution.py`（索引/匹配/优先级链）、
+`tests/test_attribution.py`；记忆列=`runtime.json attribution_memory`；证据列=
+账本 `productSource/productEvidence`；契约面无 product 参数（S97 的
+ignoredRuntimeProduct 为回执字段，非入参）。
+

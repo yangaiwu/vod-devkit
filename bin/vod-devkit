@@ -397,11 +397,14 @@ def _install_dsh(args, packs: str) -> Path:
     # 失激活（2026-11-06 真机实锤：重装后入口消失）
     # 嵌套铁律（2026-11-10 真机实锤）：块必须缩进在 `- insert:` 之下——平铺
     # 形态被 dsh 组合层丢弃，插件掉出组合树（banner/工具/UI 全消失）。
+    # 归因先验（D-attrib-B）：--product 可选；空值时写 '' 而非空值
+    # （dsh 壳 config schema 是 z.string().default('')，YAML null 会校验失败）
+    prod_yaml = args.product or "''"
     block = ("- insert:\n"
              "    - id: vod-devkit\n"
              "      name: dsh-vod-devkit\n"
              "      config:\n"
-             f"        product: {args.product}\n"
+             f"        product: {prod_yaml}\n"
              f"        apiBase: {args.java_api_base}\n"
              f"        uiBase: {args.java_api_base}\n"  # D-uiBase-direct：浏览器半直连引擎
              "        # headless 无审批通道：原生 ask 门禁会永久阻断写工具（四宿主实测实锤：\n"
@@ -635,19 +638,10 @@ def cmd_install(args):
                   "（draft→commit 审计链/重复 commit 被拒/未确认可检测）。",
                   file=sys.stderr)
             sys.exit(2)
-    # 归因绑定（T7d 统一：安装必配，与 dsh UI 加载必配同口径）：--product 必填——
-    # 缺省宿主名在生态部署是错归陷阱（高校AI开发者平台 agent 底座=hermes，
-    # 不填则反馈全归 hermes）。宿主名仍是合法值（自反馈场景显式传
-    # --product hermes），但必须显式选择，不做静默默认（归因错误比没数据更糟）。
-    if not args.product:
-        print(
-            "[vod-devkit] --product 必填：产品归因是安装必配项（与 UI 嵌入注入同口径）。\n"
-            "  取值=生态看板产品名（可用 GET /external/products 查询权威名单），如：\n"
-            "    --product \"高校AI开发者平台\" / --product \"GTD\" / --product \"Skills门户\"\n"
-            "  取值必须在产品名录内（安装期硬校验，D-product-id-2）；完整名单：\n"
-            "    GET /external/products",
-            file=sys.stderr)
-        sys.exit(2)
+    # 归因绑定降级（D-attrib-B，2026-11-11 负责人拍板 P1-P4 全 A）：--product
+    # 由必填改为**可选先验**——归因主路径改成运行期从用户原话解析（证据唯一
+    # 命中才采信），安装绑定只在「无字面证据且无记忆」时兜底。保留「给了就
+    # 必须对」：显式提供时仍做名录硬校验（拼错照样 exit 2），不给不拦装。
     # D-dsh-install-1：--profile 必填在进入任何安装动作前校验（先校验后写入）
     if target == "dsh" and not (args.dsh_profile or "").strip():
         print("[vod-devkit] --profile 必填：dsh 按 profile 组织插件与配置。\n"
@@ -662,7 +656,8 @@ def cmd_install(args):
     # 目录不可达（离线/引擎异常）同样拒绝——宁可不装不可装错（postinstall 拒绝
     # 猜测同源纪律）。插件提交链的 name 兼容通道不受影响（那是老版本插件兼容，
     # 不是安装期放行理由）。
-    _validate_product_or_exit(args.product, args.java_api_base)
+    if args.product:  # 可选先验：给了就校验，不给不拦装（D-attrib-B）
+        _validate_product_or_exit(args.product, args.java_api_base)
     # D-key-guard-2 红线：preset（产品分发）形态下 key 禁止随包——环境变量里的
     # key 不透传给宿主配置（客户机一律走匿名令牌自领），并当场告警
     distribution = args.distribution

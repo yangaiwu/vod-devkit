@@ -270,11 +270,14 @@ def test_install_hermes_official_cli_and_conf(env):
 
 # ---- 归因绑定：安装必配（T7d 统一，与 dsh UI 加载必配同口径） ----
 
-def test_install_requires_product(env):
-    # 缺省宿主名=生态部署错归陷阱（高校AI开发者平台 agent 底座=hermes，
-    # 不填全归 hermes）——必填 fail fast，宿主名须显式传
+def test_install_without_product_is_allowed(env):
+    """D-attrib-B（2026-11-11 负责人拍板 P1-P4 全 A）：--product 由必填降为
+    可选先验——归因主路径改成运行期从用户原话解析，不装绑定也能装。
+    给了仍必须对（见 test_install_rejects_unregistered_product）。"""
     r = cli(env, "install", "--target", "opencode")
-    assert r.returncode == 2 and "--product 必填" in r.stderr
+    assert r.returncode == 0, r.stderr
+    rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
+    assert not rt.get("product"), "未提供 --product 时不得写默认绑定（不做静默默认）"
 
 def test_install_binds_explicit_product(env):
     # 指向桩引擎：默认平台地址依赖外网可达性（不可达=校验拒绝，属预期），
@@ -593,10 +596,14 @@ def test_install_dsh_bad_product_exits2_before_add(env_dsh):
     assert not env_dsh["dsh_calls"].exists()  # 校验先于 add：无半成品
 
 
-def test_install_dsh_missing_product_exits2(env_dsh):
+def test_install_dsh_without_product_binds_empty(env_dsh):
+    """D-attrib-B：dsh 也允许不配产品——块里写 product: ''（壳 schema 是
+    z.string().default('')，YAML null 会校验失败，故不能留空值）。"""
     r = cli(env_dsh, "install", "--target", "dsh", "--profile", "web")
-    assert r.returncode == 2
-    assert not env_dsh["dsh_calls"].exists()
+    assert r.returncode == 0, r.stderr
+    text = _dsh_patch(env_dsh).read_text()
+    assert "product: ''" in text, text
+    assert "- id: vod-devkit" in text
 
 
 def test_install_dsh_missing_profile_exits2(env_dsh):

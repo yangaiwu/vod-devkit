@@ -32,6 +32,7 @@
     "vod_mcp/guardrails.py",
     "vod_mcp/pending.py",
     "vod_mcp/provenance.py",
+    "vod_mcp/attribution.py",
     "vod_mcp/runtime.example.json",
     "plugins/vod-devkit/.codex-plugin/plugin.json",
     "plugins/vod-devkit/.mcp.json",

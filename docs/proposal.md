@@ -1015,3 +1015,28 @@ SKILL 软层承载（D-resume-commit-1 话术锁：确认后当回合必须 comm
 失败保留/接线源码锁/originalLines 三例）；pytest 全套 110 绿。
 边界（明示）：echo 前移为概率性防线非确定性闸；宿主程序整体恶意时 pending
 文件本身不可信（与 ReceiptGuard 宿主侧天花板同理）。
+
+## 归因改为运行期字面解析（S91-S100，D-attrib-B，2026-11-11 负责人拍板 A/A/A/A）
+
+需求变更：产品不再由安装/启动配置决定，改为**运行期从用户原话解析**，配合
+产品名录（引擎 meta）下发与短 TTL 记忆复用。归因优先级（证据强度降序）：
+用户原话字面证据 > 记忆（TTL 30 分钟）> 安装 `--product` 先验 > UNKNOWN。
+硬规则：唯一命中才采信；多产品命中一律 UNKNOWN 并保留全部命中片段；模型自报
+product 不采信（契约删除该参数）；0 命中且无记忆/先验时落 UNKNOWN 人工归因池。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S91 | 中文别名命中 | 原话含「码道」→ 提交 catalog 主键 id，productSource=user_input，productEvidence 含 alias=码道 与原文片段 |
+| S92 | 长别名/别名归一 | 「软件开发生产线 CodeArts」「对象存储服务 OBS」「modelarts」分别命中 CodeArts/OBS/MaaS；长别名优先于其子串 |
+| S93 | 误命中反例 | `codearts.yaml`、`mycodearts`、`obs://bucket`、小写 `obs` 均不命中（拉丁词边界 + 短别名只认 OBS 强形态） |
+| S94 | 多产品命中 | 一条反馈同时命中 CodeArts 与 MaaS → product 留空（UNKNOWN），productEvidence 保留两条命中（含 alias/片段/reason=ambiguous） |
+| S95 | 记忆复用 | 无字面证据时复用 TTL 内最近一次字面归因：productSource=memory，evidence 回指历史命中与时间 |
+| S96 | 记忆过期与先验回退 | 记忆超 30 分钟 → 落安装 `--product` 先验（productSource=install_binding）；先验也没有 → unknown |
+| S97 | 模型自报忽略 | 契约已无 product 参数；调用方仍塞 product 时被忽略并回执 ignoredRuntimeProduct（D-attrib-A 语义保留） |
+| S98 | 名录不可用 | meta 不可达/老引擎（无 productCatalog/nameAliases）→ 只走短码匹配；仍无字面证据则 UNKNOWN，回执 productSource=unknown 明示不静默猜 |
+| S99 | 留痕可追 | 回执与本机账本同带 productSource + productEvidence（含命中文本片段），人工可回溯到用户原话 |
+| S100 | 歧义不写记忆 | 多命中/无证据的调用不更新 attribution_memory，避免歧义污染后续归因 |
+
+回归：tests/test_attribution.py（别名/边界/歧义/记忆 TTL/自报忽略/老引擎/
+账本留痕/歧义不写记忆）+ 既有 D-attrib-A 用例改造。
+
