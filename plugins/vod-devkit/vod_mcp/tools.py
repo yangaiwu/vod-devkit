@@ -106,6 +106,8 @@ def _load_meta(force: bool = False) -> dict:
                 "catalog": cache["data"].get("productCatalog") or [],
                 "aliases": cache["data"].get("aliases") or {},
                 "nameAliases": cache["data"].get("nameAliases") or {},
+                "problemTypes": cache["data"].get("problemTypes") or [],
+                "dictVersion": cache["data"].get("dictVersion"),
                 "stale": False, "source": "cache"}
     try:
         out = _http("GET", _META_PATH, None, base=JAVA_BASE, key=_eff_key(), timeout=10)
@@ -116,11 +118,15 @@ def _load_meta(force: bool = False) -> dict:
                     "catalog": data.get("productCatalog") or [],
                     "aliases": data.get("aliases") or {},
                     "nameAliases": data.get("nameAliases") or {},
+                    "problemTypes": data.get("problemTypes") or [],
+                    "dictVersion": data.get("dictVersion"),
                     "stale": False, "source": "meta"}
     except ToolError:
         pass
     return {"products": _META_SNAPSHOT["products"], "catalog": [],
             "aliases": {}, "nameAliases": {},
+            # 快照不含分类白名单：allowed 为空=不校验（宁可放行也不误杀）
+            "problemTypes": [], "dictVersion": None,
             "stale": True, "source": "snapshot"}
 
 
@@ -379,6 +385,41 @@ def _flush_pending(product):
 
 
 
+def _allowed_tags() -> set:
+    """分类白名单（引擎 meta.problemTypes，单一真源）。
+
+    空集=不知道白名单（老引擎/快照/未上线）→ 不过滤：宁可放行也不误杀采集。
+    """
+    return set(_load_meta().get("problemTypes") or [])
+
+
+_PROBLEM_TYPE_PREFIX = "problem_type:"
+
+
+def _filter_tags(tags, allowed: set) -> tuple:
+    """tags 白名单过滤 → (kept, dropped)。
+
+    引擎约定（ExternalVoicesServiceImpl.extractProblemType）：分类标注写
+    `problem_type:<值>`，值域=meta.problemTypes（六类）。其它语义的 tag 不参与
+    分类校验、原样保留；只有 problem_type 的值会被白名单过滤——脏值丢弃不拒收
+    声音（对标 vod-skill 的 check_classification：分类必须存在于知识库）。
+    """
+    kept, dropped = [], []
+    for t in tags or []:
+        s = str(t).strip()
+        if not s:
+            continue
+        if allowed and s.startswith(_PROBLEM_TYPE_PREFIX):
+            val = s[len(_PROBLEM_TYPE_PREFIX):].strip()
+            if val not in allowed:
+                dropped.append(s)
+                continue
+            s = _PROBLEM_TYPE_PREFIX + val  # 归一（去多余空白）
+        if s not in kept:
+            kept.append(s)
+    return kept, dropped
+
+
 def _collect_voice_items(params: dict) -> tuple[list, list]:
     """校验段：content 非空+≤2000 字（契约 maxLength，防超大 payload）。
     返回 (items[(index, voice, content)], rejected 明细)。"""
@@ -504,7 +545,20 @@ def submit_voices(params: dict, client_info: dict | None = None,
             code=-32012)
 
     # ---- 主路径：囤积端点批式提交 ----
-    body = {"voices": [_hoard_voice(v, content) for _, v, content in items]}
+    allowed_tags = _allowed_tags()
+    hoard, invalid_tags = [], []
+    for i, v, content in items:
+        hv = _hoard_voice(v, content)
+        if hv.get("tags"):
+            kept, dropped = _filter_tags(hv["tags"], allowed_tags)
+            if kept:
+                hv["tags"] = kept
+            else:
+                hv.pop("tags", None)
+            if dropped:
+                invalid_tags.append({"index": i, "tags": dropped})
+        hoard.append(hv)
+    body = {"voices": hoard}
     if product:  # 无归因不带 product（引擎 UNKNOWN 档），不本地拦截
         body["product"] = product
     out = None
@@ -555,6 +609,8 @@ def submit_voices(params: dict, client_info: dict | None = None,
                   "analysis": "deferred",  # 囤积语义明示（V6 运营批量消费）
                   "path": "hoarding",
                   "echo": _echo_plan(items, voice_ids)}
+        if invalid_tags:  # 分类白名单外值被丢弃（不拒收声音，只丢 tag）
+            result["invalidTags"] = invalid_tags
         if out.get("productRegistered") is not None:
             result["productRegistered"] = out.get("productRegistered")
         _attach_attribution(result, attr)      # 来源+证据留痕（S99）
@@ -889,6 +945,8 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
     """两段式第一步：校验+暂存草稿+签发一次性令牌（不提交任何数据）。"""
     import time as _time
     voices_in = params.get("voices", [])
+    allowed_tags = _allowed_tags()
+    invalid_tags = []
     clean = []
     for i, v in enumerate(voices_in):
         content = str(v.get("content", "")).strip()
@@ -898,7 +956,11 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
             raise ToolError(f"第 {i + 1} 条 content 超 2000 字（{len(content)}）", code=-32602)
         item = {"content": content}
         if v.get("tags"):
-            item["tags"] = v["tags"]
+            kept, dropped = _filter_tags(v["tags"], allowed_tags)
+            if kept:
+                item["tags"] = kept
+            if dropped:
+                invalid_tags.append({"index": i, "tags": dropped})
         if v.get("userType"):
             item["userType"] = v["userType"]
         # D-followup-impl-2：追问补充随 draft 暂存（commit 复用 payload 原样上送），
@@ -951,6 +1013,8 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
                         "不同意则停（草稿 10 分钟后自动作废）。"),
     }
     _attach_attribution(out, attr)  # 草稿阶段也让归因来源可审（commit 回执沿用）
+    if invalid_tags:
+        out["invalidTags"] = invalid_tags
     return out
 
 

@@ -47,14 +47,29 @@
           "symbols": [
             "友商"
           ]
+        },
+        {
+          "file": "workflow/src/llm_analyzer.py",
+          "symbols": [
+            "易学习",
+            "易部署",
+            "易开发",
+            "易迁移",
+            "易维护",
+            "易演进",
+            "易社区",
+            "不适用",
+            "L5好用"
+          ]
         }
       ],
       "recorded": {
         "engine": {
           "workflow/src/workflow_v2.py": "sha256:80e0c03508b979bef1a46d57704d1d42ffe056470b486edbb881963e84a2c193",
-          "workflow/src/n08_competitor.py": "sha256:187daf7ec4b680fa48efb47c30077ef2eb5fefd469dadd6cd8d3b3e13e408248"
+          "workflow/src/n08_competitor.py": "sha256:187daf7ec4b680fa48efb47c30077ef2eb5fefd469dadd6cd8d3b3e13e408248",
+          "workflow/src/llm_analyzer.py": "sha256:8c408fb7f8d3ca27651af0a66d767eec20d1bad32daee510740cbec5d5ccd9c4"
         },
-        "skill": "sha256:beb991f52625a86ec373fc0c214b9414c2b5c507a4008b9ed8d7aceee952b652"
+        "skill": "sha256:be564d8a08d73094a7d82b5eb4960a0c784d8e6c0c1b4ab27e4c5d419af70f9f"
       }
     }
   ]

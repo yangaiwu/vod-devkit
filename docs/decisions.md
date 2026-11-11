@@ -740,3 +740,24 @@ tests 随技能包（与"验收工具不入交付分支"冲突）；skill-audit 
 skill-quality-cli 遥测包装（拍板不做遥测）；"SKILL.md 默认英文"（上架时再做）。
 脱敏取向：维持拒收（A），不对反馈就地脱敏（逐字回显是硬红线）。
 
+## D-tags-1 分类标注白名单 + 等级定义入技能（2026-11-11，对标 developer-skill/vod-skill）
+
+对标 vod-skill 仓（同域 4 个技能；vod-feedback-classifier 1928 行 SKILL.md + 66 文件 +
+产品文档语料）后采纳两项：
+
+1. **tags 白名单**（对标其 check_classification.py：分类必须存在于知识库）
+   现状缺口：契约里 tags 只是 string 数组、tools.py 原样透传，脏分类先进报表。
+   口径：引擎约定 `problem_type:<值>`（ExternalVoicesServiceImpl.extractProblemType），
+   值域=meta.problemTypes；白名单外的 problem_type 值丢弃并回执 invalidTags（只丢
+   tag，不拒收声音）；其它语义 tag 不参与校验；meta 拿不到白名单（老引擎/快照）时
+   空集=不过滤（宁可放行不误杀）。
+2. **等级定义入评分技能**（真源=引擎 llm_analyzer.py LEVEL_CRITERIA）
+   缺口：vod-scoring-rules 只有"L1=5.0…"的分数，没有定义，模型无法预判等级。
+   落法：把七个易用性维度（易学习/易部署/易开发/易迁移/易维护/易演进/易社区）的
+   L1-L5 定义以表格摘入技能（不抄 vod-skill 的"声音等级 L1-L5"——那是另一维度，
+   抄进来=第二套 taxonomy），并把 llm_analyzer.py 加进 rules-provenance 符号对账。
+
+未采：其产品文档语料学习链（CDP 抓文档建功能知识库——插件不拥有分类真源，抓取脆弱
+且会造第二真源）；批量 CSV 断点续传/追加写（我们 pending 已原子重写）；"每次加载技能/
+每次 3 条/展示思考过程"的批作业禁令；1928 行单文件（超 500 行反例）。
+

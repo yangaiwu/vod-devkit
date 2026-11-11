@@ -27,7 +27,8 @@
                   "type": "array",
                   "items": {
                     "type": "string"
-                  }
+                  },
+                  "description": "采集层分类标注（可选）：分类值写成 `problem_type:<六类之一>`，值域=引擎 meta.problemTypes；白名单外的 problem_type 值由插件丢弃并在回执 invalidTags 里报出（不拒收声音）。其它语义的 tag 不参与分类校验、原样保留"
                 },
                 "reproSteps": {
                   "type": "string",
@@ -248,7 +249,8 @@
                   "type": "array",
                   "items": {
                     "type": "string"
-                  }
+                  },
+                  "description": "采集层分类标注（可选）：分类值写成 `problem_type:<六类之一>`，值域=引擎 meta.problemTypes；白名单外的 problem_type 值由插件丢弃并在回执 invalidTags 里报出（不拒收声音）。其它语义的 tag 不参与分类校验、原样保留"
                 },
                 "reproSteps": {
                   "type": "string",
