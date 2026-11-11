@@ -4,3 +4,8 @@ __pycache__/
 install-manifest.json
 vod_mcp/runtime.json
 .e2e-behavior.json
+
+# 运行期产物（cron 追加的 E2E 日志 / 本地打包件）
+.e2e-nightly.log
+.e2e-behavior-nightly.log
+*.tgz
