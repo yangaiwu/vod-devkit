@@ -310,6 +310,12 @@
     "S100": {
       "carrier": "docs/design.md"
     },
+    "S101": {
+      "carrier": "tests/test_content_fidelity.py"
+    },
+    "S102": {
+      "carrier": "tests/test_content_fidelity.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

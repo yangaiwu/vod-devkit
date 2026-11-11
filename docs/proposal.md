@@ -1036,6 +1036,8 @@ product 不采信（契约删除该参数）；0 命中且无记忆/先验时落
 | S98 | 名录不可用 | meta 不可达/老引擎（无 productCatalog/nameAliases）→ 只走短码匹配；仍无字面证据则 UNKNOWN，回执 productSource=unknown 明示不静默猜 |
 | S99 | 留痕可追 | 回执与本机账本同带 productSource + productEvidence（含命中文本片段），人工可回溯到用户原话 |
 | S100 | 歧义不写记忆 | 多命中/无证据的调用不更新 attribution_memory，避免歧义污染后续归因 |
+| S101 | 原话逐字（反例） | 用户"产品体验很糟糕" → content 只能是这一句；模型补"操作不流畅，使用不方便"=违规（2026-11-11 CodeArts Agent 真机实锤，已落进引擎） |
+| S102 | tags 值域 | 只允许 `problem_type:<六类之一>`；自造"易用性"被白名单丢弃并回执 invalidTags（同次真机实锤） |
 
 回归：tests/test_attribution.py（别名/边界/歧义/记忆 TTL/自报忽略/老引擎/
 账本留痕/歧义不写记忆）+ 既有 D-attrib-A 用例改造。
