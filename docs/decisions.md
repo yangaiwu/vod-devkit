@@ -639,3 +639,24 @@ dsh 归因漂移锁已按新口径改写（旧「安装期绑定」句禁止回�
 未采（仍不抄）：devkit 的 56 工具/12 packs/sandbox/proxy/telemetry（云服务业务面）、
 5 宿主全适配（无消费者）、release-please（我们 release.sh 三重断言已反超）。
 
+## D-devtoolchain-7 更新链补 skip-version + registry 对账 + 类型门禁（2026-11-11，负责人拍板 B）
+
+对表 devkit 的 update-* 八模块（update-semver/skip/cache/registry-diff/…），只取对
+我们场景有消费者的三件；照抄整条链是无收益负债。
+
+1. **skip-version**（vod_check_update: skip / clearSkip + `vod-devkit update --skip`）：
+   只压「当前 latest 这一个版本」，下个版本照常提醒——永久静音比打扰更坏（用户会
+   长期吃旧包且无人知道）。与既有 dismiss（3 天冷却）并存：dismiss=不想被打扰，
+   skip=这个版本不要。
+2. **registry 对账**（scripts/registry_reconcile.py）：与 publish_verify.py 分工——
+   publish_verify 管「发版当时真的上线了没」，本脚本管「任何时刻的状态快照」：
+   两包同版、契约版本同步、registry==仓内 / 仓内领先（开发中）/ registry 领先（DRIFT）、
+   tag 是否在。离线=UNKNOWN 不判绿。CI 以非严格模式跑（仓内领先=正常开发态）。
+3. **类型门禁**（pyproject [tool.mypy]，作用域=vod_mcp/attribution.py）：全仓 mypy
+   会炸存量 tools.py 且无收益；白名单式收窄——新增纯逻辑模块必须过，存量随重构
+   自然收敛。首个模块补了 5 处容器注解（mypy var-annotated 报出来的真问题）。
+   CI 装 mypy 并跑 `python3 -m mypy`。
+
+未采：update-registry snapshot diff 全量（我们用 publish_verify 的 tarball 内容断言
+覆盖）、update-upgrade 自升级（preset 形态禁止自更新是既有拍板）、badge:sync。
+

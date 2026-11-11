@@ -126,3 +126,23 @@ def test_policy_rules_have_required_fields_and_real_tools():
     assert not problems, "policy 结构问题：\n  " + "\n  ".join(problems)
     ids = [r.get("id") for r in rules]
     assert len(ids) == len(set(ids)), "policy 规则 id 重复"
+
+def test_build_info_root_and_plugin_copy_agree():
+    """溯源双副本一致：根 build-info.json 与 plugins 副本必须同版本、同 SHA。
+
+    实锤（2026-11-11）：根副本停在 0.4.2/0bbe0dd 五个发版周期，而包内副本已 0.5.0/
+    4d4e6cb——`vod-devkit status/verify/doctor` 读根副本，报的版本与真实包不符，
+    正是「版本号相同≠内容相同」那一类静默漂移。
+    """
+    import json
+    root_bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
+    pkg_bi = json.loads((ROOT / "plugins" / "vod-devkit" / "build-info.json")
+                        .read_text(encoding="utf-8"))
+    pkg = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+    assert root_bi.get("version") == pkg["version"], (
+        f"根 build-info 版本 {root_bi.get('version')} ≠ package.json {pkg['version']}"
+        "（跑 python3 bin/vod-devkit build-info 重烧）")
+    for field in ("version", "commitSha"):
+        assert root_bi.get(field) == pkg_bi.get(field), (
+            f"根/包内 build-info 的 {field} 不一致："
+            f"{root_bi.get(field)} vs {pkg_bi.get(field)}")

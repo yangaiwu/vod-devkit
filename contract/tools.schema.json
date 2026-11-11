@@ -340,16 +340,24 @@
       }
     },
     "vod_check_update": {
-      "description": "检查本机插件版本是否落后（npm registry latest，24 小时缓存，失败静默）。只读、只在用户问到版本/升级或会话首次自检时调用，不要每轮调用。返回 currentVersion/latestVersion/updateAvailable；有新版时给 upgradeCommand（重跑 install 或 vod-devkit update，本工具从不自升级）。用户不想被提醒时传 dismiss=true，跳过 3 天。preset（产品分发）形态不发外呼，直接告知版本随 agent 发版管理。",
+      "description": "检查本机插件版本是否落后（npm registry latest，24 小时缓存，失败静默）。只读、只在用户问到版本/升级或会话首次自检时调用，不要每轮调用。返回 currentVersion/latestVersion/updateAvailable；有新版时给 upgradeCommand（重跑 install 或 vod-devkit update，本工具从不自升级）。用户不想被提醒时传 dismiss=true，跳过 3 天；用户点名某个版本别再提时传 skip=true（只压该版本，下个版本仍会提醒），clearSkip=true 撤销。preset（产品分发）形态不发外呼，直接告知版本随 agent 发版管理。",
       "input": {
         "type": "object",
         "properties": {
           "dismiss": {
             "type": "boolean",
             "description": "用户明确表示不想再被提醒时传 true（3 天冷却）"
+          },
+          "skip": {
+            "type": "boolean",
+            "description": "用户明确说「就这个版本别再提醒」时传 true：只跳过当前 latest 这一个版本，下个版本照常提醒（不提供永久静音）"
+          },
+          "clearSkip": {
+            "type": "boolean",
+            "description": "撤销之前的版本跳过设置，恢复正常提醒"
           }
-        },
-        "additionalProperties": false
+          },
+          "additionalProperties": false
       }
     }
   },

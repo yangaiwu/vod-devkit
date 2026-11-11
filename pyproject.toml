@@ -17,3 +17,15 @@ vod-devkit = "bin.vod-devkit"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.mypy]
+# 作用域刻意收窄（D-devtoolchain-7）：只对新增的纯逻辑模块做类型门禁。
+# 存量 tools.py 是历史代码，全仓 mypy 会炸存量且无收益——新增模块必须过，
+# 存量随重构自然收敛（mypy 的 files 白名单就是这条纪律的落点）。
+python_version = "3.12"
+files = ["vod_mcp/attribution.py"]
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true

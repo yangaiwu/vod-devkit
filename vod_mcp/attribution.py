@@ -61,7 +61,7 @@ def build_alias_index(meta: dict) -> list:
         if name:
             id_by_lower[name.lower()] = str(item.get("id")) if item.get("id") is not None else None
 
-    canon = {}  # lower(name) -> {"label","id","aliases":set(),"brand":bool}
+    canon: dict[str, dict] = {}  # lower(name) -> {"label","id","aliases":set(),"brand":bool}
 
     def _slot(name, brand):
         key = str(name).strip().lower()
@@ -105,7 +105,8 @@ def build_alias_index(meta: dict) -> list:
                 slot["id"] = id_by_lower[alias.lower()]
                 break
 
-    merged, by_id = [], {}               # 同 id 合并（展示名那条为准）
+    merged: list = []                    # 同 id 合并（展示名那条为准）
+    by_id: dict = {}
     for slot in canon.values():
         pid = slot["id"]
         if pid is not None and pid in by_id:
@@ -115,7 +116,8 @@ def build_alias_index(meta: dict) -> list:
             by_id[pid] = slot
         merged.append(slot)
 
-    entries, seen = [], set()
+    entries: list = []
+    seen: set = set()
     for slot in merged:
         for alias in slot["aliases"]:
             key = (slot["label"].lower(), alias)  # 大小写敏感：保留 MaaS/Maas 两种写法
@@ -132,7 +134,8 @@ def _ascii_hits(text: str, alias: str) -> list:
     exact_case = len(alias) < _SHORT_ALIAS_MAX
     hay = text if exact_case else text.lower()
     needle = alias if exact_case else alias.lower()
-    out, start = [], 0
+    out: list = []
+    start = 0
     while True:
         i = hay.find(needle, start)
         if i < 0:
@@ -166,7 +169,8 @@ def match_products(text: str, index: list) -> list:
     text = str(text or "")
     if not text or not index:
         return []
-    taken, hits = [], []
+    taken: list = []
+    hits: list = []
     for entry in index:
         alias = entry["alias"]
         spans = _ascii_hits(text, alias) if _is_ascii(alias) else [
@@ -184,7 +188,7 @@ def match_products(text: str, index: list) -> list:
 
 def _group(hits: list) -> dict:
     """按产品合并（同产品多别名命中取最长片段作证据）。"""
-    grouped = {}
+    grouped: dict = {}
     for h in hits:
         key = h["product"].lower()
         cur = grouped.get(key)

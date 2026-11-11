@@ -67,6 +67,14 @@ vendor 链已停用：VOD-Project 的 skills/ 文档与引擎 v2 代码分叉）
 - 承载不是"必须同名测试"——是能自动回答"这条承诺兑现了吗"的最低痕迹
 - CI 会跑 `sync_case_roster.py --check`，文档改了没重录即红
 
+## 发版状态与版本提醒
+
+- 发版状态对账：`python3 scripts/registry_reconcile.py`（registry↔仓内、两包同版、
+  契约版本、tag；仓内领先=开发中不算红，`--strict` 供发版检查用）
+- 发版终态：`scripts/publish_verify.py`（publish 后轮询上线+包内容断言，release.sh 已接）
+- 版本提醒：`vod_check_update` 支持 dismiss（3 天冷却）/ skip（只压当前版本）/
+  clearSkip；命令行为 `vod-devkit update --skip|--clear-skip`
+
 ## 提交流程
 
 1. fork / 分支 → 改动 → 本地全量测试 + pyflakes 绿

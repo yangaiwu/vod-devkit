@@ -87,3 +87,44 @@ def test_registry_failures_never_raise(monkeypatch):
             raise OSError("dns dead")
     monkeypatch.setattr(uc.urllib.request, "urlopen", Bad)
     assert uc._fetch_latest() is None
+
+def test_skip_version_suppresses_only_that_version(monkeypatch):
+    """skip-version（devkit update-skip 裁剪）：只压指定的那个版本，下个版本照常提醒。"""
+    monkeypatch.setattr(uc, "_fetch_latest", lambda timeout=3: "99.0.0")
+    out = tools.dispatch("vod_check_update", {"skip": True})
+    assert out["updateAvailable"] is False and "只压这一个版本" in out["note"]
+    assert _rt()["update_check"]["skipVersion"] == "99.0.0"
+
+    out2 = tools.dispatch("vod_check_update", {})
+    assert out2["updateAvailable"] is False and out2.get("skippedVersion") == "99.0.0"
+
+    # 更新的版本出现 → 照常提醒（不提供永久静音）
+    # 先把 24h 缓存打到过期，模拟"过一阵子再检查"
+    st = dict(tools._runtime_cfg().get("update_check") or {})
+    st["checkedAt"] = "2000-01-01T00:00:00"
+    tools._save_runtime({"update_check": st})
+    monkeypatch.setattr(uc, "_fetch_latest", lambda timeout=3: "99.1.0")
+    out3 = tools.dispatch("vod_check_update", {})
+    assert out3["updateAvailable"] is True and out3["latestVersion"] == "99.1.0"
+    assert out3.get("skippedVersion") is None
+
+
+def test_clear_skip_restores_nagging(monkeypatch):
+    monkeypatch.setattr(uc, "_fetch_latest", lambda timeout=3: "99.0.0")
+    tools.dispatch("vod_check_update", {"skip": True})
+    out = tools.dispatch("vod_check_update", {"clearSkip": True})
+    assert "已清除版本跳过" in out["note"]
+    assert "skipVersion" not in (_rt()["update_check"] or {})
+    out2 = tools.dispatch("vod_check_update", {})
+    assert out2["updateAvailable"] is True
+
+
+def test_skip_when_registry_unreachable_is_honest(monkeypatch):
+    # 隔离：清掉缓存里的 latestVersion（否则 skip 会直接拿缓存值，测不到不可达路径）
+    tools._save_runtime({"update_check": {k: v for k, v in
+                                          (tools._runtime_cfg().get("update_check") or {}).items()
+                                          if k != "latestVersion"}})
+    monkeypatch.setattr(uc, "_fetch_latest", lambda timeout=3: None)
+    out = tools.dispatch("vod_check_update", {"skip": True})
+    assert out["checked"] is False and "无法记录跳过版本" in out["note"]
+    assert "skipVersion" not in (_rt().get("update_check") or {})

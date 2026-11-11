@@ -4,8 +4,10 @@
 agent 发版管理，D-key-guard-3②）。所以升级动作永远是 install/update，工具
 只负责回答"我这台是不是旧了"，绝不下载、不解包、不改盘。
 
-三个约束：
+四个约束：
 - 一次会话只打扰一次 + 拒绝后冷却 3 天（devkit 同款）；状态落 runtime.json。
+- **skip-version**（devkit update-skip 裁剪版）：用户明确说"这个版本不要提醒"时记
+  住该版本号，只压这一个版本——下个版本照常提醒（永久静音的危害大于打扰）。
 - 网络失败静默降级（离线/内网环境必须可用），不阻塞任何采集链。
 - preset 形态完全不发外呼。
 """
@@ -53,6 +55,8 @@ def check(params: dict | None = None) -> dict:
     from vod_mcp import __version__, tools
     params = params or {}
     dismiss = bool(params.get("dismiss"))
+    skip = bool(params.get("skip"))
+    clear_skip = bool(params.get("clearSkip"))
     cfg = tools._runtime_cfg()
     state = cfg.get("update_check") or {}
     now = _now()
@@ -62,6 +66,25 @@ def check(params: dict | None = None) -> dict:
                 "updateAvailable": False, "checked": False,
                 "note": "本装机为产品分发形态（preset），版本随 agent 发版管理，"
                         "不做外呼检查。升级请联系产品提供方。"}
+
+    if clear_skip:
+        tools._save_runtime({"update_check": {k: v for k, v in state.items()
+                                               if k != "skipVersion"}})
+        return {"currentVersion": __version__, "latestVersion": state.get("latestVersion"),
+                "updateAvailable": False, "checked": False,
+                "note": "已清除版本跳过设置，下次检查恢复正常提醒。"}
+
+    if skip:
+        latest_seen = state.get("latestVersion") or _fetch_latest()
+        if not latest_seen:
+            return {"currentVersion": __version__, "latestVersion": None,
+                    "updateAvailable": False, "checked": False,
+                    "note": "版本检查不可达，无法记录跳过版本；不影响采集，稍后重试即可。"}
+        tools._save_runtime({"update_check": {**state, "skipVersion": latest_seen}})
+        return {"currentVersion": __version__, "latestVersion": latest_seen,
+                "updateAvailable": False, "checked": False,
+                "note": f"已跳过 v{latest_seen}：只压这一个版本，下个版本仍会提醒"
+                        f"（clearSkip=true 可撤销）。"}
 
     dismissed_until = state.get("dismissedUntil")
     if dismiss:
@@ -95,11 +118,16 @@ def check(params: dict | None = None) -> dict:
         tools._save_runtime({"update_check": {**state, "checkedAt": now.isoformat(
             timespec="seconds"), "latestVersion": latest}})
     newer = _version_tuple(latest) > _version_tuple(__version__)
+    skipped = bool(state.get("skipVersion")) and state["skipVersion"] == latest
     out = {"currentVersion": __version__, "latestVersion": latest,
-           "updateAvailable": newer, "checked": True,
+           "updateAvailable": newer and not skipped, "checked": True,
            "note": ("有新版本可用：重跑 install（幂等原位更新）或 vod-devkit update。"
                     "用户不想被打扰时用 dismiss=true 跳过 3 天。") if newer else
                    "已是最新版本。"}
-    if newer:
+    if skipped and newer:
+        out["skippedVersion"] = latest
+        out["note"] = (f"v{latest} 已被用户跳过（skip-version），本期不提醒；"
+                       f"clearSkip=true 可恢复。")
+    if out["updateAvailable"]:
         out["upgradeCommand"] = "vod-devkit update   # 或重跑 install（同一行装命令）"
     return out

@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: 安装依赖（含远程面可选 extra，否则远程面用例 SKIP）
-        run: python3 -m pip install pytest pyflakes 'mcp>=1.0' 
+        run: python3 -m pip install pytest pyflakes mypy 'mcp>=1.0' 
       - name: lint（pyflakes）
         run: python3 -m pyflakes vod_mcp/*.py tests/*.py
       - name: 双副本一致性（vod_mcp + skills 同步锁）
@@ -28,6 +28,10 @@ jobs:
         run: python3 scripts/sync_case_roster.py --check
       - name: 规则技能 ↔ 引擎真源对账（无引擎检出时 SKIP，不判绿）
         run: python3 scripts/rules_provenance.py
+      - name: 类型门禁（作用域=新增纯逻辑模块，见 pyproject [tool.mypy]）
+        run: python3 -m mypy
+      - name: 发版状态对账（registry↔仓内；仓内领先=开发中，不判红）
+        run: python3 scripts/registry_reconcile.py
       - name: 测试（pytest 全量：单元+护栏+packs+协议级+回环+meta+账本）
         run: python3 -m pytest tests/ -q
       - name: 安装器烟雾

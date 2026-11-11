@@ -737,7 +737,7 @@ def _install_skills(target: str, packs: str, profile: str | None = None):
                 if dst2.exists():
                     shutil.rmtree(dst2)
                 shutil.copytree(entry, dst2)
-        # vendored 领域规则已由 vendor_rules.py 落成技能目录结构
+        # 领域规则技能为静态副本，与引擎真源的对账见 scripts/rules_provenance.py
     return extra_dirs
 
 
@@ -966,8 +966,20 @@ def cmd_verify(_args):
     print(f"verify: OK（commit {sha[:12]} 存在于本仓/origin）")
 
 
-def cmd_update(_args):
-    """更新：git fetch 比较 origin/main，落后则 ff 拉取并重烧 build-info。"""
+def cmd_update(args=None):
+    """更新：git fetch 比较 origin/main，落后则 ff 拉取并重烧 build-info。
+
+    --skip / --clear-skip（D-devtoolchain-7，对齐 devkit update-skip 裁剪版）：
+    只维护「跳过某个版本提醒」的运行时状态，不动代码——所以放在 git 拉取之前返回。
+    """
+    if getattr(args, "skip", False) or getattr(args, "clear_skip", False):
+        from vod_mcp import update_check as uc
+        out = uc.check({"clearSkip": True} if getattr(args, "clear_skip", False)
+                       else {"skip": True})
+        print(out.get("note") or "")
+        if out.get("latestVersion"):
+            print(f"latest = {out['latestVersion']}（clearSkip=true 可撤销）")
+        return
     if _distribution() == "preset":
         # D-key-guard-3②：产品分发形态插件版本随 agent 发版管理，客户机禁止自更新
         #（绕过产品版本管理=未测试代码进客户现场）
@@ -1076,6 +1088,12 @@ def main():
                      ("verify", cmd_verify), ("update", cmd_update),
                      ("uninstall", cmd_uninstall)):
         s = sub.add_parser(name)
+        if name == "update":
+            s.add_argument("--skip", action="store_true",
+                           help="跳过当前 registry latest 的提醒（只压这一个版本，"
+                                "下个版本仍提醒；不提供永久静音）")
+            s.add_argument("--clear-skip", action="store_true",
+                           help="撤销版本跳过设置，恢复正常提醒")
         s.set_defaults(fn=fn)
     sub.add_parser("build-info").set_defaults(fn=lambda a: write_build_info(strict=False))
 
