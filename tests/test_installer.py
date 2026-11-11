@@ -868,3 +868,51 @@ def test_golden_verify_preset(env):
     r = cli(env, "verify")
     assert r.returncode == 0, r.stderr
     _assert_golden("verify_preset", r.stdout.strip())
+
+
+# ---- 配置形态守卫（B6，devkit mcp-config-merge 纪律的 Python 落地）----
+
+def test_codex_install_strips_child_tables_without_orphans(env):
+    """回归锁：旧实现只删父表，残留 [mcp_servers.vod-devkit.env] 会在 TOML
+    语义里重建父表 = 装出一个没有 command 的假 server。"""
+    conf = env["home"] / ".codex" / "config.toml"
+    conf.parent.mkdir(parents=True, exist_ok=True)
+    conf.write_text(
+        'model = "gpt"\n\n'
+        '[mcp_servers.vod-devkit]\ncommand = "python3"\n'
+        'args = [\n  "/x.py",\n]\n\n'
+        '[mcp_servers.vod-devkit.env]\nVOD_PACKS = "core,collect"\n\n'
+        '[mcp_servers.other]\ncommand = "z"\n', encoding="utf-8")
+    r = cli(env, "install", "--target", "codex", "--product", "CodeArts")
+    assert r.returncode == 0, r.stderr
+    left = conf.read_text(encoding="utf-8")
+    assert "vod-devkit" not in left, "父表/子表必须一起删，否则假 server 复活"
+    assert '[mcp_servers.other]' in left and 'command = "z"' in left, "不许误删他人表"
+
+
+def test_codex_install_refuses_unmergeable_config(env):
+    """形态守卫：重复表头（TOML 非法）= 拒绝猜测。字节必须原样不动，
+    exit 2——改坏用户整份 codex 配置的代价远高于装不上。"""
+    conf = env["home"] / ".codex" / "config.toml"
+    conf.parent.mkdir(parents=True, exist_ok=True)
+    bad = ('[mcp_servers.vod-devkit]\ncommand = "a"\n'
+           '[mcp_servers.vod-devkit]\ncommand = "b"\n')
+    conf.write_text(bad, encoding="utf-8")
+    r = cli(env, "install", "--target", "codex", "--product", "CodeArts")
+    assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+    assert "形态不受支持" in r.stderr
+    assert conf.read_text(encoding="utf-8") == bad, "拒绝路径绝不允许改字节"
+
+
+def test_dsh_install_refuses_tab_indented_patch(env_dsh):
+    """形态守卫：dsh patch 缩进含 tab（YAML 非法）→ 拒绝写，字节不动，
+    exit 1 并给出手动修复格式（插件已装但配置未写的半成品态是已知语义）。"""
+    patch = _dsh_patch(env_dsh)
+    patch.parent.mkdir(parents=True, exist_ok=True)
+    bad = "- insert:\n\t- id: other\n"
+    patch.write_text(bad, encoding="utf-8")
+    r = cli(env_dsh, "install", "--target", "dsh", "--profile", "web",
+            "--product", "CodeArts")
+    assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+    assert "形态不受支持" in r.stderr
+    assert patch.read_text(encoding="utf-8") == bad, "拒绝路径绝不允许改字节"

@@ -230,25 +230,23 @@ def _install_opencode(args, packs: str) -> Path:
 
 
 def _strip_codex_vod_blocks(text: str) -> str:
-    """幂等剥离：按行删除 [mcp_servers.vod-devkit] 及 .env 子表整块。
+    """幂等剥离：删除 [mcp_servers.vod-devkit] **及其全部子表**。
 
-    不能用行内正则截断式剥离——args = ["…"] 行内的 '[' 会让正则提前断块，
-    旧 env 子表残留（实测：二次安装后 env 表×2、旧 VOD_PACKS 滞留，
-    换 preset 不生效）。按行扫描到下一个 '[' 开头的节头为止才是整块。
+    不能用行内正则截断式剥离——args = ["…"] 行内的 '[' 会让正则提前断块。
+    也不能只删父表（旧实现）：留下 [mcp_servers.vod-devkit.env] 在 TOML
+    语义里会重建父表，装出一个没有 command 的假 server。扫描/删除语义
+    统一在 vod_mcp/config_forms.py（单一实现），形态不受支持时抛
+    RuntimeError——调用方必须原样放弃修改。
     """
-    out, skipping = [], False
-    for line in text.splitlines():
-        s = line.strip()
-        # P2（深审 2026-11-06）：精确匹配表头——startswith("…vod-devkit")
-        # 会误删 [mcp_servers.vod-devkit2] 等无关表
-        if s == "[mcp_servers.vod-devkit]":
-            skipping = True
-            continue
-        if skipping and s.startswith("["):
-            skipping = False
-        if not skipping:
-            out.append(line)
-    return "\n".join(out).rstrip()
+    from vod_mcp import config_forms as cf
+    try:
+        verdict, reason = cf.classify_codex_toml(text)
+    except cf.Refused as e:
+        raise RuntimeError(f"codex config.toml 形态不受支持：{e}") from e
+    if verdict == "refuse":
+        raise RuntimeError(f"codex config.toml 形态不受支持：{reason}")
+    cleaned, _removed = cf.strip_managed_toml(text)
+    return cleaned
 
 
 _AGENTS_MARKER_BEGIN = "<!-- vod-devkit:feedback-skill BEGIN -->"
@@ -292,7 +290,13 @@ def _install_codex(args, packs: str) -> Path:
     conf = Path.home() / ".codex" / "config.toml"
     if conf.exists():  # 历史遗留：config.toml MCP 段与插件同名=双注册，移除
         text = conf.read_text(encoding="utf-8")
-        cleaned = _strip_codex_vod_blocks(text)
+        try:
+            cleaned = _strip_codex_vod_blocks(text)
+        except RuntimeError as e:
+            # 形态守卫：非已知形态宁可不装——改坏用户整份 codex 配置的代价
+            # 远高于装不上（字节未动）
+            print(f"[vod-devkit] {e}。安装中止，未改动该文件。", file=sys.stderr)
+            sys.exit(2)
         if cleaned != text.rstrip():
             conf.write_text(cleaned + "\n", encoding="utf-8")
             print(f"已移除旧 config.toml MCP 段（原生插件取代）：{conf}")
@@ -410,9 +414,11 @@ def _install_dsh(args, packs: str) -> Path:
     try:
         written = _upsert_dsh_patch(patch, block)
     except Exception as e:
-        # 回滚/修复指引：插件已装但配置未写 = 半成品，给明确的手动修复格式
+        # 回滚/修复指引：插件已装但配置未写 = 半成品，给明确的手动修复格式。
+        # 区分两类失败：形态守卫拒绝（文件合法但不在已知形态内，字节未动）
+        # 与真实 IO 失败——两者的处置动作不同，文案必须能分辨。
         print(f"[vod-devkit] 插件已装入 profile={profile}，但配置写入失败"
-              f"（{e.__class__.__name__}）。请手动把下段并入 {patch}"
+              f"（{e.__class__.__name__}: {e}；该文件未被改动）。请手动把下段并入 {patch}"
               f"（顶层 YAML 数组元素，已有 - id: vod-devkit 段则原位替换）：\n"
               f"{block}", file=sys.stderr)
         sys.exit(1)
@@ -424,36 +430,30 @@ def _install_dsh(args, packs: str) -> Path:
 
 
 def _find_dsh_block(lines):
-    """定位 cordis.patch.yml 中 vod-devkit 块的 (start, end)；不存在返回
-    (None, None)。块边界=下一顶层元素行（`- ` 开头）或 EOF。
-    嵌套铁律（真机实锤，2026-11-10 复现）：dsh 只认缩进在 `- insert:` 下
-    的块——平铺 `- id:` 会被组合层丢弃=插件整个掉出组合树（banner/工具/
-    UI 全消失）。当命中行是嵌套形态（带缩进）时，start 向上归并到其
-    `- insert:` 组头，整组替换；平铺旧形态（历史安装器写的）按原语义
-    顶格替换。install 的幂等 upsert 与 uninstall 的摘除共用本边界语义
-    （单一实现，防两处扫描规则漂移——双载体漂移已在本仓 dsh/UI 壳实锤过）。"""
-    for i, ln in enumerate(lines):
-        if ln.strip().startswith("- id: vod-devkit"):
-            start = i
-            if ln[:1] == " ":  # 嵌套形态：向上归并组头（- insert: 或其它顶层 -）
-                for k in range(i - 1, -1, -1):
-                    if lines[k].startswith("- "):
-                        start = k
-                        break
-            end = len(lines)
-            for j in range(start + 1, len(lines)):
-                if lines[j].startswith("- "):  # 下一顶层元素：本块结束
-                    end = j
-                    break
-            return start, end
-    return None, None
+    """定位 cordis.patch.yml 中 vod-devkit 块的 (start, end)。
+
+    扫描/边界语义统一在 vod_mcp/config_forms.find_dsh_block（单一实现，
+    install 的幂等 upsert、uninstall 摘除、doctor 自愈三处共用——两处扫描
+    规则漂移在本仓 dsh 壳上实锤过）。本函数只保留名字兼容调用点。
+    """
+    from vod_mcp import config_forms as cf
+    return cf.find_dsh_block(lines)
 
 
 def _upsert_dsh_patch(patch: Path, block: str) -> bool:
     """幂等写 profile cordis.patch.yml：已存在 `- id: vod-devkit` 段则原位整块
     替换（不重复插入）；无则追加。按行扫描块边界（下一行 `- ` 顶层元素或 EOF），
     不引 YAML 依赖（本仓零第三方依赖红线）。返回是否有写入。"""
+    from vod_mcp import config_forms as cf
     lines = patch.read_text(encoding="utf-8").splitlines() if patch.exists() else []
+    # 形态守卫（先分类后改字节）：非已知形态一律拒绝——这个文件坏掉等于
+    # 整个 dsh profile 起不来（`[]` 占位实锤），比装不上代价高得多
+    try:
+        verdict, reason = cf.classify_dsh_patch(lines)
+    except cf.Refused as e:
+        raise RuntimeError(f"cordis.patch.yml 形态不受支持：{e}") from e
+    if verdict == "refuse":
+        raise RuntimeError(f"cordis.patch.yml 形态不受支持：{reason}")
     start, end = _find_dsh_block(lines)
     if start is None:
         # 空数组占位清除（四宿主实测实锤：dsh plugin add 自建的模板含字面量
@@ -487,7 +487,17 @@ def _remove_dsh_patch_block(patch: Path) -> bool:
     """从 cordis.patch.yml 摘除 vod-devkit 块（uninstall 用）。返回是否摘除。"""
     if not patch.exists():
         return False
+    from vod_mcp import config_forms as cf
     lines = patch.read_text(encoding="utf-8").splitlines()
+    try:
+        verdict, reason = cf.classify_dsh_patch(lines)
+    except cf.Refused as e:
+        verdict, reason = "refuse", str(e)
+    if verdict == "refuse":
+        # 卸载路径同样不动字节：文件已经坏了，再"尽力删"只会让故障更难定位
+        print(f"[vod-devkit] skip（cordis.patch.yml 形态不受支持，未改动）：{reason}",
+              file=sys.stderr)
+        return False
     start, end = _find_dsh_block(lines)
     if start is None:
         return False
@@ -816,7 +826,17 @@ def _repair_dsh_patch_block(mf: dict) -> str | None:
     patch = Path.home() / ".dsh" / "profiles" / prof / "cordis.patch.yml"
     if not patch.exists():
         return None
+    from vod_mcp import config_forms as cf
     lines = patch.read_text(encoding="utf-8").splitlines()
+    try:
+        verdict, reason = cf.classify_dsh_patch(lines)
+    except cf.Refused as e:
+        verdict, reason = "refuse", str(e)
+    if verdict == "refuse":
+        # 自愈也不越界：文件形态未知时只报告，不动字节
+        print(f"[doctor] skip（cordis.patch.yml 形态不受支持，未自愈）：{reason}",
+              file=sys.stderr)
+        return None
     vod_idx = next((i for i, ln in enumerate(lines)
                     if ln.strip().startswith("- id: vod-devkit")), None)
     if vod_idx is not None and lines[vod_idx].startswith((" ", "\t")):
