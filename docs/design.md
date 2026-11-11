@@ -235,9 +235,9 @@ stdio 直连零语言成本；宿主原生格式（dsh 的 npm 包等）单独�
 
 | pack | 内容 | 启用工具/技能 |
 |---|---|---|
-| core | 路由元技能 + 护栏 | vod-core |
-| knowledge | 纯技能零工具 | 3 个领域规则技能（采集预分类，零依赖） |
-| collect | 反馈采集 | vod_submit_voices + vod-feedback-collect 技能 |
+| core | 路由元技能 + 护栏 + 版本提醒 | vod-core 技能；vod_devkit_info / vod_auth_status / vod_check_update |
+| knowledge | 领域规则技能 + 披露面 | 2 个规则技能（问题分类/评分）+ vod_list_skills / vod_retrieve_skill（只读、零上游） |
+| collect | 反馈采集 | vod_submit_voices / draft / commit / list_submitted + vod-feedback-collect 技能 |
 
 实现：packs.py 一张启用表，未启用的工具不注册、技能不落盘（与 devkit
 DEVKIT_PACKS 同语义）。
@@ -614,3 +614,31 @@ VOD_PACKS 两种取值的 tools/list 断言）。
   改机械锁）；双通道消息分离（用户人话/日志全量，路径属 CWE-209）。
 - 定性边界：通道方三问（确认/原话/送达），不问第四个；内容价值判断归
   引擎（幂等/R2/人工归因）与运营侧。
+
+## 承载补充：技能披露第二轨 / 版本提醒 / 宿主适配层（2026-11-11，对表 devkit）
+
+三条改造的共同判据是「把可对账性与单一事实源下沉到代码」，对应 devkit 已
+验证过的工程形状（skills-as-server-data、update-check、integrations/<host>）。
+
+- **技能披露第二轨**：`vod_list_skills` + `vod_retrieve_skill`（knowledge pack，
+  只读零上游）。技能文本成为 server data，任何 MCP 宿主（含没有原生技能目录的
+  dsh）都能取到与包内一致的规则全文；owner pack 被裁剪时返回恢复命令而非空内容。
+  元技能（vod-core / vod-feedback-collect）仍原生安装——激活时机不能靠工具调用。
+  承载：vod_mcp/skills_registry.py + tests/test_skills_disclosure.py（含 pack 裁剪、
+  未知技能、路径穿越、零 HTTP 四类锁）。
+- **版本提醒**：`vod_check_update`（core）。24h 缓存 + 拒绝冷却 3 天 + 失败静默；
+  preset 形态零外呼；只给 upgradeCommand，从不自升级（D-key-guard-3② 口径不变）。
+  承载：vod_mcp/update_check.py + tests/test_update_check.py（semver 数值比较
+  0.4.10>0.4.9 单独锁——字符串比较会判反）。
+- **宿主适配层**：`integrations/<host>/host.json` 承载配置落点/技能目录/平台分叉/
+  随装生成物，`vod_mcp/hosts.py` 解析；安装器不再出现宿主路径字面量（反向锁
+  test_no_second_source_of_host_paths_in_installer）。新增宿主=加一个目录 +
+  一段安装逻辑，改漏变成结构上不可能。承载：integrations/*/host.json +
+  tests/test_hosts_spec.py。
+- **顺手修的两处存量漂移**（本次实测发现）：
+  ① `skills/vod-core/SKILL.md` 还在教 `vod_run_analysis` / `vod_task_status` /
+  `vod_task_result` / `vod_kb_search`（2026-11-03 已删的工具）与不存在的
+  `vod-category-matching` 技能——按本技能路由会直接调到不存在的工具，已按当前
+  工具面重写（v2）。
+  ② opencode 的 `/vod-doctor` 命令正文硬编码在安装器函数里，已移入
+  integrations/opencode/command/vod-doctor.md 模板（单一来源）。

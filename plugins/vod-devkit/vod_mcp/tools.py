@@ -905,7 +905,31 @@ def _sha256(s: str) -> str:
     import hashlib
     return hashlib.sha256(s.encode()).hexdigest()
 
+def check_update(params: dict, client_info: dict | None = None) -> dict:
+    from vod_mcp import update_check as uc
+    return uc.check(params)
+
+
+def list_skills(params: dict, client_info: dict | None = None) -> dict:
+    from vod_mcp import skills_registry as sr
+    try:
+        return sr.list_skills(params)
+    except sr.SkillError as e:
+        raise ToolError(str(e), code=e.code)
+
+
+def retrieve_skill(params: dict, client_info: dict | None = None) -> dict:
+    from vod_mcp import skills_registry as sr
+    try:
+        return sr.retrieve_skill(params)
+    except sr.SkillError as e:
+        raise ToolError(str(e), code=e.code)
+
+
 _HANDLERS = {
+    "vod_check_update": check_update,
+    "vod_list_skills": list_skills,
+    "vod_retrieve_skill": retrieve_skill,
     "vod_submit_voices": submit_voices,
     "vod_list_submitted": list_submitted,
     "vod_devkit_info": devkit_info,

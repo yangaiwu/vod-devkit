@@ -1,23 +1,43 @@
 ---
 name: vod-core
-description: 'VOD 用户声音分析插件路由入口。任何"分析用户声音/反馈、发起 VOD 分析任务、查任务状态/结果、VOD 评分/分类规则、KB 检索"类请求先经本技能路由到对应工具与领域技能。写操作（发起分析）必须先获用户确认（confirm 护栏）。'
-version: 1
+description: 'VOD 用户声音采集插件的路由入口与纪律速查。遇到"提交反馈/采集用户声音/这条反馈入库没有/问题分类与评分规则是什么/插件版本与来源/key 认证状态"类请求先读本技能，再按表路由到具体工具或领域技能。采集写操作必须先获用户明确同意。'
+version: 2
 ---
 
-# VOD Core
+# VOD Core（路由与纪律）
 
-VOD 分析能力入口。按意图路由：
+本插件只做**用户声音采集**：把用户对本产品的抱怨/建议/期望原话送进 VOD 囤积区。
+分析与运营归 vod-system 前端，插件没有、也不该有发起分析的入口。
+
+## 意图 → 工具
 
 | 意图 | 动作 |
 |---|---|
-| 发起分析 | 工具 vod_run_analysis（confirm：必须用户确认后传 confirmed=true；taskId 为对账主键） |
-| 查任务进度/结果 | vod_task_status / vod_task_result |
-| 知识库检索 | vod_kb_search |
-| 插件自述/来源核验 | vod_devkit_info |
-| 分类匹配/问题分类/评分规则 | 领域技能（由 vendor 机制从 VOD-Project 真源拉取：vod-category-matching / vod-problem-classification / vod-scoring-rules） |
+| 用户抱怨/建议，要提交 | `vod_submit_voices`（先征得明确同意，再传 `confirmed=true`）；话术见 `vod-feedback-collect` |
+| 想先暂存、等用户确认后再提交 | `vod_draft_voices` → 用户确认 → `vod_commit_voices`（一次性令牌 + payload 校验） |
+| 本机已提交过哪些（进度追问） | `vod_list_submitted`（本地账本口径，换机不保留） |
+| 插件版本/来源核验 | `vod_devkit_info`（version + commitSha） |
+| key/认证状态、引擎连通性 | `vod_auth_status`（只报指纹，不下发明文） |
+| 有哪些技能、规则技能是否可用 | `vod_list_skills` |
+| 取规则技能全文（分类/评分口径） | `vod_retrieve_skill`（owner pack 被裁剪时返回恢复指引） |
 
-纪律：
-1. 任务 ID 是唯一对账主键，发起后一切追问以 taskId 对账，不凭记忆描述
-2. 单任务条数上限、product 白名单由护栏强制，超限直接拒
-3. 任何 DB 直连/凭据读取意图会被 deny——不要尝试
-4. 领域规则以 vendored 技能文件为准，不凭训练数据回答 VOD 评分口径
+## 意图 → 领域技能
+
+| 主题 | 技能 | 加载方式 |
+|---|---|---|
+| 采集话术/确认时机/原话逐字纪律 | `vod-feedback-collect` | 宿主原生加载（元技能，已装进本机技能目录） |
+| 六类问题分类口径（引擎 v2.2 真源） | `vod-problem-classification-rules` | 原生副本优先；读不到或怀疑过期时用 `vod_retrieve_skill` |
+| 四项评分公式（引擎 v2 真源） | `vod-scoring-rules` | 同上 |
+
+## 纪律（违反即事故）
+
+1. **同意前置**：用户陈述反馈 ≠ 同意提交。先承接、再问"要提交给产品团队吗"、
+   再用一句固定的引导补充话术，一次说完。
+2. **原话逐字**：`content` 放用户原话，禁改写/概括/增删语气词；回执
+   `echo.contents` 必须逐字转述给用户（「已收录原话：…」）。
+3. **归因不问**：product 由安装绑定决定，禁止问用户"提交到哪个产品"。
+4. **篇幅边界**：content ≤ 2000 字、单批 ≤ 50 条（护栏强制，超限直接拒）。
+5. **不碰内部面**：不尝试数据库直连、不读取或打印凭据；被 deny 时如实告知，
+   不要换措辞重试。
+6. **规则口径以技能/披露内容为准**：不凭训练数据回答 VOD 分类与评分——
+   vendored 文本与引擎代码同源。

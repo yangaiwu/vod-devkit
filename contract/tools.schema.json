@@ -322,6 +322,43 @@
         ],
         "additionalProperties": false
       }
+    },
+    "vod_list_skills": {
+      "description": "列出本插件可用的技能（名称/归属 pack/是否启用/是否原生安装/描述）。只读、零网络。用在两处：①需要判断某个采集或规则问题该读哪本技能时；②确认某个领域规则技能是否因 pack 裁剪而不可用（enabled=false 即不可用，重跑 install 带 --packs 恢复）。领域规则技能用 vod_retrieve_skill 取全文；元技能（vod-core/vod-feedback-collect）由宿主原生技能机制加载，这里只列名用于路由。",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "vod_retrieve_skill": {
+      "description": "按名取一份技能全文（SKILL.md 原文，含 frontmatter）。只读、零网络。用途：当前宿主没有该技能的原生副本（例如没有技能目录的宿主），或本机副本与插件版本不一致时，取与插件同版本的规则全文。领域规则技能（问题分类/评分）归属 knowledge pack——被裁剪时本工具返回错误并给出恢复命令，不会静默返回空。先用 vod_list_skills 查名字；不认识的技能名会连可用清单一起返回。返回里 note 非空时表示内容含内部表名/连接串字样，向用户复述时不要照抄。",
+      "input": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "技能名（来自 vod_list_skills，例如 vod-problem-classification-rules）"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "vod_check_update": {
+      "description": "检查本机插件版本是否落后（npm registry latest，24 小时缓存，失败静默）。只读、只在用户问到版本/升级或会话首次自检时调用，不要每轮调用。返回 currentVersion/latestVersion/updateAvailable；有新版时给 upgradeCommand（重跑 install 或 vod-devkit update，本工具从不自升级）。用户不想被提醒时传 dismiss=true，跳过 3 天。preset（产品分发）形态不发外呼，直接告知版本随 agent 发版管理。",
+      "input": {
+        "type": "object",
+        "properties": {
+          "dismiss": {
+            "type": "boolean",
+            "description": "用户明确表示不想再被提醒时传 true（3 天冷却）"
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "backends": {

@@ -44,11 +44,21 @@ def test_submit_description_frontloads_consent():
 def test_tool_specs_follow_packs(monkeypatch):
     monkeypatch.setenv("VOD_PACKS", "core")
     specs = tools.tool_specs(packs.enabled_tools())
-    assert [s["name"] for s in specs] == ["vod_devkit_info", "vod_auth_status"]
+    assert [s["name"] for s in specs] == ["vod_devkit_info", "vod_auth_status",
+                                         "vod_check_update"]
 
 
-def test_knowledge_pack_has_no_tools():
-    assert packs.PACK_TOOLS["knowledge"] == [], "知识包=纯技能零工具"
+def test_knowledge_pack_is_disclosure_only():
+    """知识包工具面=两个只读披露工具（2026-11-11 双轨改造）。
+
+    口径变更理由：领域规则技能此前只靠"拷进宿主技能目录"分发，四份副本
+    各自漂移（D-drift-lock 只能事后发现）。披露工具让技能文本成为 server
+    data——但**不新增任何上游调用/写面**，仍属纯知识包。
+    """
+    assert set(packs.PACK_TOOLS["knowledge"]) == {"vod_list_skills", "vod_retrieve_skill"}
+    contract = tools.load_contract()["tools"]
+    for name in packs.PACK_TOOLS["knowledge"]:
+        assert "只读" in contract[name]["description"], f"{name} 必须声明只读与零网络"
 
 
 # ---------- 护栏（U3/U7） ----------
@@ -250,7 +260,11 @@ def test_stdio_roundtrip():
         names = [t["name"] for t in listing["result"]["tools"]]
         assert set(names) == {"vod_submit_voices", "vod_draft_voices",
                               "vod_commit_voices", "vod_list_submitted",
-                              "vod_devkit_info", "vod_auth_status"}
+                              "vod_devkit_info", "vod_auth_status",
+                              # 版本提醒（core）
+                              "vod_check_update",
+                              # 第二轨：领域规则技能的披露面（knowledge pack）
+                              "vod_list_skills", "vod_retrieve_skill"}
         info = _rpc(proc, {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                            "params": {"name": "vod_devkit_info", "arguments": {}}})
         payload = json.loads(info["result"]["content"][0]["text"])

@@ -54,13 +54,16 @@ VOD_PACKS=core,collect python3 -m vod_mcp.server   # packs 裁剪
 
 ## 工具面（契约唯一事实源：contract/tools.schema.json）
 
-| 工具 | 类型 | 护栏 |
-|---|---|---|
-
-| vod_submit_voices | 写 | confirm 逐次同意 + 单批≤50 + source 取握手宿主身份；走 Java /external/voices |
-| vod_devkit_info | 只读常驻 | 返回版本/commitSHA/宿主 clientInfo |
-| vod_auth_status | 只读常驻 | key 指纹化自检+三步引导（无 key 可跑） |
-| vod_list_submitted | 只读 | 本机提交账本（cap 200）——agent 替用户对账进度 |
+| 工具 | pack | 类型 | 护栏 |
+|---|---|---|---|
+| vod_submit_voices | collect | 写 | confirm 逐次同意 + 单批≤50 + source 取握手宿主身份；走 Java /external/voices |
+| vod_draft_voices | collect | 写（暂存） | 本机暂存 cap10/TTL600s，逐字回显 contents；不触上游 |
+| vod_commit_voices | collect | 写 | 一次性令牌 + payloadSha256 防调包，内部复用提交链 |
+| vod_list_submitted | collect | 只读 | 本机提交账本（cap 200）——agent 替用户对账进度 |
+| vod_devkit_info | core | 只读 | 返回版本/commitSHA/宿主 clientInfo |
+| vod_auth_status | core | 只读 | key 指纹化自检+三步引导（无 key 可跑） |
+| vod_check_update | core | 只读 | npm registry latest（24h 缓存/失败静默）；只提醒不自升级 |
+| vod_list_skills / vod_retrieve_skill | knowledge | 只读 | 领域规则技能的披露面（pack 裁剪即拒绝并给恢复命令） |
 
 安全：deny 拦 DB 直连意图与凭据读取（safety/policy.json 声明式规则；
 文本规则只扫结构性字段，不误杀反馈内容里的凭据引用）。
