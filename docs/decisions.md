@@ -639,6 +639,20 @@ dsh 归因漂移锁已按新口径改写（旧「安装期绑定」句禁止回�
 未采（仍不抄）：devkit 的 56 工具/12 packs/sandbox/proxy/telemetry（云服务业务面）、
 5 宿主全适配（无消费者）、release-please（我们 release.sh 三重断言已反超）。
 
+### D-attrib-B 复审触发与后续排期（2026-11-11，负责人拍板 A + P5/P6）
+
+- **维持 A（不问）**：契约继续 NEVER ask，歧义进 UNKNOWN，不猜不问。理由=P5 让
+  "不问也归得准"成立前，用打扰补上下文不足是顺序反了；且询问要动契约/SKILL/
+  desc-budget 三处锁，历史上问"哪个产品"已直接导致采集失败（非理论风险）。
+- **先排 P5**：引擎 meta 增 `productKeywords`（运营可维护的关键词/场景词），插件索引
+  合并别名源 → 直接压 UNKNOWN，零用户打扰。
+- **再排 P6**：引擎落 `product_source` / `product_evidence`，报表能筛「字面归因 /
+  记忆归因 / 未归因」——UNKNOWN 的人工成本才有抓手（本机账本做不到报表层筛选）。
+- **B 的复审触发（不现在拍板）**：P5 上线后统计 UNKNOWN 率、UNKNOWN 原因分布、
+  运营从证据反推的平均处理成本；只有数据表明"UNKNOWN 集中在少数多产品歧义模式、
+  且运营成本显著高于一次二选一确认的打扰成本"时，才凭数据小范围灰度 B，届时再改
+  三处锁。B 的话术留作备选，不落地。
+
 ## D-devtoolchain-7 更新链补 skip-version + registry 对账 + 类型门禁（2026-11-11，负责人拍板 B）
 
 对表 devkit 的 update-* 八模块（update-semver/skip/cache/registry-diff/…），只取对
