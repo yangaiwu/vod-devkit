@@ -916,3 +916,24 @@ def test_dsh_install_refuses_tab_indented_patch(env_dsh):
     assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
     assert "形态不受支持" in r.stderr
     assert patch.read_text(encoding="utf-8") == bad, "拒绝路径绝不允许改字节"
+
+
+def test_install_dsh_installs_skills_to_discovery_dir(env_dsh):
+    """2026-11-11 实锤缺口：安装器的技能拷贝分支只有 hermes/opencode/codex，
+    `--target dsh` 一个技能都不落——npx 装 dsh 的机器只有工具没有话术纪律
+    （同意前置/逐字回显/追问判定在 SKILL.md 里）。落点=~/.dsh/skills（dsh 自动
+    发现，与 /opt/vod-install 分发脚本同址），并进 manifest 名册参与漂移对账。"""
+    r = cli(env_dsh, "install", "--target", "dsh", "--profile", "web",
+            "--product", "CodeArts")
+    assert r.returncode == 0, r.stderr
+    skills = env_dsh["home"] / ".dsh" / "skills"
+    for name in ("vod-core", "vod-feedback-collect"):
+        assert (skills / name / "SKILL.md").exists(), f"dsh 缺技能落点 {name}"
+    mf = json.loads((env_dsh["repo"] / "install-manifest.json").read_text())
+    assert any(si["host"] == "dsh" for si in mf["skillInstalls"]), \
+        "dsh 落点必须进 manifest 名册（否则 doctor 对不了账）"
+    # 名册参与漂移对账：改动 dsh 侧副本 → doctor 点名 FAIL
+    f = skills / "vod-feedback-collect" / "SKILL.md"
+    f.write_text(f.read_text(encoding="utf-8") + "\n<!-- 篡改 -->\n", encoding="utf-8")
+    r = cli(env_dsh, "doctor")
+    assert r.returncode == 1 and "dsh" in r.stdout, (r.stdout, r.stderr)

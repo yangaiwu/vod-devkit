@@ -93,7 +93,7 @@ def _server_env(args, packs: str) -> dict:
     return env
 
 
-def _skill_installs(manifest_path: Path, oc_skills, cx_skills) -> list:
+def _skill_installs(manifest_path: Path, extra_dirs) -> list:
     """多宿主技能落点并集（名册对账）：manifest 按「最近一次安装」覆盖会
     互相冲掉落点（实锤：codex 装完 opencode 落点消失），按 host+dir
     去重保留历史落点。"""
@@ -111,8 +111,7 @@ def _skill_installs(manifest_path: Path, oc_skills, cx_skills) -> list:
                     prev[(si["host"], d)] = si
         except Exception:
             pass
-    for h, d in (("hermes", HERMES_SKILLS_DIR),
-                 ("opencode", oc_skills), ("codex", cx_skills)):
+    for h, d in [("hermes", HERMES_SKILLS_DIR)] + list(extra_dirs or []):
         if d is not None:
             prev[(h, str(d))] = {"host": h, "dir": str(d)}
     return sorted(prev.values(), key=lambda x: (x["host"], x["dir"]))
@@ -701,32 +700,32 @@ def cmd_install(args):
         print(f"[vod-devkit] 已显式解除 codex 采集熔断（安装成功），审计已记录：{audit}")
 
     # G1 修复：技能全量拷贝（目录型技能+平铺规则文档），按 packs 过滤
-    oc_skills, cx_skills = _install_skills(target, packs)
+    extra_dirs = _install_skills(target, packs,
+                                 (getattr(args, "dsh_profile", "") or "").strip() or None)
 
     _write_install_manifest(args, target, packs, bound_product, mcp_conf,
-                             oc_skills, cx_skills)
+                            extra_dirs)
 
 
-def _install_skills(target: str, packs: str):
-    """技能段：全量拷贝（目录型技能+平铺规则文档），按 packs 过滤，落
-    hermes 主目录 + opencode/codex 原生目录。返回 (oc_skills, cx_skills)
-    落点（供 manifest 名册对账）。"""
+def _install_skills(target: str, packs: str, profile: str | None = None):
+    """技能段：按 packs 过滤后拷到 hermes 主目录 + 目标宿主的技能发现目录。
+
+    目标宿主列表由 integrations/<host>/host.json 的 skillsDir 决定——2026-11-11
+    实锤：dsh 此前不在拷贝分支里，npx 装 dsh 只拿到工具、拿不到任何技能文
+    件（同意前置/逐字回显/追问判定这些话术纪律整层缺失），而 ~/.dsh/skills
+    下的副本是 /opt/vod-install 脚本手工刷的，不是安装器产物。
+    返回 [(host, Path)] 落点清单（供 manifest 名册对账）。"""
     HERMES_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
     # opencode 原生技能目录（2026-11-06 实测：opencode 自动发现
     # ~/.config/opencode/skills/ 并经 skill 工具按需加载——此前安装器漏拷，
     # opencode 只有工具描述一条约束通道，话术类约束全部失效）
-    oc_skills = None
-    cx_skills = None
-    if target in ("opencode", "codex"):
-        spec = host_specs.load(target)
+    extra_dirs = []  # [(host, Path)]
+    spec = host_specs.load(target, profile)
+    if spec.get("skillsDir") and target != "hermes":
         dst = Path(spec["skillsDir"])
         dst.mkdir(parents=True, exist_ok=True)
-        if target == "opencode":
-            oc_skills = dst
-        else:
-            cx_skills = dst
+        extra_dirs.append((target, dst))
     pack_set = set(p for p in packs.split(",") if p)
-    extra_skill_dirs = [d for d in (oc_skills, cx_skills) if d is not None]
     for entry in sorted((ROOT / "skills").iterdir()):
         if entry.is_dir():  # vod-core / vod-feedback-collect
             skill = entry.name
@@ -738,17 +737,17 @@ def _install_skills(target: str, packs: str):
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(entry, dst)
-            for oc_dst in extra_skill_dirs:
+            for _host, oc_dst in extra_dirs:
                 dst2 = oc_dst / skill
                 if dst2.exists():
                     shutil.rmtree(dst2)
                 shutil.copytree(entry, dst2)
         # vendored 领域规则已由 vendor_rules.py 落成技能目录结构
-    return oc_skills, cx_skills
+    return extra_dirs
 
 
 def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
-                            oc_skills, cx_skills) -> None:
+                            extra_dirs) -> None:
     """manifest 段：落安装名册（版本/来源/归因/落点指纹），并给出 key
     配置提示。名册对账口径见各字段注释（原 cmd_install 尾段，整段平移）。"""
     bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
@@ -775,7 +774,7 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
         # 不再只盯 hermes 单目录（opencode 漏拷静默失效的针对性防线）。
         # 多宿主并集合并：manifest 按「最近一次安装」覆盖会互相冲掉落点
         # （实锤：codex 装完 opencode 落点消失），按 host+dir 去重保留历史
-        "skillInstalls": _skill_installs(manifest_path(), oc_skills, cx_skills),
+        "skillInstalls": _skill_installs(manifest_path(), extra_dirs),
         "skillHashes": _skill_hashes(),
     }
     manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2),

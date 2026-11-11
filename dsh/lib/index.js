@@ -13,19 +13,24 @@ import z from '@deepseek-ai/schemastery';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 
 export const name = 'vod-devkit';
 export const inject = ['tools'];
 
 const PKG_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const DATA_DIR = join(PKG_DIR, 'data');
-const RUNTIME = join(DATA_DIR, 'runtime.json');
+// 运行时状态路径可用 VOD_DSH_RUNTIME 覆盖（测试隔离/企业数据驻留用；
+// 2026-11-11 实锤：dsh/test 直写仓内 dsh/data/runtime.json，本地账本被测试
+// 灌到 128 条——测试必须能指到 tmp，不能再共用真实账本）
+const RUNTIME = process.env.VOD_DSH_RUNTIME || join(DATA_DIR, 'runtime.json');
 const API_PREFIX = '/rest/developer/manager/hdvodmngservice/v1';
 const HOARD_PATH = `${API_PREFIX}/external/voices`; // V16 囤积端点（批量/不触发 LLM/结构化回执）
 const SUBMIT_PATH = `${API_PREFIX}/external/voice/submit`; // 旧单条端点：仅 404 回落使用 // V16 已切换：主路径 HOARD_PATH（囤积），本路径仅 404 回落（见 docs/decisions.md D-dsh-4）
 const TOKEN_PATH = `${API_PREFIX}/external/token`;
 const LEDGER_CAP = 200;
+const PKG_VERSION = JSON.parse(readFileSync(join(PKG_DIR, 'package.json'), 'utf8')).version;
 
 export const Config = z.object({
     apiBase: z.string().default('https://vod-dev.topxtopx.com').volatile(),
@@ -294,6 +299,47 @@ export function apply(ctx, config) {
             ? readCfg(config?.receiptGuard, 'report') : 'report',
     });
 
+    // ── 技能披露 + 版本提醒（与 Python 侧同口径的只读面）──────────────────
+    // 为什么 dsh 必须有这两个：dsh 是本插件唯一没有 MCP 的宿主，规则/话术
+    // 全靠落盘技能；而 2026-11-11 前安装器根本没给 dsh 落技能（已修）。
+    // 披露让"技能文本=server data"，改规则不必碰宿主拷贝。
+    const SKILLS_DIR = process.env.VOD_SKILLS_DIR || join(homedir(), '.dsh', 'skills');
+    const SKILL_RE = /^[a-z0-9][a-z0-9-]{2,63}$/;
+    const SKILL_CAP = 12000;
+    const UPDATE_TTL_MS = 24 * 3600 * 1000;
+    const DISMISS_DAYS = 3;
+
+    function skillDirs() {
+        try {
+            return readdirSync(SKILLS_DIR, { withFileTypes: true })
+                .filter((e) => e.isDirectory())
+                .map((e) => e.name)
+                .filter((n) => existsSync(join(SKILLS_DIR, n, 'SKILL.md')))
+                .sort();
+        } catch {
+            return [];
+        }
+    }
+
+    function skillDescription(text) {
+        const m = /^description:\s*(.+)$/m.exec(text || '');
+        return m ? m[1].trim().replace(/^['"]|['"]$/g, '') : '';
+    }
+
+    function versionTuple(v) {
+        const core = String(v || '').split('-')[0].split('+')[0];
+        return core.split('.').slice(0, 3).map((x) => Number.parseInt(x, 10) || 0)
+            .concat([0, 0]).slice(0, 3);
+    }
+
+    function cmpVersion(a, b) {
+        const x = versionTuple(a), y = versionTuple(b);
+        for (let i = 0; i < 3; i += 1) {
+            if (x[i] !== y[i]) return x[i] > y[i] ? 1 : -1;
+        }
+        return 0;
+    }
+
     const tools = [
         {
             name: 'vod_submit_voices',
@@ -512,6 +558,95 @@ export function apply(ctx, config) {
                     authNote: c.key ? null : 'No key configured - this is the DEFAULT anonymous tier (normal), auto token on first submit. NOT a misconfiguration.',
                     ledgerEntries: Array.isArray(rt.submissions) ? rt.submissions.length : 0,
                 });
+            },
+        },
+        {
+            name: 'vod_list_skills',
+            description: '[VOD-unique] Read-only: list skills available on this machine (name/pack/description). '
+                + 'Use before routing a rules question (分类/评分/话术) or before vod_retrieve_skill.',
+            parameters: buildParameters({}),
+            output: { schema: { type: 'object', additionalProperties: true }, render: renderText },
+            async execute() {
+                const skills = skillDirs().map((n) => {
+                    let text = '';
+                    try { text = readFileSync(join(SKILLS_DIR, n, 'SKILL.md'), 'utf8'); } catch { /* 忽略 */ }
+                    const pack = ['vod-core', 'vod-feedback-collect'].includes(n) ? 'core' : 'knowledge';
+                    return { name: n, pack, native: true, description: skillDescription(text) };
+                });
+                return textResult({ skills, skillsDir: SKILLS_DIR });
+            },
+        },
+        {
+            name: 'vod_retrieve_skill',
+            description: '[VOD-unique] Read-only: read one skill verbatim (SKILL.md). '
+                + 'Use when this machine\'s copy is missing or you need the rules text without a native skill loader. '
+                + 'Unknown names return the available list.',
+            parameters: buildParameters({
+                name: { type: 'string', description: 'skill name from vod_list_skills' },
+            }),
+            output: { schema: { type: 'object', additionalProperties: true }, render: renderText },
+            async execute(args) {
+                const nm = String(args.name || '').trim();
+                if (!SKILL_RE.test(nm)) {
+                    return textResult({ error: 'bad-name', available: skillDirs() });
+                }
+                try {
+                    let content = readFileSync(join(SKILLS_DIR, nm, 'SKILL.md'), 'utf8');
+                    const truncated = content.length > SKILL_CAP;
+                    if (truncated) content = content.slice(0, SKILL_CAP);
+                    return textResult({ name: nm, chars: content.length, truncated, content });
+                } catch {
+                    return textResult({ error: 'not-found', name: nm, available: skillDirs() });
+                }
+            },
+        },
+        {
+            name: 'vod_check_update',
+            description: '[VOD-unique] Read-only: is this plugin behind npm latest? 24h cache, silent on failure. '
+                + 'Reports only - never self-upgrades (upgrade = rerun the install command). '
+                + 'Pass dismiss=true after the user asks to stop the reminders (3-day cooldown).',
+            parameters: buildParameters({
+                dismiss: { type: 'boolean', description: 'user asked to stop reminders (3-day cooldown)' },
+            }),
+            output: { schema: { type: 'object', additionalProperties: true }, render: renderText },
+            async execute(args) {
+                const state = loadRuntime().update_check || {};
+                const now = Date.now();
+                const today = new Date(now).toISOString().slice(0, 10);
+                if (args.dismiss === true) {
+                    const until = new Date(now + DISMISS_DAYS * 86400e3).toISOString().slice(0, 10);
+                    saveRuntime({ update_check: { ...state, dismissedUntil: until } });
+                    return textResult({ dismissedUntil: until, updateAvailable: false });
+                }
+                if (state.dismissedUntil && today < state.dismissedUntil) {
+                    return textResult({ updateAvailable: false, dismissedUntil: state.dismissedUntil });
+                }
+                const fresh = state.checkedAt && (now - Date.parse(state.checkedAt)) < UPDATE_TTL_MS;
+                let latest = fresh ? state.latestVersion : null;
+                if (!latest) {
+                    try {
+                        const ctl = new AbortController();
+                        const timer = setTimeout(() => ctl.abort(), 3000);
+                        const res = await fetch('https://registry.npmjs.org/dsh-vod-devkit/latest',
+                            { signal: ctl.signal });
+                        clearTimeout(timer);
+                        const body = await res.json();
+                        latest = body?.version ? String(body.version) : null;
+                    } catch { latest = null; }
+                    if (latest) {
+                        saveRuntime({ update_check: { ...state, checkedAt: new Date(now).toISOString(),
+                            latestVersion: latest } });
+                    }
+                }
+                if (!latest) {
+                    return textResult({ currentVersion: PKG_VERSION, latestVersion: null,
+                        updateAvailable: false, checked: false,
+                        note: '版本检查不可达（离线/内网正常），不影响采集。' });
+                }
+                const newer = cmpVersion(latest, PKG_VERSION) > 0;
+                return textResult({ currentVersion: PKG_VERSION, latestVersion: latest,
+                    updateAvailable: newer, checked: true,
+                    ...(newer ? { upgradeCommand: '重跑 install（同一行装命令）' } : {}) });
             },
         },
     ];

@@ -10,5 +10,6 @@
   "managedPaths": [
     "~/.dsh/profiles/{profile}/node_modules/dsh-vod-devkit"
   ],
-  "notes": "profile patch 的 insert 块是唯一的运行时配置通道（嵌套铁律：id/name/config 必须缩进在 - insert: 之下）"
+  "notes": "profile patch 的 insert 块是唯一的运行时配置通道（嵌套铁律：id/name/config 必须缩进在 - insert: 之下）；技能落点=~/.dsh/skills（dsh 自动发现，与 /opt/vod-install 脚本同址）",
+  "skillsDir": "~/.dsh/skills"
 }
