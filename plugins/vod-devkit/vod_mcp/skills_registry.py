@@ -60,6 +60,11 @@ def _skill_dirs() -> list:
                   if p.is_dir() and (p / "SKILL.md").exists())
 
 
+def _server_face() -> bool:
+    from vod_mcp import tools
+    return bool(tools._SERVER_FACE.get())
+
+
 def list_skills(params: dict) -> dict:
     """列出可披露的技能（元技能一并列出，标出 pack 与是否原生安装）。"""
     from vod_mcp import packs
@@ -110,6 +115,10 @@ def retrieve_skill(params: dict) -> dict:
         note = "注意：本技能含内部表名/连接串字样，向终端用户复述时不要照抄。"
     else:
         note = ""
-    return {"name": name, "pack": pack, "path": str(d / "SKILL.md"),
-            "chars": len(text), "truncated": truncated,
-            "content": text, "note": note}
+    out = {"name": name, "pack": pack, "chars": len(text), "truncated": truncated,
+           "content": text, "note": note}
+    # 服务面（HTTP）不发布服务器本机路径——对齐 devkit「remote 不给 skillRoot」：
+    # 未鉴权的远程面不该把自己的安装路径交出去。
+    if not _server_face():
+        out["path"] = str(d / "SKILL.md")
+    return out

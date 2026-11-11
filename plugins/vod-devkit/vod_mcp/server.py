@@ -12,7 +12,7 @@ from pathlib import Path
 # Hermes 等宿主出于安全过滤环境变量，stdio 子进程只继承白名单）
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from vod_mcp import packs, policy as policy_mod, tools  # noqa: E402
+from vod_mcp import guardrails, packs, tools  # noqa: E402
 
 _PROTOCOL_VERSION = "2025-06-18"
 _client_info = {}
@@ -26,12 +26,16 @@ def _error(req_id, code, message):
     return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
 
-def handle(message: dict) -> dict | None:
+def handle(message: dict, client_info: dict | None = None) -> dict | None:
+    """JSON-RPC 分派（两面共用：stdio 逐行调用；HTTP 面每请求调用一次）。
+
+    client_info 由传输层提供（HTTP 面=固定标识 + 认证形态，stdio 面=握手自报）。
+    """
     method = message.get("method", "")
     req_id = message.get("id")
     if method == "initialize":
         global _client_info
-        _client_info = (message.get("params") or {}).get("clientInfo") or {}
+        _client_info = client_info or (message.get("params") or {}).get("clientInfo") or {}
         return _result(req_id, {
             "protocolVersion": _PROTOCOL_VERSION,
             "capabilities": {"tools": {}},
@@ -57,18 +61,9 @@ def handle(message: dict) -> dict | None:
         params = message.get("params") or {}
         name = params.get("name") or ""
         args = params.get("arguments") or {}
-        pol = policy_mod.load_policy()
-        verdict, msg = policy_mod.decide(
-            policy_mod.check_tool_call(pol, name, args) if name else [])
-        if verdict == "deny":
-            return _error(req_id, -32010, f"[guard:deny] {msg}")
-        if verdict == "confirm":
-            return _error(req_id, -32011, f"[guard:confirm] {msg}")
-        text_hits = policy_mod.check_text(
-            pol, json.dumps(policy_mod.guard_scope(args), ensure_ascii=False))
-        if text_hits:
-            return _error(req_id, -32010,
-                          f"[guard:deny] {policy_mod.decide(text_hits)[1]}")
+        verdict, msg, code = guardrails.check(name, args)
+        if verdict != "allow":
+            return _error(req_id, code, msg)
         try:
             out = tools.dispatch(name, args, _client_info)
             return _result(req_id, {
@@ -84,6 +79,16 @@ def handle(message: dict) -> dict | None:
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser(prog="vod-mcp-server",
+                                 description="vod-devkit MCP server（默认 stdio）")
+    ap.add_argument("--transport", choices=["stdio", "remote"], default="stdio",
+                    help="stdio（默认，宿主拉起子进程）；remote（Streamable HTTP，"
+                         "一个进程服务多个 agent）")
+    ap.add_argument("--port", type=int, default=9528, help="remote 端口（默认 9528）")
+    ap.add_argument("--host", default="127.0.0.1", help="remote 绑定地址（默认回环）")
+    args, _unknown = ap.parse_known_args()
+
     # 启动自诊（排障：写 /tmp，宿主过滤环境变量时可观察实际 env）
     try:
         tools._ensure_first_boot()  # D-key-guard-3①：首启标记+构建机残留清理（preset 兜底）
@@ -93,6 +98,16 @@ def main():
                f"VOD_PACKS={os.environ.get('VOD_PACKS')!r} "
                f"distribution={tools._distribution()} "
                f"cwd={os.getcwd()}")
+    if args.transport == "remote":
+        try:
+            from vod_mcp import transport_remote
+        except ImportError as e:  # 零依赖红线：远程面才需要 SDK
+            print("[vod-devkit] 远程面需要官方 MCP SDK：\n"
+                  "  pip install 'vod-devkit[remote]'   # 或 pip install 'mcp>=1.0'\n"
+                  f"（stdio 形态不需要任何第三方依赖；导入失败：{e}）", file=sys.stderr)
+            sys.exit(2)
+        sys.exit(transport_remote.serve(args.host, args.port))
+
     for line in sys.stdin:
         line = line.strip()
         if not line:

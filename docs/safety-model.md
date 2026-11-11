@@ -24,6 +24,9 @@
 | codex 采集熔断 | `vod_mcp/packs.py:BREAKER_MARKERS` + `bin/vod-devkit` 安装门禁 | 未确认提交 ≥2 次后强制摘除 collect pack |
 | 分发红线（key 不随包） | `bin/vod-devkit:cmd_install` `--distribution preset` | `VOD_JAVA_API_KEY` 从 env 摘除且不写宿主配置 |
 | 技能拷贝漂移 | `bin/vod-devkit:_skill_hashes/_drifted_skills`（D-drift-lock） | 安装期记录 sha256，doctor/verify 逐落点比对 |
+| 远程面护栏 | `vod_mcp/guardrails.py`（stdio 与 HTTP 共用同一判定） | 新增传输不新增策略：deny/confirm/文本规则两面一致 |
+| 远程面工具面 | `vod_mcp/packs.py:REMOTE_WITHHELD` | HTTP 面摘掉写本机状态的工具（draft/commit/list_submitted） |
+| 远程面身份 | `vod_mcp/tools.py:_REQ_KEY/_SERVER_FACE` | 身份只从请求头来，逐请求生效；缺 key 的 submit fail fast，不代签匿名令牌 |
 
 错误码约定（宿主/模型可据此分流）：`-32010` deny、`-32011` confirm、`-32012`
 认证（缺 key 且令牌不可得）、`-32013` 归因缺失、`-32014` 传输（非回环 http）。
@@ -51,6 +54,12 @@
   拦转述，代价是"用户在反馈正文里要求 agent 读凭据"不会被这层拦住。
 - **headless 回执 echo 无闸**：dsh headless 单轮模式实测出现过回执改字一笔
   （「点了定义」→「点"转到定义"」），数据层原话无损，展示层无自动拦截。
+
+- **远程面没有内建鉴权**：进程不校验身份，默认只绑回环；一旦 `--host 0.0.0.0`
+  就依赖反代承担 TLS 与身份校验。这是刻意对齐 devkit 的形态（它的 README 同样
+  警告 "do not expose it anonymously"），不是遗漏。
+- **远程面不写库**：它唯一的出站动作是调用引擎 HTTP API；落库/配额/审计都在
+  服务端。插件不持有 DB 连接，也没有任何 DB 代码路径——这条在两种传输下都成立。
 
 ## Non-goals
 

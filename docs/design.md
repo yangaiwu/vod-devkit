@@ -642,3 +642,33 @@ VOD_PACKS 两种取值的 tools/list 断言）。
   工具面重写（v2）。
   ② opencode 的 `/vod-doctor` 命令正文硬编码在安装器函数里，已移入
   integrations/opencode/command/vod-doctor.md 模板（单一来源）。
+
+## 承载补充：传输解耦（Streamable HTTP 远程面，2026-11-11，对齐 devkit）
+
+形态逐项照 huaweicloud-devkit 的远程面（它的 mcp-server-remote.ts 与
+test/remote-mcp-server.test.ts 是参照物），只在我们有身份/写面的地方收紧。
+
+| 维度 | devkit | 本插件 |
+|---|---|---|
+| 启动 | 同一二进制 `--transport remote --port 9528 --host 127.0.0.1` | `vod-devkit serve --transport remote --port 9528 --host 127.0.0.1`（bin 透传） |
+| 传输 | 官方 SDK Streamable HTTP，stateless + jsonResponse | 官方 Python SDK `StreamableHTTPSessionManager(json_response=True, stateless=True)` |
+| 方法契约 | POST 进传输；GET 405；OPTIONS 204 + ACAO:*；通知 202；坏 JSON 400 | 同（逐条测试钉死） |
+| 工具面门控 | remoteSurface 摘掉 secrets 包 + 本地写工具 | `packs.REMOTE_WITHHELD` 摘掉 draft/commit/list_submitted；submit 保留（它只调引擎 API） |
+| instructions | remote 版不给 skillRoot，教 retrieve_skill | 同；`vod_retrieve_skill` 在远程面不返回 path，`vod_list_skills` 不返回 skillsDir |
+| 身份 | 不管（凭据在服务器本机文件） | **请求头 Authorization 逐请求注入**；缺 key 时 submit fail fast，不代签匿名令牌 |
+| 鉴权 | 无，README 警告别公开 | 无内建鉴权（同），默认回环 + 反代承担 TLS/身份 |
+
+插件不写库这条在远程面同样成立：HTTP 面唯一的出站动作仍是引擎 HTTP API
+（POST /external/voices 等），落库/配额/审计全在服务端；本仓没有任何 DB 连接
+代码路径，远程面也没有新增。
+
+承载：`vod_mcp/transport_remote.py`（HTTP 外壳 + ASGI 适配层）、
+`vod_mcp/remote_app.py`（SDK Server 与工具面/instructions）、
+`vod_mcp/guardrails.py`（护栏唯一实现，两面共用）、`packs.REMOTE_WITHHELD`、
+`tools._REQ_KEY/_SERVER_FACE`（逐请求身份）、tests/test_remote_transport.py（8 例）。
+
+残余（如实记录，未做）：
+- SSE 流式响应被缓冲后一次写出（本仓工具都无长任务，够用；真需要流式再补）；
+- `capabilities.tools.listChanged` 由 SDK 给 false（devkit 为 true）——信息性字段，
+  本实现 stateless 且 packs 不中途变更，未强行改写；
+- dsh 壳不在此列（它不走 MCP，见壳自身工具面）。

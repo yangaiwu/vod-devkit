@@ -13,8 +13,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: 安装依赖
-        run: python3 -m pip install pytest pyflakes
+      - name: 安装依赖（含远程面可选 extra，否则远程面用例 SKIP）
+        run: python3 -m pip install pytest pyflakes 'mcp>=1.0' 
       - name: lint（pyflakes）
         run: python3 -m pyflakes vod_mcp/*.py tests/*.py
       - name: 双副本一致性（vod_mcp + skills 同步锁）

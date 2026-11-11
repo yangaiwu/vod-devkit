@@ -52,6 +52,36 @@ python3 -m vod_mcp.server          # stdio，JSON-RPC
 VOD_PACKS=core,collect python3 -m vod_mcp.server   # packs 裁剪
 ```
 
+## 远程面（Streamable HTTP）
+
+默认形态是 stdio（各宿主拉起子进程，零端口）。如果你的 agent 支持
+`type: "remote"`（Streamable HTTP），可以单独起一个常驻进程，供多个 agent 共用：
+
+```bash
+pip install 'vod-devkit[remote]'          # 远程面依赖官方 MCP SDK（stdio 形态不需要）
+vod-devkit serve --transport remote      # 默认 http://127.0.0.1:9528
+```
+
+```jsonc
+{ "mcp": { "vod-devkit": {
+    "type": "remote", "url": "http://localhost:9528", "enabled": true } } }
+```
+
+端口被占用用 `--port <port>`（同步改 url）；`--host 0.0.0.0` 可开 LAN 访问。
+
+边界（与 stdio 形态的实质差别）：
+
+- **身份从请求头来**：每个请求带 `Authorization: Bearer <VOD key>`；缺 key 时
+  `vod_submit_voices` 直接结构化拒绝，**不代签匿名令牌**（匿名令牌按设备锚点签发，
+  一进程一锚点会把配额、声量、归因搅在一起）。
+- **工具面收窄**：草稿/本地账本类工具（`vod_draft_voices` / `vod_commit_voices` /
+  `vod_list_submitted`）不在远程面提供——它们写"本机状态"，而一个共享进程没有
+  "本机"。
+- **插件不写库**：远程面能做的仍然只是调用引擎 HTTP API；落库、配额、审计都在
+  服务端。插件不持有数据库连接，也没有任何 DB 代码路径。
+- **无内建鉴权**：本进程不校验身份，默认只绑回环。要对外必须在反代上加 TLS 与
+  身份校验——不要把它匿名暴露到公网。
+
 ## 工具面（契约唯一事实源：contract/tools.schema.json）
 
 | 工具 | pack | 类型 | 护栏 |

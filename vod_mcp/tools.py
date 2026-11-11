@@ -9,6 +9,7 @@ ExternalApiKeyFilter Bearer）。
   POST …/external/voice/submit（现有接口，提交即分析）
   POST …/external/token（VOD-KEY，零字段匿名令牌）
 """
+import contextvars
 import json
 import os
 import stat
@@ -18,6 +19,22 @@ from pathlib import Path
 
 from vod_mcp import provenance
 from vod_mcp import DEFAULT_JAVA_BASE
+
+# ── 服务面（HTTP 传输）上下文 ────────────────────────────────────────────
+# 每个请求由 transport_remote 注入，逐请求隔离（contextvars 随 asyncio 任务/
+# 线程传播），因此并发客户端不会互相覆盖 key。
+#   身份：stdio 面=装在哪台机器；HTTP 面=这个请求带了谁的 key。
+#   插件自己不产生身份（不代签、不落盘），只把请求头的 Bearer 转成引擎鉴权。
+_REQ_KEY = contextvars.ContextVar("vod_req_key", default=None)
+_SERVER_FACE = contextvars.ContextVar("vod_server_face", default=False)
+
+
+def _eff_key(explicit=None) -> str:
+    """当前生效的 key：显式参数 > 请求头（HTTP 面）> env/runtime（stdio 面）。"""
+    if explicit is not None:
+        return explicit
+    return _REQ_KEY.get() or JAVA_KEY
+
 
 # D-followup-impl-2：追问拒答语义词集（答"没有"类=两字段不上送）。
 # 契约话术承诺了"不方便回复没有"，客户端必须技术兜底——模型不守话术纪律时
@@ -88,7 +105,7 @@ def _load_meta(force: bool = False) -> dict:
                 "catalog": cache["data"].get("productCatalog") or [],
                 "stale": False, "source": "cache"}
     try:
-        out = _http("GET", _META_PATH, None, base=JAVA_BASE, key=JAVA_KEY, timeout=10)
+        out = _http("GET", _META_PATH, None, base=JAVA_BASE, key=_eff_key(), timeout=10)
         data = out.get("data") or {}
         if isinstance(data.get("products"), list) and data["products"]:
             _save_runtime({"meta_cache": {"fetchedAt": int(now), "data": data}})
@@ -304,7 +321,7 @@ def _flush_pending(product):
         if product:
             body["product"] = product
         try:
-            out = _http("POST", _SUBMIT_HOARDING, body, base=JAVA_BASE, key=JAVA_KEY)
+            out = _http("POST", _SUBMIT_HOARDING, body, base=JAVA_BASE, key=_eff_key())
             ids = (out or {}).get("voiceIds") or ((out or {}).get("data") or {}).get("voiceIds")
             if ids is None:
                 failed += 1
@@ -434,8 +451,16 @@ def submit_voices(params: dict, client_info: dict | None = None,
         }
         if product:
             body["product"] = product
-        out = _http("POST", _EXISTING_SUBMIT, body, base=JAVA_BASE, key=JAVA_KEY)
+        out = _http("POST", _EXISTING_SUBMIT, body, base=JAVA_BASE, key=_eff_key())
         return vid, (out.get("data") or {}).get("taskId")
+
+    # 服务面（HTTP）：身份只能来自请求头。缺 key 时 fail fast——不先打引擎再
+    # 靠 401 兜底（那会多一次无意义外呼，且引擎若宽容 200 就绕过了守卫）。
+    if _SERVER_FACE.get() and not _eff_key():
+        raise ToolError(
+            "服务面（HTTP 传输）不代签身份：请在本请求带上 Authorization: Bearer "
+            "<VOD key>（插件只搬运身份，不产生身份；落库与配额都在服务端）",
+            code=-32012)
 
     # ---- 主路径：囤积端点批式提交 ----
     body = {"voices": [_hoard_voice(v, content) for _, v, content in items]}
@@ -444,18 +469,26 @@ def submit_voices(params: dict, client_info: dict | None = None,
     out = None
     fallback = False
     try:
-        out = _http("POST", _SUBMIT_HOARDING, body, base=JAVA_BASE, key=JAVA_KEY)
+        out = _http("POST", _SUBMIT_HOARDING, body, base=JAVA_BASE, key=_eff_key())
     except ToolError as ex:
         if ex.code == 404:
             fallback = True  # 囤积端点未部署 → 落到下方 legacy 回落
-        elif not JAVA_KEY or ex.code == -32012:
+        elif not _eff_key() or ex.code == -32012:
+            if _SERVER_FACE.get():
+                # 服务面（HTTP）：不代签身份。匿名令牌按设备锚点签发，一进程
+                # 一锚点会把配额/声量/归因全搅在一起（服务端多用户形态的
+                # 已拍板口径：formal/host key + 按请求透传）。
+                raise ToolError(
+                    "服务面（HTTP 传输）不代签身份：请在本请求带上 "
+                    "Authorization: Bearer <VOD key>，或改用 stdio 形态的匿名链",
+                    code=-32012)
             if _explicit_key():
-                _raise_explicit_key_rejected(JAVA_KEY)
+                _raise_explicit_key_rejected(_eff_key())
             # 缺 key/匿名令牌失效 → 零字段匿名令牌 → 落 runtime.json → 重试一次
             token = _acquire_anon_token_or_raise()
             JAVA_KEY = token
             _save_runtime({"java_key": token, "token_tier": "anonymous"})
-            out = _http("POST", _SUBMIT_HOARDING, body, base=JAVA_BASE, key=JAVA_KEY)
+            out = _http("POST", _SUBMIT_HOARDING, body, base=JAVA_BASE, key=_eff_key())
         else:
             raise  # 网络/413 等如实上抛
     if not fallback:
@@ -503,9 +536,13 @@ def submit_voices(params: dict, client_info: dict | None = None,
                 accepted += 1
                 voice_ids.append(vid)
                 task_ids.append(None)
-            elif (not JAVA_KEY or e.code == -32012) and not voice_ids:
+            elif (not _eff_key() or e.code == -32012) and not voice_ids:
+                if _SERVER_FACE.get():
+                    rejected.append({"index": i, "reason":
+                        "服务面（HTTP 传输）不代签身份：请带 Authorization: Bearer <VOD key>"})
+                    continue
                 if _explicit_key():
-                    _raise_explicit_key_rejected(JAVA_KEY)
+                    _raise_explicit_key_rejected(_eff_key())
                 # 零字段匿名令牌：缺 key/401 → 自动取令牌 → 落 runtime.json → 重试一次
                 token = _acquire_anon_token_or_raise()
                 JAVA_KEY = token

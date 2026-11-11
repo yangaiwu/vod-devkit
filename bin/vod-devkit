@@ -1049,6 +1049,11 @@ def cmd_uninstall(_args):
 
 
 def main():
+    # `serve` 后的参数整体透传给 MCP server（argparse 的 REMAINDER 会把
+    # --transport 当成未知参数拦下，devkit 的二进制本身就是 server，同形处理）
+    if len(sys.argv) > 1 and sys.argv[1] == "serve":
+        os.execv(sys.executable,
+                 [sys.executable, str(ROOT / "vod_mcp" / "server.py"), *sys.argv[2:]])
     ap = argparse.ArgumentParser(prog="vod-devkit")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("install")
@@ -1079,10 +1084,20 @@ def main():
         s.set_defaults(fn=fn)
     sub.add_parser("build-info").set_defaults(fn=lambda a: write_build_info(strict=False))
 
-    def _serve(_a):
-        """codex 原生插件 .mcp.json 入口：exec MCP stdio server（可移植分发）。"""
-        os.execv(sys.executable, [sys.executable, str(ROOT / "vod_mcp" / "server.py")])
-    sub.add_parser("serve").set_defaults(fn=_serve)
+    def _serve(a):
+        """MCP server 入口（codex 插件 .mcp.json 与远程面共用）。
+
+        透传参数：`vod-devkit serve --transport remote --port 9528` 即起 HTTP 面
+        （与 huaweicloud-devkit 的 `--transport remote` 同形）。
+        """
+        extra = list(getattr(a, "server_args", []) or [])
+        os.execv(sys.executable,
+                 [sys.executable, str(ROOT / "vod_mcp" / "server.py"), *extra])
+    sp_serve = sub.add_parser("serve", help="启动 MCP server（默认 stdio；"
+                                            "--transport remote 起 Streamable HTTP）")
+    sp_serve.add_argument("server_args", nargs=argparse.REMAINDER,
+                          help="透传给 vod_mcp.server（如 --transport remote --port 9528）")
+    sp_serve.set_defaults(fn=_serve)
     args = ap.parse_args()
     args.fn(args)
 
