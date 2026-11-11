@@ -1,96 +1,87 @@
 """用例花名册门禁（借鉴 huaweicloud-devkit e2e-cases-roster 纪律）。
 
-背景（2026-11-11 实测）：proposal 定义了 131 个用例号，其中 72 个在
-design/docs 与任何测试文件里都找不到痕迹——不代表没测，而是无法自动对账，
-文档里的验收承诺只能靠人记。devkit 的原话是 「names derive from the roster,
-never from hand lists that silently drift」。
+2026-11-11 升级：从「门禁现场正则扫文档」改为「显式清单 + 对账」——
+tests/case_roster.json 是可审阅的单一真源（devkit 的做法是 roster 与 runner
+共用同一模块，手写清单/现场解析都会静默漂移）。重录：
+  python3 scripts/sync_case_roster.py
 
-本门禁的三条断言：
-1. proposal 里定义（行首 `S/U/DG + 数字`）的每个用例号，必须在本仓里被
-   「承载」——出现在 docs/design.md、任一 tests/*.py 或 dsh/test/*.mjs 中
-   （区间写法 S67-S70 会展开）。新增用例当场没有承载即红。
-2. 历史欠账进 tests/case_roster_baseline.txt（棘轮基线）：基线只许缩不许增。
-3. 基线里已经补上承载的条目必须从基线删除（否则基线会变成永久豁免清单）。
-
-承载不是"必须有一条同名测试"——它是可对账痕迹的最低要求；有承载 ≠ 有断言，
-但无承载 = 没人能自动回答"这条承诺兑现了吗"。
+四条断言：
+1. 花名册 == proposal 定义的用例号（文档改了没重录 → 红，给重录命令）
+2. 有承载的条目，承载文件必须真实存在且正文里出现该编号（防"写了承载其实没有"）
+3. 豁免（carrier=null）必须与 tests/case_roster_baseline.txt 完全一致（棘轮基线只缩）
+4. 已补承载的条目不许继续留在豁免里（否则基线变永久豁免清单）
 """
-import re
+import json
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-_ID = re.compile(r"(?m)^(?:\|\s*)?(?:[-*]\s*)?(S|U|DG)(\d{1,3})\b")
-_ID_ANY = re.compile(r"\b(S|U|DG)(\d{1,3})\b")
-_RANGE = re.compile(r"\b(S|U|DG)(\d{1,3})\s*[-–~]\s*(?:S|U|DG)?(\d{1,3})\b")
+sys.path.insert(0, str(ROOT / "scripts"))
+import case_roster as roster  # noqa: E402
+
+ROSTER = ROOT / "tests" / "case_roster.json"
 
 
-def _ordered(ids):
-    def key(x):
-        m = re.match(r"\D*", x)
-        n = re.search(r"\d+", x)
-        return (m.group() if m else x, int(n.group()) if n else 0)
-    return sorted(ids, key=key)
+def _load() -> dict:
+    assert ROSTER.exists(), "花名册缺失：python3 scripts/sync_case_roster.py"
+    return json.loads(ROSTER.read_text(encoding="utf-8"))
 
 
-def _expand(text: str) -> set:
-    """出现过的用例号（含 S67-S70 这类区间写法展开）。"""
-    out = {f"{a}{b}" for a, b in _ID_ANY.findall(text)}
-    for a, x, y in _RANGE.findall(text):
-        out |= {f"{a}{n}" for n in range(int(x), int(y) + 1)}
-    return out
+def test_roster_matches_proposal_definition():
+    data = _load()
+    defined = set(roster.defined_cases())
+    listed = set(data["cases"])
+    assert defined == listed, (
+        "花名册与 proposal 不一致（新增/删除用例后必须重录）：\n"
+        f"  文档有、花名册无：{roster.ordered(defined - listed)}\n"
+        f"  花名册有、文档无：{roster.ordered(listed - defined)}\n"
+        "  重录：python3 scripts/sync_case_roster.py")
 
 
-def _carrier_texts() -> list:
-    files = [ROOT / "docs" / "design.md"]
-    files += sorted((ROOT / "tests").glob("*.py"))
-    files += sorted((ROOT / "dsh" / "test").glob("*.mjs"))
-    return [f for f in files if f.exists()]
+def test_each_carried_case_really_appears_in_its_carrier():
+    data = _load()
+    missing_files, missing_marks = [], []
+    cache = {}
+    for cid, meta in data["cases"].items():
+        carrier = meta.get("carrier")
+        if not carrier:
+            continue
+        p = ROOT / carrier
+        if not p.exists():
+            missing_files.append(f"{cid} → {carrier}（文件不存在）")
+            continue
+        if carrier not in cache:
+            cache[carrier] = roster.expand(p.read_text(encoding="utf-8"))
+        if cid not in cache[carrier]:
+            missing_marks.append(f"{cid} → {carrier}（正文里没有该编号）")
+    assert not missing_files and not missing_marks, (
+        "花名册承载不实（写了承载但文件/正文对不上）：\n  "
+        + "\n  ".join(missing_files + missing_marks))
 
 
-def _defined() -> list:
-    prop = (ROOT / "docs" / "proposal.md").read_text(encoding="utf-8")
-    return _ordered({f"{a}{b}" for a, b in _ID.findall(prop)})
+def test_waivers_equal_baseline_ratchet():
+    data = _load()
+    listed = set(data.get("waivers") or [])
+    baseline = set(roster.baseline_waivers())
+    assert listed == baseline, (
+        "花名册 waivers 与 tests/case_roster_baseline.txt 不一致：\n"
+        f"  只在花名册：{roster.ordered(listed - baseline)}\n"
+        f"  只在基线：{roster.ordered(baseline - listed)}\n"
+        "  重录：python3 scripts/sync_case_roster.py")
 
 
-def _carried() -> set:
-    out = set()
-    for f in _carrier_texts():
-        out |= _expand(f.read_text(encoding="utf-8"))
-    return out
-
-
-def _baseline() -> list:
-    p = Path(__file__).parent / "case_roster_baseline.txt"
-    if not p.exists():
-        return []
-    return [x.strip() for x in p.read_text(encoding="utf-8").splitlines()
-            if x.strip() and not x.strip().startswith("#")]
-
-
-def test_every_proposal_case_has_a_carrier_or_a_baseline_waiver():
-    defined = _defined()
-    assert defined, "proposal 里没有解析到任何用例号——解析规则或文档结构变了"
-    missing = set(defined) - _carried()
-    waivers = set(_baseline())
-    new_gaps = _ordered(missing - waivers)
-    assert not new_gaps, (
-        "新增用例没有承载痕迹（docs/design.md / tests/*.py / dsh/test/*.mjs 均未出现）：\n  "
-        + "、".join(new_gaps)
-        + "\n用例号必须能对上承载——写明落在哪个设计节/哪个测试，再提交。")
-
-
-def test_baseline_is_a_shrinking_ratchet():
-    """基线只许缩：已补载的条目必须从基线删掉，否则豁免清单永久化。"""
-    waivers = set(_baseline())
-    still_missing = set(_defined()) - _carried()
-    stale = _ordered(waivers - still_missing)
+def test_no_waiver_that_already_has_a_carrier():
+    """棘轮只缩：已经补上承载的用例必须从基线/豁免里删掉。"""
+    data = _load()
+    stale = [cid for cid, meta in data["cases"].items()
+             if meta.get("carrier") and cid in set(data.get("waivers") or [])]
     assert not stale, (
-        "基线条目已获得承载，请从 tests/case_roster_baseline.txt 删除：\n  "
-        + "、".join(stale))
+        "以下用例已有承载却仍在豁免清单（基线必须只缩）：\n  "
+        + "、".join(roster.ordered(stale))
+        + "\n  从 tests/case_roster_baseline.txt 删除后重录花名册。")
 
 
-def test_baseline_entries_are_real_case_ids():
-    """基线里不许有幽灵编号（写错/已删用例），否则棘轮对账失真。"""
-    defined = set(_defined())
-    ghosts = _ordered(set(_baseline()) - defined)
-    assert not ghosts, "基线里有 proposal 不存在的用例号：\n  " + "、".join(ghosts)
+def test_waivers_are_real_case_ids():
+    data = _load()
+    ghosts = set(data.get("waivers") or []) - set(data["cases"])
+    assert not ghosts, "豁免里有 proposal 不存在的幽灵编号：\n  " + "、".join(roster.ordered(ghosts))

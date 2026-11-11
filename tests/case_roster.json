@@ -1,0 +1,502 @@
+{
+  "_comment": "生成物：python3 scripts/sync_case_roster.py 重录。cases=用例号→承载文件（null=无承载，必须同时在 baseline 豁免）；waivers 与 tests/case_roster_baseline.txt 同步（棘轮只缩）。",
+  "cases": {
+    "DG1": {
+      "carrier": "docs/design.md"
+    },
+    "DG2": {
+      "carrier": "docs/design.md"
+    },
+    "DG3": {
+      "carrier": "docs/design.md"
+    },
+    "DG4": {
+      "carrier": "docs/design.md"
+    },
+    "DG5": {
+      "carrier": "docs/design.md"
+    },
+    "DG6": {
+      "carrier": "docs/design.md"
+    },
+    "DG7": {
+      "carrier": "docs/design.md"
+    },
+    "DG8": {
+      "carrier": "docs/design.md"
+    },
+    "DG9": {
+      "carrier": "docs/design.md"
+    },
+    "S1": {
+      "carrier": "docs/design.md"
+    },
+    "S2": {
+      "carrier": null
+    },
+    "S3": {
+      "carrier": null
+    },
+    "S4": {
+      "carrier": "docs/design.md"
+    },
+    "S5": {
+      "carrier": null
+    },
+    "S6": {
+      "carrier": null
+    },
+    "S7": {
+      "carrier": null
+    },
+    "S8": {
+      "carrier": null
+    },
+    "S9": {
+      "carrier": null
+    },
+    "S10": {
+      "carrier": null
+    },
+    "S11": {
+      "carrier": null
+    },
+    "S12": {
+      "carrier": "docs/design.md"
+    },
+    "S13": {
+      "carrier": "docs/design.md"
+    },
+    "S14": {
+      "carrier": null
+    },
+    "S15": {
+      "carrier": null
+    },
+    "S16": {
+      "carrier": "docs/design.md"
+    },
+    "S17": {
+      "carrier": null
+    },
+    "S18": {
+      "carrier": null
+    },
+    "S19": {
+      "carrier": null
+    },
+    "S20": {
+      "carrier": "tests/test_auth.py"
+    },
+    "S21": {
+      "carrier": "tests/test_auth.py"
+    },
+    "S22": {
+      "carrier": "tests/test_auth.py"
+    },
+    "S23": {
+      "carrier": null
+    },
+    "S24": {
+      "carrier": null
+    },
+    "S25": {
+      "carrier": null
+    },
+    "S26": {
+      "carrier": null
+    },
+    "S27": {
+      "carrier": null
+    },
+    "S28": {
+      "carrier": null
+    },
+    "S29": {
+      "carrier": null
+    },
+    "S30": {
+      "carrier": null
+    },
+    "S31": {
+      "carrier": null
+    },
+    "S32": {
+      "carrier": null
+    },
+    "S33": {
+      "carrier": null
+    },
+    "S34": {
+      "carrier": null
+    },
+    "S35": {
+      "carrier": null
+    },
+    "S36": {
+      "carrier": null
+    },
+    "S37": {
+      "carrier": "docs/design.md"
+    },
+    "S38": {
+      "carrier": null
+    },
+    "S39": {
+      "carrier": null
+    },
+    "S40": {
+      "carrier": null
+    },
+    "S41": {
+      "carrier": null
+    },
+    "S42": {
+      "carrier": null
+    },
+    "S43": {
+      "carrier": "tests/test_installer.py"
+    },
+    "S44": {
+      "carrier": null
+    },
+    "S45": {
+      "carrier": null
+    },
+    "S46": {
+      "carrier": null
+    },
+    "S47": {
+      "carrier": null
+    },
+    "S48": {
+      "carrier": null
+    },
+    "S49": {
+      "carrier": "docs/design.md"
+    },
+    "S50": {
+      "carrier": "docs/design.md"
+    },
+    "S51": {
+      "carrier": "docs/design.md"
+    },
+    "S52": {
+      "carrier": "docs/design.md"
+    },
+    "S53": {
+      "carrier": "docs/design.md"
+    },
+    "S54": {
+      "carrier": "docs/design.md"
+    },
+    "S55": {
+      "carrier": "docs/design.md"
+    },
+    "S56": {
+      "carrier": "dsh/test/ux-sync.test.mjs"
+    },
+    "S57": {
+      "carrier": "docs/design.md"
+    },
+    "S58": {
+      "carrier": "docs/design.md"
+    },
+    "S59": {
+      "carrier": "docs/design.md"
+    },
+    "S60": {
+      "carrier": "docs/design.md"
+    },
+    "S61": {
+      "carrier": "docs/design.md"
+    },
+    "S62": {
+      "carrier": "docs/design.md"
+    },
+    "S63": {
+      "carrier": "docs/design.md"
+    },
+    "S64": {
+      "carrier": "docs/design.md"
+    },
+    "S65": {
+      "carrier": "docs/design.md"
+    },
+    "S66": {
+      "carrier": "docs/design.md"
+    },
+    "S67": {
+      "carrier": "docs/design.md"
+    },
+    "S68": {
+      "carrier": "docs/design.md"
+    },
+    "S69": {
+      "carrier": "docs/design.md"
+    },
+    "S70": {
+      "carrier": "docs/design.md"
+    },
+    "S71": {
+      "carrier": "docs/design.md"
+    },
+    "S72": {
+      "carrier": "docs/design.md"
+    },
+    "S73": {
+      "carrier": "docs/design.md"
+    },
+    "S74": {
+      "carrier": "docs/design.md"
+    },
+    "S75": {
+      "carrier": "docs/design.md"
+    },
+    "S76": {
+      "carrier": "docs/design.md"
+    },
+    "S83": {
+      "carrier": "docs/design.md"
+    },
+    "S84": {
+      "carrier": "docs/design.md"
+    },
+    "S85": {
+      "carrier": "docs/design.md"
+    },
+    "S86": {
+      "carrier": "docs/design.md"
+    },
+    "S87": {
+      "carrier": null
+    },
+    "S88": {
+      "carrier": null
+    },
+    "S89": {
+      "carrier": null
+    },
+    "S90": {
+      "carrier": null
+    },
+    "S91": {
+      "carrier": "docs/design.md"
+    },
+    "S92": {
+      "carrier": "docs/design.md"
+    },
+    "S93": {
+      "carrier": "docs/design.md"
+    },
+    "S94": {
+      "carrier": "docs/design.md"
+    },
+    "S95": {
+      "carrier": "docs/design.md"
+    },
+    "S96": {
+      "carrier": "docs/design.md"
+    },
+    "S97": {
+      "carrier": "docs/design.md"
+    },
+    "S98": {
+      "carrier": "docs/design.md"
+    },
+    "S99": {
+      "carrier": "docs/design.md"
+    },
+    "S100": {
+      "carrier": "docs/design.md"
+    },
+    "U1": {
+      "carrier": "tests/test_skeleton.py"
+    },
+    "U2": {
+      "carrier": null
+    },
+    "U3": {
+      "carrier": "tests/test_skeleton.py"
+    },
+    "U4": {
+      "carrier": null
+    },
+    "U5": {
+      "carrier": null
+    },
+    "U6": {
+      "carrier": null
+    },
+    "U7": {
+      "carrier": "tests/test_skeleton.py"
+    },
+    "U8": {
+      "carrier": null
+    },
+    "U9": {
+      "carrier": null
+    },
+    "U10": {
+      "carrier": null
+    },
+    "U11": {
+      "carrier": null
+    },
+    "U12": {
+      "carrier": null
+    },
+    "U13": {
+      "carrier": "tests/test_skeleton.py"
+    },
+    "U14": {
+      "carrier": null
+    },
+    "U15": {
+      "carrier": "tests/test_skeleton.py"
+    },
+    "U16": {
+      "carrier": null
+    },
+    "U17": {
+      "carrier": null
+    },
+    "U18": {
+      "carrier": null
+    },
+    "U19": {
+      "carrier": null
+    },
+    "U20": {
+      "carrier": null
+    },
+    "U21": {
+      "carrier": null
+    },
+    "U22": {
+      "carrier": null
+    },
+    "U23": {
+      "carrier": "docs/design.md"
+    },
+    "U24": {
+      "carrier": null
+    },
+    "U25": {
+      "carrier": null
+    },
+    "U26": {
+      "carrier": null
+    },
+    "U27": {
+      "carrier": null
+    },
+    "U28": {
+      "carrier": "tests/test_skeleton.py"
+    },
+    "U29": {
+      "carrier": null
+    },
+    "U30": {
+      "carrier": null
+    },
+    "U31": {
+      "carrier": null
+    },
+    "U32": {
+      "carrier": null
+    },
+    "U33": {
+      "carrier": null
+    },
+    "U34": {
+      "carrier": null
+    },
+    "U35": {
+      "carrier": null
+    },
+    "U36": {
+      "carrier": null
+    },
+    "U37": {
+      "carrier": null
+    },
+    "U38": {
+      "carrier": "docs/design.md"
+    }
+  },
+  "waivers": [
+    "S2",
+    "S3",
+    "S5",
+    "S6",
+    "S7",
+    "S8",
+    "S9",
+    "S10",
+    "S11",
+    "S14",
+    "S15",
+    "S17",
+    "S18",
+    "S19",
+    "S23",
+    "S24",
+    "S25",
+    "S26",
+    "S27",
+    "S28",
+    "S29",
+    "S30",
+    "S31",
+    "S32",
+    "S33",
+    "S34",
+    "S35",
+    "S36",
+    "S38",
+    "S39",
+    "S40",
+    "S41",
+    "S42",
+    "S44",
+    "S45",
+    "S46",
+    "S47",
+    "S48",
+    "S87",
+    "S88",
+    "S89",
+    "S90",
+    "U2",
+    "U4",
+    "U5",
+    "U6",
+    "U8",
+    "U9",
+    "U10",
+    "U11",
+    "U12",
+    "U14",
+    "U16",
+    "U17",
+    "U18",
+    "U19",
+    "U20",
+    "U21",
+    "U22",
+    "U24",
+    "U25",
+    "U26",
+    "U27",
+    "U29",
+    "U30",
+    "U31",
+    "U32",
+    "U33",
+    "U34",
+    "U35",
+    "U36",
+    "U37"
+  ]
+}

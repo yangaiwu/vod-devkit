@@ -48,9 +48,24 @@
 
 ## 领域规则技能
 
-`skills/` 下的分类/评分规则技能由 `scripts/vendor_rules.py` 从
-VodTeam/VOD-Project 按 commitSHA 锁定拉取——**规则只改引擎仓一处**，
-本仓不手改 vendored 内容（过期停用标注除外）。
+`skills/` 下的分类/评分规则技能是从引擎代码人工核对后写死的静态副本（原
+vendor 链已停用：VOD-Project 的 skills/ 文档与引擎 v2 代码分叉）。对账改用
+`scripts/rules_provenance.py` + `docs/rules-provenance.json`：
+
+- manifest 记三元组（技能文件 ↔ 引擎文件 ↔ 必须同时出现的符号）与双方 sha256
+- 引擎检出存在时对账：符号消失/文件改动 → 红，提示"技能口径已过期"
+- 人工复核确认技能仍正确后 `--update` 重录指纹；无引擎检出时 SKIP（外部贡献者/CI）
+- 引擎口径变更的处置顺序：先改技能 → 复核 diff → 重录指纹 → 同一提交带上
+
+## 用例花名册
+
+`tests/case_roster.json` 是「用例号 → 承载文件」的显式清单（唯一真源），门禁
+只做对账，不再现场解析文档：
+
+- 新增/删除 proposal 用例后：`python3 scripts/sync_case_roster.py` 重录
+- 存量欠账在 `tests/case_roster_baseline.txt`（棘轮只缩不许增）
+- 承载不是"必须同名测试"——是能自动回答"这条承诺兑现了吗"的最低痕迹
+- CI 会跑 `sync_case_roster.py --check`，文档改了没重录即红
 
 ## 提交流程
 

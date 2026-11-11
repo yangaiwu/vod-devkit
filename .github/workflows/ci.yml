@@ -24,6 +24,10 @@ jobs:
           || { echo "FAIL: 双副本漂移——先跑 scripts/sync_plugin.py 再提交"; exit 1; }
       - name: 凭据/高危模式扫描（与 pre-push 同一把尺）
         run: python3 scripts/secret_scan.py
+      - name: 用例花名册对账（docs ↔ tests/case_roster.json）
+        run: python3 scripts/sync_case_roster.py --check
+      - name: 规则技能 ↔ 引擎真源对账（无引擎检出时 SKIP，不判绿）
+        run: python3 scripts/rules_provenance.py
       - name: 测试（pytest 全量：单元+护栏+packs+协议级+回环+meta+账本）
         run: python3 -m pytest tests/ -q
       - name: 安装器烟雾

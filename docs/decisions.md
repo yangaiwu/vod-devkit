@@ -615,3 +615,27 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 描述口径改为"来自用户原话，部署值仅先验"；回归锁 tests/test_desc_budget.py 的
 dsh 归因漂移锁已按新口径改写（旧「安装期绑定」句禁止回流）。
 
+## D-devtoolchain-6 治理三件：结构守卫 + 花名册显式清单 + 规则真源对账（2026-11-11，负责人拍板 A）
+
+背景：与 huaweicloud-devkit 重新对表后（devkit v2 5b770e6 / 本仓 e613449 实测），
+骨架层已对齐，剩余治理层三处欠账。负责人选 A（零风险三项），全落。
+
+1. **结构守卫**（tests/test_structure_guards.py，6 例）：vod_mcp 不得 import 引擎
+   内部模块（插件只走 HTTP）；可选 SDK `mcp` 只能出现在远程面两模块（stdio 主路径
+   零第三方依赖）；attribution.py 必须纯函数（禁文件/环境/网络 IO，持久化留 tools）；
+   contract 与 _HANDLERS 工具集一一对应；policy.json 必备字段下限 + 规则指向工具
+   真实存在（跨切面 field+regex 规则例外，正则必须可编译）。
+2. **花名册显式清单**：删除门禁现场正则扫文档的形态，改 `scripts/case_roster.py`
+   （共享扫描逻辑）+ `scripts/sync_case_roster.py`（重录）+ `tests/case_roster.json`
+   （用例号→承载文件，可审阅）。门禁四条：花名册==proposal 定义；承载文件真实存在
+   且正文含该编号；豁免==baseline（棘轮只缩）；已补承载的条目不许留在豁免。
+   首次重录：141 用例、72 无承载（历史欠账，基线不动）。
+3. **规则真源对账**：删除已停用的 scripts/vendor_rules.py（README/CONTRIBUTING 曾写
+   "从 VOD-Project 拉取"=描述一条不存在的链）。替代=`docs/rules-provenance.json`
+   （技能↔引擎文件↔符号三元组 + 双方 sha256）+ `scripts/rules_provenance.py`
+   （符号对账 + 指纹漂移；无引擎检出 SKIP 不伪绿；人工复核后 --update 重录）。
+   CI 增两步：花名册 --check、规则真源对账。
+
+未采（仍不抄）：devkit 的 56 工具/12 packs/sandbox/proxy/telemetry（云服务业务面）、
+5 宿主全适配（无消费者）、release-please（我们 release.sh 三重断言已反超）。
+
