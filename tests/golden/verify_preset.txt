@@ -1,0 +1,1 @@
+verify: OK（preset 本地完整性；源端比对 unchecked）

@@ -65,8 +65,10 @@ VOD_PACKS=core,collect python3 -m vod_mcp.server   # packs 裁剪
 安全：deny 拦 DB 直连意图与凭据读取（safety/policy.json 声明式规则；
 文本规则只扫结构性字段，不误杀反馈内容里的凭据引用）。
 
-测试：39 用例（单元+护栏+packs+安装器矩阵三宿主+真进程 stdio 回环+**协议级真 HTTP 服务器**
-锁定认证头/双后端路径——E1/E2 的永久回归门）。决策闭环见 docs/decisions.md。
+测试：pytest + node:test 全量（单元+护栏+packs+安装器矩阵四宿主+真进程 stdio 回环+
+**协议级真 HTTP 服务器**锁定认证头/双后端路径——E1/E2 的永久回归门）。
+用例数以本地实测为准（`python3 -m pytest tests/ -q`），文档不手写计数——
+手写计数必然漂移，tests/test_claims.py 会拦。决策闭环见 docs/decisions.md。
 
 ## 质量门禁
 

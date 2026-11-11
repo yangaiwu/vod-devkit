@@ -29,6 +29,22 @@
 4. **可漂移值**（product 白名单等）走 `GET /external/meta` 动态取，
    快照兜底须带 `[stale]` 标记；不许把引擎枚举硬编码进新代码
 5. 提交前跑 `.githooks/pre-push`（已 `git config core.hooksPath .githooks`）
+6. **提交信息两段式**：写清「改动」+「已验证证据」+「已知残余」三段。
+   证据要可复跑（跑了哪些测试、真机验了什么），残余要写"没测到/已知边界"——
+   借鉴 huaweicloud-devkit 的 ledger 纪律：没有残余声明的提交，评审无法
+   判断边界在哪，只能重走一遍。
+
+## 用例与计数纪律（CI 会拦）
+
+- **新用例必须带承载**：在 `docs/proposal.md` 定义的每个用例号（`S*`/`U*`/`DG*`）
+  都要能在 `docs/design.md` 承载表或某个测试文件里找到痕迹；
+  `tests/test_case_roster.py` 是棘轮——新增未承载即红，历史欠账在
+  `tests/case_roster_baseline.txt` 里只许缩不许增（补上承载后要删掉那一条）。
+- **文档不手写用例/工具计数**：`tests/test_claims.py` 会拦。
+  写「全量」并给实测命令（`python3 -m pytest tests/ -q`），不写具体数字——
+  数字必然漂移，且没人能从文档里读出它是错的。
+- **golden 只在有意变更时重录**：`UPDATE_GOLDEN=1` 重录后必须人工过目 diff
+  （版本号/文案变更 vs 行为漂移，一眼能分）；门禁拦住是它该干的活。
 
 ## 领域规则技能
 

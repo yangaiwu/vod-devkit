@@ -65,10 +65,11 @@ Verified hosts: Hermes (official `hermes mcp add`), OpenCode
 
 ## Quality
 
-39 tests (unit / guardrails / packs / installer matrix across three hosts /
-protocol-level real-HTTP lock /
-stdio roundtrip / meta cache / ledger) + pre-push gate + GitHub Actions
-CI on the mirror + nightly local E2E against the test environment.
+Full pytest + node:test suite (unit / guardrails / packs / installer matrix across
+four hosts / protocol-level real-HTTP lock / stdio roundtrip / meta cache /
+ledger). Counts are never written into docs by hand — they drift; measure with
+`python3 -m pytest tests/ -q`. Plus pre-push gate + GitHub Actions CI on the
+mirror + nightly local E2E against the test environment.
 
 Docs: [README.md (中文)](README.md) · QUICKSTART.md · CONTRIBUTING.md ·
 SECURITY.md · SUPPORT.md · CODE_OF_CONDUCT.md · NOTICE · docs/proposal.md ·

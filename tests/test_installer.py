@@ -816,3 +816,55 @@ def test_upsert_dsh_patch_clears_empty_array_placeholder(tmp_path):
     assert "- id: vod-devkit" in out
     # 幂等：第二次写入无变化
     assert mod._upsert_dsh_patch(patch, block) is False
+
+
+# ---- golden 三态（借鉴 devkit doctor-golden 三 fixture：空态/装后/降级态）----
+
+def _norm_golden(env, text, mf=None):
+    """易变段归一化（路径/SHA/时间戳），非易变文案一律不归一。"""
+    subs = [(str(env["home"]), "<HOME>"), (str(env["repo"]), "<REPO>"),
+            (str(env["bare"]), "<ORIGIN>")]
+    if mf:
+        subs += [(str(mf["source"]["commitSha"]), "<SHA>"),
+                 (str(mf["source"]["commitSha"][:12]), "<SHA12>"),
+                 (str(mf.get("installedAt")), "<INSTALLED_AT>")]
+    for volatile, tag in subs:
+        text = text.replace(volatile, tag)
+    return text
+
+
+def test_golden_doctor_without_manifest(env):
+    """golden 态 A（devkit 三 fixture 之「空 HOME」）：未安装态 doctor 的用户
+    可见输出——首装机/装坏机的第一现场，口径漂移即红。"""
+    # 空态前提：仓库工作区可能带着本机真实安装产物（install-manifest.json
+    # 未入库但会被 fixture 拷进 clone）——必须先清掉才是「从未安装」形态
+    (env["repo"] / "install-manifest.json").unlink(missing_ok=True)
+    r = cli(env, "doctor")
+    assert r.returncode == 1, "未安装必须 FAIL 而非静默 OK"
+    actual = f"$ vod-devkit doctor\n{r.stdout.strip()}"
+    _assert_golden("doctor_no_manifest", _norm_golden(env, actual))
+
+
+def test_golden_doctor_skill_drift(env):
+    """golden 态 B（降级态）：技能拷贝件被改后 doctor 的点名文案与判定顺序。
+    与 test_skill_drift_lock 分工：那条锁行为（exit 1 + 关键字），
+    本条锁用户可见输出原文（含恢复指引）。"""
+    cli(env, "install", "--target", "hermes", "--product", "CodeArts")
+    mf = json.loads((env["repo"] / "install-manifest.json").read_text())
+    first_rel = sorted((mf.get("skillHashes") or {}))[0]
+    target = Path(mf["skillsDir"]) / first_rel
+    target.write_text(target.read_text() + "\n<!-- 篡改 -->\n", encoding="utf-8")
+    r = cli(env, "doctor")
+    assert r.returncode == 1
+    actual = f"$ vod-devkit doctor\n{r.stdout.strip()}"
+    _assert_golden("doctor_skill_drift", _norm_golden(env, actual, mf))
+
+
+def test_golden_verify_preset(env):
+    """golden 态 C：preset 形态 verify 的离线降级文案（客户机无 git 源，
+    源端比对 unchecked 不 FAIL——离线必须可用）。"""
+    cli(env, "install", "--target", "hermes", "--product", "CodeArts",
+        "--distribution", "preset")
+    r = cli(env, "verify")
+    assert r.returncode == 0, r.stderr
+    _assert_golden("verify_preset", r.stdout.strip())

@@ -1,0 +1,2 @@
+$ vod-devkit doctor
+FAIL: 无 install-manifest.json（未 install？）

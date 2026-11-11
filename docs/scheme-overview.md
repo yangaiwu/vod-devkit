@@ -44,7 +44,7 @@ VOD Java backend（唯一上游：/external/voice/submit + /external/token）
 
 ## 质量
 
-- 24 用例：单元+护栏+packs+协议级真 HTTP（锁认证头/路径）+stdio 回环+meta
+- 用例：单元+护栏+packs+协议级真 HTTP（锁认证头/路径）+stdio 回环+meta（数量以实测为准，文档不手写计数）
 - 门禁：pre-push 钩子（lint+pytest 红了禁推）；.gitcode-ci.yml 待平台恢复
 - 端到端已实测：真 Hermes 会话→测试环境→taskId 回执（2026-11-03）
 
