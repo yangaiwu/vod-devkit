@@ -11,6 +11,10 @@ from vod_mcp.host_adapters.base import ROOT
 HOST = "codex"
 SUPPORTS_REMOTE = True
 _AGENTS_MARKER_BEGIN = "<!-- vod-devkit:feedback-skill BEGIN -->"
+# 更早一代注入（2026-11-05 之前）：AGENTS.md 里教模型"立即提交 confirmed=true、
+# 不要追问、归因由安装绑定"——与现行红线（先征得同意、归因从原话解析）矛盾，
+# 且 1705 个历史会话带着它跑（实测）。清理逻辑必须认这个标记，否则残留继续生效。
+_LEGACY_ONE_LINER = "<!-- vod-submit-one-liner -->"
 _AGENTS_MARKER_END = "<!-- vod-devkit:feedback-skill END -->"
 _SPEC = host_specs.load("codex")
 
@@ -38,6 +42,26 @@ def strip_codex_vod_blocks(text: str) -> str:
         raise RuntimeError(f"codex config.toml 形态不受支持：{reason}")
     cleaned, _removed = cf.strip_managed_toml(text)
     return cleaned
+
+
+def strip_legacy_one_liner(text: str) -> tuple:
+    """剥离旧一代 one-liner 注入块 → (new_text, changed)。
+
+    边界取法（宁可少删不可误删）：从标记行删到下一个 `<!--` 标记 / 一级标题 `# ` /
+    `---` 分隔线；都没有则删到 EOF。绝不动用户的其它 markdown 段。
+    """
+    lines = text.splitlines()
+    idx = next((i for i, ln in enumerate(lines) if ln.strip() == _LEGACY_ONE_LINER), None)
+    if idx is None:
+        return text, False
+    end = len(lines)
+    for j in range(idx + 1, len(lines)):
+        s = lines[j].strip()
+        if s.startswith("<!--") or s.startswith("# ") or s == "---":
+            end = j
+            break
+    out = lines[:idx] + lines[end:]
+    return "\n".join(out).rstrip() + ("\n" if out else ""), True
 
 
 def strip_agents_vod_block(text: str) -> str:
@@ -91,12 +115,24 @@ def install(args, packs: str) -> Path:
     agents = Path.home() / ".codex" / "AGENTS.md"
     if agents.exists():  # 历史遗留：AGENTS.md 技能块已被原生 skill 取代
         text = agents.read_text(encoding="utf-8")
+        cleaned = text
+        if _LEGACY_ONE_LINER in cleaned:
+            # 旧一代 one-liner（"立即提交/不要追问/归因由安装绑定"）必须清掉：
+            # 它是 consent 红线的真实破口（实测 1705 个历史会话带着它跑）
+            import datetime as _dt
+            bak = agents.with_name(f"AGENTS.md.bak-{_dt.datetime.now():%Y%m%d%H%M%S}")
+            bak.write_text(text, encoding="utf-8")
+            cleaned, _ = strip_legacy_one_liner(cleaned)
+            print(f"已移除旧 AGENTS.md one-liner 注入（备份 {bak.name}）：{agents}")
         try:
-            cleaned = strip_agents_vod_block(text)
+            cleaned = strip_agents_vod_block(cleaned)
         except RuntimeError as e:
             print(f"[vod-devkit] {e}", file=sys.stderr)
             sys.exit(2)
-        if cleaned != text.rstrip():
+        if cleaned.strip() == "":
+            agents.unlink()          # 整份都是我们的注入 → 文件本身也不留
+            print(f"已删除空的 AGENTS.md（内容全为旧注入）：{agents}")
+        elif cleaned != text.rstrip():
             agents.write_text(cleaned + "\n", encoding="utf-8")
             print(f"已移除旧 AGENTS.md 技能块（原生 skill 取代）：{agents}")
     mp_root = ROOT / "plugins"

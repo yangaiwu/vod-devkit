@@ -747,6 +747,13 @@ def cmd_doctor(_args):
             print("[doctor] 提示：本次安装无载荷副本（旧版），入口指向仓内路径；重跑 install 可固化")
         for res in _payload.residue():
             print(f"[doctor] 载荷残留（无 payload.json）：{res}——可手动删除")
+        # 旧一代 AGENTS.md 注入（2026-11-05 之前的 one-liner）：教模型跳过同意 +
+        # 归因由安装绑定。实测 1705 个 codex 会话带着它 → 不动它就等于红线失效。
+        legacy_agents = Path.home() / ".codex" / "AGENTS.md"
+        if legacy_agents.exists() and "vod-submit-one-liner" in legacy_agents.read_text(
+                encoding="utf-8"):
+            problems.append(f"AGENTS.md 仍含旧一代注入（教模型跳过同意）：{legacy_agents}"
+                            "——重跑 install --target codex 自动清理")
         # 路由插件副本（hermes）：仓内话术改了但装机副本没刷新 → 宿主还在注入旧口径
         # （2026-11-11 实锤：仓里已把"归因由安装绑定决定"改成"原话解析"，装机副本仍是旧的）
         rp_dst = Path.home() / ".hermes" / "plugins" / "vod-feedback-router" / "router.py"
