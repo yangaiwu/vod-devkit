@@ -543,13 +543,24 @@ def test_doctor_flags_missing_mcp_config(env):
 
 
 def test_uninstall_removes_artifacts(env):
+    """卸载一致性（D-attach-1 一并收紧）：共享配置只摘托管条目、共享技能目录
+    只摘本插件的技能——以前这两处都是整目录/整文件删，opencode 场景等于删用户
+    整份 provider 配置与其它插件技能。"""
     cli(env, "install", "--target", "opencode", "--product", "CodeArts")
     mf = json.loads((env["repo"] / "install-manifest.json").read_text())
+    other = Path(mf["skillsDir"]) / "other-plugin"
+    other.mkdir(parents=True, exist_ok=True)   # 用户/其它插件的技能
+    (other / "SKILL.md").write_text("x", encoding="utf-8")
     r = cli(env, "uninstall")
     assert r.returncode == 0, r.stderr
     assert not (env["repo"] / "install-manifest.json").exists()
-    assert not Path(mf["mcpConfig"]).exists()
-    assert not Path(mf["skillsDir"]).exists()
+    conf = Path(mf["mcpConfig"])
+    assert conf.exists(), "共享配置文件绝不能被整文件删除"
+    assert "vod-devkit" not in (json.loads(conf.read_text()).get("mcp") or {})
+    skills_dir = Path(mf["skillsDir"])
+    assert skills_dir.exists(), "共享技能目录必须保留"
+    assert not (skills_dir / "vod-feedback-collect").exists()
+    assert (skills_dir / "other-plugin" / "SKILL.md").exists(), "别人的技能不许动"
 
 
 # ---- dsh 壳（D-dsh-install-1，2026-11-06 拍板 A）：安装期硬校验 + 幂等写配置 ----

@@ -7,6 +7,8 @@
     "commitSha": "<SHA>"
   },
   "target": "hermes",
+  "transport": "stdio",
+  "mcpUrl": null,
   "installedAt": "<INSTALLED_AT>",
   "preset": "collect",
   "distribution": "devkit",

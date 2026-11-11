@@ -24,6 +24,10 @@ remote = re.sub(r"(https?://)([^@/]+@)", r"\1", remote) or None
 version = (dst / "__init__.py").read_text(encoding="utf-8").split('__version__ = "')[1].split('"')[0]
 bi = {"version": version, "commitSha": sha,
       "builtAt": datetime.datetime.now().isoformat(timespec="seconds"), "sourceRemote": remote}
-(ROOT / "plugins" / "vod-devkit" / "build-info.json").write_text(
-    json.dumps(bi, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+for _bi_path in (ROOT / "plugins" / "vod-devkit" / "build-info.json",
+                 ROOT / "build-info.json"):
+    # 双副本一起烧（2026-11-11 实锤：根副本停在 0.4.2 五个周期，
+    # status/verify/doctor 读根副本 → 报的版本与真实包不符）
+    _bi_path.write_text(json.dumps(bi, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8")
 print(f"synced {src} -> {dst}; build-info: {bi['version']}@{str(bi['commitSha'])[:8]}")

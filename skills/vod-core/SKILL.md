@@ -14,8 +14,8 @@ version: 2
 | 意图 | 动作 |
 |---|---|
 | 用户抱怨/建议，要提交 | `vod_submit_voices`（先征得明确同意，再传 `confirmed=true`）；话术见 `vod-feedback-collect` |
-| 想先暂存、等用户确认后再提交 | `vod_draft_voices` → 用户确认 → `vod_commit_voices`（一次性令牌 + payload 校验） |
-| 本机已提交过哪些（进度追问） | `vod_list_submitted`（本地账本口径，换机不保留） |
+| 想先暂存、等用户确认后再提交 | `vod_draft_voices` → 用户确认 → `vod_commit_voices`（一次性令牌 + payload 校验）**仅 stdio 面可用**：远程 MCP 面没有这两个工具，改用 `vod_submit_voices` 单发 |
+| 本机已提交过哪些（进度追问） | `vod_list_submitted`（本地账本口径，换机不保留）**仅 stdio 面可用**；远程面改答"本条收录状态" |
 | 插件版本/来源核验 | `vod_devkit_info`（version + commitSha） |
 | key/认证状态、引擎连通性 | `vod_auth_status`（只报指纹，不下发明文） |
 | 有哪些技能、规则技能是否可用 | `vod_list_skills` |

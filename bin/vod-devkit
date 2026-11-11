@@ -508,6 +508,133 @@ def _remove_dsh_patch_block(patch: Path) -> bool:
     return True
 
 
+def _expected_remote_tools() -> set:
+    """远程面应当暴露的工具集 = 契约全集 - REMOTE_WITHHELD（写面本机工具不进远程）。"""
+    from vod_mcp import packs as _packs
+    contract = json.loads((ROOT / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
+    return set(contract["tools"]) - set(_packs.REMOTE_WITHHELD)
+
+
+def _probe_remote(url: str, token: str, timeout: int = 15) -> list:
+    """远程 MCP 端点探活：initialize + tools/list，返回工具名清单（失败抛 RuntimeError）。
+
+    走 stdlib urllib（安装器零第三方依赖红线）；Accept 双类型，兼容 SSE 单事件响应。
+    探活在**写入任何配置之前**执行——装不上就不留半成品。
+    """
+    import urllib.request
+
+    def _post(payload: dict) -> dict:
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode(), method="POST",
+            headers={"content-type": "application/json",
+                     "accept": "application/json, text/event-stream",
+                     **({"Authorization": f"Bearer {token}"} if token else {})})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", "replace")
+        if body.startswith("event:") or body.startswith("data:"):
+            for line in body.splitlines():
+                if line.startswith("data:"):
+                    body = line[5:].strip()
+                    break
+        data = json.loads(body or "{}")
+        if isinstance(data, dict) and data.get("error"):
+            raise RuntimeError(f"JSON-RPC 错误：{data['error']}")
+        return data
+
+    _post({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+           "params": {"protocolVersion": "2025-06-18",
+                      "clientInfo": {"name": "vod-devkit-installer", "version": "1"},
+                      "capabilities": {}}})
+    listed = _post({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    names = [t.get("name") for t in (listed.get("result") or {}).get("tools") or []]
+    if not names:
+        raise RuntimeError("tools/list 返回空——端点可能不是 Streamable HTTP MCP")
+    return names
+
+
+def _remote_reachable(url: str, timeout: int = 6) -> bool:
+    """端点是否可达：GET 得到任何 HTTP 响应（405 是远程面契约的正常应答）即算通。"""
+    import urllib.error
+    import urllib.request
+    try:
+        with urllib.request.urlopen(url, timeout=timeout):
+            return True
+    except urllib.error.HTTPError:
+        return True      # 405/401/406 都证明端点活着
+    except Exception:
+        return False
+
+
+def _install_remote(target: str, args, url: str, token: str) -> Path | None:
+    """把宿主 MCP 配置指向远程端点（三宿主各自形态，均用宿主官方 CLI 或官方 schema）。
+
+    - hermes  ：hermes mcp add --url + --auth header（token 经 MCP_VOD_DEVKIT_API_KEY
+                 环境变量注入，hermes 自己写 ${ENV} 引用，不落明文）
+    - opencode：mcp.vod-devkit = {type:"remote", url, enabled, headers}
+    - codex   ：codex mcp add --url + --bearer-token-env-var（token 由用户环境提供）
+    dsh 不走 MCP，调用方已拦。
+    """
+    if target == "hermes":
+        env = os.environ.copy()
+        env["MCP_VOD_DEVKIT_API_KEY"] = token  # hermes 读 env → 写 ${...} 引用，不落明文
+        r = subprocess.run(
+            ["hermes", "mcp", "add", "vod-devkit", "--url", url, "--auth", "header"],
+            input="y\ny\n", capture_output=True, text=True, env=env, timeout=180)
+        if r.returncode != 0:
+            print(f"[vod-devkit] hermes mcp add（remote）失败：{(r.stderr or r.stdout).strip()[-200:]}",
+                  file=sys.stderr)
+            sys.exit(1)
+        conf = HERMES_MCP_DIR / "vod-devkit.json"
+        conf.parent.mkdir(parents=True, exist_ok=True)
+        conf.write_text(json.dumps({"name": "vod-devkit", "url": url,
+                                    "headers": {"Authorization": "Bearer ${MCP_VOD_DEVKIT_API_KEY}"}},
+                                   ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"已注册 Hermes 远程 MCP（{url}；token 存 ~/.hermes/.env，配置内只留引用）")
+        return conf
+
+    if target == "opencode":
+        spec = host_specs.load("opencode")
+        conf = Path(spec["configPath"])
+        conf.parent.mkdir(parents=True, exist_ok=True)
+        cfg = {}
+        if conf.exists():
+            try:
+                cfg = json.loads(conf.read_text(encoding="utf-8"))
+            except Exception:
+                cfg = {}
+        cfg.setdefault("mcp", {})["vod-devkit"] = {
+            "type": "remote", "url": url, "enabled": True,
+            "headers": {"Authorization": f"Bearer {token}"},
+        }
+        conf.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"已写入 OpenCode 远程 MCP 配置：{conf}（token 随配置存放，注意文件权限）")
+        return conf
+
+    if target == "codex":
+        codex = shutil.which("codex")
+        if not codex:
+            print("[vod-devkit] 未找到 codex CLI，无法走远程注册", file=sys.stderr)
+            sys.exit(2)
+        r = subprocess.run([codex, "mcp", "add", "vod-devkit", "--url", url,
+                            "--bearer-token-env-var", "VOD_MCP_TOKEN"],
+                           capture_output=True, text=True, timeout=180)
+        if r.returncode != 0:
+            print(f"[vod-devkit] codex mcp add（remote）失败：{(r.stderr or r.stdout).strip()[-200:]}",
+                  file=sys.stderr)
+            sys.exit(1)
+        stale = Path.home() / ".codex" / "plugins"
+        if stale.exists():
+            print("提示：codex 若曾用插件形态安装过 vod-devkit，请先 "
+                  "`codex plugin remove vod-devkit@vod-local` 避免双注册（stdio 插件 .mcp.json "
+                  "与本次 remote 配置同名）", file=sys.stderr)
+        print(f"已注册 Codex 远程 MCP（{url}）。token 由环境变量 VOD_MCP_TOKEN 提供：\n"
+              f"  export VOD_MCP_TOKEN=<你的 key>（写入 shell 配置或宿主 env）")
+        return None
+
+    print(f"[vod-devkit] {target} 不支持远程 attach", file=sys.stderr)
+    sys.exit(2)
+
+
 _INSTALLERS = {"hermes": _install_hermes, "opencode": _install_opencode,
                "codex": _install_codex, "dsh": _install_dsh}
 
@@ -680,6 +807,47 @@ def cmd_install(args):
     cfg["java_base"] = args.java_api_base
     rt.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # ── 远程 attach / skills-only（D-attach-1）───────────────────────────
+    # 形态：MCP 单独部署一个远程端点，宿主只把 MCP 配置指向它（+ 本地技能）。
+    # 约束：远程面无匿名链（缺 key fail fast）→ token 必填；探活先于写入，
+    # 失败零副作用。dsh 壳不走 MCP，这两种模式对 dsh 无意义（显式拒绝）。
+    remote_url = (getattr(args, "mcp_url", "") or "").strip()
+    skills_only = bool(getattr(args, "skills_only", False))
+    if remote_url or skills_only:
+        if target == "dsh":
+            print("[vod-devkit] dsh 壳不走 MCP，不支持 --mcp-url / --skills-only\n"
+                  "  dsh 请用本地形态：install --target dsh --profile <name>",
+                  file=sys.stderr)
+            sys.exit(2)
+        token = (getattr(args, "mcp_token", "") or os.environ.get("VOD_MCP_TOKEN") or "").strip()
+        if remote_url:
+            if not token:
+                print("[vod-devkit] 远程 attach 必须提供 --mcp-token 或 env VOD_MCP_TOKEN：\n"
+                      "  远程面不代签匿名令牌（身份只从请求头来），无 token 装上也提交不了",
+                      file=sys.stderr)
+                sys.exit(2)
+            try:
+                names = _probe_remote(remote_url, token)
+            except Exception as e:  # noqa: BLE001
+                print(f"[vod-devkit] 远程 MCP 探活失败（未写入任何配置）：{e}", file=sys.stderr)
+                sys.exit(2)
+            expected = _expected_remote_tools()
+            missing = expected - set(names)
+            if missing:
+                print(f"[vod-devkit] 远程面工具面不符：缺 {sorted(missing)}\n"
+                      f"  实际 = {sorted(names)}\n"
+                      "  该端点可能不是 vod-devkit 远程面，或版本/角色不匹配；拒绝安装",
+                      file=sys.stderr)
+                sys.exit(2)
+            print(f"远程面探活通过：{len(names)} 个工具（{', '.join(sorted(names))}）")
+        mcp_conf = None if skills_only else _install_remote(target, args, remote_url, token)
+        extra_dirs = _install_skills(target, packs,
+                                     (getattr(args, "dsh_profile", "") or "").strip() or None)
+        _write_install_manifest(args, target, packs, bound_product, mcp_conf, extra_dirs,
+                                transport=("skills-only" if skills_only else "remote"),
+                                mcp_url=remote_url)
+        return
+
     mcp_conf = installer(args, packs)
 
     # P1-4 修正：ack 解除后置——安装全部成功才落（解除先于安装=失败安装
@@ -742,7 +910,8 @@ def _install_skills(target: str, packs: str, profile: str | None = None):
 
 
 def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
-                            extra_dirs) -> None:
+                            extra_dirs, transport: str = "stdio",
+                            mcp_url: str = "") -> None:
     """manifest 段：落安装名册（版本/来源/归因/落点指纹），并给出 key
     配置提示。名册对账口径见各字段注释（原 cmd_install 尾段，整段平移）。"""
     bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
@@ -753,6 +922,10 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
                                          cwd=ROOT, capture_output=True, text=True).stdout.strip(),
                    "commitSha": bi["commitSha"]},
         "target": target,
+        # 传输形态（D-attach-1）：stdio=宿主本机拉起进程；remote=指向单独部署的
+        # 远程端点；skills-only=只装技能（MCP 由别处注册）
+        "transport": transport,
+        "mcpUrl": mcp_url or None,
         "installedAt": datetime.datetime.now().isoformat(timespec="seconds"),
         "preset": args.preset,
         "distribution": getattr(args, "distribution", "devkit"),
@@ -777,8 +950,11 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
     print("installed:", json.dumps(manifest, ensure_ascii=False, indent=2))
     missing = [k for k in ("VOD_JAVA_API_KEY",) if
                not os.environ.get(k) and not _runtime_cfg_read().get("java_key")]
-    if missing:
+    if missing and transport == "stdio":
         print(f"提示：{missing} 未配置——首次提交将自动申请零字段匿名令牌（无需配置）")
+    elif transport == "remote":
+        print("远程形态提示：身份随请求头走（token 已由宿主配置承载）；"
+              "本机 runtime.json 的匿名链不参与远程提交")
 
 
 def _runtime_cfg_read() -> dict:
@@ -878,6 +1054,25 @@ def cmd_doctor(_args):
             problems.append("install-manifest 与 build-info 的 commitSHA 不一致")
         if mf.get("mcpConfig") and not Path(mf["mcpConfig"]).exists():
             problems.append("MCP 配置文件缺失")
+        if mf.get("transport") == "remote" and mf.get("mcpUrl"):
+            url = mf["mcpUrl"]
+            token = (os.environ.get("VOD_MCP_TOKEN")
+                     or os.environ.get("MCP_VOD_DEVKIT_API_KEY") or "").strip()
+            try:
+                names = _probe_remote(url, token, timeout=8)
+                missing = _expected_remote_tools() - set(names)
+                if missing:
+                    problems.append(f"远程面工具面不符（缺 {sorted(missing)}）：{url}")
+                else:
+                    print(f"[doctor] 远程面可达：{url}（{len(names)} 工具）")
+            except Exception as e:  # noqa: BLE001
+                if not _remote_reachable(url):
+                    problems.append(f"远程 MCP 端点不可达：{url}")
+                elif not token:
+                    print("[doctor] 远程端点可达，但未提供 token（401 属预期）："
+                          "设 VOD_MCP_TOKEN 可验工具面")
+                else:
+                    problems.append(f"远程面探活失败（带 token）：{e}")
         if not Path(mf["skillsDir"]).exists():
             problems.append("skills 目录缺失")
         drifted = _drifted_skills(mf)
@@ -1006,6 +1201,65 @@ def cmd_update(args=None):
     print("  并重启 agent 会话")
 
 
+# 共享用户配置文件：uninstall 只摘「我们的托管条目」，绝不删除文件
+#（深审 P0-3 只挡了 config.toml；opencode.json 同类且更危险——里面有用户整份
+# provider 配置。2026-11-11 远程 attach 落地时一并收口。）
+_SHARED_CONFIG_NAMES = {"config.toml", "config.yaml", "config.yml",
+                        "opencode.json", "opencode.jsonc"}
+
+
+def _remove_managed_mcp_entry(target: str, path: Path) -> None:
+    """从宿主共享配置里摘掉 vod-devkit 条目（保留其它键/其它 server）。"""
+    if target == "opencode":
+        if not path.exists():
+            return
+        try:
+            cfg = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            print(f"skip（{path} 不是合法 JSON，未改动）")
+            return
+        mcp = cfg.get("mcp") or {}
+        if "vod-devkit" not in mcp:
+            return
+        mcp.pop("vod-devkit")
+        if not mcp:
+            cfg.pop("mcp", None)
+        else:
+            cfg["mcp"] = mcp
+        path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"removed mcp.vod-devkit: {path}")
+        return
+    cli, args = None, None
+    if target == "hermes" and shutil.which("hermes"):
+        cli, args = "hermes", ["mcp", "remove", "vod-devkit"]
+    elif target == "codex" and shutil.which("codex"):
+        cli, args = "codex", ["mcp", "remove", "vod-devkit"]
+    if cli:
+        r = subprocess.run([cli, *args], capture_output=True, text=True, timeout=120)
+        print(f"{cli} mcp remove:", "OK" if r.returncode == 0
+              else (r.stderr or r.stdout).strip()[-120:])
+
+
+def _remove_managed_skills(mf: dict, path: Path, target: str) -> None:
+    """技能摘除：hermes 目录是专属的（整目录删）；其它宿主技能目录是**共享**的
+    （opencode ~/.config/opencode/skills 等），只摘本插件改名下的技能。
+    2026-11-11 与 uninstall 共享配置收口同批修：整目录删会连带删掉用户的其它技能。"""
+    if target == "hermes":
+        if path.exists():
+            shutil.rmtree(path)
+            print("removed:", path)
+        return
+    names = {rel.split("/")[0] for rel in (mf.get("skillHashes") or {})}
+    removed = []
+    for n in sorted(names):
+        d = path / n
+        if d.is_dir():
+            shutil.rmtree(d)
+            removed.append(n)
+    print(f"removed skills: {removed}（共享目录保留）：{path}") if removed \
+        else print(f"skip（无需摘除的技能）：{path}")
+
+
 def cmd_uninstall(_args):
     p = manifest_path()
     if p.exists():
@@ -1014,19 +1268,25 @@ def cmd_uninstall(_args):
             path_s = mf.get(key)
             if not path_s:
                 continue  # codex 等宿主 mcpConfig 可为 None（P0-3：无托管配置文件）
+            if key == "skillsDir":
+                _remove_managed_skills(mf, Path(path_s), mf.get("target"))
+                continue
             path = Path(path_s)
-            # 深审 P0-3（破坏性路径一票否决）：config.toml 是用户整份 codex
-            # 配置，永不在 uninstall 删除——旧版 manifest 曾把它记成 mcpConfig
-            if path.name == "config.toml":
-                print(f"skip（用户配置文件，uninstall 永不删除）：{path}")
+            # 深审 P0-3（破坏性路径一票否决）：共享用户配置永不整文件删除
+            #（config.toml/opencode.json 里有用户自己的 provider、其它 server）
+            if path.name in _SHARED_CONFIG_NAMES:
+                print(f"skip（用户配置文件，uninstall 只摘托管条目）：{path}")
+                _remove_managed_mcp_entry(mf.get("target"), path)
                 continue
             if path.exists():
                 shutil.rmtree(path) if path.is_dir() else path.unlink()
                 print("removed:", path)
-        # codex 原生插件摘除（best-effort：CLI 命令名随版本可能变化，失败不阻塞）
+        # codex 摘除：remote 形态摘 MCP 条目；stdio 形态摘原生插件（best-effort）
         if mf.get("target") == "codex":
             codex = shutil.which("codex")
-            if codex:
+            if codex and (mf.get("transport") or "stdio") == "remote":
+                _remove_managed_mcp_entry("codex", Path.home() / ".codex" / "config.toml")
+            elif codex:
                 r = subprocess.run([codex, "plugin", "remove",
                                     "vod-devkit@vod-local"],
                                    capture_output=True, text=True, timeout=120)
@@ -1081,6 +1341,14 @@ def main():
                          "禁自更新/客户机首启重生成状态）")
     sp.add_argument("--profile", dest="dsh_profile", default="",
                     help="dsh 专用：profile 名（--target dsh 时必填）")
+    sp.add_argument("--mcp-url", default="",
+                    help="远程 attach 模式：宿主 MCP 配置指向该 Streamable HTTP 端点"
+                         "（hermes/opencode/codex 支持；dsh 不走 MCP）")
+    sp.add_argument("--mcp-token", default="",
+                    help="远程 attach 的身份（也可用 env VOD_MCP_TOKEN）：远程面不代签身份，"
+                         "缺 token 拒绝安装")
+    sp.add_argument("--skills-only", action="store_true",
+                    help="只装技能，不动宿主 MCP 配置（MCP 已由别处/手工注册时用）")
     sp.add_argument("--no-local-ledger", action="store_true",
                     help="关闭本地提交账本（企业数据驻留要求；vod_list_submitted 将不可用）")
     sp.set_defaults(fn=cmd_install)

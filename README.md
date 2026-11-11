@@ -83,6 +83,24 @@ vod-devkit serve --transport remote      # 默认 http://127.0.0.1:9528
 - **无内建鉴权**：本进程不校验身份，默认只绑回环。要对外必须在反代上加 TLS 与
   身份校验——不要把它匿名暴露到公网。
 
+### 宿主 attach（一条命令把宿主指到远程面）
+
+```bash
+# token 必填：远程面不代签身份，缺 key 会被拒装（exit 2）
+npx -y vod-devkit@latest install --target hermes   --mcp-url https://<网关>/mcp --mcp-token <key>
+npx -y vod-devkit@latest install --target opencode --mcp-url https://<网关>/mcp --mcp-token <key>
+npx -y vod-devkit@latest install --target codex    --mcp-url https://<网关>/mcp --mcp-token <key>
+```
+
+- 写入前先探活：initialize + tools/list 必须等于远程面工具集（契约 − 写面本机工具），
+  不符即拒装且**不写任何配置**；`doctor` 会复查端点与工具面。
+- token 承载：hermes 走 env `MCP_VOD_DEVKIT_API_KEY`（配置里只留 `${...}` 引用）；
+  opencode 写在 `headers`（注意配置文件权限）；codex 走 `VOD_MCP_TOKEN` 环境变量。
+- MCP 已由别处注册时只装技能：`install --target <host> --skills-only`。
+- dsh 壳不走 MCP，`--mcp-url` 对它显式报错。
+- 技能自带传输面自适应：远程面没有草稿工具 → 单发 `vod_submit_voices` + 回显，
+  不承诺"草稿/两步"；没有本机账本工具 → 不承诺查询历史反馈。
+
 ## 工具面（契约唯一事实源：contract/tools.schema.json）
 
 | 工具 | pack | 类型 | 护栏 |

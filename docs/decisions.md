@@ -660,3 +660,34 @@ dsh 归因漂移锁已按新口径改写（旧「安装期绑定」句禁止回�
 未采：update-registry snapshot diff 全量（我们用 publish_verify 的 tarball 内容断言
 覆盖）、update-upgrade 自升级（preset 形态禁止自更新是既有拍板）、badge:sync。
 
+## D-attach-1 远程 attach 安装模式（2026-11-11，负责人拍板 B）
+
+需求：MCP 单独部署一个远程端点，宿主（hermes/opencode/codex）只把 MCP 配置指向它 +
+本地装技能即可用。对表 huaweicloud-devkit 的做法后确认：**他们没做这件事**——remote
+仅 README 片段（代码里 0 处 "type": "remote" 写入器），且其 AK/SK 落在服务端本机
+文件，远端没有 per-request 身份，只能同机/可信内网。我们的远程面要求 per-request
+Bearer（缺 key fail fast、不代签匿名），身份边界成立，所以这条路我们能走而他们不能。
+
+形态（`install --mcp-url <url> --mcp-token <token>`，或 env VOD_MCP_TOKEN）：
+- hermes：`hermes mcp add vod-devkit --url ... --auth header`，token 经
+  MCP_VOD_DEVKIT_API_KEY 注入，hermes 自己写 ${ENV} 引用（配置不落明文）
+- opencode：`mcp.vod-devkit = {type:"remote", url, enabled, headers}`（token 明文在
+  配置里，提示文件权限）
+- codex：`codex mcp add vod-devkit --url ... --bearer-token-env-var VOD_MCP_TOKEN`
+- dsh：不走 MCP → 两种模式显式拒绝（exit 2），不是静默降级
+
+硬约束（都落成测试）：
+1. **token 必填**：远程面不代签身份，无 token 装上也提交不了 → 直接 exit 2。
+2. **探活先于写入**：initialize + tools/list，断言工具面 == 契约 − REMOTE_WITHHELD；
+   失败/工具面不符一律 exit 2 且零副作用（配置文件与 manifest 都不产生）。
+3. **skills-only**：MCP 已由别处注册时只装技能、不动宿主配置（manifest
+   transport=skills-only）。
+4. **技能双面**（照 devkit 的 root/retrieve 双轨思路）：远程面没有 draft/commit/
+   list_submitted → SKILL 改为"先看工具面再定流程"，禁止承诺草稿两步与本机账本查询。
+
+顺带修一条存量 P0（远程落地时才暴露）：`uninstall` 会整文件删除 manifest.mcpConfig，
+而 opencode 的 mcpConfig 就是 ~/.config/opencode/opencode.json（用户整份 provider
+配置）——旧守卫只挡了 config.toml。现在共享用户配置一律"只摘托管条目"：
+opencode 删 mcp.vod-devkit 键、hermes/codex 走官方 mcp remove，文件永不整删（用例
+`test_uninstall_remote_keeps_user_config_keys` 断言用户键原样保留）。
+

@@ -741,3 +741,43 @@ S91-S100（proposal）→ 承载：`vod_mcp/attribution.py`（索引/匹配/优�
 账本 `productSource/productEvidence`；契约面无 product 参数（S97 的
 ignoredRuntimeProduct 为回执字段，非入参）。
 
+## 宿主 attach：MCP 单独部署（D-attach-1，2026-11-11 负责人拍板 B）
+
+形态：一个远程端点服务多个宿主；宿主只把 MCP 配置指向它 + 本地装技能。与 devkit
+的差别是身份模型（他们凭据在服务器本机、remote 只能同机；我们 per-request Bearer），
+因此 attach 是产品能力而不是文档片语。
+
+### 三宿主配置形态（各用官方通道，不自创）
+
+| 宿主 | 写入方式 | token 承载 |
+|---|---|---|
+| hermes | `hermes mcp add vod-devkit --url ... --auth header` | env `MCP_VOD_DEVKIT_API_KEY` → hermes 写 `${...}` 引用（配置无明文） |
+| opencode | `mcp.vod-devkit = {type:"remote", url, enabled, headers}` | `Authorization: Bearer <token>`（明文在配置，提示文件权限） |
+| codex | `codex mcp add vod-devkit --url ... --bearer-token-env-var VOD_MCP_TOKEN` | 用户环境变量 |
+| dsh | 不支持（壳不走 MCP） | `--mcp-url`/`--skills-only` 显式 exit 2 |
+
+### 探活契约（写入之前）
+
+`initialize` → `tools/list`，期望集合 = 契约工具 − `packs.REMOTE_WITHHELD`；缺一个都
+exit 2（端点不是 vod-devkit、或版本/角色不匹配）。探活失败零副作用：不写宿主配置、
+不写 install-manifest。
+
+### 安装产物
+
+manifest 增 `transport`（stdio|remote|skills-only）与 `mcpUrl`；`skills-only` 不动任何
+MCP 配置（MCP 已由别处注册的场景）。`doctor` 远程三查：端点可达（GET 405/401 也算
+活）、tools/list 工具面、token 是否可用（无 token 只提示不判红）。
+
+### 卸载的托管条目语义（同批修掉的存量 P0）
+
+共享用户配置（config.toml / opencode.json / opencode.jsonc / config.yaml）**永不整
+文件删除**：opencode 只摘 `mcp.vod-devkit`，hermes/codex 走官方 `mcp remove`。旧实现
+对 manifest.mcpConfig 直接 unlink，opencode 场景等于删掉用户整份 provider 配置
+（旧守卫只挡了 config.toml）。
+
+### 技能双面（传输面自适应）
+
+远程面摘掉 draft/commit/list_submitted → SKILL 必须"先看工具面再定流程"：有草稿工具
+走两段式；没有则单发 submit + 回执回显，且不承诺本机账本查询。这是 devkit
+"skillRoot 有/无" 双轨的同构做法（他们按面切换技能加载路径，我们按面切换流程）。
+
