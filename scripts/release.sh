@@ -10,8 +10,15 @@
 set -e
 cd "$(dirname "$0")/.."
 
-PART="${1:-auto}"
-DRY="${2:---run}"
+PART="auto"; DRY="--run"; PUBLISH=0
+for a in "$@"; do
+  case "$a" in
+    patch|minor|major|auto) PART="$a" ;;
+    --dry-run) DRY="--dry-run" ;;
+    --publish) PUBLISH=1 ;;
+    *) echo "未知参数: $a（可用：patch|minor|major|auto --dry-run --publish）" >&2; exit 1 ;;
+  esac
+done
 
 CUR=$(python3 -c "import json;print(json.load(open('package.json'))['version'])")
 if [ "$PART" = "auto" ]; then
@@ -147,7 +154,19 @@ if ! tar xzOf "$DSH_TGZ" package/lib/index.js | diff -q - dsh/lib/index.js >/dev
   exit 1
 fi
 echo "dsh tarball 已验证：$DSH_TGZ（lib 指纹=工作区）"
-echo "发版完成 v$BUMP，待发布两颗包（发布后 npm view 双断言 latest）："
-echo "  1) npm publish $TGZ --access public"
-echo "  2) npm publish $DSH_TGZ --access public"
-echo "  验证: npm view vod-devkit version && npm view dsh-vod-devkit version  （均应=$BUMP）"
+if [ "$PUBLISH" = "1" ]; then
+  # 发布 + 终态断言（v0.4.2 实锤：tag 推了 npm 没上，用户吃旧包且无人发现）。
+  # 断言不过即 exit 1——"publish 回执成功"从来不是发版完成的证据。
+  echo "发布两颗包…"
+  npm publish "$TGZ" --access public || { echo "FAIL: vod-devkit publish 失败"; exit 1; }
+  npm publish "$DSH_TGZ" --access public || { echo "FAIL: dsh 壳 publish 失败"; exit 1; }
+  python3 scripts/publish_verify.py --version "$BUMP" \
+      --pkg vod-devkit --pkg dsh-vod-devkit \
+    || { echo "FAIL: 发版终态断言未过（registry 未上线或包内容不符）"; exit 1; }
+  echo "发版完成 v$BUMP，两颗包已上线并通过内容核验"
+else
+  echo "发版完成 v$BUMP，待发布两颗包（加 --publish 可自动发布并核验终态）："
+  echo "  1) npm publish $TGZ --access public"
+  echo "  2) npm publish $DSH_TGZ --access public"
+  echo "  3) python3 scripts/publish_verify.py --version $BUMP --pkg vod-devkit --pkg dsh-vod-devkit"
+fi
