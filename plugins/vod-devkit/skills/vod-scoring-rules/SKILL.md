@@ -1,7 +1,9 @@
 ---
 name: vod-scoring-rules
 description: VOD 评分规则（引擎 v2 真实公式）— 四项加法、上下限、优先级映射。真源=workflow/src/workflow_v2.py（VOD-Project 2bb3fc82 实测核对）。
-version: 2
+tags: [vod, scoring, rules]
+metadata:
+  version: 2
 ---
 
 # VOD 评分规则（引擎 v2 口径）

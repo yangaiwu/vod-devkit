@@ -27,7 +27,7 @@
           "workflow/src/n01_classify.py": "sha256:4dd56bf660a79ba3928e2d9cb3ba14f3e52a2fc71fc02b0d584d63d39428aee8",
           "workflow/src/n09_common.py": "sha256:597bc9f89ee7e2afec411cbe76a4a1e214e1b1b7bbca4b1090b54a1df35563d5"
         },
-        "skill": "sha256:7e357e0870253bd31dc6181b4cc4e1e44d06670aa2f308673bf19d84cd347e58"
+        "skill": "sha256:17b7af70a512a9545c0092760cdfa969b6770c46c4cfbb520ca0e8d4c568c114"
       }
     },
     {
@@ -54,7 +54,7 @@
           "workflow/src/workflow_v2.py": "sha256:80e0c03508b979bef1a46d57704d1d42ffe056470b486edbb881963e84a2c193",
           "workflow/src/n08_competitor.py": "sha256:187daf7ec4b680fa48efb47c30077ef2eb5fefd469dadd6cd8d3b3e13e408248"
         },
-        "skill": "sha256:3be3a7fdef52eb01b924156ba782e46691528f13e4a22d05e5ddc70a005c5a5f"
+        "skill": "sha256:beb991f52625a86ec373fc0c214b9414c2b5c507a4008b9ed8d7aceee952b652"
       }
     }
   ]

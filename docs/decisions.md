@@ -717,3 +717,26 @@ Bearer（缺 key fail fast、不代签匿名），身份边界成立，所以这
 opencode 删 mcp.vod-devkit 键、hermes/codex 走官方 mcp remove，文件永不整删（用例
 `test_uninstall_remote_keeps_user_config_keys` 断言用户键原样保留）。
 
+## D-skill-structure-1 技能结构与触发词门禁（2026-11-11，对标 huaweicloud-skills）
+
+对标 developer-skill/huaweicloud-skills（195 技能/17 领域，实测 references 192、
+scripts 168、tests 5）。采纳四项，全为测试与文档（零生产面）：
+1. `tests/test_skill_structure.py`：frontmatter 合法 YAML + name==目录名 + description
+   非空 + tags≤5 + 顶层无 version（挪 metadata.version）+ SKILL.md ≤500 行 +
+   references 文件名 kebab-case 且必须有 verification-method.md。
+   依据：对标仓规则写着"tags≤5/无 version"，实测 32 个超 tags、27 个带 version、
+   27 个超 500 行——**规范没有门禁就会漂**，所以借的是门禁不是条文。
+2. 触发词冲突扫描（对标 skill-tester Phase 5 internal_ambiguities）：技能间 Triggers
+   不得重复；多技能共存时互抢激活是真实风险（dsh 市场装一堆技能）。
+3. vod-core 路由表覆盖性：每个技能必须被路由表引用（否则装了不可达），路由表不得
+   引用不存在的技能（vod-system 作为外部系统名白名单）。
+4. 技能级 references/verification-method.md + acceptance-criteria.md（vod-core 与
+   vod-feedback-collect）：只给验证入口与勾选清单，断言仍以 proposal 用例与 tests 为准
+   （避免第二真源）。
+
+未采：references/iam-policies.md 与 cli-installation-guide.md（无云 IAM/CLI 场景）；
+tests 随技能包（与"验收工具不入交付分支"冲突）；skill-audit 那套重型工具链
+（gitleaks 自动下载/skillspector/markdownlint-cli2）——我们已有 secret_scan + pyflakes；
+skill-quality-cli 遥测包装（拍板不做遥测）；"SKILL.md 默认英文"（上架时再做）。
+脱敏取向：维持拒收（A），不对反馈就地脱敏（逐字回显是硬红线）。
+

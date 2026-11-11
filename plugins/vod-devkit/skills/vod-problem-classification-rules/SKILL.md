@@ -1,7 +1,9 @@
 ---
 name: vod-problem-classification-rules
 description: VOD 问题分类规则（引擎 v2.2 真实口径）— 六类定义、判定细节、LLM 分类流程。真源=workflow/src/n01_classify.py（VOD-Project 2bb3fc82 实测核对）。
-version: 2
+tags: [vod, classification, rules]
+metadata:
+  version: 2
 ---
 
 # VOD 问题分类规则（引擎 v2 口径）

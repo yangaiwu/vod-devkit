@@ -1,7 +1,9 @@
 ---
 name: vod-core
 description: 'VOD 用户声音采集插件的路由入口与纪律速查。遇到"提交反馈/采集用户声音/这条反馈入库没有/问题分类与评分规则是什么/插件版本与来源/key 认证状态"类请求先读本技能，再按表路由到具体工具或领域技能。采集写操作必须先获用户明确同意。'
-version: 2
+tags: [vod, feedback, routing]
+metadata:
+  version: 2
 ---
 
 # VOD Core（路由与纪律）
