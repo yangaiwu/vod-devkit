@@ -44,6 +44,20 @@ def _text_result(payload: dict, is_error: bool = False) -> types.CallToolResult:
         is_error=is_error)
 
 
+class _RemoteServer(Server):
+    """把 capabilities 对齐 devkit：{tools:{listChanged:true}}。
+
+    Python SDK 的默认 NotificationOptions 给 listChanged=false；devkit 的
+    remote test 明确断言 {tools: {listChanged: true}}。工具面由 pack 门控且
+    本面 stateless，listChanged 只是信息性声明，但既然参照物声明了 true，就照它。
+    """
+
+    def create_initialization_options(self, *args, **kwargs):  # noqa: D401
+        from mcp.server.lowlevel.server import NotificationOptions
+        kwargs.setdefault("notification_options", NotificationOptions(tools_changed=True))
+        return super().create_initialization_options(*args, **kwargs)
+
+
 def build_server(remote: bool = True) -> Server:
     version = tools.load_contract()["version"]
 
@@ -74,7 +88,7 @@ def build_server(remote: bool = True) -> Server:
             out.pop("skillsDir", None)  # 服务面不发布本机目录
         return _text_result(out)
 
-    return Server(
+    return _RemoteServer(
         name="vod-devkit",
         version=version,
         instructions=REMOTE_INSTRUCTIONS if remote else None,

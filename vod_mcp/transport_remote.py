@@ -62,33 +62,74 @@ class RemoteRuntime:
         if not self._ready.wait(timeout=15):
             raise RuntimeError("MCP session manager 启动超时")
 
-    def request(self, scope: dict, body: bytes, timeout: float = 60) -> tuple:
-        """把一次 HTTP 请求投递进事件循环 → (status, headers, body)。"""
-        collected = {"status": None, "headers": [], "chunks": []}
+    def request(self, scope: dict, body: bytes, sink, timeout: float = 60) -> None:
+        """把一次 HTTP 请求投递进事件循环，响应**逐块下沉**给 sink。
+
+        sink.start(status, headers) / sink.body(bytes) / sink.end()。
+        逐块而不是攒全再写：devkit 的 shell 也是 `for await (chunk of
+        response.body) res.write(chunk)`——SSE 这种长响应攒全再写等于把流式
+        语义废掉（客户端一个字节都看不到，直到响应结束）。
+        """
+        state = {"body_sent": False}
 
         async def receive():
-            if collected.get("body_sent"):
+            if state["body_sent"]:
                 return {"type": "http.disconnect"}
-            collected["body_sent"] = True
+            state["body_sent"] = True
             return {"type": "http.request", "body": body, "more_body": False}
 
         async def send(message):
             if message["type"] == "http.response.start":
-                collected["status"] = message["status"]
-                collected["headers"] = [(k.decode() if isinstance(k, bytes) else k,
-                                         v.decode() if isinstance(v, bytes) else v)
-                                        for k, v in message.get("headers", [])]
+                headers = [(k.decode() if isinstance(k, bytes) else k,
+                            v.decode() if isinstance(v, bytes) else v)
+                           for k, v in message.get("headers", [])]
+                sink.start(message["status"], headers)
             elif message["type"] == "http.response.body":
                 chunk = message.get("body") or b""
-                collected["chunks"].append(chunk)
+                if chunk:
+                    sink.body(chunk)
 
         async def run():
-            await self.manager.handle_request(scope, receive, send)
+            try:
+                await self.manager.handle_request(scope, receive, send)
+            finally:
+                sink.end()
 
         fut = asyncio.run_coroutine_threadsafe(run(), self._loop)
-        fut.result(timeout=timeout)
-        return (collected["status"] or 500, collected["headers"],
-                b"".join(collected["chunks"]))
+        try:
+            fut.result(timeout=timeout)
+        except Exception as e:  # 传输层异常：写 stderr 并让外壳答 500/断连
+            sys.stderr.write(f"remote transport error: {e}\n")
+            raise
+
+
+def _normalize_headers(handler) -> list:
+    """把请求头规范到 SDK 能接的形态——逐条照 devkit 的外壳做法。
+
+    devkit 在构造 `Request` 前做两件事（mcp-server-remote.ts）：
+      ① 缺 content-type 或 `text/plain*` → 覆盖成 `application/json`
+         （裸 `curl -d` 与 undici 默认体不因此吃 415）；
+      ② 缺 accept → 补 `application/json, text/event-stream`
+         （否则 SDK 的 accept 协商会 406）。
+    这两条不是"宽松"，是让最小客户端也能跑通同一份契约。
+    """
+    headers = []
+    ctype = (handler.headers.get("Content-Type") or "").strip()
+    if not ctype or ctype.lower().startswith("text/plain"):
+        ctype = "application/json"
+    seen_ctype = False
+    for k, v in handler.headers.items():
+        lk = k.lower()
+        if lk == "content-type":
+            seen_ctype = True
+            headers.append((b"content-type", ctype.encode()))
+            continue
+        headers.append((lk.encode(), str(v).encode()))
+    if not seen_ctype:
+        headers.append((b"content-type", ctype.encode()))
+    if not handler.headers.get("Accept"):
+        headers.append((b"accept", b"application/json, text/event-stream"))
+    return headers
 
 
 def _scope(handler, body: bytes) -> dict:
@@ -99,12 +140,57 @@ def _scope(handler, body: bytes) -> dict:
         "method": handler.command, "scheme": "http",
         "path": parts.path or "/", "raw_path": (parts.path or "/").encode(),
         "query_string": (parts.query or "").encode(),
-        "headers": [(k.lower().encode(), str(v).encode())
-                    for k, v in handler.headers.items()],
+        "headers": _normalize_headers(handler),
         "client": (handler.client_address[0], handler.client_address[1]),
         "server": (handler.server.server_address[0], handler.server.server_address[1]),
         "root_path": "",
     }
+
+
+class _StreamSink:
+    """把 ASGI 的 send 回调落成 HTTP 响应字节流（逐块，不攒全）。
+
+    与 devkit 的 `for await (chunk of response.body) res.write(chunk)` 等价：
+    - 响应头里有 content-length → 原样写；
+    - 没有（SSE 这类流式响应）→ 用 chunked 分帧，客户端能立刻收到字节。
+    """
+
+    def __init__(self, handler):
+        self.h = handler
+        self.started = False
+        self.chunked = False
+        self.closed = False
+
+    def start(self, status, headers):
+        h = self.h
+        h.send_response_only(status)
+        hdrs = [(k, v) for k, v in headers if k.lower() != "transfer-encoding"]
+        self.chunked = not any(k.lower() == "content-length" for k, _ in hdrs)
+        for k, v in hdrs:
+            h.send_header(k, v)
+        h._cors()
+        if self.chunked:
+            h.send_header("Transfer-Encoding", "chunked")
+        h.end_headers()
+        h.wfile.flush()
+        self.started = True
+
+    def body(self, chunk: bytes):
+        if not self.started:
+            raise RuntimeError("ASGI body 先于 response.start")
+        if self.chunked:
+            self.h.wfile.write(f"{len(chunk):X}\r\n".encode() + chunk + b"\r\n")
+        else:
+            self.h.wfile.write(chunk)
+        self.h.wfile.flush()
+
+    def end(self):
+        if not self.started or self.closed:
+            return
+        self.closed = True
+        if self.chunked:
+            self.h.wfile.write(b"0\r\n\r\n")
+            self.h.wfile.flush()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -168,28 +254,19 @@ class _Handler(BaseHTTPRequestHandler):
         key = raw_auth[7:].strip() if raw_auth.lower().startswith("bearer ") else ""
 
         from vod_mcp import tools
+        sink = _StreamSink(self)
         tok_key = tools._REQ_KEY.set(key or None)
         tok_face = tools._SERVER_FACE.set(True)
         try:
-            status, headers, payload = self.server.runtime.request(_scope(self, body), body)
-        except Exception as e:  # 传输层异常必须答 500，而不是断连
-            tools._SERVER_FACE.reset(tok_face)
-            tools._REQ_KEY.reset(tok_key)
-            self._json(500, {"jsonrpc": "2.0", "id": None,
-                             "error": {"code": -32603, "message": str(e)}})
+            self.server.runtime.request(_scope(self, body), body, sink)
+        except Exception as e:  # 传输层异常：能答就答 500，已经流出去就断连
+            if not sink.started:
+                self._json(500, {"jsonrpc": "2.0", "id": None,
+                                 "error": {"code": -32603, "message": str(e)}})
             return
         finally:
             tools._SERVER_FACE.reset(tok_face)
             tools._REQ_KEY.reset(tok_key)
-        self.send_response(status)
-        for k, v in headers:
-            if k.lower() in ("content-length", "transfer-encoding"):
-                continue
-            self.send_header(k, v)
-        self.send_header("Content-Length", str(len(payload)))
-        self._cors()
-        self.end_headers()
-        self.wfile.write(payload)
 
 
 def serve(host: str, port: int) -> int:

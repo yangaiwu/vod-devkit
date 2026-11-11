@@ -652,7 +652,7 @@ test/remote-mcp-server.test.ts 是参照物），只在我们有身份/写面的
 |---|---|---|
 | 启动 | 同一二进制 `--transport remote --port 9528 --host 127.0.0.1` | `vod-devkit serve --transport remote --port 9528 --host 127.0.0.1`（bin 透传） |
 | 传输 | 官方 SDK Streamable HTTP，stateless + jsonResponse | 官方 Python SDK `StreamableHTTPSessionManager(json_response=True, stateless=True)` |
-| 方法契约 | POST 进传输；GET 405；OPTIONS 204 + ACAO:*；通知 202；坏 JSON 400 | 同（逐条测试钉死） |
+| 方法契约 | POST 进传输；GET 405；OPTIONS 204 + ACAO:*；通知 202；坏 JSON 400 | 同（逐条测试钉死）；`Accept` 必须含 `application/json`——只给 `text/event-stream` 的客户端按 jsonResponse 模式回 406（与 devkit 同） |
 | 工具面门控 | remoteSurface 摘掉 secrets 包 + 本地写工具 | `packs.REMOTE_WITHHELD` 摘掉 draft/commit/list_submitted；submit 保留（它只调引擎 API） |
 | instructions | remote 版不给 skillRoot，教 retrieve_skill | 同；`vod_retrieve_skill` 在远程面不返回 path，`vod_list_skills` 不返回 skillsDir |
 | 身份 | 不管（凭据在服务器本机文件） | **请求头 Authorization 逐请求注入**；缺 key 时 submit fail fast，不代签匿名令牌 |
@@ -665,10 +665,15 @@ test/remote-mcp-server.test.ts 是参照物），只在我们有身份/写面的
 承载：`vod_mcp/transport_remote.py`（HTTP 外壳 + ASGI 适配层）、
 `vod_mcp/remote_app.py`（SDK Server 与工具面/instructions）、
 `vod_mcp/guardrails.py`（护栏唯一实现，两面共用）、`packs.REMOTE_WITHHELD`、
-`tools._REQ_KEY/_SERVER_FACE`（逐请求身份）、tests/test_remote_transport.py（8 例）。
+`tools._REQ_KEY/_SERVER_FACE`（逐请求身份）、tests/test_remote_transport.py（13 例）。
 
-残余（如实记录，未做）：
-- SSE 流式响应被缓冲后一次写出（本仓工具都无长任务，够用；真需要流式再补）；
-- `capabilities.tools.listChanged` 由 SDK 给 false（devkit 为 true）——信息性字段，
-  本实现 stateless 且 packs 不中途变更，未强行改写；
-- dsh 壳不在此列（它不走 MCP，见壳自身工具面）。
+与参照物逐条对账（不留"够用就行"的账）：
+
+| 项 | devkit | 本插件 | 状态 |
+|---|---|---|---|
+| 响应流式写出 | `for await (chunk) res.write(chunk)` | `_StreamSink` 逐块写；无 content-length 时 chunked 分帧并每块 flush | **已对齐**（`test_stream_sink_*` 2 例钉字节与分帧）。可达性如实说明：jsonResponse 模式下 SDK 的响应都带 content-length，走的是原样分支；chunked 分支只在 SDK 给无长度响应（如将来关掉 jsonResponse 开 SSE）时生效 |
+| `capabilities.tools.listChanged` | `{tools:{listChanged:true}}` 断言 | `_RemoteServer` 覆盖 `create_initialization_options` 传 `NotificationOptions(tools_changed=True)` | **已对齐**（`test_initialize_*` 断真值） |
+| 请求头规范化 | 缺省/`text/plain` content-type → JSON；缺 accept → 补双类型 | `_normalize_headers` 同规则 | **已对齐**（实测不做的后果：`text/plain` 请求被 SDK 判 400 Invalid Content-Type；`test_minimal_client_headers_*` 钉住） |
+| `tools/call` 省略 `arguments` | 在 JSON 边界补 `{}`（其 zod 层拒 undefined） | **不补**：Python SDK 的 `CallToolRequestParams.arguments` 本就可空，实测不补即 200 | 不复制——那段代码补的是 JS schema 的洞，属无收益复杂度；wire 契约仍由 `test_tools_call_without_arguments_*` 钉住 |
+| initialize 副作用 | 预热 user hash（3s 超时）+ 上报 agent/telemetry | 本仓无 telemetry/hash 子系统 | 不适用（不是"没做"，是没有对应对象） |
+| dsh 壳 | 不走 MCP | 同 | 范围外（它有自己的工具面，不经 MCP 传输） |

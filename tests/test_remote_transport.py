@@ -187,3 +187,99 @@ def test_submit_forwards_per_request_key_to_engine(remote):
     hop = [s for s in remote["engine"].seen if "external/voices" in s["path"]]
     assert hop, "必须真的调到引擎囤积端点"
     assert hop[-1]["auth"] == "Bearer tenant-key-A", "逐请求身份必须透传给引擎"
+
+def test_initialize_advertises_tools_list_changed_true(remote):
+    """devkit 的 remote test 断言 {tools: {listChanged: true}}；SDK 默认 false，
+    我们在 _RemoteServer 里对齐（参照物的声明照抄，不"够用就行"）。"""
+    st, body = _init(remote["url"])
+    assert st == 200
+    assert body["result"]["capabilities"]["tools"]["listChanged"] is True
+
+
+class _FakeHandler:
+    """最小 HTTP handler 替身：只供 _StreamSink 落字节，断言分帧与即时写。"""
+
+    def __init__(self):
+        import io
+        self.wfile = io.BytesIO()
+        self.headers_out = []
+
+    def send_response_only(self, status):
+        self.status = status
+
+    def send_header(self, k, v):
+        self.headers_out.append((k, v))
+
+    def _cors(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+
+    def end_headers(self):
+        pass
+
+
+def test_stream_sink_writes_chunks_immediately_with_chunked_framing():
+    """SSE 这类没有 content-length 的响应必须 chunked 分帧并逐块 flush——
+    devkit 的 shell 是 `for await (chunk) res.write(chunk)`，攒全再写等于废掉流式。"""
+    sink = tr._StreamSink(_FakeHandler())
+    sink.start(200, [("content-type", "text/event-stream")])
+    assert sink.chunked is True
+    assert ("Transfer-Encoding", "chunked") in sink.h.headers_out
+    sink.body(b"hello")
+    assert sink.h.wfile.getvalue() == b"5\r\nhello\r\n", "首块必须立刻成帧写出"
+    sink.body(b"world!")
+    sink.end()
+    assert sink.h.wfile.getvalue() == b"5\r\nhello\r\n6\r\nworld!\r\n0\r\n\r\n"
+
+
+def test_stream_sink_keeps_length_delimited_responses_raw():
+    sink = tr._StreamSink(_FakeHandler())
+    sink.start(200, [("content-length", "2"), ("content-type", "application/json")])
+    assert sink.chunked is False
+    sink.body(b"{}")
+    sink.end()
+    assert sink.h.wfile.getvalue() == b"{}"
+
+
+def _raw_post(url, payload, headers):
+    """不经过 urllib 的默认头：精确控制 content-type / accept 的有无。"""
+    import http.client
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    conn = http.client.HTTPConnection(parts.hostname, parts.port, timeout=30)
+    body = json.dumps(payload).encode()
+    conn.putrequest("POST", "/", skip_accept_encoding=True)
+    for k, v in headers.items():
+        conn.putheader(k, v)
+    conn.putheader("Content-Length", str(len(body)))
+    conn.endheaders(body)
+    resp = conn.getresponse()
+    data = resp.read()
+    conn.close()
+    return resp.status, dict(resp.getheaders()), data
+
+
+def test_minimal_client_headers_are_normalized_like_devkit(remote):
+    """devkit 的外壳会把缺省/`text/plain` 的 content-type 覆盖成 JSON、缺 accept
+    补成 `application/json, text/event-stream`，否则裸客户端吃 415/406。
+    这里用 http.client 精确构造"没有 Accept、content-type=text/plain"的请求。"""
+    payload = {"jsonrpc": "2.0", "id": 41, "method": "initialize",
+               "params": {"protocolVersion": "2025-06-18",
+                          "clientInfo": {"name": "bare", "version": "1"},
+                          "capabilities": {}}}
+    st, hdrs, body = _raw_post(remote["url"], payload,
+                               {"Content-Type": "text/plain; charset=utf-8"})
+    assert st == 200, body
+    assert json.loads(body)["result"]["serverInfo"]["name"] == "vod-devkit"
+
+
+def test_tools_call_without_arguments_is_accepted(remote):
+    """MCP 允许省略 tools/call 的 arguments。devkit 为此在 JSON 边界补 {}（其 zod
+    层不接受 undefined）；Python SDK 的 CallToolRequestParams.arguments 本身就是
+    可空，实测不补也能过——所以本仓不加那段代码，但把"省略也 200"的 wire 契约
+    钉住，防 SDK 升级后回退。"""
+    st, _h, body = _post(remote["url"], {"jsonrpc": "2.0", "id": 42, "method": "tools/call",
+                                         "params": {"name": "vod_devkit_info"}})
+    assert st == 200, body
+    data = json.loads(body)
+    assert "error" not in data, data
+    assert data["result"].get("isError") is not True, data
