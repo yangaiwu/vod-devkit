@@ -545,3 +545,42 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
   `- insert:` 组头自愈清理；回归锁并入 test_install_dsh_valid_product
   _writes_config。此前 11-09 真机实证能过，是当时 dsh 重序列化把平铺块
   收编了——依赖宿主宽容=非稳定通道，此坑在宿主行为变化时爆发。
+
+### D-devtoolchain-1..5：对表 huaweicloud-devkit 的工程化改造（2026-11-11，负责人「全部做」）
+
+判据：只抄它**市场验证过的工程形状**（骨架），不抄它清单（别人需求的镜像）。
+五条全部落在「可对账性」与「单一事实源」上，没有一条扩展产品能力面。
+
+- **D-devtoolchain-1 用例承载棘轮**：proposal 定义的每个用例号必须有承载痕迹
+  （design 承载表 / tests / dsh 测试，区间写法展开）。历史欠账 72 条进
+  tests/case_roster_baseline.txt，只许缩不许增；补上承载必须同时删基线条目。
+  理由：131 个用例号中 72 个此前全仓无痕迹——不是没测，是没人能自动回答
+  「这条承诺兑现了吗」。
+- **D-devtoolchain-2 声明计数禁止手写**：对外文档/CI 不许写「N 用例/N 工具」。
+  实测四处互相矛盾（README 39 / README.en 39 / ci.yml 25 / scheme-overview 24
+  vs 真实 194+24）。改写口径=「全量 + 实测命令」。历史台账（CHANGELOG/
+  decisions）不受限——它们是记录不是现状声明。
+- **D-devtoolchain-3 配置形态守卫**：codex config.toml / dsh cordis.patch.yml 的
+  扫描与删除统一进 vod_mcp/config_forms.py；非已知形态在改字节前拒绝
+  （重复表头、畸形表头、tab 缩进、flow 根、映射根、多个受管块），一律
+  字节不动 + 非零退出。顺带修掉真 bug：旧剥离只删父表，残留
+  `[mcp_servers.vod-devkit.env]` 会在 TOML 语义里重建父表 → 装出一个没有
+  command 的假 server（模型 = "gpt" 的配置删完仍留 env 表，实例复现）。
+- **D-devtoolchain-4 技能披露第二轨**：领域规则技能进 MCP 披露面
+  （vod_list_skills / vod_retrieve_skill，knowledge pack，只读零上游），元技能
+  仍原生安装。理由：四份宿主拷贝各自漂移，D-drift-lock 只能事后发现；且
+  dsh 这类没有规则技能原生目录的宿主此前拿不到规则全文。同时修掉
+  vod-core 路由表教已删工具（vod_run_analysis 等）的存量漂移。
+- **D-devtoolchain-5 发版终态断言 + 功能级冒烟**：release.sh --publish 后必须
+  过 publish_verify（轮询 npm view 到目标版本 + 拉回 tarball 查关键模块与
+  契约版本）；smoke_hosts 从识别级升到功能级（读宿主实际配置拉起 stdio 真调
+  只读工具），并支持 --expect-tools——同版本号下工具面可以不同（npx 缓存
+  副本与仓内 head 实测同为 0.4.4 却少 3 个工具）。
+
+- **回归锁**：tests/test_case_roster.py、test_claims.py、test_config_forms.py、
+  test_skills_disclosure.py、test_update_check.py、test_hosts_spec.py、
+  test_publish_verify.py，以及 test_installer.py 新增的 golden 三态与形态
+  守卫三例。
+- **残余**：dsh 壳（node 半）未接披露/版本提醒；vendor 规则 third skill
+  （vod-category-matching）文件本身不存在（vendor 已停用），文档已改为与现状
+  一致而非凭空补规则；publish 仍需人做一次 npm 登录与 2FA。
