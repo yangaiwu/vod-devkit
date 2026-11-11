@@ -747,6 +747,13 @@ def cmd_doctor(_args):
             print("[doctor] 提示：本次安装无载荷副本（旧版），入口指向仓内路径；重跑 install 可固化")
         for res in _payload.residue():
             print(f"[doctor] 载荷残留（无 payload.json）：{res}——可手动删除")
+        # 路由插件副本（hermes）：仓内话术改了但装机副本没刷新 → 宿主还在注入旧口径
+        # （2026-11-11 实锤：仓里已把"归因由安装绑定决定"改成"原话解析"，装机副本仍是旧的）
+        rp_dst = Path.home() / ".hermes" / "plugins" / "vod-feedback-router" / "router.py"
+        rp_src = ROOT / "hermes-plugin" / "vod-feedback-router" / "router.py"
+        if rp_dst.exists() and rp_src.exists() and rp_dst.read_text(encoding="utf-8") != \
+                rp_src.read_text(encoding="utf-8"):
+            problems.append(f"路由插件副本落后于仓内：{rp_dst}（重跑 install --target hermes）")
         # CodeArts Agent 冒烟：官方 CLI 在就 list 一次（实测通道=codearts_cli.json 的 mcp 段）
         if mf.get("target") == "codeartsdoer" and shutil.which("codearts"):
             r = subprocess.run(["codearts", "mcp", "list"], capture_output=True,
