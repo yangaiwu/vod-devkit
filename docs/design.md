@@ -678,6 +678,13 @@ test/remote-mcp-server.test.ts 是参照物），只在我们有身份/写面的
 | initialize 副作用 | 预热 user hash（3s 超时）+ 上报 agent/telemetry | 本仓无 telemetry/hash 子系统 | 不适用（不是"没做"，是没有对应对象） |
 | dsh 壳 | 不走 MCP | 同 | 范围外（它有自己的工具面，不经 MCP 传输） |
 
+dsh 壳归因同步（2026-11-11，负责人要求「能力一致」）：`dsh/lib/index.js` 落同一
+优先级链（字面证据 > 记忆 30 分钟 > config product 先验 > UNKNOWN），索引/匹配/
+歧义/误命中判定例与 Python 侧逐条对齐（含线上 meta 的 catalog≠展示名两颗雷），
+账本与回执同带 productSource/productEvidence；硬编码 PRODUCT_MAP 删除（改名录
+驱动）；工具面本就无 product 入参。用例见 dsh/test/attribution.test.mjs（7 例，
+含行为级 stub fetch：无证据走先验、中文别名压过先验、歧义不带 product）。
+
 ## 归因：运行期字面解析（D-attrib-B，2026-11-11 负责人拍板 A/A/A/A）
 
 产品不再由安装/启动配置决定。install `--product` 由必填降为可选先验；归因在

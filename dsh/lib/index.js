@@ -127,25 +127,229 @@ async function http(method, path, body, { base, key, timeoutSec, signal }) {
     }
 }
 
-// T7i（方案 A，2026-11-05 拍板）：产品归因主键化——meta productCatalog
-// （[{id,name}]，t_vod_product 运营预置）按名解析平台 id 后提交；
-// ①纯数字=平台 id 透传 ②目录无此名/不可达（含老引擎 404）→ 规范名兼容通道
-// （引擎 name 命中同样补落 product_id）——不静默丢提交。进程内缓存一次。
+// ── 归因（D-attrib-B，2026-11-11 负责人拍板 A/A/A/A）：与 vod_mcp/attribution.py
+// 同一口径——用户原话字面证据 > 记忆（TTL 30 分钟）> 部署 config 先验 > 未知。
+// 唯一命中才采信；多产品命中=歧义 → 不上送 product（引擎 UNKNOWN 池）；
+// 模型自报参数不存在（本壳工具面无 product 入参）。
 const META_PATH = `${API_PREFIX}/external/meta`;
-let _productCatalog = null;
-async function resolveProductId(product, cfg, signal) {
-    if (/^\d+$/.test(product)) return product;
+const META_TTL_MS = 24 * 3600 * 1000;
+const ATTR_MEM_TTL = 30 * 60;          // 秒（与 Python 侧 MEM_TTL 对齐）
+const ATTR_SHORT_ALIAS = 5;            // <5 字符短别名只认大小写精确（obs/maas）
+const ATTR_BOUNDARY = /[A-Za-z0-9_-]/;
+const ATTR_HISTORY_CAP = 10;
+let _metaCache = null;                 // {at, data}
+
+function emptyMeta() {
+    return { products: [], catalog: [], aliases: {}, nameAliases: {} };
+}
+
+async function loadMeta(cfg, signal) {
+    if (_metaCache && Date.now() - _metaCache.at < META_TTL_MS) return _metaCache.data;
     try {
-        if (!_productCatalog) {
-            const out = await http('GET', META_PATH, undefined, { ...cfg, signal });
-            _productCatalog = (out.ok && out.data && out.data.data?.productCatalog)
-                || out.data?.productCatalog || [];
+        const out = await http('GET', META_PATH, undefined, { ...cfg, signal });
+        const d = out?.data?.data || out?.data || {};
+        const meta = {
+            products: Array.isArray(d.products) ? d.products : [],
+            catalog: Array.isArray(d.productCatalog) ? d.productCatalog : [],
+            aliases: d.aliases && typeof d.aliases === 'object' ? d.aliases : {},
+            nameAliases: d.nameAliases && typeof d.nameAliases === 'object' ? d.nameAliases : {},
+        };
+        if (meta.products.length) {
+            _metaCache = { at: Date.now(), data: meta };
+            return meta;
         }
-        const hit = _productCatalog.find(
-            (x) => String(x?.name || '').toLowerCase() === product.toLowerCase());
-        if (hit && hit.id != null) return String(hit.id);
-    } catch (e) { /* 目录不可用 → 名字兼容通道 */ }
-    return product;
+    } catch (e) { /* 名录不可用 → 快照空：短码都拿不到，宁可 UNKNOWN 不猜 */ }
+    return _metaCache?.data || emptyMeta();
+}
+
+export function buildAliasIndex(meta = {}) {
+    const products = (meta.products || []).map(String).filter(Boolean);
+    const catalog = meta.catalog || [];
+    const idByLower = new Map();
+    for (const it of catalog) {
+        const name = String(it?.name || '').trim();
+        if (name) idByLower.set(name.toLowerCase(), it.id != null ? String(it.id) : null);
+    }
+    const canon = new Map(); // lower(name) -> {label,id,aliases:Set,brand}
+    const slot = (nm, brand) => {
+        const key = String(nm).trim().toLowerCase();
+        let cur = canon.get(key);
+        if (!cur) {
+            cur = { label: String(nm).trim(), id: null, aliases: new Set(), brand: !!brand };
+            canon.set(key, cur);
+        } else if (brand && !cur.brand) {
+            cur.label = String(nm).trim();
+            cur.brand = true;
+        }
+        cur.aliases.add(String(nm).trim());
+        return cur;
+    };
+    products.forEach((p) => slot(p, true));          // 展示名优先成标签
+    catalog.forEach((it) => { if (it?.name) slot(it.name, false); });
+    for (const [key, list] of Object.entries(meta.nameAliases || {})) {
+        const aliases = (list || []).map(String).filter(Boolean);
+        let target = canon.get(String(key).toLowerCase());
+        if (!target) {
+            for (const a of aliases) {
+                const s = canon.get(a.toLowerCase());
+                if (s) { target = s; break; }
+            }
+        }
+        if (!target) target = slot(key, true);
+        aliases.forEach((a) => target.aliases.add(a));
+        target.aliases.add(String(key));
+    }
+    for (const [key, targetName] of Object.entries(meta.aliases || {})) {
+        let s = canon.get(String(targetName).toLowerCase());
+        if (!s) s = slot(targetName, false);   // 目标不在名录也不丢别名
+        s.aliases.add(String(key));
+    }
+    for (const s of canon.values()) {          // 名字/别名任一命中 catalog → 拿 id
+        for (const a of [s.label, ...s.aliases]) {
+            if (idByLower.has(a.toLowerCase())) {
+                const id = idByLower.get(a.toLowerCase());
+                if (id != null) { s.id = id; break; }
+            }
+        }
+    }
+    const merged = [];
+    const byId = new Map();                    // 同 id 合并（展示名那条为准）
+    for (const s of canon.values()) {
+        if (s.id != null && byId.has(s.id)) {
+            const keep = byId.get(s.id);
+            s.aliases.forEach((a) => keep.aliases.add(a));
+            continue;
+        }
+        if (s.id != null) byId.set(s.id, s);
+        merged.push(s);
+    }
+    const entries = [];
+    const seen = new Set();
+    for (const s of merged) {
+        for (const alias of s.aliases) {
+            const key = `${s.label.toLowerCase()}\u0000${alias}`; // 大小写敏感：留住 MaaS/Maas
+            if (!alias || seen.has(key)) continue;
+            seen.add(key);
+            entries.push({ product: s.label, id: s.id, alias });
+        }
+    }
+    entries.sort((a, b) => b.alias.length - a.alias.length);
+    return entries;
+}
+
+function snippetOf(text, start, end) {
+    const lo = Math.max(0, start - 20);
+    const hi = Math.min(text.length, end + 20);
+    return text.slice(lo, hi).replace(/\s+/g, ' ').slice(0, 80);
+}
+
+export function matchProducts(text, index) {
+    const t = String(text || '');
+    if (!t || !Array.isArray(index) || !index.length) return [];
+    const taken = [];
+    const hits = [];
+    const isAscii = (s) => [...s].every((c) => c.charCodeAt(0) < 128);
+    for (const e of index) {
+        const alias = String(e.alias || '');
+        if (!alias) continue;
+        const spans = [];
+        if (!isAscii(alias)) {
+            let i = 0;
+            while ((i = t.indexOf(alias, i)) >= 0) { spans.push([i, i + alias.length]); i += 1; }
+        } else {
+            const exact = alias.length < ATTR_SHORT_ALIAS;
+            const hay = exact ? t : t.toLowerCase();
+            const needle = exact ? alias : alias.toLowerCase();
+            let i = 0;
+            while ((i = hay.indexOf(needle, i)) >= 0) {
+                const j = i + needle.length;
+                const beforeOk = i === 0 || !ATTR_BOUNDARY.test(hay[i - 1]);
+                let afterOk = true;
+                if (j < hay.length) {
+                    const n = hay[j];
+                    if (ATTR_BOUNDARY.test(n)) afterOk = false;
+                    else if (n === '.' && j + 1 < hay.length && /[A-Za-z0-9]/.test(hay[j + 1])) afterOk = false;
+                }
+                if (beforeOk && afterOk) spans.push([i, j]);
+                i += 1;
+            }
+        }
+        for (const [s, en] of spans) {
+            if (taken.some(([ts, te]) => !(en <= ts || s >= te))) continue; // 长别名优先
+            taken.push([s, en]);
+            hits.push({ product: e.product, id: e.id, alias, start: s, end: en, snippet: snippetOf(t, s, en) });
+        }
+    }
+    hits.sort((a, b) => a.start - b.start);
+    return hits;
+}
+
+function resolveSubmitValue(product, meta) {
+    const p = String(product || '').trim();
+    if (!p) return '';
+    if (/^\d+$/.test(p)) return p;
+    const idx = buildAliasIndex(meta || {});
+    const low = p.toLowerCase();
+    for (const e of idx) {
+        if (String(e.product).toLowerCase() === low && e.id != null) return String(e.id);
+    }
+    for (const e of idx) {
+        if (String(e.alias).toLowerCase() === low && e.id != null) return String(e.id);
+    }
+    return p;
+}
+
+export function attributeProduct(text, meta, opts = {}) {
+    const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
+    const ttl = opts.ttl ?? ATTR_MEM_TTL;
+    const hits = matchProducts(text, buildAliasIndex(meta || {}));
+    const groups = new Map();
+    for (const h of hits) {
+        const k = String(h.product).toLowerCase();
+        const cur = groups.get(k);
+        if (!cur || h.alias.length > cur.alias.length) groups.set(k, h);
+    }
+    if (groups.size === 1) {
+        const h = [...groups.values()][0];
+        return { product: h.id != null ? String(h.id) : h.product, productName: h.product,
+            source: 'user_input',
+            evidence: [{ product: h.product, alias: h.alias, snippet: h.snippet }] };
+    }
+    if (groups.size > 1) {
+        return { product: null, productName: null, source: 'unknown',
+            evidence: hits.map((h) => ({ product: h.product, alias: h.alias,
+                snippet: h.snippet, reason: 'ambiguous' })) };
+    }
+    const mem = opts.memory || {};
+    if (mem.product && nowSec - Number(mem.at || 0) <= ttl) {
+        return { product: String(mem.product), productName: mem.productName || null,
+            source: 'memory',
+            evidence: [{ product: mem.productName || String(mem.product), alias: mem.alias,
+                snippet: mem.snippet, at: mem.at, reason: 'memory' }] };
+    }
+    const binding = String(opts.binding || '').trim();
+    if (binding) {
+        return { product: resolveSubmitValue(binding, meta), productName: binding,
+            source: 'install_binding', evidence: [] };
+    }
+    return { product: null, productName: null, source: 'unknown',
+        evidence: [{ reason: 'no-evidence' }] };
+}
+
+// 记忆：只记「字面证据唯一命中」；覆盖时旧条目进 attribution_history（cap 10）
+function rememberAttribution(attr) {
+    if (attr?.source !== 'user_input') return;
+    const ev = (attr.evidence || [])[0] || {};
+    const mem = { product: attr.product, productName: ev.product || attr.productName || null,
+        alias: ev.alias, snippet: ev.snippet, at: Math.floor(Date.now() / 1000) };
+    const rt = loadRuntime();
+    const prev = rt.attribution_memory || {};
+    if (prev.product) {
+        const hist = (Array.isArray(rt.attribution_history) ? rt.attribution_history : [])
+            .concat([{ ...prev, replacedAt: mem.at }]).slice(-ATTR_HISTORY_CAP);
+        saveRuntime({ attribution_history: hist });
+    }
+    saveRuntime({ attribution_memory: mem });
 }
 
 async function fetchAnonToken(cfg) {
@@ -155,15 +359,6 @@ async function fetchAnonToken(cfg) {
     }
     return null;
 }
-
-const PRODUCT_MAP = { // 引擎枚举归一（实测：小写 codearts → 400 空响应；Python 侧同款映射）
-    // 已知差距（M2/M3 不适用于 dsh 形态）：本表硬编码，不拉 GET /external/meta——
-    // 引擎 VodExternalProducts 变更时需同步此表（含 kb-query-auth 合入后的 AISHELL/nameAliases）。
-    // 详见 docs/decisions.md D-dsh-3。
-    agentarts: 'AgentArts', codearts: 'CodeArts', dataarts: 'DataArts',
-    maas: 'MaaS', obs: 'OBS', officeclaw: 'OfficeClaw',
-    modelarts: 'MaaS',
-};
 
 function voiceId(source, content, nonce) {
     const h = createHash('sha1').update(content + nonce).digest('hex').slice(0, 12);
@@ -358,7 +553,7 @@ export function apply(ctx, config) {
                 + 'content MUST be a faithful transcription of the user\'s own words - '
                 + 'NEVER invent sentiment (e.g. 体验不好) or fabricate content the user did not say. '
                 +                'A bare product name or a question is NOT feedback - ask what the user wants to report. ' +
-                'Product attribution is bound at install/deploy time (config product; no runtime product argument exists). ' +
+                'Attribution comes from the user\'s own words; config product is only a fallback. NEVER ask or invent a product. ' +
                 'Fixed one-time follow-up at confirmation, verbatim: 「方便的话，补充一下遇到这个问题时的操作步骤或期望的表现吗？不方便回复"没有"，我直接提交。」' +
                 'Answer → reproSteps/expectedBehavior verbatim excerpt, never into content; "没有/跳过"=omit both. ' +
                 'Batch ≤50. Returns voiceIds (reconciliation key) + taskIds.',
@@ -376,12 +571,15 @@ export function apply(ctx, config) {
                 const voices = Array.isArray(args.voices) ? args.voices : [];
                 if (!voices.length) return textResult({ error: 'voices 为空', code: -32001 });
                 if (voices.length > 50) return textResult({ error: '单批上限 50 条', code: -32001 });
-                // 归因（D-attrib-A，2026-11-06 拍板，方案 A）：归因只由部署配置绑定
-                // 决定（安装时定），不读 args——宿主/模型传参自报不采信（对齐 vod_mcp
-                // effectiveBotPat 同款收紧；Python 侧实锤宽容口径被模型滥用后统一）
-                let product = String(c.product || '').trim(); // 部署配置权威（安装时定），无 args 覆盖
-                product = PRODUCT_MAP[product.toLowerCase()] || product;
-                product = await resolveProductId(product, c, exec?.signal); // T7i：主键化提交
+                // 归因（D-attrib-B，对齐 vod_mcp/attribution.py）：从用户原话解析，
+                // 部署 config.product 只是「无字面证据且无记忆」时的先验
+                const meta = await loadMeta(c, exec?.signal);
+                const attrText = voices.map((v) => String(v?.content ?? '')).join('\n');
+                const attr = attributeProduct(attrText, meta, {
+                    memory: loadRuntime().attribution_memory,
+                    binding: String(c.product || ''),
+                });
+                const product = attr.product || '';
                 const source = 'dsh';
                 // D-rguard-1：原文比对（whitelist 通道=会话日志 user 轮）。enforce 档
                 // mismatch/unavailable 拒收；report（默认）只标注；off 全跳过。
@@ -421,14 +619,15 @@ export function apply(ctx, config) {
                     hoard.push(hv);
                 }
                 if (hoard.length) {
-                    let out = await http('POST', HOARD_PATH, { voices: hoard, product },
+                    const hoardBody = { voices: hoard, ...(product ? { product } : {}) };
+                    let out = await http('POST', HOARD_PATH, hoardBody,
                         { ...c, key, signal: exec?.signal });
                     if (out.status === 401 && i0Anon(c)) {
                         const token = await fetchAnonToken({ ...c, key: '', signal: exec?.signal });
                         if (token) {
                             key = token;
                             saveRuntime({ java_key: token, token_tier: 'anonymous' });
-                            out = await http('POST', HOARD_PATH, { voices: hoard, product },
+                            out = await http('POST', HOARD_PATH, hoardBody,
                                 { ...c, key, signal: exec?.signal });
                         } else {
                             return textResult({
@@ -450,14 +649,18 @@ export function apply(ctx, config) {
                                 taskIds.push(null); // 囤积语义：无即时任务
                             }
                             const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+                            rememberAttribution(attr); // 只记有字面证据的唯一命中
                             ledgerAppend(hoard.map((h, i) => ({
                                 voiceId: ids[i] || '', taskId: null,
                                 title: h.title.slice(0, 40), product,
+                                productSource: attr.source, productEvidence: attr.evidence,
                                 at: now, status: sts[i] === 'skipped' ? 'accepted' : 'accepted',
                             })));
                             return textResult({
                                 accepted: accepted.length, voiceIds: accepted,
                                 taskIds, rejected, path: 'hoarding',
+                                productSource: attr.source,
+                                ...(attr.evidence && attr.evidence.length ? { productEvidence: attr.evidence } : {}),
                                 ...(rgMode !== 'off' ? { receiptGuard: rgGuardSummary(rgVerdict, hoard.length) } : {}),
                                 ...(d.productRegistered !== undefined ? { productRegistered: d.productRegistered } : {}),
                             });
@@ -477,7 +680,7 @@ export function apply(ctx, config) {
                         voiceId: vid,
                         title: content.slice(0, 128), // R3：title=用户原文（分析消费），模板只允许出现在 description
                         description: desc,
-                        product,
+                        ...(product ? { product } : {}), // 无证据/歧义 → 不带 product（引擎 UNKNOWN 池）
                         source,
                         ...(v.userType ? { customer: v.userType } : {}),
                     };
@@ -508,12 +711,16 @@ export function apply(ctx, config) {
                     }
                 }
                 const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+                if (accepted.length) rememberAttribution(attr);
                 ledgerAppend(accepted.map((vid, i) => ({
                     voiceId: vid, taskId: taskIds[i],
                     title: String((voices[i] || {}).content ?? '').slice(0, 40),
-                    product, at: now,
+                    product, productSource: attr.source, productEvidence: attr.evidence,
+                    at: now,
                 })));
                 return textResult({ accepted: accepted.length, voiceIds: accepted, taskIds, rejected,
+                    productSource: attr.source,
+                    ...(attr.evidence && attr.evidence.length ? { productEvidence: attr.evidence } : {}),
                     ...(rgMode !== 'off' ? { receiptGuard: rgGuardSummary(rgVerdict, voices.length) } : {}) });
             },
         },

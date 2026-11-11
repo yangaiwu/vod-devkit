@@ -610,3 +610,8 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 
 用例：S91-S100（proposal 新节）→ 承载见 design 同名节。
 
+范围补充（同日追加）：dsh 壳（node 半）同步落同一口径——负责人要求"能力一致"，
+壳内删硬编码 PRODUCT_MAP 改名录驱动，账本/回执同带 productSource/productEvidence，
+描述口径改为"来自用户原话，部署值仅先验"；回归锁 tests/test_desc_budget.py 的
+dsh 归因漂移锁已按新口径改写（旧「安装期绑定」句禁止回流）。
+

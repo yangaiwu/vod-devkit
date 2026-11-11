@@ -8,28 +8,29 @@ VOD 用户声音采集插件 —— DeepSeek Harness (dsh) 薄壳。
 - 插件=引擎客户端，只走 HTTPS（VOD external API），不 import 任何引擎模块
 - 与 vod-devkit（MCP 形态，同仓 `../vod_mcp`）语义对齐：
   - voiceId = f(source, content, 调用级 nonce)：同调用幂等、跨调用保声量
-  - product 归一映射（小写 codearts → CodeArts；引擎实测小写 400）
-  - 归因三层：配置绑定 → 显式传参 → 报错引导（绝不静默默认）
+  - 归因=运行期从用户原话解析（引擎产品名录别名，含中文/长别名），唯一命中才采信；
+    优先级：字面证据 > 记忆（30 分钟）> 配置 product 先验 > 未知（引擎 UNKNOWN 池）
+  - 多产品命中=歧义 → 不带 product 上送（宁可人工归因，不可错归；与 vod_mcp 同口径）
   - 无 key/401 → POST /external/token 零字段匿名令牌 → 本地落盘 → 重试一次
   - 本地账本 data/runtime.json（cap 200 环形，读改写只动目标键）
 
 ## 安装
 
 ```
-npx --yes vod-devkit install --target dsh --profile <name> --product <产品>   # 推荐（安装期硬校验+幂等写配置，一条命令完成全部部署）
+npx --yes vod-devkit install --target dsh --profile <name> [--product <产品>]   # 推荐（--product 可选先验；给了即硬校验）
 ```
 
 > ⚠️ 不要用 `dsh plugin add dsh-vod-devkit` 裸装：只装插件本体不写配置——
-> product 缺失时反馈入口不激活（fail fast，宁可不装不可装错）；apiBase/uiBase
-> 缺失时工具半不可用、UI 提交会发往 dsh 同源（404 → 本地暂存发不出去，
-> 嵌入方真机实锤）。裸装后补救：跑一次上面的 npx 命令即可（幂等）。
+> apiBase/uiBase 缺失时工具半不可用、UI 提交会发往 dsh 同源（404 → 本地暂存
+> 发不出去，嵌入方真机实锤）。裸装后补救：跑一次上面的 npx 命令即可（幂等）。
+> product 不再是必填：归因默认从用户原话解析，配置值只是无证据时的先验。
 
 装后配置落在 profile 的 cordis.patch.yml（npx 包装命令自动写入）：
 
 ```yaml
 - id: vod-devkit
   config:
-    product: codearts        # 归因绑定（安装时定）；无运行期传参通道
+    product: ''             # 可选先验（无字面证据且无记忆时兜底）；归因主路径=用户原话解析
     # apiBase: https://vod-dev.topxtopx.com   # 工具半（Node 服务端）用，缺省即此
     # uiBase: https://vod-dev.topxtopx.com     # 浏览器半（反馈按钮）直连用，缺省即此
 ```
@@ -49,7 +50,7 @@ npx --yes vod-devkit install --target dsh --profile <name> --product <产品>   
 | apiBase | https://vod-dev.topxtopx.com | VOD external API 基址（工具半/服务端用） |
 | uiBase | 同 apiBase | 浏览器半（反馈按钮）直连基址；同源代理形态可留空 |
 | apiKey | （空） | 缺省走零字段匿名令牌；灰度期可用运营签发 key |
-| product | （空） | 本机产品归因绑定（如 codearts）；空且调用未传参时报错引导 |
+| product | （空） | 可选归因先验（如 codearts）：仅在无字面证据且无记忆时生效；空=完全靠原话解析，歧义落 UNKNOWN |
 | confirmWrites | true | 写操作走 dsh 审批通道（tools/pre-execute → ask） |
 | timeoutSec | 30 | HTTP 超时 |
 

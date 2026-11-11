@@ -81,12 +81,16 @@ def test_dsh_desc_survives_truncation_budget():
 
 
 def test_dsh_desc_no_stale_permissive_attribution():
-    """归因口径漂移锁：dsh 壳实现只认配置绑定（无运行期 product 参数），
-    description 禁止再现旧宽容口径「explicit arg → config → host identity」
-    （D-dsh-install-1 实锤的约束源漂移——最陈旧一层生效）。"""
+    """归因口径漂移锁（D-attrib-B，2026-11-11 更新）：dsh 壳归因已改运行期
+    字面解析——description 必须写「来自用户原话」，禁止回流两种旧口径：
+    ①宽容链「explicit arg → config → host identity」（D-dsh-install-1 实锤）
+    ②「绑定在安装期且无运行期解析」（D-attrib-B 前的旧口径）。"""
     desc = _dsh_composed_desc()
-    assert "explicit arg" not in desc, "旧宽容归因口径句回流（须为部署配置权威口径）"
-    assert "install/deploy time" in desc or "bound at install" in desc
+    assert "explicit arg" not in desc, "旧宽容归因口径句回流"
+    assert "install/deploy time" not in desc and "bound at install" not in desc, \
+        "旧「安装期绑定」口径句回流（须为运行期字面解析口径）"
+    assert "user's own words" in desc, "缺「来自用户原话」口径句"
+    assert "NEVER ask or invent a product" in desc, "缺禁问/禁造产品名句"
 
 
 def test_dsh_desc_precondition_semantics():
