@@ -260,3 +260,18 @@
 - 1e55b12 fix(dsh): 反馈按钮静默不渲染根治——dock 槽名跨版本漂移，双候选注册+互斥锁
 - 79c2296 chore(release): golden 随 v0.4.3 重录（仅版本值漂移，人工过目合规）
 
+
+## v0.5.0（2026-11-11）
+
+- 0b72a3f fix(传输): 把"够用就行"的两条账做实——流式逐块写、capabilities 对齐，另补请求头规范化
+- 5f10b75 feat(传输): Streamable HTTP 远程面——形态照 devkit，身份与写面按我们的边界收紧
+- 4020f73 feat(dsh/CI): dsh 补技能落点与只读工具面 + CI 加凭据扫描
+- a4a92e3 docs(decisions): D-devtoolchain-1..5 台账（对表 devkit 的五条改造与残余）
+- 35abac6 refactor(安装器): 宿主适配层数据化（integrations/<host>/host.json）
+- 82d4396 feat(发版/冒烟): publish 终态断言 + 多宿主功能级冒烟
+- 211247a feat(技能/版本): 领域技能披露第二轨 + 版本提醒，并修 vod-core 路由过期
+- bcbc738 feat(安装器): 宿主配置形态守卫 + 单一扫描器（顺带修掉 TOML 孤儿子表真 bug）
+- 13f76fa feat(对账): 用例花名册棘轮 + 声明计数门禁 + doctor golden 三态 + 安全模型文档
+- 061ca39 docs: dsh 插件接入安装手册（三条安装路径/配置/验证/公网反代/FAQ）
+- dbfb31c chore(release): golden 随 v0.4.4 重录（仅 version 字段，人工过目合规）
+
