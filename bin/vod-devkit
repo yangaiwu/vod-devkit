@@ -16,8 +16,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-HERMES_MCP_DIR = Path.home() / ".hermes" / "mcp"  # 约定：写入前打印供确认
-HERMES_SKILLS_DIR = Path.home() / ".hermes" / "skills" / "devops" / "vod-devkit"
+
+from vod_mcp import hosts as host_specs  # noqa: E402  宿主适配层（数据驱动）
+
+# 路径常量一律来自 integrations/<host>/host.json（单一来源）：新增宿主=加
+# 目录，不改这里；平台差异也在数据里（opencode 的 windows 分叉）。
+_HERMES_SPEC = host_specs.load("hermes")
+HERMES_MCP_DIR = Path(_HERMES_SPEC["configPath"]).parent  # 约定：写入前打印供确认
+HERMES_SKILLS_DIR = Path(_HERMES_SPEC["skillsDir"])
 
 
 def git_sha(strict: bool) -> str | None:
@@ -193,10 +199,8 @@ def _install_opencode(args, packs: str) -> Path:
     schema 实测要求：command=数组、enabled 必填；既有内容（provider 等）
     原样保留（读改写，只动 mcp.vod-devkit 键）。
     """
-    import platform
-    base = Path.home() / (".config/opencode" if platform.system() != "Windows"
-                          else "AppData/Local/opencode")
-    conf = base / "opencode.json"
+    spec = host_specs.load("opencode")
+    conf = Path(spec["configPath"])
     conf.parent.mkdir(parents=True, exist_ok=True)
     cfg = {}
     if conf.exists():
@@ -212,20 +216,14 @@ def _install_opencode(args, packs: str) -> Path:
     }
     conf.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"已写入 OpenCode 配置：{conf}（重启 OpenCode 会话生效）")
-    cmd_dir = base / "command"
-    cmd_dir.mkdir(parents=True, exist_ok=True)
-    (cmd_dir / "vod-doctor.md").write_text(
-        "---\n"
-        "description: 自检 VOD DevKit 就绪状态（MCP 连通/版本/key/账本）。\n"
-        "---\n\n"
-        "使用 vod-devkit 工具做就绪自检，按序执行并汇总 OK/缺失：\n"
-        "1. 调用 vod_devkit_info：确认 version 与 commitSha 非空（版本/来源溯源）。\n"
-        "2. 调用 vod_auth_status：报告 key 配置态与引擎连通性；无 key 属正常（首次提交自动取匿名令牌）。\n"
-        "3. 调用 vod_list_submitted（limit 5）：报告本机已提交反馈数（本地账本口径）。\n"
-        "4. 汇总：installed（OK）vs 缺失（需处理项）。不要打印任何 key/令牌明文。\n"
-        "若 MCP 工具不可用（刚装完未重启），提示用户重启 OpenCode 会话。\n",
-        encoding="utf-8")
-    print(f"已写入 OpenCode 自检命令：/vod-doctor（{cmd_dir / 'vod-doctor.md'}）")
+    # 随装生成物走 integrations/opencode/ 的模板（单一来源——此前模板正文
+    # 硬编码在本函数里，改文案要同时改代码与文档两处）
+    for g in spec["generated"]:
+        dest = Path(g["dest"])
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(Path(g["template"]).read_text(encoding="utf-8"),
+                        encoding="utf-8")
+        print(f"已写入 OpenCode 自检命令：/vod-doctor（{dest}）")
     return conf
 
 
@@ -287,7 +285,8 @@ def _install_codex(args, packs: str) -> Path:
     if not codex:
         print("[vod-devkit] 未找到 codex CLI，无法走原生插件安装", file=sys.stderr)
         sys.exit(2)
-    conf = Path.home() / ".codex" / "config.toml"
+    spec = host_specs.load("codex")
+    conf = Path(spec["configPath"])
     if conf.exists():  # 历史遗留：config.toml MCP 段与插件同名=双注册，移除
         text = conf.read_text(encoding="utf-8")
         try:
@@ -393,7 +392,7 @@ def _install_dsh(args, packs: str) -> Path:
         sys.exit(1)
     print(f"已安装 dsh 插件 dsh-vod-devkit（profile={profile}，dsh plugin list 可见）")
 
-    patch = Path.home() / ".dsh" / "profiles" / profile / "cordis.patch.yml"
+    patch = Path(host_specs.load("dsh", profile)["configPath"])
     # name 行必须保留：cordis.patch.yml 的 insert 块靠 name 绑定 client 半
     # （反馈按钮）——只写 id+config 会在重装幂等替换时把 name 吞掉，UI 静默
     # 失激活（2026-11-06 真机实锤：重装后入口消失）
@@ -512,16 +511,14 @@ _INSTALLERS = {"hermes": _install_hermes, "opencode": _install_opencode,
 
 
 def detect_targets() -> list:
-    """0/1/N 探测：按各家配置目录存在性判断已装宿主。"""
+    """0/1/N 探测：按 host.json 的 detect 段判断宿主是否在场（CLI 或配置目录）。"""
     found = []
-    if shutil.which("hermes"):
-        found.append("hermes")
-    if (Path.home() / ".config/opencode").exists():
-        found.append("opencode")
-    if (Path.home() / ".codex").exists():
-        found.append("codex")
-    if shutil.which("dsh"):
-        found.append("dsh")
+    for host in host_specs.hosts():
+        spec = host_specs.load(host)
+        if spec.get("detectCLI") and shutil.which(spec["detectCLI"]):
+            found.append(host)
+        elif spec.get("detectPath") and Path(spec["detectPath"]).exists():
+            found.append(host)
     return found
 
 
@@ -720,15 +717,14 @@ def _install_skills(target: str, packs: str):
     # opencode 只有工具描述一条约束通道，话术类约束全部失效）
     oc_skills = None
     cx_skills = None
-    if target == "opencode":
-        import platform as _pf
-        oc_base = Path.home() / (".config/opencode" if _pf.system() != "Windows"
-                                 else "AppData/Local/opencode")
-        oc_skills = oc_base / "skills"
-        oc_skills.mkdir(parents=True, exist_ok=True)
-    elif target == "codex":
-        cx_skills = Path.home() / ".codex" / "skills"
-        cx_skills.mkdir(parents=True, exist_ok=True)
+    if target in ("opencode", "codex"):
+        spec = host_specs.load(target)
+        dst = Path(spec["skillsDir"])
+        dst.mkdir(parents=True, exist_ok=True)
+        if target == "opencode":
+            oc_skills = dst
+        else:
+            cx_skills = dst
     pack_set = set(p for p in packs.split(",") if p)
     extra_skill_dirs = [d for d in (oc_skills, cx_skills) if d is not None]
     for entry in sorted((ROOT / "skills").iterdir()):
@@ -823,7 +819,7 @@ def _repair_dsh_patch_block(mf: dict) -> str | None:
     dsh 的配置序列化只保留它能识别的块，手工游离块会被下次写盘冲掉。
     """
     prof = mf["dshProfile"]
-    patch = Path.home() / ".dsh" / "profiles" / prof / "cordis.patch.yml"
+    patch = Path(host_specs.load("dsh", prof)["configPath"])
     if not patch.exists():
         return None
     from vod_mcp import config_forms as cf
@@ -1031,10 +1027,11 @@ def cmd_uninstall(_args):
                 print("codex plugin remove:",
                       "OK" if r.returncode == 0
                       else (r.stderr or r.stdout).strip()[-120:])
-        oc_cmd = Path.home() / ".config/opencode/command/vod-doctor.md"
-        if oc_cmd.exists():
-            oc_cmd.unlink()
-            print("removed:", oc_cmd)
+        for g in host_specs.load("opencode")["generated"]:
+            gen = Path(g["dest"])
+            if gen.exists():
+                gen.unlink()
+                print("removed:", gen)
         # dsh 壳（D-dsh-install-1）：摘插件 + 从 profile patch 移除 config 段
         dsh = shutil.which("dsh")
         if dsh:
@@ -1042,9 +1039,10 @@ def cmd_uninstall(_args):
             if prof:
                 subprocess.run([dsh, "plugin", "--profile", prof, "remove",
                                 "dsh-vod-devkit"], capture_output=True, text=True)
-            patch = Path.home() / ".dsh" / "profiles" / prof / "cordis.patch.yml"
-            if _remove_dsh_patch_block(patch):
-                print("removed vod-devkit config block:", patch)
+            if prof:  # 无 profile 记录=没写过 patch，无需（也无法）摘除
+                patch = Path(host_specs.load("dsh", prof)["configPath"])
+                if _remove_dsh_patch_block(patch):
+                    print("removed vod-devkit config block:", patch)
         p.unlink()
         print("removed:", p)
     else:

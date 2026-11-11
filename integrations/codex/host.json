@@ -1,0 +1,20 @@
+{
+  "id": "codex",
+  "cli": "codex",
+  "detect": {
+    "path": {
+      "default": "~/.codex"
+    }
+  },
+  "config": {
+    "default": "~/.codex/config.toml"
+  },
+  "skillsDir": {
+    "default": "~/.codex/skills"
+  },
+  "managedPaths": [
+    "~/.codex/plugins/marketplaces/vod-local",
+    "~/.codex/plugins/cache/vod-local"
+  ],
+  "notes": "原生插件路径：codex plugin marketplace add <仓>/plugins + plugin add；config.toml 里的同名段与 AGENTS.md 技能块属历史遗留，安装时清理"
+}

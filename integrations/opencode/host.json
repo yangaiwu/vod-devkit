@@ -1,0 +1,28 @@
+{
+  "id": "opencode",
+  "cli": "opencode",
+  "detect": {
+    "path": {
+      "default": "~/.config/opencode",
+      "windows": "~/AppData/Local/opencode"
+    }
+  },
+  "config": {
+    "default": "~/.config/opencode/opencode.json",
+    "windows": "~/AppData/Local/opencode/opencode.json"
+  },
+  "skillsDir": {
+    "default": "~/.config/opencode/skills",
+    "windows": "~/AppData/Local/opencode/skills"
+  },
+  "generated": [
+    {
+      "template": "command/vod-doctor.md",
+      "dest": {
+        "default": "~/.config/opencode/command/vod-doctor.md",
+        "windows": "~/AppData/Local/opencode/command/vod-doctor.md"
+      }
+    }
+  ],
+  "notes": "opencode.json 的 mcp 段无损合并（command=数组、enabled 必填）"
+}

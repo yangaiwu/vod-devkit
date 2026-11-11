@@ -1,0 +1,14 @@
+{
+  "id": "dsh",
+  "cli": "dsh",
+  "detect": {
+    "cli": "dsh"
+  },
+  "config": {
+    "default": "~/.dsh/profiles/{profile}/cordis.patch.yml"
+  },
+  "managedPaths": [
+    "~/.dsh/profiles/{profile}/node_modules/dsh-vod-devkit"
+  ],
+  "notes": "profile patch 的 insert 块是唯一的运行时配置通道（嵌套铁律：id/name/config 必须缩进在 - insert: 之下）"
+}

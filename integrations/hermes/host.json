@@ -1,0 +1,20 @@
+{
+  "id": "hermes",
+  "cli": "hermes",
+  "detect": {
+    "cli": "hermes"
+  },
+  "config": {
+    "default": "~/.hermes/mcp/vod-devkit.json"
+  },
+  "mcpConfigFile": {
+    "default": "~/.hermes/mcp/vod-devkit.json"
+  },
+  "skillsDir": {
+    "default": "~/.hermes/skills/devops/vod-devkit"
+  },
+  "managedPaths": [
+    "~/.hermes/plugins/vod-feedback-router"
+  ],
+  "notes": "配置通过官方 hermes mcp add 写入；这里同时落一份独立 json 便于 doctor 与迁移"
+}
