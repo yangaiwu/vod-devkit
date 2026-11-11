@@ -146,3 +146,12 @@ def test_build_info_root_and_plugin_copy_agree():
         assert root_bi.get(field) == pkg_bi.get(field), (
             f"根/包内 build-info 的 {field} 不一致："
             f"{root_bi.get(field)} vs {pkg_bi.get(field)}")
+
+
+def test_server_instructions_match_attribution_design():
+    """真机实锤的文案漂移锁：D-attrib-B 改成运行期字面解析后，server 的
+    instructions 仍写着"归因由安装绑定完成"——宿主会照这句话去绑定安装期的
+    product，等于把已推翻的语义重新说给模型听。"""
+    text = (ROOT / "vod_mcp" / "server.py").read_text(encoding="utf-8")
+    assert "安装绑定完成" not in text
+    assert "从用户原话解析" in text
