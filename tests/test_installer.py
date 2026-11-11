@@ -828,12 +828,13 @@ def test_upsert_dsh_patch_clears_empty_array_placeholder(tmp_path):
              "  config:\n"
              "    product: CodeArts\n"
              "    apiBase: https://example.com\n")
-    assert mod._upsert_dsh_patch(patch, block) is True
+    from vod_mcp.host_adapters import dsh as dsh_adapter
+    assert dsh_adapter.upsert_patch(patch, block) is True
     out = patch.read_text(encoding="utf-8")
     assert not any(ln.strip() == "[]" for ln in out.splitlines()), "空数组占位必须清除"
     assert "- id: vod-devkit" in out
     # 幂等：第二次写入无变化
-    assert mod._upsert_dsh_patch(patch, block) is False
+    assert dsh_adapter.upsert_patch(patch, block) is False
 
 
 # ---- golden 三态（借鉴 devkit doctor-golden 三 fixture：空态/装后/降级态）----

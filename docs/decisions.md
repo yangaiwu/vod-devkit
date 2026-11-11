@@ -761,3 +761,27 @@ skill-quality-cli 遥测包装（拍板不做遥测）；"SKILL.md 默认英文"
 且会造第二真源）；批量 CSV 断点续传/追加写（我们 pending 已原子重写）；"每次加载技能/
 每次 3 条/展示思考过程"的批作业禁令；1928 行单文件（超 500 行反例）。
 
+## D-hosts-1 宿主适配分层：专属模块 + 通用写入器 + 探测表（2026-11-11，负责人拍板 A+B）
+
+对标 huaweicloud-devkit 的「为什么它能支持那么多 agent」：不是 11 套集成，而是三层——
+6 个真宿主特异模块（agents/<id>.ts，平均 ~190 行，统一 deploy/status/uninstall/doctor
+四面孔）、其余只写 mcpServers + 拷同一份技能树、认不出就 `configureGenericMCP()` 给片段；
+横切是声明式 AGENTS 表驱动探测（加宿主=加一行）。
+
+我们的差距不在能力而在**边际成本**：四宿主逻辑内联在 1387 行的 bin 里、13 处 target
+分支、未知宿主直接"不支持"、没有通用写入器、没有声明式探测表。
+
+落地（A+B 一次做完）：
+
+1. **B 结构**：`vod_mcp/host_adapters/` 包，每宿主一模块（hermes/opencode/codex/dsh），
+   统一协议 `install / install_remote / skills_dir`；`__init__.py` 的 REGISTRY 驱动分派，
+   bin/vod-devkit 只剩参数解析、manifest、status/doctor/verify/update/uninstall。
+   门禁：`tests/test_host_adapters.py` 锁协议完整性 + 「宿主动手逻辑不得回到 bin」。
+2. **A 兜底**：`--target generic [--mcp-config <path>]`——外科式合并 `mcpServers.vod-devkit`
+   （其它 server/用户键原样保留、首改 `.bak`）；非法 JSON/非对象拒绝且字节不动；不给路径
+   只打印可粘贴片段；`auto` 只探测到唯一通用宿主时自动走通用写入（多个/零个要求人指定）。
+   探测表 `KNOWN_HOSTS`（Claude Code / Cursor / Windsurf / Cline）只收「已知 JSON 形态」，
+   不在表里的宿主仍可用 `--mcp-config` 显式装。
+
+未采：把 11 个宿主全做成专属模块（没有消费者验证）；通用层代装技能（技能目录是宿主私有
+的，猜错=把话术装到没用的地方）。

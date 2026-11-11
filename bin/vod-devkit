@@ -17,7 +17,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from vod_mcp import hosts as host_specs  # noqa: E402  宿主适配层（数据驱动）
+from vod_mcp import hosts as host_specs  # noqa: E402  宿主适配层（数据驱动：路径/探测/生成物）
+from vod_mcp.host_adapters import REGISTRY as HOST_ADAPTERS  # noqa: E402  宿主安装逻辑（每宿主一模块）
+from vod_mcp.host_adapters import generic as generic_host  # noqa: E402
 
 # 路径常量一律来自 integrations/<host>/host.json（单一来源）：新增宿主=加
 # 目录，不改这里；平台差异也在数据里（opencode 的 windows 分叉）。
@@ -76,21 +78,6 @@ PRESETS = {
     # 运行口不认=挪到别处而非消除）
     "full": "core,collect,knowledge",
 }
-
-
-def _server_entry() -> str:
-    return str(ROOT / "vod_mcp" / "server.py")
-
-
-def _server_env(args, packs: str) -> dict:
-    # 无 key 不写空串（空串会让探针/严格解析器误当字面值；运行时空=未设置，
-    # 自动兜底 runtime.json java_key 或首提申请匿名令牌）
-    env = {"VOD_PACKS": packs,
-           "VOD_JAVA_API_BASE": args.java_api_base}
-    key = os.environ.get("VOD_JAVA_API_KEY", "")
-    if key:
-        env["VOD_JAVA_API_KEY"] = key
-    return env
 
 
 def _skill_installs(manifest_path: Path, extra_dirs) -> list:
@@ -158,354 +145,8 @@ def _drifted_skills(manifest: dict) -> list:
     return drifted
 
 
-def _install_hermes(args, packs: str) -> Path:
-    """Hermes：官方途径 hermes mcp add（config.yaml mcp_servers）。"""
-    conf = HERMES_MCP_DIR / "vod-devkit.json"
-    conf.parent.mkdir(parents=True, exist_ok=True)
-    conf.write_text(json.dumps({
-        "name": "vod-devkit", "command": sys.executable,
-        "args": [_server_entry()], "env": _server_env(args, packs),
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
-    env_args = []
-    for k, v in _server_env(args, packs).items():
-        env_args.extend([k + "=" + v])
-    r = subprocess.run(
-        ["hermes", "mcp", "add", "vod-devkit", "--command", sys.executable,
-         *["--env"] + env_args, "--args", _server_entry()],
-        input="y\ny\n", capture_output=True, text=True)
-    # D-hook-1：强制评估路由插件（pre_llm_call 确定性意图路由，业界 forced-eval 模式）
-    import shutil as _sh
-    plug_src = ROOT / "hermes-plugin" / "vod-feedback-router"
-    plug_dst = Path.home() / ".hermes" / "plugins" / "vod-feedback-router"
-    if plug_src.is_dir():
-        if plug_dst.exists():
-            _sh.rmtree(plug_dst)
-        _sh.copytree(plug_src, plug_dst)
-        print("已安装 vod-feedback-router 路由插件（~/.hermes/plugins/）；"
-              "需在 plugins.enabled 加入该名单后生效"
-              "（hermes config set plugins.enabled ...，重启会话生效）")
-    if r.returncode == 0:
-        print("已注册 Hermes MCP（hermes mcp list 可见；重启会话生效）")
-    else:
-        print(f"提示：hermes mcp add 未成功（{r.stderr.strip()[:150]}）；"
-              f"可将 {conf} 内容并入 Hermes 配置")
-    return conf
-
-
-def _install_opencode(args, packs: str) -> Path:
-    """OpenCode：~/.config/opencode/opencode.json 的 mcp 段无损合并。
-
-    schema 实测要求：command=数组、enabled 必填；既有内容（provider 等）
-    原样保留（读改写，只动 mcp.vod-devkit 键）。
-    """
-    spec = host_specs.load("opencode")
-    conf = Path(spec["configPath"])
-    conf.parent.mkdir(parents=True, exist_ok=True)
-    cfg = {}
-    if conf.exists():
-        try:
-            cfg = json.loads(conf.read_text(encoding="utf-8"))
-        except Exception:
-            cfg = {}
-    cfg.setdefault("mcp", {})["vod-devkit"] = {
-        "type": "local",
-        "command": [sys.executable, _server_entry()],
-        "enabled": True,
-        "environment": _server_env(args, packs),
-    }
-    conf.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"已写入 OpenCode 配置：{conf}（重启 OpenCode 会话生效）")
-    # 随装生成物走 integrations/opencode/ 的模板（单一来源——此前模板正文
-    # 硬编码在本函数里，改文案要同时改代码与文档两处）
-    for g in spec["generated"]:
-        dest = Path(g["dest"])
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(Path(g["template"]).read_text(encoding="utf-8"),
-                        encoding="utf-8")
-        print(f"已写入 OpenCode 自检命令：/vod-doctor（{dest}）")
-    return conf
-
-
-def _strip_codex_vod_blocks(text: str) -> str:
-    """幂等剥离：删除 [mcp_servers.vod-devkit] **及其全部子表**。
-
-    不能用行内正则截断式剥离——args = ["…"] 行内的 '[' 会让正则提前断块。
-    也不能只删父表（旧实现）：留下 [mcp_servers.vod-devkit.env] 在 TOML
-    语义里会重建父表，装出一个没有 command 的假 server。扫描/删除语义
-    统一在 vod_mcp/config_forms.py（单一实现），形态不受支持时抛
-    RuntimeError——调用方必须原样放弃修改。
-    """
-    from vod_mcp import config_forms as cf
-    try:
-        verdict, reason = cf.classify_codex_toml(text)
-    except cf.Refused as e:
-        raise RuntimeError(f"codex config.toml 形态不受支持：{e}") from e
-    if verdict == "refuse":
-        raise RuntimeError(f"codex config.toml 形态不受支持：{reason}")
-    cleaned, _removed = cf.strip_managed_toml(text)
-    return cleaned
-
-
 _AGENTS_MARKER_BEGIN = "<!-- vod-devkit:feedback-skill BEGIN -->"
 _AGENTS_MARKER_END = "<!-- vod-devkit:feedback-skill END -->"
-
-
-def _strip_agents_vod_block(text: str) -> str:
-    """幂等剥离 AGENTS.md 中带标记的 vod-devkit 技能块（历史方案清理）。
-
-    P2（深审 2026-11-06）：只有 BEGIN 没有 END 时不得静默吞掉文件剩余
-    全部内容——抛错拒绝（调用方 exit 2 不落盘），宁可装不上不可删用户文件。
-    """
-    lines, skipping, out = text.splitlines(), False, []
-    for line in lines:
-        if line.strip() == _AGENTS_MARKER_BEGIN:
-            skipping = True
-            continue
-        if line.strip() == _AGENTS_MARKER_END:
-            skipping = False
-            continue
-        if not skipping:
-            out.append(line)
-    if skipping:
-        raise RuntimeError(
-            "AGENTS.md 存在 vod-devkit BEGIN 标记但缺失 END 标记"
-            "（文件可能被手动截断）——拒绝自动清理，请手动检查该文件")
-    return "\n".join(out).rstrip()
-
-
-def _install_codex(args, packs: str) -> Path:
-    """Codex（D-codex-agents-1 终态）：原生插件路径——
-    codex plugin marketplace add <仓>/plugins + plugin add vod-devkit@vod-local，
-    打包 skills（渐进式按需加载的采集工作流）+ .mcp.json（vod-devkit serve）。
-    历史遗留清理：旧 config.toml [mcp_servers.vod-devkit] 段与 AGENTS.md 技能块
-    一并移除（与原生插件同名会双注册；AGENTS.md 方案被原生 skill 取代）。
-    前置：codex CLI 与 vod-devkit 命令在 PATH（npm i -g vod-devkit ≥0.1.12）。"""
-    codex = shutil.which("codex")
-    if not codex:
-        print("[vod-devkit] 未找到 codex CLI，无法走原生插件安装", file=sys.stderr)
-        sys.exit(2)
-    spec = host_specs.load("codex")
-    conf = Path(spec["configPath"])
-    if conf.exists():  # 历史遗留：config.toml MCP 段与插件同名=双注册，移除
-        text = conf.read_text(encoding="utf-8")
-        try:
-            cleaned = _strip_codex_vod_blocks(text)
-        except RuntimeError as e:
-            # 形态守卫：非已知形态宁可不装——改坏用户整份 codex 配置的代价
-            # 远高于装不上（字节未动）
-            print(f"[vod-devkit] {e}。安装中止，未改动该文件。", file=sys.stderr)
-            sys.exit(2)
-        if cleaned != text.rstrip():
-            conf.write_text(cleaned + "\n", encoding="utf-8")
-            print(f"已移除旧 config.toml MCP 段（原生插件取代）：{conf}")
-    agents = Path.home() / ".codex" / "AGENTS.md"
-    if agents.exists():  # 历史遗留：AGENTS.md 技能块已被原生 skill 取代
-        text = agents.read_text(encoding="utf-8")
-        try:
-            cleaned = _strip_agents_vod_block(text)
-        except RuntimeError as e:
-            print(f"[vod-devkit] {e}", file=sys.stderr)
-            sys.exit(2)
-        if cleaned != text.rstrip():
-            agents.write_text(cleaned + "\n", encoding="utf-8")
-            print(f"已移除旧 AGENTS.md 技能块（原生 skill 取代）：{agents}")
-    mp_root = ROOT / "plugins"
-
-    def _run(cmd):
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        if r.returncode != 0:
-            raise RuntimeError(f"{' '.join(cmd)} → {r.stderr.strip() or r.stdout.strip()}")
-        return r.stdout
-
-    mp_name = "vod-local"
-    # devkit 卫生实践：stale cache 先清——codex 插件缓存不自动失效，不清则
-    # 重装/升级后旧版本残留（marketplace 指向与 cache 内容漂移）
-    for stale in (Path.home() / ".codex" / "plugins" / "marketplaces" / mp_name,
-                  Path.home() / ".codex" / "plugins" / "cache" / mp_name):
-        if stale.exists():
-            shutil.rmtree(stale)
-            print(f"已清理 stale 插件缓存：{stale}")
-    ml = subprocess.run([codex, "plugin", "marketplace", "list"], capture_output=True, text=True, timeout=120).stdout
-    if mp_name not in ml:
-        _run([codex, "plugin", "marketplace", "add", str(mp_root)])
-        print(f"已注册本地 marketplace：{mp_root}")
-    _run([codex, "plugin", "add", f"vod-devkit@{mp_name}"])
-    print("已安装 codex 原生插件 vod-devkit（skills + MCP，重启 Codex 会话生效）")
-    # P1-5（深审 2026-11-06）：插件自带的 .mcp.json 硬编码 env.VOD_PACKS=
-    # core,collect——--packs 对 codex 半失效（运行期仍注册 collect 工具）。
-    # plugin add 后把缓存内 .mcp.json 的 packs 对齐本次安装值。
-    import glob as _glob
-    mcp_jsons = sorted(
-        _glob.glob(str(Path.home() / ".codex" / "plugins" / "cache"
-                       / mp_name / "vod-devkit" / "*" / ".mcp.json")),
-        key=lambda p: Path(p).stat().st_mtime, reverse=True)
-    if mcp_jsons:
-        try:
-            mj = json.loads(Path(mcp_jsons[0]).read_text(encoding="utf-8"))
-            srv = mj.get("mcpServers", {}).get("vod-devkit")
-            if srv is not None:
-                srv.setdefault("env", {})["VOD_PACKS"] = packs
-                Path(mcp_jsons[0]).write_text(
-                    json.dumps(mj, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8")
-                print(f"已对齐插件 MCP packs：{mcp_jsons[0]}（VOD_PACKS={packs}）")
-        except Exception as e:
-            print(f"[vod-devkit] warn: 插件 .mcp.json packs 对齐失败（{e}）——"
-                  "运行期熔断门禁仍会兜底", file=sys.stderr)
-        return Path(mcp_jsons[0])
-    # 深审 P0-3：绝不再返回 ~/.codex/config.toml——它是用户整份 codex 配置，
-    # uninstall 对 mcpConfig 是删除语义，指向它=卸载删光用户配置（破坏性）
-    print("[vod-devkit] warn: 未定位到插件 .mcp.json（uninstall 将跳过 MCP 清理，"
-          "可手动删除插件缓存目录）", file=sys.stderr)
-    return None
-
-
-def _install_dsh(args, packs: str) -> Path:
-    """dsh 工具壳（D-dsh-install-1，2026-11-06 用户拍板 A）：三壳口径统一——
-    --product 安装期硬校验（cmd_install 已先行，到达此处必已过）+ 校验先于
-    add + 幂等写 profile cordis.patch.yml config override。
-    生效通道真机实测（2026-11-06，dsh 0.2.1-rc.5）：profile cordis.patch.yml
-    的 id-targeted config override 是工具壳读取 product/apiBase/uiBase/
-    confirmWrites 的唯一运行时通道（启动 banner + 桩引擎提交链实证）。
-    uiBase（D-uiBase-direct）：浏览器半（反馈按钮）直连引擎——apiBase 是
-    server 半（Node）自用，浏览器同源策略下用不上；缺 uiBase 时 UI 提交
-    发往 dsh 同源（404→本地暂存），嵌入方真机实锤。dsh plugin add 会自建
-    profile，无需前置。"""
-    dsh = shutil.which("dsh")
-    profile = (getattr(args, "dsh_profile", "") or "").strip()
-    if not profile:
-        # argparse 进入安装前校验（cmd_install 已兜底，直调防御）
-        print("[vod-devkit] --profile 必填：dsh 按 profile 组织插件与配置"
-              "（--profile <name>）", file=sys.stderr)
-        sys.exit(2)
-    if not dsh:
-        print("[vod-devkit] 未找到 dsh CLI（PATH），拒绝安装（宁可不装不可装错）。"
-              "前置：npm i -g @deepseek-ai/dsh（需 pnpm）", file=sys.stderr)
-        sys.exit(2)
-    r = subprocess.run([dsh, "plugin", "--profile", profile,
-                        "add", "dsh-vod-devkit"],
-                       capture_output=True, text=True, timeout=300)
-    if r.returncode != 0:
-        print(f"[vod-devkit] dsh plugin add 失败：{(r.stderr or r.stdout).strip()[-300:]}",
-              file=sys.stderr)
-        sys.exit(1)
-    print(f"已安装 dsh 插件 dsh-vod-devkit（profile={profile}，dsh plugin list 可见）")
-
-    patch = Path(host_specs.load("dsh", profile)["configPath"])
-    # name 行必须保留：cordis.patch.yml 的 insert 块靠 name 绑定 client 半
-    # （反馈按钮）——只写 id+config 会在重装幂等替换时把 name 吞掉，UI 静默
-    # 失激活（2026-11-06 真机实锤：重装后入口消失）
-    # 嵌套铁律（2026-11-10 真机实锤）：块必须缩进在 `- insert:` 之下——平铺
-    # 形态被 dsh 组合层丢弃，插件掉出组合树（banner/工具/UI 全消失）。
-    # 归因先验（D-attrib-B）：--product 可选；空值时写 '' 而非空值
-    # （dsh 壳 config schema 是 z.string().default('')，YAML null 会校验失败）
-    prod_yaml = args.product or "''"
-    block = ("- insert:\n"
-             "    - id: vod-devkit\n"
-             "      name: dsh-vod-devkit\n"
-             "      config:\n"
-             f"        product: {prod_yaml}\n"
-             f"        apiBase: {args.java_api_base}\n"
-             f"        uiBase: {args.java_api_base}\n"  # D-uiBase-direct：浏览器半直连引擎
-             "        # headless 无审批通道：原生 ask 门禁会永久阻断写工具（四宿主实测实锤：\n"
-             "        # requires approval, but no approval channel）。同意确认由 SKILL 话术层\n"
-             "        # 承担（draft→用户确认→commit / 明确指令直发），web 端如需硬门禁按\n"
-             "        # profile 覆盖回 true。\n"
-             "        confirmWrites: false\n")
-    try:
-        written = _upsert_dsh_patch(patch, block)
-    except Exception as e:
-        # 回滚/修复指引：插件已装但配置未写 = 半成品，给明确的手动修复格式。
-        # 区分两类失败：形态守卫拒绝（文件合法但不在已知形态内，字节未动）
-        # 与真实 IO 失败——两者的处置动作不同，文案必须能分辨。
-        print(f"[vod-devkit] 插件已装入 profile={profile}，但配置写入失败"
-              f"（{e.__class__.__name__}: {e}；该文件未被改动）。请手动把下段并入 {patch}"
-              f"（顶层 YAML 数组元素，已有 - id: vod-devkit 段则原位替换）：\n"
-              f"{block}", file=sys.stderr)
-        sys.exit(1)
-    if written:
-        print(f"已写入归因/引擎配置（幂等 upsert）：{patch}")
-    else:
-        print(f"配置未变化（幂等跳过）：{patch}")
-    return patch
-
-
-def _find_dsh_block(lines):
-    """定位 cordis.patch.yml 中 vod-devkit 块的 (start, end)。
-
-    扫描/边界语义统一在 vod_mcp/config_forms.find_dsh_block（单一实现，
-    install 的幂等 upsert、uninstall 摘除、doctor 自愈三处共用——两处扫描
-    规则漂移在本仓 dsh 壳上实锤过）。本函数只保留名字兼容调用点。
-    """
-    from vod_mcp import config_forms as cf
-    return cf.find_dsh_block(lines)
-
-
-def _upsert_dsh_patch(patch: Path, block: str) -> bool:
-    """幂等写 profile cordis.patch.yml：已存在 `- id: vod-devkit` 段则原位整块
-    替换（不重复插入）；无则追加。按行扫描块边界（下一行 `- ` 顶层元素或 EOF），
-    不引 YAML 依赖（本仓零第三方依赖红线）。返回是否有写入。"""
-    from vod_mcp import config_forms as cf
-    lines = patch.read_text(encoding="utf-8").splitlines() if patch.exists() else []
-    # 形态守卫（先分类后改字节）：非已知形态一律拒绝——这个文件坏掉等于
-    # 整个 dsh profile 起不来（`[]` 占位实锤），比装不上代价高得多
-    try:
-        verdict, reason = cf.classify_dsh_patch(lines)
-    except cf.Refused as e:
-        raise RuntimeError(f"cordis.patch.yml 形态不受支持：{e}") from e
-    if verdict == "refuse":
-        raise RuntimeError(f"cordis.patch.yml 形态不受支持：{reason}")
-    start, end = _find_dsh_block(lines)
-    if start is None:
-        # 空数组占位清除（四宿主实测实锤：dsh plugin add 自建的模板含字面量
-        # `[]` 顶层行，直接追加块 = `[]` 后跟 `- id:` 顶层元素 = 非法 YAML，
-        # 整个 profile 启动崩溃）。`[]` 语义=空数组，被块 entries 取代即删。
-        lines = [ln for ln in lines if ln.strip() != "[]"]
-        new = lines + ([""] if lines and lines[-1].strip() else []) + block.splitlines()
-    else:
-        new = lines[:start] + block.splitlines() + lines[end:]
-    new_text = "\n".join(new).rstrip("\n") + "\n"
-    # 空 `- insert:` 组头清理（损坏态自愈）：孤儿组头（下一个顶层元素前无
-    # 子项）来自历史平铺替换的残留——留它在 dsh 组合层是空组，可能拖垮
-    # 整个 patch 解析。upsert 后顺手摘除（幂等，不碰正常组）。
-    cleaned = []
-    for idx, ln in enumerate(new):
-        if ln.strip() == "- insert:":
-            nxt = new[idx + 1] if idx + 1 < len(new) else ""
-            if nxt.startswith("- ") or (not nxt.strip() and idx + 2 >= len(new)):
-                continue  # 孤儿组头：下一行已是新顶层元素（无子项）→ 摘除
-        cleaned.append(ln)
-    new_text = "\n".join(cleaned).rstrip("\n") + "\n"
-    old_text = patch.read_text(encoding="utf-8") if patch.exists() else ""
-    if new_text == old_text:
-        return False
-    patch.parent.mkdir(parents=True, exist_ok=True)
-    patch.write_text(new_text, encoding="utf-8")
-    return True
-
-
-def _remove_dsh_patch_block(patch: Path) -> bool:
-    """从 cordis.patch.yml 摘除 vod-devkit 块（uninstall 用）。返回是否摘除。"""
-    if not patch.exists():
-        return False
-    from vod_mcp import config_forms as cf
-    lines = patch.read_text(encoding="utf-8").splitlines()
-    try:
-        verdict, reason = cf.classify_dsh_patch(lines)
-    except cf.Refused as e:
-        verdict, reason = "refuse", str(e)
-    if verdict == "refuse":
-        # 卸载路径同样不动字节：文件已经坏了，再"尽力删"只会让故障更难定位
-        print(f"[vod-devkit] skip（cordis.patch.yml 形态不受支持，未改动）：{reason}",
-              file=sys.stderr)
-        return False
-    start, end = _find_dsh_block(lines)
-    if start is None:
-        return False
-    patch.write_text(
-        "\n".join(lines[:start] + lines[end:]).rstrip("\n") + "\n",
-        encoding="utf-8")
-    return True
 
 
 def _expected_remote_tools() -> set:
@@ -565,85 +206,13 @@ def _remote_reachable(url: str, timeout: int = 6) -> bool:
         return False
 
 
-def _install_remote(target: str, args, url: str, token: str) -> Path | None:
-    """把宿主 MCP 配置指向远程端点（三宿主各自形态，均用宿主官方 CLI 或官方 schema）。
-
-    - hermes  ：hermes mcp add --url + --auth header（token 经 MCP_VOD_DEVKIT_API_KEY
-                 环境变量注入，hermes 自己写 ${ENV} 引用，不落明文）
-    - opencode：mcp.vod-devkit = {type:"remote", url, enabled, headers}
-    - codex   ：codex mcp add --url + --bearer-token-env-var（token 由用户环境提供）
-    dsh 不走 MCP，调用方已拦。
-    """
-    if target == "hermes":
-        env = os.environ.copy()
-        env["MCP_VOD_DEVKIT_API_KEY"] = token  # hermes 读 env → 写 ${...} 引用，不落明文
-        r = subprocess.run(
-            ["hermes", "mcp", "add", "vod-devkit", "--url", url, "--auth", "header"],
-            input="y\ny\n", capture_output=True, text=True, env=env, timeout=180)
-        if r.returncode != 0:
-            print(f"[vod-devkit] hermes mcp add（remote）失败：{(r.stderr or r.stdout).strip()[-200:]}",
-                  file=sys.stderr)
-            sys.exit(1)
-        conf = HERMES_MCP_DIR / "vod-devkit.json"
-        conf.parent.mkdir(parents=True, exist_ok=True)
-        conf.write_text(json.dumps({"name": "vod-devkit", "url": url,
-                                    "headers": {"Authorization": "Bearer ${MCP_VOD_DEVKIT_API_KEY}"}},
-                                   ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"已注册 Hermes 远程 MCP（{url}；token 存 ~/.hermes/.env，配置内只留引用）")
-        return conf
-
-    if target == "opencode":
-        spec = host_specs.load("opencode")
-        conf = Path(spec["configPath"])
-        conf.parent.mkdir(parents=True, exist_ok=True)
-        cfg = {}
-        if conf.exists():
-            try:
-                cfg = json.loads(conf.read_text(encoding="utf-8"))
-            except Exception:
-                cfg = {}
-        cfg.setdefault("mcp", {})["vod-devkit"] = {
-            "type": "remote", "url": url, "enabled": True,
-            "headers": {"Authorization": f"Bearer {token}"},
-        }
-        conf.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"已写入 OpenCode 远程 MCP 配置：{conf}（token 随配置存放，注意文件权限）")
-        return conf
-
-    if target == "codex":
-        codex = shutil.which("codex")
-        if not codex:
-            print("[vod-devkit] 未找到 codex CLI，无法走远程注册", file=sys.stderr)
-            sys.exit(2)
-        r = subprocess.run([codex, "mcp", "add", "vod-devkit", "--url", url,
-                            "--bearer-token-env-var", "VOD_MCP_TOKEN"],
-                           capture_output=True, text=True, timeout=180)
-        if r.returncode != 0:
-            print(f"[vod-devkit] codex mcp add（remote）失败：{(r.stderr or r.stdout).strip()[-200:]}",
-                  file=sys.stderr)
-            sys.exit(1)
-        stale = Path.home() / ".codex" / "plugins"
-        if stale.exists():
-            print("提示：codex 若曾用插件形态安装过 vod-devkit，请先 "
-                  "`codex plugin remove vod-devkit@vod-local` 避免双注册（stdio 插件 .mcp.json "
-                  "与本次 remote 配置同名）", file=sys.stderr)
-        print(f"已注册 Codex 远程 MCP（{url}）。token 由环境变量 VOD_MCP_TOKEN 提供：\n"
-              f"  export VOD_MCP_TOKEN=<你的 key>（写入 shell 配置或宿主 env）")
-        return None
-
-    print(f"[vod-devkit] {target} 不支持远程 attach", file=sys.stderr)
-    sys.exit(2)
-
-
-_INSTALLERS = {"hermes": _install_hermes, "opencode": _install_opencode,
-               "codex": _install_codex, "dsh": _install_dsh}
 
 
 def detect_targets() -> list:
     """0/1/N 探测：按 host.json 的 detect 段判断宿主是否在场（CLI 或配置目录）。"""
     found = []
     for host in host_specs.hosts():
-        spec = host_specs.load(host)
+        spec = host_specs.raw(host)   # 探测不解析路径（dsh 的 {profile} 占位符必填）
         if spec.get("detectCLI") and shutil.which(spec["detectCLI"]):
             found.append(host)
         elif spec.get("detectPath") and Path(spec["detectPath"]).exists():
@@ -732,19 +301,36 @@ def cmd_install(args):
     target = args.target
     if target == "auto":
         found = detect_targets()
+        generic_found = generic_host.detect_known()
         if len(found) == 1:
             target = found[0]
+        elif not found and len(generic_found) == 1:
+            # A 层兜底：没有专属模块但有已知通用 MCP 宿主 → 走通用写入
+            #（探到唯一一个才自动写，多个/零个都要人选定，不许猜）
+            target = "generic"
+            if not getattr(args, "mcp_config", ""):
+                args.mcp_config = str(generic_host._expand(generic_found[0]["config"]))
+            print(f"探测到通用 MCP 宿主: {generic_found[0]['label']} → 通用写入 "
+                  f"（{args.mcp_config}）")
         elif not found:
-            print("未探测到任何宿主；用 --target hermes|opencode|codex 显式指定",
-                  file=sys.stderr)
+            known = "、".join(h["label"] + "（" + h["config"] + "）" for h in generic_found)
+            print("未探测到可自动安装的宿主；用 --target hermes|opencode|codex|dsh 显式指定"
+                  + (f"，或通用写入：--target generic --mcp-config <配置>（探测到 {known}）"
+                     if generic_found else ""), file=sys.stderr)
             sys.exit(2)
         else:
-            print(f"探测到多个宿主: {found}；请 --target 显式指定其一", file=sys.stderr)
+            print(f"探测到多个宿主: {found + [h['id'] for h in generic_found]}；"
+                  "请 --target 显式指定其一", file=sys.stderr)
             sys.exit(2)
         print(f"探测到宿主: {target}")
-    installer = _INSTALLERS.get(target)
-    if installer is None:
-        print(f"不支持目标: {target}（可选 hermes|opencode|codex|auto）", file=sys.stderr)
+    adapter = HOST_ADAPTERS.get(target)
+    if adapter is None:
+        g = [(h["id"], h["config"]) for h in generic_host.detect_known()]
+        hint = ("\n  探测到通用 MCP 宿主：" + "；".join(f"{i}（{c}）" for i, c in g)
+                if g else "")
+        print(f"不支持目标: {target}（可选 hermes|opencode|codex|dsh|generic|auto）{hint}\n"
+              "  通用宿主：install --target generic --mcp-config <配置文件>",
+              file=sys.stderr)
         sys.exit(2)
     packs = args.packs or PRESETS.get(args.preset, "")
     # 恢复门禁（D-codex-circuit-breaker-1，2026-11-06 负责人确认）：
@@ -814,9 +400,11 @@ def cmd_install(args):
     remote_url = (getattr(args, "mcp_url", "") or "").strip()
     skills_only = bool(getattr(args, "skills_only", False))
     if remote_url or skills_only:
-        if target == "dsh":
-            print("[vod-devkit] dsh 壳不走 MCP，不支持 --mcp-url / --skills-only\n"
-                  "  dsh 请用本地形态：install --target dsh --profile <name>",
+        if not getattr(adapter, "SUPPORTS_REMOTE", False):
+            what = "dsh 壳不走 MCP" if target == "dsh" else f"{target} 不走 MCP"
+            print(f"[vod-devkit] {what}，不支持 --mcp-url / --skills-only\n"
+                  f"  {target} 请用本地形态：install --target {target} "
+                  + ("--profile <name>" if target == "dsh" else ""),
                   file=sys.stderr)
             sys.exit(2)
         token = (getattr(args, "mcp_token", "") or os.environ.get("VOD_MCP_TOKEN") or "").strip()
@@ -840,15 +428,15 @@ def cmd_install(args):
                       file=sys.stderr)
                 sys.exit(2)
             print(f"远程面探活通过：{len(names)} 个工具（{', '.join(sorted(names))}）")
-        mcp_conf = None if skills_only else _install_remote(target, args, remote_url, token)
-        extra_dirs = _install_skills(target, packs,
+        mcp_conf = None if skills_only else adapter.install_remote(args, remote_url, token)
+        extra_dirs = _install_skills(target, packs, args,
                                      (getattr(args, "dsh_profile", "") or "").strip() or None)
         _write_install_manifest(args, target, packs, bound_product, mcp_conf, extra_dirs,
                                 transport=("skills-only" if skills_only else "remote"),
                                 mcp_url=remote_url)
         return
 
-    mcp_conf = installer(args, packs)
+    mcp_conf = adapter.install(args, packs)
 
     # P1-4 修正：ack 解除后置——安装全部成功才落（解除先于安装=失败安装
     # 也绕过了恢复门禁语义）
@@ -863,14 +451,14 @@ def cmd_install(args):
         print(f"[vod-devkit] 已显式解除 codex 采集熔断（安装成功），审计已记录：{audit}")
 
     # G1 修复：技能全量拷贝（目录型技能+平铺规则文档），按 packs 过滤
-    extra_dirs = _install_skills(target, packs,
+    extra_dirs = _install_skills(target, packs, args,
                                  (getattr(args, "dsh_profile", "") or "").strip() or None)
 
     _write_install_manifest(args, target, packs, bound_product, mcp_conf,
                             extra_dirs)
 
 
-def _install_skills(target: str, packs: str, profile: str | None = None):
+def _install_skills(target: str, packs: str, args, profile: str | None = None):
     """技能段：按 packs 过滤后拷到 hermes 主目录 + 目标宿主的技能发现目录。
 
     目标宿主列表由 integrations/<host>/host.json 的 skillsDir 决定——2026-11-11
@@ -883,9 +471,9 @@ def _install_skills(target: str, packs: str, profile: str | None = None):
     # ~/.config/opencode/skills/ 并经 skill 工具按需加载——此前安装器漏拷，
     # opencode 只有工具描述一条约束通道，话术类约束全部失效）
     extra_dirs = []  # [(host, Path)]
-    spec = host_specs.load(target, profile)
-    if spec.get("skillsDir") and target != "hermes":
-        dst = Path(spec["skillsDir"])
+    adapter = HOST_ADAPTERS.get(target)
+    dst = adapter.skills_dir(args) if adapter and target != "hermes" else None
+    if dst is not None:
         dst.mkdir(parents=True, exist_ok=True)
         extra_dirs.append((target, dst))
     pack_set = set(p for p in packs.split(",") if p)
@@ -1307,7 +895,8 @@ def cmd_uninstall(_args):
                                 "dsh-vod-devkit"], capture_output=True, text=True)
             if prof:  # 无 profile 记录=没写过 patch，无需（也无法）摘除
                 patch = Path(host_specs.load("dsh", prof)["configPath"])
-                if _remove_dsh_patch_block(patch):
+                from vod_mcp.host_adapters import dsh as dsh_adapter
+                if dsh_adapter.remove_patch_block(patch):
                     print("removed vod-devkit config block:", patch)
         p.unlink()
         print("removed:", p)
@@ -1325,7 +914,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("install")
     sp.add_argument("--target", default="auto",
-                    help="hermes|opencode|codex|dsh|auto（默认探测）")
+                    help="hermes|opencode|codex|dsh|generic|auto（默认探测）")
     sp.add_argument("--preset", default="collect", choices=list(PRESETS),
                     help="collect=对外默认（采集者）；full=内部全量")
     sp.add_argument("--api-base", default="http://127.0.0.1:8000")
@@ -1347,6 +936,8 @@ def main():
     sp.add_argument("--mcp-token", default="",
                     help="远程 attach 的身份（也可用 env VOD_MCP_TOKEN）：远程面不代签身份，"
                          "缺 token 拒绝安装")
+    sp.add_argument("--mcp-config", default="",
+                    help="通用宿主（--target generic）的 MCP 配置文件路径；不给则只打印可粘贴片段")
     sp.add_argument("--skills-only", action="store_true",
                     help="只装技能，不动宿主 MCP 配置（MCP 已由别处/手工注册时用）")
     sp.add_argument("--no-local-ledger", action="store_true",

@@ -16,7 +16,8 @@ INSTALL.md 结构：每宿主一节（前置条件 → 安装 → 验证 → 常
 npx --yes vod-devkit install --target opencode --product codearts
 ```
 
-- `--target`：`hermes` | `opencode` | `codex` | `auto`（auto=探测已装宿主，0/1/N 个时提示）
+- `--target`：`hermes` | `opencode` | `codex` | `dsh` | `generic` | `auto`
+  （auto=探测已装宿主，0/1/N 个时提示；generic=任意 MCP 宿主，配 `--mcp-config <文件>`）
 - `--product`：必填，采集反馈默认归属的产品（`--help` 内含权威名单；归因错误比报错糟，故 fail fast）
 - `--java-api-base`：VOD 平台地址（缺省 `https://vod-dev.topxtopx.com`；本机同机部署可用 `http://127.0.0.1:<port>`——传输守卫只拦"非回环明文 http"）
 - `--distribution preset`：产品随 agent 分发形态（禁 key 随包/禁自更新/客户机首启重生成状态；自装运维不要用）

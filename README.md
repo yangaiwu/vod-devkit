@@ -2,65 +2,144 @@
 
 [English](README.en.md) | 中文
 
-VOD 用户声音采集插件（方案 A 纯采集形态）：MCP server + 技能 +
-声明式护栏，把 agent 产品的用户反馈安全送进 VOD。运营能力归
-vod-system 前端，不在本插件。对齐 huaweicloud-devkit v2 的工程骨架（installer /
-MCP / skills / packs / policy），面向"服务面插件"的护栏更保守。
+把 **AI agent 产品的用户反馈**原话送进 VOD（Voice of Developer）囤积区：MCP server +
+技能 + 声明式护栏。纯采集形态——分析与运营归 vod-system 前端，不在本插件。
 
-- 需求/设计：docs/proposal.md、docs/design.md（VOD-PLUGIN）
-- 贡献：CONTRIBUTING.md ｜ 安全策略与边界：SECURITY.md
-- 支持：SUPPORT.md ｜ 行为准则：CODE_OF_CONDUCT.md ｜ 第三方素材：NOTICE
-- 真源纪律：领域规则技能与引擎代码的对账由 scripts/rules_provenance.py 执行
-  （docs/rules-provenance.json 记「技能↔引擎文件↔符号」与双方指纹：引擎改了
-  分类/评分口径 → 对账红，技能复核后 --update 重录；无引擎检出时 SKIP 不伪绿）
-- 对账主键：引擎任务 taskId；插件来源主键=commitSHA（build-info.json 构建烧录，
-  install-manifest.json 安装落盘，`vod-devkit verify` 到 origin 核对 commit）
+三条纪律（比骨架更重要）：
 
-## 安装（外部用户，零配置）
+- **只采集**：插件的唯一写动作是调用引擎 HTTP API（`POST /external/voices`）。
+  落库、配额、审计、身份判定全在服务端；本仓没有任何数据库连接代码路径。
+- **身份随请求走**：stdio 面走本机匿名令牌；远程面只从请求头取 Bearer，缺 key
+  直接拒绝、**不代签匿名令牌**（插件只搬运身份，不产生身份）。
+- **归因不问用户**：产品由插件从用户原话字面解析（引擎名录别名），唯一命中才采信；
+  多产品命中=歧义 → 落 UNKNOWN 由运营判。安装时的 `--product` 只是可选先验。
 
-完整分宿主指南见 [INSTALL.md](INSTALL.md)。速览：
+## 前置条件
+
+| 依赖 | 要求 | 说明 |
+|---|---|---|
+| Node | >= 18 | `npx` 引导器；dsh 宿主请按其官方要求（Node 24.9+） |
+| Python | >= 3.10 | 安装器与 MCP server；可用 `VOD_PYTHON` 指定解释器 |
+| 宿主 | hermes / opencode / codex / dsh 任一 | 用 `--target auto` 探测，或显式指定 |
+| 网络 | 可达你的 VOD 引擎 | 缺省 `https://vod-dev.topxtopx.com`，可 `--java-api-base` 覆盖 |
+
+远程面额外需要官方 MCP SDK：`pip install 'vod-devkit[remote]'`（stdio 形态零第三方依赖）。
+
+## 快速开始
 
 ```bash
-# 任意 MCP 宿主（Hermes / OpenCode / Codex 客户端等）：npm 公网已发布
-npx --yes vod-devkit install --target opencode --product codearts   # --product 可选先验（归因默认从用户原话解析）
-
-# WorkBuddy / CodeBuddy（GitHub 仓即市场，无审核）：
-/plugin marketplace add yangaiwu/vod-devkit
-
-# DeepSeek Harness (dsh)：薄壳包 dsh-vod-devkit（npm 同名）；目录收录审核中
-dsh plugin --profile <profile> add dsh-vod-devkit
+npx -y vod-devkit@latest install --target auto
 ```
 
-安装后即用：平台地址有默认值，首次提交自动申请零字段匿名令牌。
-手动配置片段与故障排查见 [QUICKSTART.md](QUICKSTART.md)。
-
-## 快速使用
+装完**重启会话**才生效（宿主在启动时读取 MCP 配置）。随后自检：
 
 ```bash
-# 安装到 Hermes（写 MCP 配置+skills+install-manifest）
-bin/vod-devkit install --target hermes --preset collect   # 对外默认（采集者）
-# 唯一上游 Java backend（key 未配置时首提自动申请匿名令牌）：
-VOD_JAVA_API_BASE / VOD_JAVA_API_KEY
-
-bin/vod-devkit update   # git fetch+ff 拉取+重烧 build-info
-bin/vod-devkit status   # 看 install-manifest（版本+来源+宿主+packs）
-bin/vod-devkit verify   # commitSHA 到 origin 核验（篡改/改写告警）
-bin/vod-devkit doctor   # 配置+skills+build-info 三查
-bin/vod-devkit uninstall
-
-# 直接以 MCP server 运行（任意 MCP 客户端可连）
-python3 -m vod_mcp.server          # stdio，JSON-RPC
-VOD_PACKS=core,collect python3 -m vod_mcp.server   # packs 裁剪
+npx -y vod-devkit@latest doctor   # 配置 + 技能名册 + build-info 三查（针对已装实例）
+npx -y vod-devkit@latest status   # install-manifest：版本 / 来源 / 宿主 / 传输形态
 ```
 
-## 远程面（Streamable HTTP）
+`--product <产品名>` 是可选先验（仅在无字面证据且无记忆时兜底）；给了就会做名录
+硬校验，拼错直接 `exit 2`，不给也能装。
 
-默认形态是 stdio（各宿主拉起子进程，零端口）。如果你的 agent 支持
-`type: "remote"`（Streamable HTTP），可以单独起一个常驻进程，供多个 agent 共用：
+## 按宿主安装
+
+四个宿主的装法一致（`install` 带 `--target`），差异在配置落点与注意点。
+`doctor` / `status` / `verify` / `update` / `uninstall` 都是**针对已装实例**
+（读 install-manifest），不带 `--target`。
+
+### Hermes
 
 ```bash
-pip install 'vod-devkit[remote]'          # 远程面依赖官方 MCP SDK（stdio 形态不需要）
-vod-devkit serve --transport remote      # 默认 http://127.0.0.1:9528
+npx -y vod-devkit@latest install --target hermes
+# 验证 / 更新 / 卸载
+npx -y vod-devkit@latest doctor
+npx -y vod-devkit@latest status
+npx -y vod-devkit@latest install --target hermes      # 更新=幂等重装
+npx -y vod-devkit@latest uninstall
+```
+
+- 落点：`hermes mcp add` 写 `~/.hermes/config.yaml`，另存 `~/.hermes/mcp/vod-devkit.json`；
+  技能装到 `~/.hermes/skills/devops/vod-devkit`
+- 卸载只摘托管的 MCP 条目（走 `hermes mcp remove`），不动你的其它 server
+
+### OpenCode
+
+```bash
+npx -y vod-devkit@latest install --target opencode
+npx -y vod-devkit@latest doctor && npx -y vod-devkit@latest status
+npx -y vod-devkit@latest uninstall
+```
+
+- 落点：`~/.config/opencode/opencode.json` 的 `mcp.vod-devkit`（无损合并，保留你的
+  provider 等既有键）；技能装到 `~/.config/opencode/skills`
+- **卸载只摘 `mcp.vod-devkit` 与本次装进去的技能目录**——共享配置文件与其它插件的
+  技能永不整文件/整目录删除
+
+### Codex
+
+```bash
+npx -y vod-devkit@latest install --target codex
+npx -y vod-devkit@latest doctor
+npx -y vod-devkit@latest uninstall        # 摘原生插件，不删你的 config.toml
+```
+
+- 形态：走 codex 原生插件（`codex plugin marketplace add` + `plugin add`），技能随插件
+  渐进加载；`.mcp.json` 用 `vod-devkit serve` 拉起 stdio
+- 采集熔断：未确认提交累计触发后 install 会拒绝装 collect，恢复需
+  `--ack-suspension`（审计日志落在 `~/.codex/`）
+
+### DeepSeek Harness (dsh)
+
+```bash
+npx -y vod-devkit@latest install --target dsh --profile <profile名>
+npx -y vod-devkit@latest doctor
+npx -y vod-devkit@latest uninstall
+```
+
+- `--profile` 必填（profile 名 = `ls ~/.dsh/profiles` 的目录名）；装的是壳包
+  `dsh-vod-devkit`（npm 同名），配置幂等写进 profile 的 `cordis.patch.yml`
+- **dsh 壳不走 MCP**：`--mcp-url` / `--skills-only` 对它显式报错；远程面模式不覆盖 dsh
+- 卸载会摘插件并从 patch 移除本插件的 config 块，不删其它插件段
+
+## 其它 MCP 宿主（通用层）
+
+没有专属适配模块的宿主不再"不支持"——通用层负责写配置或给片段：
+
+```bash
+# 已知形态（Claude Code / Cursor / Windsurf / Cline）：合并 mcpServers 条目
+npx -y vod-devkit@latest install --target generic --mcp-config ~/.claude.json
+npx -y vod-devkit@latest install --target generic --mcp-config ~/.cursor/mcp.json
+
+# 不指定路径：只打印可粘贴片段，不写任何文件
+npx -y vod-devkit@latest install --target generic
+```
+
+- **外科式合并**：只写 `mcpServers.vod-devkit`，其它 server 与用户自有键原样保留；
+  首次改动前落 `.bak`
+- 文件不是合法 JSON / 顶层不是对象 → 报错退出、字节不动（宁可不装不可装错）
+- `--target auto` 在只探测到一个通用宿主时自动走通用写入；多个/零个要求显式指定
+- 通用层只装 MCP 条目，不装技能（技能目录是宿主私有的；要话术层用 hermes/opencode/codex）
+
+手写片段（把 `<repo>` 换成本仓绝对路径）：
+
+```jsonc
+{ "mcpServers": { "vod-devkit": {
+    "command": "python3", "args": ["<repo>/vod_mcp/server.py"] } } }
+```
+
+MCP 已由别处注册、只想装技能话术时：
+
+```bash
+npx -y vod-devkit@latest install --target <hermes|opencode|codex> --skills-only
+```
+
+## 远程部署：MCP 单独部署 + 宿主 attach
+
+一个远程端点服务多个宿主；身份随请求头走，不落服务器：
+
+```bash
+pip install 'vod-devkit[remote]'
+vod-devkit serve --transport remote --port 9528 --host 127.0.0.1   # 前面需自建 TLS 反代
 ```
 
 ```jsonc
@@ -68,73 +147,79 @@ vod-devkit serve --transport remote      # 默认 http://127.0.0.1:9528
     "type": "remote", "url": "http://localhost:9528", "enabled": true } } }
 ```
 
-端口被占用用 `--port <port>`（同步改 url）；`--host 0.0.0.0` 可开 LAN 访问。
-
-边界（与 stdio 形态的实质差别）：
-
-- **身份从请求头来**：每个请求带 `Authorization: Bearer <VOD key>`；缺 key 时
-  `vod_submit_voices` 直接结构化拒绝，**不代签匿名令牌**（匿名令牌按设备锚点签发，
-  一进程一锚点会把配额、声量、归因搅在一起）。
-- **工具面收窄**：草稿/本地账本类工具（`vod_draft_voices` / `vod_commit_voices` /
-  `vod_list_submitted`）不在远程面提供——它们写"本机状态"，而一个共享进程没有
-  "本机"。
-- **插件不写库**：远程面能做的仍然只是调用引擎 HTTP API；落库、配额、审计都在
-  服务端。插件不持有数据库连接，也没有任何 DB 代码路径。
-- **无内建鉴权**：本进程不校验身份，默认只绑回环。要对外必须在反代上加 TLS 与
-  身份校验——不要把它匿名暴露到公网。
-
-### 宿主 attach（一条命令把宿主指到远程面）
+宿主 attach（token 必填——远程面不代签匿名身份，缺 key 会被拒装 `exit 2`）：
 
 ```bash
-# token 必填：远程面不代签身份，缺 key 会被拒装（exit 2）
 npx -y vod-devkit@latest install --target hermes   --mcp-url https://<网关>/mcp --mcp-token <key>
 npx -y vod-devkit@latest install --target opencode --mcp-url https://<网关>/mcp --mcp-token <key>
 npx -y vod-devkit@latest install --target codex    --mcp-url https://<网关>/mcp --mcp-token <key>
 ```
 
-- 写入前先探活：initialize + tools/list 必须等于远程面工具集（契约 − 写面本机工具），
-  不符即拒装且**不写任何配置**；`doctor` 会复查端点与工具面。
+写入前先探活：`initialize` + `tools/list` 必须等于远程面工具集，不符即拒装且
+**不写任何配置**；`doctor` 复查端点与工具面。远程面与 stdio 面的实质差别：
+
+- **工具面收窄**：草稿/本机账本类工具（`vod_draft_voices` / `vod_commit_voices` /
+  `vod_list_submitted`）不在远程面——它们写"本机状态"，共享进程没有"本机"
 - token 承载：hermes 走 env `MCP_VOD_DEVKIT_API_KEY`（配置里只留 `${...}` 引用）；
-  opencode 写在 `headers`（注意配置文件权限）；codex 走 `VOD_MCP_TOKEN` 环境变量。
-- MCP 已由别处注册时只装技能：`install --target <host> --skills-only`。
-- dsh 壳不走 MCP，`--mcp-url` 对它显式报错。
-- 技能自带传输面自适应：远程面没有草稿工具 → 单发 `vod_submit_voices` + 回显，
-  不承诺"草稿/两步"；没有本机账本工具 → 不承诺查询历史反馈。
+  opencode 写在 `headers`（注意文件权限）；codex 走 `VOD_MCP_TOKEN`
+- **无内建鉴权**：本进程不校验身份，默认只绑回环；对外必须反代 TLS + 身份校验
+- 技能自带传输面自适应：没有草稿工具 → 单发 + 回显，不承诺"草稿/两步"；没有本机
+  账本工具 → 不承诺查询历史反馈
+
+端口被占用用 `--port <port>`（同步改 url）；`--host 0.0.0.0` 可开 LAN 访问。
+
+## 遥测与数据
+
+- **收集什么**：无。本插件不上报任何使用数据——没有遥测、没有埋点、没有用量统计，
+  技能加载与工具调用都不回传。
+- **不收集什么**：全部。反馈内容只在用户明确同意后发往**你配置的引擎地址**；插件
+  不自建任何回传通道。
+- **传输路径**：stdio 面由宿主进程直连引擎；远程面由请求头里的 key 标识调用方，
+  身份不落服务器。
+- **如何关闭**：无需关闭（本就没有）。若要不连引擎：`uninstall`，或把
+  `--java-api-base` 指向你自己的实例。
 
 ## 工具面（契约唯一事实源：contract/tools.schema.json）
 
 | 工具 | pack | 类型 | 护栏 |
 |---|---|---|---|
-| vod_submit_voices | collect | 写 | confirm 逐次同意 + 单批≤50 + source 取握手宿主身份；走 Java /external/voices |
-| vod_draft_voices | collect | 写（暂存） | 本机暂存 cap10/TTL600s，逐字回显 contents；不触上游 |
+| vod_submit_voices | collect | 写 | confirm 逐次同意 + 单批<=50；走 Java `/external/voices` |
+| vod_draft_voices | collect | 写（暂存） | 本机暂存 cap10/TTL600s，逐字回显；不触上游 |
 | vod_commit_voices | collect | 写 | 一次性令牌 + payloadSha256 防调包，内部复用提交链 |
 | vod_list_submitted | collect | 只读 | 本机提交账本（cap 200）——agent 替用户对账进度 |
-| vod_devkit_info | core | 只读 | 返回版本/commitSHA/宿主 clientInfo |
-| vod_auth_status | core | 只读 | key 指纹化自检+三步引导（无 key 可跑） |
-| vod_check_update | core | 只读 | npm registry latest（24h 缓存/失败静默）；只提醒不自升级 |
-| vod_list_skills / vod_retrieve_skill | knowledge | 只读 | 领域规则技能的披露面（pack 裁剪即拒绝并给恢复命令） |
+| vod_devkit_info | core | 只读 | 版本 / commitSHA / 宿主 clientInfo |
+| vod_auth_status | core | 只读 | key 指纹化自检 + 三步引导（无 key 可跑） |
+| vod_check_update | core | 只读 | registry latest（24h 缓存 / 失败静默）；只提醒不升级 |
+| vod_list_skills / vod_retrieve_skill | knowledge | 只读 | 领域规则技能披露（pack 裁剪即拒绝并给恢复命令） |
 
-安全：deny 拦 DB 直连意图与凭据读取（safety/policy.json 声明式规则；
-文本规则只扫结构性字段，不误杀反馈内容里的凭据引用）。
+安全：`safety/policy.json` 声明式规则拦 DB 直连意图与凭据读取；文本规则只扫结构性
+字段，不误杀反馈内容里的凭据引用（引用与读取是两件事）。
 
-测试：pytest + node:test 全量（单元+护栏+packs+安装器矩阵四宿主+真进程 stdio 回环+
-**协议级真 HTTP 服务器**锁定认证头/双后端路径——E1/E2 的永久回归门）。
-用例数以本地实测为准（`python3 -m pytest tests/ -q`），文档不手写计数——
-手写计数必然漂移，tests/test_claims.py 会拦。决策闭环见 docs/decisions.md。
-
-## 质量门禁
-
-GitCode Actions 平台侧当前对本账号不可用（运行 0ms FAILED 零 job、
-公开实验仓同样不触发，平台问题非代码问题，已实测隔离）。期间的机器
-门禁=pre-push 钩子（pytest+pyflakes，红了禁推）：
+## 质量与可验证性
 
 ```bash
-git config core.hooksPath .githooks   # clone 后执行一次
+python3 -m pytest tests/ -q        # 全量（单元 + 护栏 + packs + 安装器矩阵 + 协议级真 HTTP + stdio 回环）
+python3 -m pyflakes vod_mcp/*.py tests/*.py scripts/*.py bin/vod-devkit
+python3 -m mypy                    # 作用域见 pyproject [tool.mypy]（新增纯逻辑模块）
+python3 scripts/secret_scan.py
+python3 scripts/sync_case_roster.py --check   # docs 与花名册对账
+python3 scripts/rules_provenance.py           # 技能与引擎真源对账（无引擎检出时 SKIP）
 ```
 
-`.gitcode/workflows/ci.yml` 已就位，平台恢复后自动叠加服务端门禁。
+门禁清单：pre-push 钩子（pytest + pyflakes + secret_scan）+ GitHub Actions（镜像仓）+
+双副本一致性（`vod_mcp` / `skills` 与插件副本逐字节）+ description 截断预算 +
+install-manifest 名册对账（doctor 逐落点）+ 声明计数对账（对外文档不手写用例或工具数）。
 
-## 测试
+本文档不放用例数/工具数——手写计数必然漂移；数字一律现场测量。
 
-零第三方运行时依赖；测试需 pytest。真进程 stdio 回环覆盖握手、工具
-列举、confirm 护栏、宿主感知（U1/U3/U13/U15/U16）。
+## 文档
+
+- 需求 / 设计：[docs/proposal.md](docs/proposal.md) · [docs/design.md](docs/design.md)
+- 一页纸：[docs/scheme-overview.md](docs/scheme-overview.md) ｜ 安全边界：[docs/safety-model.md](docs/safety-model.md)
+- 决策台账：[docs/decisions.md](docs/decisions.md) ｜ 规则真源：[docs/rules-provenance.json](docs/rules-provenance.json)
+- 手动配置与排障：[QUICKSTART.md](QUICKSTART.md) ｜ 分宿主细节：[INSTALL.md](INSTALL.md)
+- 贡献：[CONTRIBUTING.md](CONTRIBUTING.md) ｜ 安全策略：[SECURITY.md](SECURITY.md) ｜ 行为准则：[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+
+## 许可
+
+MIT（见 LICENSE.txt）。第三方素材见 NOTICE。

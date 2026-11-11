@@ -1,76 +1,200 @@
 # vod-devkit (English)
 
-Collect product feedback from your AI agent's users and deliver it safely
-into the VOD voice-of-customer platform. A pure-collection MCP plugin:
-one write endpoint, one upstream, tiered trust — aligned with the
-engineering skeleton of huaweicloud-devkit, adapted for a service-facing
-plugin.
+[中文](README.md) | English
 
-## What it does
+Deliver your AI-agent users' **verbatim feedback** into the VOD (Voice of
+Developer) intake channel: MCP server + skills + declarative guardrails.
+Collection only — analysis and operations live in the vod-system frontend.
 
-- **vod_submit_voices** — submit user feedback (requires per-batch user
-  confirmation; content ≤2000 chars; product attribution via
-  install-binding > explicit > ask-user, never silently guessed)
-- **vod_list_submitted** — local ledger of what this machine submitted
-  (agent answers "did my feedback go through?")
-- **vod_auth_status** — key fingerprint self-check + 3-step guidance
-  (works without a key)
-- **vod_devkit_info** — plugin version / commitSHA / host identity
+Three rules that matter more than the skeleton:
 
-Zero-field anonymous token: on first submission the plugin automatically
-requests a token (no registration). Upgrade to a formal key when volume
-grows. Skills: VOD problem-classification (6 categories), category
-matching, and scoring rules — sourced from engine code, used for
-pre-classification at collection time.
+- **Collect only**: the plugin's single write action is an engine HTTP call
+  (`POST /external/voices`). Persistence, quotas, audit and identity checks all
+  live server-side; there is no database code path in this repo.
+- **Identity travels with the request**: stdio uses the local anonymous token;
+  the remote face reads Bearer from the request header and **never mints an
+  identity** (missing key = reject).
+- **Attribution never asks the user**: the product is parsed from the user's own
+  words against the engine catalog aliases; only an unambiguous single hit is
+  accepted, multiple hits become UNKNOWN for a human to resolve. `--product` at
+  install time is an optional prior only.
 
-## Install
+## Prerequisites
 
-```bash
-# Any MCP host (Hermes / OpenCode / Codex clients, …):
-npx github:yangaiwu/vod-devkit          # bootstrap probes the host and installs
+| Dependency | Requirement | Notes |
+|---|---|---|
+| Node | >= 18 | `npx` bootstrap; the dsh host needs Node 24.9+ per its own docs |
+| Python | >= 3.10 | installer + MCP server; point `VOD_PYTHON` at an interpreter if needed |
+| Host | hermes / opencode / codex / dsh | `--target auto` probes, or name one explicitly |
+| Network | reachable VOD engine | defaults to `https://vod-dev.topxtopx.com`, override with `--java-api-base` |
 
-# WorkBuddy / CodeBuddy (the GitHub repo IS the marketplace, no review):
-/plugin marketplace add yangaiwu/vod-devkit
+The remote face additionally needs the official MCP SDK:
+`pip install 'vod-devkit[remote]'` (stdio has zero third-party deps).
 
-# DeepSeek Harness (dsh): npm package dsh-vod-devkit (thin shell, same
-# semantics); one-click in the dsh community directory once published to
-# npm — until then, local tarball:
-dsh plugin --profile <profile> add dsh/dsh-vod-devkit-0.1.0.tgz
-```
-
-From source:
+## Quick start
 
 ```bash
-git clone https://github.com/yangaiwu/vod-devkit.git
-cd vod-devkit
-bin/vod-devkit install --target auto --product <your-product>   # hermes | opencode | codex
-# For any MCP client, see QUICKSTART.md for the manual config snippet
+npx -y vod-devkit@latest install --target auto
 ```
 
-Zero config after install: platform base has a default, and the first
-submission automatically requests a zero-field anonymous token.
+**Restart the session** afterwards (hosts read MCP config at startup), then:
 
-Verified hosts: Hermes (official `hermes mcp add`), OpenCode
-(`opencode mcp list` → connected), Codex CLI (config recognized).
+```bash
+npx -y vod-devkit@latest doctor   # config + skill roster + build-info
+npx -y vod-devkit@latest status   # install-manifest: version / source / host / transport
+```
 
-## Guarantees
+`--product <name>` is an optional prior (used only when there is no literal
+evidence and no memory); when given it is validated against the catalog and a
+typo exits 2.
 
-- No identity fields in tool schemas — attribution cannot be forged by
-  the model; user identity travels as data fields only
-- Guardrails: per-batch confirm, batch ≤50, credential/DB-intent deny
-  (scoped so legitimate feedback quoting secrets is not killed)
-- Provenance: install-manifest + build-info (commitSHA) +
-  `vod-devkit verify` tamper detection
-- No telemetry. Fail-closed: no traceable credential → no write.
+## Per-host install
+
+`install` takes `--target`; `doctor` / `status` / `verify` / `update` /
+`uninstall` operate on the installed instance (they read `install-manifest`) and
+take no target.
+
+### Hermes
+
+```bash
+npx -y vod-devkit@latest install --target hermes
+npx -y vod-devkit@latest doctor && npx -y vod-devkit@latest status
+npx -y vod-devkit@latest uninstall      # removes the managed MCP entry only
+```
+
+Writes `hermes mcp add` into `~/.hermes/config.yaml` plus
+`~/.hermes/mcp/vod-devkit.json`; skills go to `~/.hermes/skills/devops/vod-devkit`.
+
+### OpenCode
+
+```bash
+npx -y vod-devkit@latest install --target opencode
+npx -y vod-devkit@latest uninstall
+```
+
+Merges `mcp.vod-devkit` into `~/.config/opencode/opencode.json` (your provider
+keys are preserved); skills go to `~/.config/opencode/skills`. Uninstall removes
+only our entry and the skill dirs we installed.
+
+### Codex
+
+```bash
+npx -y vod-devkit@latest install --target codex
+npx -y vod-devkit@latest uninstall      # removes the native plugin, keeps config.toml
+```
+
+Uses the codex native plugin path (`codex plugin marketplace add` + `plugin add`),
+with `.mcp.json` running `vod-devkit serve` over stdio. If the collection circuit
+breaker is tripped, install refuses the collect pack until `--ack-suspension`.
+
+### DeepSeek Harness (dsh)
+
+```bash
+npx -y vod-devkit@latest install --target dsh --profile <name>
+```
+
+`--profile` is required; installs the `dsh-vod-devkit` shell package and writes a
+profile `cordis.patch.yml` override. The dsh shell does not speak MCP:
+`--mcp-url` / `--skills-only` exit 2.
+
+## Other MCP hosts (generic layer)
+
+Hosts without a dedicated adapter are no longer "unsupported":
+
+```bash
+# Known config shapes (Claude Code / Cursor / Windsurf / Cline):
+npx -y vod-devkit@latest install --target generic --mcp-config ~/.claude.json
+
+# No path given: print a paste-ready snippet, write nothing
+npx -y vod-devkit@latest install --target generic
+```
+
+- Surgical merge: only `mcpServers.vod-devkit` is written, other servers and user
+  keys are preserved, first touch leaves a `.bak`
+- Invalid JSON / non-object top level → refuse and leave bytes untouched
+- `--target auto` auto-picks the generic path only when exactly one known host is
+  detected; otherwise it asks you to be explicit
+- The generic layer installs the MCP entry only (skill dirs are host-private)
+
+Manual snippet (replace `<repo>`):
+
+```jsonc
+{ "mcpServers": { "vod-devkit": {
+    "command": "python3", "args": ["<repo>/vod_mcp/server.py"] } } }
+```
+
+## Remote deployment: standalone MCP + host attach
+
+One endpoint serves many hosts; identity comes from request headers:
+
+```bash
+pip install 'vod-devkit[remote]'
+vod-devkit serve --transport remote --port 9528 --host 127.0.0.1   # put TLS/identity in front
+```
+
+Attach a host (token required — the remote face never mints anonymous identity):
+
+```bash
+npx -y vod-devkit@latest install --target hermes   --mcp-url https://<gateway>/mcp --mcp-token <key>
+npx -y vod-devkit@latest install --target opencode --mcp-url https://<gateway>/mcp --mcp-token <key>
+npx -y vod-devkit@latest install --target codex    --mcp-url https://<gateway>/mcp --mcp-token <key>
+```
+
+Liveness is probed before any write: `initialize` + `tools/list` must equal the
+remote tool set, otherwise the install is refused with zero side effects. The
+remote face withholds machine-local tools (`vod_draft_voices`,
+`vod_commit_voices`, `vod_list_submitted`) — a shared process has no "local".
+There is no built-in auth: bind to loopback and front it with TLS + identity.
+
+## Telemetry and data
+
+- **Collected**: nothing. No telemetry, no analytics, no usage counters.
+- **Not collected**: everything. Feedback content goes only to the engine you
+  configure, and only after the user agrees.
+- **Transport**: stdio calls the engine directly; the remote face identifies the
+  caller from the request header, nothing is stored server-side.
+- **How to opt out**: nothing to opt out of. To disconnect entirely, `uninstall`
+  or point `--java-api-base` at your own instance.
+
+## Tool surface (single source: contract/tools.schema.json)
+
+| Tool | pack | Type | Guardrail |
+|---|---|---|---|
+| vod_submit_voices | collect | write | per-batch confirm; batch <= 50; Java `/external/voices` |
+| vod_draft_voices | collect | write (staging) | local cap 10 / TTL 600s; verbatim echo; no upstream call |
+| vod_commit_voices | collect | write | one-time token + payloadSha256; reuses submit chain |
+| vod_list_submitted | collect | read | local ledger (cap 200) |
+| vod_devkit_info | core | read | version / commitSHA / host clientInfo |
+| vod_auth_status | core | read | fingerprint self-check + 3-step guidance |
+| vod_check_update | core | read | npm latest (24h cache, silent on failure); never self-upgrades |
+| vod_list_skills / vod_retrieve_skill | knowledge | read | rule-skill disclosure (pack filtering refuses with a fix hint) |
+
+Security: `safety/policy.json` denies DB-direct intent and credential reads;
+text rules only inspect structural fields, so feedback quoting a secret is not
+misfired (quoting vs reading are different acts).
 
 ## Quality
 
-Full pytest + node:test suite (unit / guardrails / packs / installer matrix across
-four hosts / protocol-level real-HTTP lock / stdio roundtrip / meta cache /
-ledger). Counts are never written into docs by hand — they drift; measure with
-`python3 -m pytest tests/ -q`. Plus pre-push gate + GitHub Actions CI on the
-mirror + nightly local E2E against the test environment.
+```bash
+python3 -m pytest tests/ -q        # full: unit + guardrails + packs + installer matrix + real-HTTP + stdio
+python3 -m pyflakes vod_mcp/*.py tests/*.py scripts/*.py bin/vod-devkit
+python3 -m mypy                    # scope in pyproject [tool.mypy]
+python3 scripts/secret_scan.py
+python3 scripts/sync_case_roster.py --check
+python3 scripts/rules_provenance.py
+```
 
-Docs: [README.md (中文)](README.md) · QUICKSTART.md · CONTRIBUTING.md ·
-SECURITY.md · SUPPORT.md · CODE_OF_CONDUCT.md · NOTICE · docs/proposal.md ·
-docs/design.md · docs/scheme-overview.md (one-pager) · CHANGELOG.md
+Gates: pre-push hook (pytest + pyflakes + secret_scan) + GitHub Actions on the
+mirror + byte-identical package mirrors + description budget + install-manifest
+roster checks + outward-doc claim checks. Counts are never hand-written into
+docs; measure them.
+
+## Docs
+
+docs/proposal.md · docs/design.md · docs/scheme-overview.md ·
+docs/safety-model.md · docs/decisions.md · docs/rules-provenance.json ·
+QUICKSTART.md · INSTALL.md · CONTRIBUTING.md · SECURITY.md
+
+## License
+
+MIT (see LICENSE.txt). Third-party notices in NOTICE.

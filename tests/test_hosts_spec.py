@@ -65,9 +65,9 @@ def _bin_module():
 
 
 def test_every_installer_has_a_host_spec():
-    """反向锁：安装器注册表里的宿主必须有 host.json，否则等于还在硬编码。"""
-    mod = _bin_module()
-    assert set(mod._INSTALLERS) <= set(hosts.hosts())
+    """反向锁：适配器注册表里的宿主必须有 host.json（generic 是兜底层，豁免）。"""
+    from vod_mcp.host_adapters import REGISTRY
+    assert {h for h in REGISTRY if h != "generic"} <= set(hosts.hosts())
 
 
 def test_host_specs_are_packed():

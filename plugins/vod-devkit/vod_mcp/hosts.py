@@ -46,6 +46,26 @@ def _resolve(path_str, profile: str | None = None) -> Path:
     return Path(path_str)
 
 
+def raw(host: str) -> dict:
+    """读原始 host.json（不解析路径、不代入 profile）——探测/展示用。
+
+    动机（2026-11-11 实测）：detect_targets 走 load() 时，dsh 的 configPath
+    含 {profile} 必填占位符 → ValueError，--target auto 在装了 dsh 集成后直接
+    崩。探测只需要 detectCLI/detectPath，不该被路径解析拖累。
+    """
+    p = INTEGRATIONS / host / "host.json"
+    if not p.exists():
+        raise KeyError(f"未知宿主 {host}")
+    data = json.loads(p.read_text(encoding="utf-8"))
+    detect = data.get("detect") or {}
+    # 只补探测所需的两键（与 load() 同名）；configPath 等仍留原始串，不解析
+    # {profile}——探测不该依赖安装期才有的输入。
+    data["detectCLI"] = detect.get("cli")
+    data["detectPath"] = (_resolve(_pick(detect["path"]))
+                          if detect.get("path") else None)
+    return data
+
+
 def load(host: str, profile: str | None = None) -> dict:
     """读一个宿主的适配数据并解析成绝对路径 → dict（键为契约的一部分）。
 
