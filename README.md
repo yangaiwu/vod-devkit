@@ -20,7 +20,7 @@
 |---|---|---|
 | Node | >= 18 | `npx` 引导器；dsh 宿主请按其官方要求（Node 24.9+） |
 | Python | >= 3.10 | 安装器与 MCP server；可用 `VOD_PYTHON` 指定解释器 |
-| 宿主 | hermes / opencode / codex / dsh 任一 | 用 `--target auto` 探测，或显式指定 |
+| 宿主 | hermes / opencode / codeartsdoer / codex / dsh 任一 | 用 `--target auto` 探测，或显式指定 |
 | 网络 | 可达你的 VOD 引擎 | 缺省 `https://vod-dev.topxtopx.com`，可 `--java-api-base` 覆盖 |
 
 远程面额外需要官方 MCP SDK：`pip install 'vod-devkit[remote]'`（stdio 形态零第三方依赖）。
@@ -43,7 +43,7 @@ npx -y vod-devkit@latest status   # install-manifest：版本 / 来源 / 宿主 
 
 ## 按宿主安装
 
-四个宿主的装法一致（`install` 带 `--target`），差异在配置落点与注意点。
+五个宿主的装法一致（`install` 带 `--target`），差异在配置落点与注意点。
 `doctor` / `status` / `verify` / `update` / `uninstall` 都是**针对已装实例**
 （读 install-manifest），不带 `--target`。
 
@@ -87,6 +87,21 @@ npx -y vod-devkit@latest uninstall        # 摘原生插件，不删你的 confi
   渐进加载；`.mcp.json` 用 `vod-devkit serve` 拉起 stdio
 - 采集熔断：未确认提交累计触发后 install 会拒绝装 collect，恢复需
   `--ack-suspension`（审计日志落在 `~/.codex/`）
+
+### CodeArts Agent（codeartsdoer）
+
+```bash
+npx -y vod-devkit@latest install --target codeartsdoer
+npx -y vod-devkit@latest doctor      # 会用 `codearts mcp list` 冒烟一次
+npx -y vod-devkit@latest uninstall   # 只摘 mcp.vod-devkit，provider/model 保留
+```
+
+- CodeArts Agent 是 OpenCode 分支（`SCENARIO=codeartsdoer`，配置在
+  `~/.codeartsdoer/codearts_cli.json`），MCP 段同 opencode schema；技能装到
+  `~/.codeartsdoer/skills`
+- 实测口径：写入后 `codearts mcp list` 显示 `✓ vod-devkit connected`
+- **不要**写 `~/.codeartsdoer/mcp/mcp_settings.json`——那是项目级路径；用户级
+  mcp_settings 读的是 `~/.config/opencode/mcp/`
 
 ### DeepSeek Harness (dsh)
 

@@ -110,7 +110,10 @@ def env(tmp_path, engine_stub):
     shutil.copytree(SRC_REPO, repo, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns(".git", "__pycache__",
                                                   ".e2e-nightly.log",
-                                                  ".smoke", "runtime.json"))
+                                                  ".smoke", "runtime.json",
+                                                  # 真实安装产物不许混进隔离仓（本机装过
+                                                  # codeartsdoer 后 golden 拿它对比 hermes 实锤）
+                                                  "install-manifest.json"))
 
     e = os.environ.copy()
     e["HOME"] = str(home)
@@ -956,3 +959,30 @@ def test_install_dsh_installs_skills_to_discovery_dir(env_dsh):
     f.write_text(f.read_text(encoding="utf-8") + "\n<!-- 篡改 -->\n", encoding="utf-8")
     r = cli(env_dsh, "doctor")
     assert r.returncode == 1 and "dsh" in r.stdout, (r.stdout, r.stderr)
+
+def test_multi_host_installs_are_recorded_and_uninstalled(env):
+    """D-installs-1：manifest 记全部宿主安装，卸载时逐条清（结构债回归锁）。
+
+    事故背景：顶电平字段只记最近一次安装——装 opencode 再装 codeartsdoer 后，
+    uninstall 只清最后一个宿主的 MCP 条目，另一个宿主的配置永远留在那。
+    """
+    r1 = cli(env, "install", "--target", "opencode")
+    assert r1.returncode == 0, r1.stderr
+    r2 = cli(env, "install", "--target", "codeartsdoer")
+    assert r2.returncode == 0, r2.stderr
+    mf = json.loads((env["repo"] / "install-manifest.json").read_text(encoding="utf-8"))
+    targets = {row["target"] for row in mf["installs"]}
+    assert targets == {"opencode", "codeartsdoer"}
+    assert all(row["payloadDir"] for row in mf["installs"]), "每条安装都要记载荷目录"
+
+    oc = env["home"] / ".config" / "opencode" / "opencode.json"
+    ca = env["home"] / ".codeartsdoer" / "codearts_cli.json"
+    assert "vod-devkit" in json.loads(oc.read_text(encoding="utf-8"))["mcp"]
+    assert "vod-devkit" in json.loads(ca.read_text(encoding="utf-8"))["mcp"]
+
+    r3 = cli(env, "uninstall")
+    assert r3.returncode == 0, r3.stderr
+    assert "vod-devkit" not in (json.loads(oc.read_text(encoding="utf-8")).get("mcp") or {})
+    assert "vod-devkit" not in (json.loads(ca.read_text(encoding="utf-8")).get("mcp") or {})
+    assert not (env["home"] / ".vod-devkit" / "payloads").exists() or \
+        not any((env["home"] / ".vod-devkit" / "payloads").iterdir()), "载荷副本要清掉"

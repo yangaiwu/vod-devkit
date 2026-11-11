@@ -78,7 +78,17 @@ def handle(message: dict, client_info: dict | None = None) -> dict | None:
     return None
 
 
+def _consume_payload_marker() -> None:
+    """载荷标记：install 换完载荷写它=该重启；被真正跑起来的进程消费掉。"""
+    try:
+        from vod_mcp import payload as _payload
+        _payload.consume_marker()
+    except Exception:
+        pass
+
+
 def main():
+    _consume_payload_marker()
     import argparse
     ap = argparse.ArgumentParser(prog="vod-mcp-server",
                                  description="vod-devkit MCP server（默认 stdio）")

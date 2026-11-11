@@ -1,4 +1,5 @@
 $ vod-devkit doctor
+[doctor] 载荷已换（<HOME>/.vod-devkit/payloads/0.5.0）——重启宿主会话生效
 doctor: OK
 $ vod-devkit verify
 verify: OK（commit <SHA12> 存在于本仓/origin）

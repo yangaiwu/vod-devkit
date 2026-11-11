@@ -5,11 +5,12 @@
 
 REGISTRY 里的模块必须实现 protocol 的三件事：install / install_remote / skills_dir。
 """
-from vod_mcp.host_adapters import codex, dsh, generic, hermes, opencode
+from vod_mcp.host_adapters import codearts, codex, dsh, generic, hermes, opencode
 
 REGISTRY = {
     "hermes": hermes,
     "opencode": opencode,
+    "codeartsdoer": codearts,
     "codex": codex,
     "dsh": dsh,
     "generic": generic,

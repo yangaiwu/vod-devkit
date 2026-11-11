@@ -25,7 +25,7 @@ Three rules that matter more than the skeleton:
 |---|---|---|
 | Node | >= 18 | `npx` bootstrap; the dsh host needs Node 24.9+ per its own docs |
 | Python | >= 3.10 | installer + MCP server; point `VOD_PYTHON` at an interpreter if needed |
-| Host | hermes / opencode / codex / dsh | `--target auto` probes, or name one explicitly |
+| Host | hermes / opencode / codeartsdoer / codex / dsh | `--target auto` probes, or name one explicitly |
 | Network | reachable VOD engine | defaults to `https://vod-dev.topxtopx.com`, override with `--java-api-base` |
 
 The remote face additionally needs the official MCP SDK:
@@ -86,6 +86,15 @@ npx -y vod-devkit@latest uninstall      # removes the native plugin, keeps confi
 Uses the codex native plugin path (`codex plugin marketplace add` + `plugin add`),
 with `.mcp.json` running `vod-devkit serve` over stdio. If the collection circuit
 breaker is tripped, install refuses the collect pack until `--ack-suspension`.
+
+### CodeArts Agent (codeartsdoer)
+
+CodeArts Agent is an OpenCode fork (`SCENARIO=codeartsdoer`, config at
+`~/.codeartsdoer/codearts_cli.json`), so the MCP entry uses the opencode schema:
+`{"type":"local","command":[...],"enabled":true,"environment":{...}}`. Skills go to
+`~/.codeartsdoer/skills`. `doctor` runs `codearts mcp list` as a smoke check.
+Do **not** write `~/.codeartsdoer/mcp/mcp_settings.json` — that path is project-level;
+the user-level mcp_settings lives under `~/.config/opencode/mcp/`.
 
 ### DeepSeek Harness (dsh)
 

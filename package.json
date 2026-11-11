@@ -34,6 +34,7 @@
     "vod_mcp/provenance.py",
     "vod_mcp/attribution.py",
     "vod_mcp/runtime.example.json",
+    "vod_mcp/payload.py",
     "vod_mcp/host_adapters/",
     "plugins/vod-devkit/.codex-plugin/plugin.json",
     "plugins/vod-devkit/.mcp.json",

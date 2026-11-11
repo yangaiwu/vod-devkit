@@ -785,3 +785,52 @@ skill-quality-cli 遥测包装（拍板不做遥测）；"SKILL.md 默认英文"
 
 未采：把 11 个宿主全做成专属模块（没有消费者验证）；通用层代装技能（技能目录是宿主私有
 的，猜错=把话术装到没用的地方）。
+
+## D-payload-1 安装载荷固化（2026-11-11，对标 devkit copyServerPayload）
+
+事故模型：本仓所有 MCP 入口此前写 `sys.executable + <repo>/vod_mcp/server.py`。
+npx 安装时 repo 在 `~/.npm/_npx/<hash>/`——npm 清缓存或换版本后入口指向已删除路径，
+宿主启动即 MCP 掉线，且**没有任何报错**（比装错更糟：用户在会话里等一个不存在的工具）。
+
+落地：`vod_mcp/payload.py`
+- `stage()` 把 `vod_mcp/ contract/ safety/ skills/`（+ build-info/package.json）拷到
+  `~/.vod-devkit/payloads/<version>/`，`payload.json` 记逐文件 sha256（**不自指**），
+  写 `.installed` 标记
+- `base.server_entry()` 优先返回载荷里的 `vod_mcp/server.py`；`bin` 在 install 前
+  `stage()` + `set_payload_dir()`
+- `prune_stale()` 只删我们拥有的顶层条目（`OWNED` 白名单；用户文件不动）
+- `server.py` 启动消费 `.installed`；`doctor` 校验 sha256、提示重启、报残留目录
+- `uninstall` 逐目录删载荷副本 + marker
+
+与 devkit 的差异：零第三方依赖 → 不做它的 `installRuntimeDeps`（npm install undici）；
+载荷校验用 sha256 全集而非字节数重试（Python 侧无文件锁重试梯子）。
+
+## D-installs-1 manifest 记多宿主安装（2026-11-11）
+
+结构债：manifest 顶电平字段只记「最近一次安装」。装 opencode 后再装 codeartsdoer，
+`uninstall` 只清最后一个宿主的 MCP 条目，前一个宿主的配置永远留在那（且 doctor 不报）。
+
+落地：`installs[]` 每宿主一行（target/transport/mcpConfig/skillsDir/payloadDir/
+product/packs/dshProfile/apiBase/version/commitSha），按 target 去重合并；
+`uninstall` 逐行清理（老 manifest 无 installs[] 时退化为单行）；顶电平字段保留
+「最近一次」语义（golden/status 兼容）。
+
+## D-codeartsdoer-1 CodeArts Agent 适配（2026-11-11，本机实测）
+
+事实（`~/.codeartsdoer/installers/codearts` 286MB 二进制 + 现场探针）：CodeArts Agent
+是 **OpenCode 分支**（`SCENARIO=codeartsdoer`、`OPENCODE_CONFIG=~/.codeartsdoer/
+codearts_cli.json`、`KERNEL_CONFIG_DIR=~/.codeartsdoer`）。
+- 实测：往 `codearts_cli.json` 写 `mcp.vod-probe` → `codearts mcp list` 立即显示
+  （"○ vod-probe disabled"），随后还原 → 通道确认
+- `codearts mcp add` 无参数（交互向导）→ 程序化只能写 JSON，再用 `mcp list` 冒烟
+- `mcp_settings.json` 只对**项目级** `.codeartsdoer/mcp/` 生效；用户级读
+  `~/.config/opencode/mcp/` → **huaweicloud-devkit 写的 `~/.codeartsdoer/mcp/
+  mcp_settings.json` 用户级不生效**（它项目级那半边是对的）
+- 技能目录 `~/.codeartsdoer/skills`（二进制字符串）
+
+落地：`integrations/codeartsdoer/host.json` + `host_adapters/codearts.py`（复用
+`merge_json_mcp`）+ REGISTRY 一行；`doctor` 用 `codearts mcp list` 冒烟；
+`uninstall` 只摘 `mcp.vod-devkit`（**codearts_cli.json 是用户配置，绝不可整文件删**——
+第一版实锤：没进共享名单，卸载把整份配置删了，已加目标白名单）。
+
+真机验收：本机装完 `codearts mcp list` → `✓ vod-devkit connected`；`doctor` OK。

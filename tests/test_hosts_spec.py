@@ -18,8 +18,8 @@ from vod_mcp import hosts
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_all_four_hosts_have_specs():
-    assert set(hosts.hosts()) == {"hermes", "opencode", "codex", "dsh"}
+def test_every_integration_has_a_valid_spec():
+    assert set(hosts.hosts()) == {"hermes", "opencode", "codeartsdoer", "codex", "dsh"}
     for h in hosts.hosts():
         spec = hosts.load(h, "web")
         assert spec["id"] == h

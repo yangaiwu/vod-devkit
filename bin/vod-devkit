@@ -314,7 +314,7 @@ def cmd_install(args):
                   f"（{args.mcp_config}）")
         elif not found:
             known = "、".join(h["label"] + "（" + h["config"] + "）" for h in generic_found)
-            print("未探测到可自动安装的宿主；用 --target hermes|opencode|codex|dsh 显式指定"
+            print("未探测到可自动安装的宿主；用 --target hermes|opencode|codeartsdoer|codex|dsh 显式指定"
                   + (f"，或通用写入：--target generic --mcp-config <配置>（探测到 {known}）"
                      if generic_found else ""), file=sys.stderr)
             sys.exit(2)
@@ -328,7 +328,7 @@ def cmd_install(args):
         g = [(h["id"], h["config"]) for h in generic_host.detect_known()]
         hint = ("\n  探测到通用 MCP 宿主：" + "；".join(f"{i}（{c}）" for i, c in g)
                 if g else "")
-        print(f"不支持目标: {target}（可选 hermes|opencode|codex|dsh|generic|auto）{hint}\n"
+        print(f"不支持目标: {target}（可选 hermes|opencode|codeartsdoer|codex|dsh|generic|auto）{hint}\n"
               "  通用宿主：install --target generic --mcp-config <配置文件>",
               file=sys.stderr)
         sys.exit(2)
@@ -436,6 +436,7 @@ def cmd_install(args):
                                 mcp_url=remote_url)
         return
 
+    payload_dir = _stage_payload()      # 载荷固化：入口指向这份副本，不再指向 npx 缓存
     mcp_conf = adapter.install(args, packs)
 
     # P1-4 修正：ack 解除后置——安装全部成功才落（解除先于安装=失败安装
@@ -455,7 +456,20 @@ def cmd_install(args):
                                  (getattr(args, "dsh_profile", "") or "").strip() or None)
 
     _write_install_manifest(args, target, packs, bound_product, mcp_conf,
-                            extra_dirs)
+                            extra_dirs, payload_dir=payload_dir)
+
+
+def _stage_payload():
+    """把 server/contract/safety/skills 拷进 ~/.vod-devkit/payloads/<ver>/ 并指过去。
+
+    对标 devkit 的 copyServerPayload（D-payload-1）：npx 安装时仓在
+    ~/.npm/_npx/<hash>/，npm 清缓存/换版本后入口指向已删除路径 → 宿主 MCP 静默掉线。
+    """
+    from vod_mcp import payload as _payload
+    from vod_mcp.host_adapters import base as _base
+    dest = _payload.stage()
+    _base.set_payload_dir(dest)
+    return dest
 
 
 def _install_skills(target: str, packs: str, args, profile: str | None = None):
@@ -497,9 +511,30 @@ def _install_skills(target: str, packs: str, args, profile: str | None = None):
     return extra_dirs
 
 
+def _read_manifest() -> dict:
+    p = manifest_path()
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _install_rows(prev: dict, row: dict) -> list:
+    """按 target 去重的安装行（D-installs-1）：一个 manifest 记全部宿主安装。
+
+    起因（结构债）：顶电平字段只记「最近一次安装」，装 hermes 再装 codearts 后
+    uninstall 只清最后一个宿主的 MCP 条目，另一台宿主的配置永远留在那。
+    """
+    rows = [r for r in (prev.get("installs") or []) if r.get("target") != row["target"]]
+    rows.append(row)
+    return sorted(rows, key=lambda r: r.get("installedAt") or "")
+
+
 def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
                             extra_dirs, transport: str = "stdio",
-                            mcp_url: str = "") -> None:
+                            mcp_url: str = "", payload_dir=None) -> None:
     """manifest 段：落安装名册（版本/来源/归因/落点指纹），并给出 key
     配置提示。名册对账口径见各字段注释（原 cmd_install 尾段，整段平移）。"""
     bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
@@ -532,7 +567,18 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
         # （实锤：codex 装完 opencode 落点消失），按 host+dir 去重保留历史
         "skillInstalls": _skill_installs(manifest_path(), extra_dirs),
         "skillHashes": _skill_hashes(),
+        # 载荷副本（D-payload-1）：宿主入口指向这里，而不是仓/npx 缓存路径
+        "payloadDir": str(payload_dir) if payload_dir else None,
     }
+    row = {k: manifest[k] for k in
+           ("target", "transport", "mcpUrl", "installedAt", "product", "packs",
+            "dshProfile", "apiBase", "mcpConfig", "skillsDir", "payloadDir")}
+    row["version"] = manifest["version"]
+    row["commitSha"] = manifest["source"]["commitSha"]
+    row["skillInstalls"] = [si for si in manifest["skillInstalls"]
+                            if si["host"] == target]
+    prev = _read_manifest()
+    manifest["installs"] = _install_rows(prev, row)
     manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
                                encoding="utf-8")
     print("installed:", json.dumps(manifest, ensure_ascii=False, indent=2))
@@ -565,6 +611,9 @@ def cmd_status(_args):
     text = p.read_text(encoding="utf-8")
     text = re.sub(r'"apiBase": "http://127\.0\.0\.1:\d+"',
                   '"apiBase": "http://127.0.0.1:<PORT>"', text)
+    # 载荷路径含 HOME/版本，按 <PAYLOAD> 归一（golden 不随环境漂）
+    text = re.sub(r'"payloadDir": ".*?/payloads/[^"]+"',
+                  '"payloadDir": "<PAYLOAD>"', text)
     print(text)
 
 
@@ -682,6 +731,31 @@ def cmd_doctor(_args):
                     problems.append(f"技能文件缺失（{si['host']}）：{rel}")
                 elif hashlib.sha256(f.read_bytes()).hexdigest() != sha:
                     problems.append(f"技能文件漂移（{si['host']}）：{rel}")
+        # 载荷（D-payload-1）：MCP 入口指向副本 → 副本必须在且未被改
+        from vod_mcp import payload as _payload
+        pd = mf.get("payloadDir")
+        if pd:
+            if not Path(pd).is_dir():
+                problems.append(f"载荷目录缺失：{pd}（MCP 入口指向它，宿主起不来）——重跑 install")
+            else:
+                bad = _payload.verify(Path(pd))
+                if bad:
+                    problems.append("载荷被改动：" + "；".join(bad[:5]))
+                if _payload.marker_path().exists():
+                    print(f"[doctor] 载荷已换（{pd}）——重启宿主会话生效")
+        else:
+            print("[doctor] 提示：本次安装无载荷副本（旧版），入口指向仓内路径；重跑 install 可固化")
+        for res in _payload.residue():
+            print(f"[doctor] 载荷残留（无 payload.json）：{res}——可手动删除")
+        # CodeArts Agent 冒烟：官方 CLI 在就 list 一次（实测通道=codearts_cli.json 的 mcp 段）
+        if mf.get("target") == "codeartsdoer" and shutil.which("codearts"):
+            r = subprocess.run(["codearts", "mcp", "list"], capture_output=True,
+                               text=True, timeout=60)
+            if "vod-devkit" in (r.stdout or ""):
+                print("[doctor] CodeArts Agent 已识别 vod-devkit（codearts mcp list）")
+            else:
+                problems.append("CodeArts Agent 未列出 vod-devkit"
+                                "（codearts mcp list）——检查 codearts_cli.json 的 mcp 段")
     if problems:
         for x in problems:
             print("FAIL:", x)
@@ -798,7 +872,8 @@ _SHARED_CONFIG_NAMES = {"config.toml", "config.yaml", "config.yml",
 
 def _remove_managed_mcp_entry(target: str, path: Path) -> None:
     """从宿主共享配置里摘掉 vod-devkit 条目（保留其它键/其它 server）。"""
-    if target == "opencode":
+    section = {"opencode": "mcp", "codeartsdoer": "mcp", "generic": "mcpServers"}.get(target)
+    if section:
         if not path.exists():
             return
         try:
@@ -806,16 +881,16 @@ def _remove_managed_mcp_entry(target: str, path: Path) -> None:
         except Exception:
             print(f"skip（{path} 不是合法 JSON，未改动）")
             return
-        mcp = cfg.get("mcp") or {}
-        if "vod-devkit" not in mcp:
+        block = cfg.get(section) or {}
+        if "vod-devkit" not in block:
             return
-        mcp.pop("vod-devkit")
-        if not mcp:
-            cfg.pop("mcp", None)
+        block.pop("vod-devkit")
+        if not block:
+            cfg.pop(section, None)
         else:
-            cfg["mcp"] = mcp
+            cfg[section] = block
         path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"removed mcp.vod-devkit: {path}")
+        print(f"removed {section}.vod-devkit: {path}")
         return
     cli, args = None, None
     if target == "hermes" and shutil.which("hermes"):
@@ -848,60 +923,91 @@ def _remove_managed_skills(mf: dict, path: Path, target: str) -> None:
         else print(f"skip（无需摘除的技能）：{path}")
 
 
-def cmd_uninstall(_args):
-    p = manifest_path()
-    if p.exists():
-        mf = json.loads(p.read_text(encoding="utf-8"))
-        for key in ("mcpConfig", "skillsDir"):
-            path_s = mf.get(key)
-            if not path_s:
-                continue  # codex 等宿主 mcpConfig 可为 None（P0-3：无托管配置文件）
-            if key == "skillsDir":
-                _remove_managed_skills(mf, Path(path_s), mf.get("target"))
-                continue
-            path = Path(path_s)
-            # 深审 P0-3（破坏性路径一票否决）：共享用户配置永不整文件删除
-            #（config.toml/opencode.json 里有用户自己的 provider、其它 server）
-            if path.name in _SHARED_CONFIG_NAMES:
-                print(f"skip（用户配置文件，uninstall 只摘托管条目）：{path}")
-                _remove_managed_mcp_entry(mf.get("target"), path)
-                continue
-            if path.exists():
-                shutil.rmtree(path) if path.is_dir() else path.unlink()
-                print("removed:", path)
-        # codex 摘除：remote 形态摘 MCP 条目；stdio 形态摘原生插件（best-effort）
-        if mf.get("target") == "codex":
-            codex = shutil.which("codex")
-            if codex and (mf.get("transport") or "stdio") == "remote":
-                _remove_managed_mcp_entry("codex", Path.home() / ".codex" / "config.toml")
-            elif codex:
-                r = subprocess.run([codex, "plugin", "remove",
-                                    "vod-devkit@vod-local"],
-                                   capture_output=True, text=True, timeout=120)
-                print("codex plugin remove:",
-                      "OK" if r.returncode == 0
-                      else (r.stderr or r.stdout).strip()[-120:])
+def _cleanup_install_row(row: dict, skill_hashes: dict | None = None) -> None:
+    """按一条安装记录清理：MCP 条目 / 技能落点 / 宿主专属产物。
+
+    技能名清单来自 manifest 顶层 skillHashes（各安装行共用同一份技能集合）。
+    """
+    target = row.get("target")
+    mf = dict(row)
+    mf["skillHashes"] = skill_hashes or {}
+    for key in ("mcpConfig", "skillsDir"):
+        path_s = row.get(key)
+        if not path_s:
+            continue  # codex 等宿主 mcpConfig 可为 None（P0-3：无托管配置文件）
+        if key == "skillsDir":
+            _remove_managed_skills(mf, Path(path_s), target)
+            continue
+        path = Path(path_s)
+        # 深审 P0-3（破坏性路径一票否决）：共享用户配置永不整文件删除
+        #（config.toml/opencode.json/codearts_cli.json/.claude.json 里有用户自己的
+        # provider、其它 server）。JSON 合并型宿主一律走"摘条目"，与文件名无关——
+        # codearts_cli.json 第一版没进 _SHARED_CONFIG_NAMES，卸载把整份配置删了（实锤）。
+        if target in ("opencode", "codeartsdoer", "generic") or path.name in _SHARED_CONFIG_NAMES:
+            print(f"skip（用户配置文件，uninstall 只摘托管条目）：{path}")
+            _remove_managed_mcp_entry(target, path)
+            continue
+        if path.exists():
+            shutil.rmtree(path) if path.is_dir() else path.unlink()
+            print("removed:", path)
+    # codex 摘除：remote 形态摘 MCP 条目；stdio 形态摘原生插件（best-effort）
+    if target == "codex":
+        codex = shutil.which("codex")
+        if codex and (row.get("transport") or "stdio") == "remote":
+            _remove_managed_mcp_entry("codex", Path.home() / ".codex" / "config.toml")
+        elif codex:
+            r = subprocess.run([codex, "plugin", "remove", "vod-devkit@vod-local"],
+                               capture_output=True, text=True, timeout=120)
+            print("codex plugin remove:",
+                  "OK" if r.returncode == 0 else (r.stderr or r.stdout).strip()[-120:])
+    # opencode 随装生成物（/vod-doctor 命令）
+    if target == "opencode":
         for g in host_specs.load("opencode")["generated"]:
             gen = Path(g["dest"])
             if gen.exists():
                 gen.unlink()
                 print("removed:", gen)
-        # dsh 壳（D-dsh-install-1）：摘插件 + 从 profile patch 移除 config 段
+    # dsh 壳（D-dsh-install-1）：摘插件 + 从 profile patch 移除 config 段
+    if target == "dsh":
         dsh = shutil.which("dsh")
-        if dsh:
-            prof = (mf.get("dshProfile") or "").strip()
-            if prof:
-                subprocess.run([dsh, "plugin", "--profile", prof, "remove",
-                                "dsh-vod-devkit"], capture_output=True, text=True)
-            if prof:  # 无 profile 记录=没写过 patch，无需（也无法）摘除
-                patch = Path(host_specs.load("dsh", prof)["configPath"])
-                from vod_mcp.host_adapters import dsh as dsh_adapter
-                if dsh_adapter.remove_patch_block(patch):
-                    print("removed vod-devkit config block:", patch)
-        p.unlink()
-        print("removed:", p)
-    else:
+        prof = (row.get("dshProfile") or "").strip()
+        if dsh and prof:
+            subprocess.run([dsh, "plugin", "--profile", prof, "remove",
+                            "dsh-vod-devkit"], capture_output=True, text=True)
+        if prof:  # 无 profile 记录=没写过 patch，无需（也无法）摘除
+            patch_path = Path(host_specs.load("dsh", prof)["configPath"])
+            from vod_mcp.host_adapters import dsh as dsh_adapter
+            if dsh_adapter.remove_patch_block(patch_path):
+                print("removed vod-devkit config block:", patch_path)
+    # codeartsdoer / opencode / generic 共用 JSON 配置：条目已在上面按 mcpConfig 摘除
+
+
+def cmd_uninstall(_args):
+    p = manifest_path()
+    if not p.exists():
         print("未安装")
+        return
+    mf = json.loads(p.read_text(encoding="utf-8"))
+    rows = mf.get("installs") or [mf]   # 老 manifest（无 installs[]）退化为单条
+    for row in rows:
+        _cleanup_install_row(row, mf.get("skillHashes"))
+    # 载荷清理（D-payload-1）：所有安装记录共用的副本，逐目录去重后删，再删 marker
+    from vod_mcp import payload as _payload
+    seen = set()
+    for row in rows:
+        pd = row.get("payloadDir")
+        if not pd or pd in seen:
+            continue
+        seen.add(pd)
+        if Path(pd).is_dir():
+            shutil.rmtree(pd, ignore_errors=True)
+            print("removed payload:", pd)
+    try:
+        _payload.marker_path().unlink(missing_ok=True)
+    except Exception:
+        pass
+    p.unlink()
+    print("removed:", p)
 
 
 def main():
@@ -914,7 +1020,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("install")
     sp.add_argument("--target", default="auto",
-                    help="hermes|opencode|codex|dsh|generic|auto（默认探测）")
+                    help="hermes|opencode|codeartsdoer|codex|dsh|generic|auto（默认探测）")
     sp.add_argument("--preset", default="collect", choices=list(PRESETS),
                     help="collect=对外默认（采集者）；full=内部全量")
     sp.add_argument("--api-base", default="http://127.0.0.1:8000")
