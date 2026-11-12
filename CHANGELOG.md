@@ -322,3 +322,14 @@
 - c1677c2 feat(工程化): doctor 分层报告 + explain + detect + 宿主矩阵进 CI + 发版 workflow
 - f9b732c fix(发版): publish_verify 不再误判 propagation 窗口（v0.5.3 实锤）
 
+
+## v0.5.5（2026-11-13）
+
+- f3fa14d fix(归因): 产品名录单一真源=引擎接口 + 清 host_default 残留（评审收口）
+- ec56497 fix(远程面): 载荷自校验不再 import host_adapters + codex 适配改惰性解析
+- a1e44c6 feat(远程面): 抄 devkit 两条守卫——构造期技能树自校验 + 每请求载荷校验
+- b963d84 fix(dsh壳): vod_devkit_info 的 version 改用 PKG_VERSION（写死 0.1.0 实锤）
+- 9feb789 docs(验证): 宿主会话级验证手册（统一网关跑 codex/atomcode 的实测命令）
+- 6c2d9a1 fix(宿主): hermes 路径改为调用期解析 + 新增 host_matrix --audit 巡检
+- 0e688e3 docs(验证): 记真机可达边界 + AtomCode 真机验证结论
+
