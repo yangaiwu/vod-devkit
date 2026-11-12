@@ -16,12 +16,21 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "publish_verify.py"
 
 STUB_NPM = """#!/bin/sh
-# npm view <pkg> <field> --json
+# npm view <pkg>[@ver] <field> --json
 pkg="$2"; field="$3"
+case "$pkg" in
+  *@*) base="${pkg%%@*}"; ver="${pkg#*@}" ;;
+  *)   base="$pkg";       ver="" ;;
+esac
 case "$field" in
   version)
-    f="$STUB_DIR/version_$pkg"
-    [ -f "$f" ] && cat "$f" || echo '"0.0.0"'
+    if [ -n "$ver" ]; then
+      f="$STUB_DIR/specific_${base}_${ver}"
+      [ -f "$f" ] && cat "$f" || echo '""'
+    else
+      f="$STUB_DIR/version_$base"
+      [ -f "$f" ] && cat "$f" || echo '"0.0.0"'
+    fi
     ;;
   dist.tarball)
     f="$STUB_DIR/tarball_$pkg"
@@ -90,7 +99,7 @@ def test_fail_when_registry_still_on_old_version(tmp_path):
     r = _run(env, "--version", "0.4.5", "--pkg", "vod-devkit",
              "--timeout", "0.5", "--interval", "0.1")
     assert r.returncode == 1
-    assert "未上线" in r.stderr and "0.4.2" in r.stderr
+    assert "查不到 0.4.5" in r.stderr and "0.4.2" in r.stderr
 
 
 def test_fail_when_tarball_misses_a_module(tmp_path):
@@ -123,3 +132,14 @@ def test_skip_tarball_mode_only_checks_version(tmp_path):
     r = _run(env, "--version", "0.4.5", "--pkg", "vod-devkit",
              "--timeout", "2", "--interval", "0.1", "--skip-tarball")
     assert r.returncode == 0, (r.stdout, r.stderr)
+
+def test_pass_when_target_version_visible_but_latest_lags(tmp_path):
+    """v0.5.3 形态：包已上线（目标版本可查），latest 还停在旧版 → 不该判失败。"""
+    tgz = tmp_path / "good.tgz"
+    _make_tarball(tgz, _good_members())
+    env = _env(tmp_path, {"vod-devkit": "0.4.2"}, {"vod-devkit": tgz})
+    (tmp_path / "specific_vod-devkit_0.4.5").write_text(json.dumps("0.4.5"))
+    r = _run(env, "--version", "0.4.5", "--pkg", "vod-devkit",
+             "--timeout", "2", "--interval", "0.1")
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert "dist-tag latest 仍指向 0.4.2" in r.stdout

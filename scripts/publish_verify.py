@@ -51,15 +51,32 @@ def _npm_view(pkg: str, field: str):
 
 
 def wait_for_version(pkg: str, version: str, timeout: float, interval: float) -> tuple:
-    """轮询 registry 直到 latest/该包版本落到位。返回 (ok, 最后观察值)。"""
+    """轮询 registry 直到目标版本**存在**。返回 (ok, latest, 该版本是否可见)。
+
+    v0.5.3 实锤：只查 `npm view <pkg> version`（= dist-tag latest）会在传播窗口内
+    误判——主包 0.5.3 已经 publish 成功、`<pkg>@0.5.3` 也查得到，但 latest 还指向
+    0.5.2，脚本据此宣告发版失败。现在分两个信号：
+      · 目标版本可查  → 包确实上线（发布成功）
+      · latest 是否已切 → 只是 dist-tag/CDN 传播，晚几秒到几分钟
+    任一信号到位都不该判失败；latest 落后只提示，不阻塞。
+    """
     deadline = time.time() + timeout
-    last = None
+    last_latest, last_specific = None, None
+    started = time.time()
     while True:
-        last = _npm_view(pkg, "version")
-        if str(last) == str(version):
-            return True, last
-        if time.time() >= deadline:
-            return False, last
+        last_latest = _npm_view(pkg, "version")
+        last_specific = _npm_view(f"{pkg}@{version}", "version")
+        specific_ok = str(last_specific) == str(version)
+        latest_ok = str(last_latest) == str(version)
+        if specific_ok or latest_ok:
+            return True, last_latest, specific_ok
+        now = time.time()
+        if int(now - started) % 30 < interval + 1:
+            print(f"  … 等待 {pkg}@{version}（latest={last_latest}，"
+                  f"目标版本={'待传播' if not specific_ok else '已可见'}）",
+                  file=sys.stderr)
+        if now >= deadline:
+            return False, last_latest, False
         time.sleep(interval)
 
 
@@ -102,7 +119,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--version", required=True)
     ap.add_argument("--pkg", action="append", required=True)
-    ap.add_argument("--timeout", type=float, default=300)
+    ap.add_argument("--timeout", type=float, default=600)
     ap.add_argument("--interval", type=float, default=5)
     ap.add_argument("--skip-tarball", action="store_true",
                     help="只做版本对账（registry 不可拉包时的降级档，需显式指定）")
@@ -110,14 +127,19 @@ def main():
 
     failed = False
     for pkg in a.pkg:
-        ok, seen = wait_for_version(pkg, a.version, a.timeout, a.interval)
+        ok, latest, specific_ok = wait_for_version(pkg, a.version, a.timeout, a.interval)
         if not ok:
-            print(f"FAIL: {pkg} registry 版本停在 {seen}，目标 {a.version} 未上线"
-                  f"（publish 回执成功≠已上线；检查 staging 2FA/权限）",
+            print(f"FAIL: {pkg} 在 {a.timeout:.0f}s 内查不到 {a.version}"
+                  f"（latest 仍是 {latest}；publish 回执成功≠已上线，"
+                  "检查 staging 2FA / 权限 / 是否被 npm 拒收）",
                   file=sys.stderr)
             failed = True
             continue
-        print(f"OK: {pkg}@{a.version} 已上线（轮询确认）")
+        if latest != a.version:
+            print(f"OK: {pkg}@{a.version} 已上线（目标版本可查）；"
+                  f"dist-tag latest 仍指向 {latest}——属 CDN 传播延迟，稍后自愈")
+        else:
+            print(f"OK: {pkg}@{a.version} 已上线（latest 已切，轮询确认）")
         if a.skip_tarball:
             continue
         try:
