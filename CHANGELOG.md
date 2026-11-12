@@ -308,3 +308,11 @@
 - cd1b0b0 feat(追问): 轮次上限 2 次 + 候选可解释（评审采纳）
 - 2eb7886 chore(发版): golden 版本行随 bump 自动重录（两次实锤：v0.5.0/v0.5.1 都在 pre-push 被拦）
 
+
+## v0.5.3（2026-11-12）
+
+- e8bc909 feat(hermes): 路由插件自动启用 + 修 dsh 包发布路径
+- 8a93bd8 feat(宿主): 新增 4 个宿主适配（workbuddy / atomcode / codeartswork / codex-desktop）
+- ba2901b chore(发版): 提交清单补根 skills/、hermes-plugin/、docs/decisions.md、build-info.json
+- cbbaf17 docs(技能): 补齐 0.5.2 同批文案 + 发版清单修正
+
