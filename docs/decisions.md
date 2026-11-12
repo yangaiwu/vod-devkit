@@ -876,9 +876,15 @@ codearts_cli.json`、`KERNEL_CONFIG_DIR=~/.codeartsdoer`）。
   ② 原话唯一且高置信提及（多产品/对比语境=低置信，转去问）→ user_input
   ③ 会话记忆（30 分钟滑动、进程内、跨会话不继承、作用域含身份哈希）→ memory
   ④ 安装先验 → install_binding
-  ⑤ host_default：**仅**用户明确说不知道/随便（productNotSpecified=true）时用宿主产品，
-     confidence=low、证据写 user-not-specified，可人工修正
-  ⑥ 都没有 → 工具以 -32010 拒绝，错误里带候选（模型据此问一句），不写引擎
+  ⑤ 都没有 → 工具以 -32010 拒绝，错误里带候选（模型据此问一句），**不写引擎**
+
+**不做任何兜底猜测**（2026-11-11 二次拍板，负责人口径）：没有产品就是"不支持提交"。
+- 用户说"不知道/随便"（productNotSpecified=true）→ 也不按宿主产品记，直接拒绝并提示
+  用户"没有产品归属的反馈我不提交，因为不知道转给哪个产品团队"，请他补充产品
+- 用户说的产品不在名录（"智果"/打错）→ 不按原名硬提交、不自己挑最像的，用
+  vod_search_products 的候选再确认一次；仍对不上 → 不提交
+- 名录不可用（离线/快照）时无法校验，按用户回答原样上报、confidence=low（引擎侧继续按表解析）
+- 宿主 productDefault 只用于候选提示，**不作为归因来源**（host_default 已删除）
 
 落地：
 - 契约：submit/draft 重新加 `product`（可选，产品名或 ID）+ `productNotSpecified`（可选布尔）
