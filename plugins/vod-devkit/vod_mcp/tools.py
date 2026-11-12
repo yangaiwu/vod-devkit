@@ -303,9 +303,25 @@ def _attribute_product(items: list, params: dict, client_info: dict | None = Non
         hit = [c for c in (meta.get("catalog") or [])
                if str(c.get("id")) == str(rid)
                or str(c.get("name") or "").lower() == answer.lower()]
-        name = (hit[0].get("name") if hit else answer)
-        return {"product": rid, "productName": name, "source": "user_answer",
-                "confidence": "high" if hit else "low", "rawText": answer,
+        if not hit and not (meta.get("catalog") or []):
+            # 名录不可用（离线/快照/老引擎）：没有校验依据，不能假装能核。
+            # 按用户回答原样上报，标 low（引擎侧仍会按表解析，未命中落未知池）。
+            return {"product": answer, "productName": answer, "source": "user_answer",
+                    "confidence": "low", "rawText": answer,
+                    "evidence": [{"reason": "catalog-unavailable", "rawText": answer}],
+                    "ignored": None}
+        if not hit:
+            # 用户说了名录里没有的产品（"智果"/"XYZ"/打错）：**不拿原名硬提交**，
+            # 也不要自己猜最像的——把候选交回去，让模型按名录再问一次。
+            cands = search_products({"query": answer, "limit": 5})["candidates"]
+            return {"product": None, "productName": None, "source": "unknown",
+                    "confidence": "low", "rawText": answer, "unmatched_answer": answer,
+                    "candidates": cands,
+                    "evidence": [{"reason": "unmatched-answer", "rawText": answer}],
+                    "ignored": None}
+        name = hit[0].get("name")
+        return {"product": str(hit[0].get("id")), "productName": name,
+                "source": "user_answer", "confidence": "high", "rawText": answer,
                 "evidence": [{"product": name, "alias": "用户回答", "snippet": answer}],
                 "ignored": None}
 
@@ -328,13 +344,9 @@ def _attribute_product(items: list, params: dict, client_info: dict | None = Non
 
     not_specified = bool(params.get("productNotSpecified")) or bool(mem.get("not_specified"))
     if not_specified:
-        hp = _host_product()
-        if hp:
-            return {"product": _attrib.resolve_id(hp, meta), "productName": hp,
-                    "source": "host_default", "confidence": "low", "rawText": None,
-                    "evidence": [{"reason": "user-not-specified",
-                                  "hostProduct": hp}], "ignored": None,
-                    "not_specified": True}
+        # 用户明确说不知道：**不做任何猜测**（不按宿主产品兜底——那也是一次推断，
+        # 且产品会进引擎幂等域，错归代价比丢一条高）。交给调用方提示用户"缺产品不提交"。
+        pass
     ev = list(result.get("evidence") or [])
     if not_specified:
         ev = [{"reason": "user-not-specified"}] + ev
@@ -352,10 +364,19 @@ def _require_product_or_ask(attr: dict, items: list) -> None:
     """
     if attr.get("product"):
         return
+    if attr.get("unmatched_answer"):
+        cands = attr.get("candidates") or []
+        hint = "、".join(f"{c['name']}（{c['id']}）" for c in cands) or "（名录为空）"
+        raise ToolError(
+            f"用户说的产品「{attr['rawText']}」不在产品名录里，不能按它提交。"
+            f"请按名录再确认一次是哪一个：{hint}；用户仍说不出来就说明这条先不提交。",
+            code=_UNRESOLVED_CODE)
     if attr.get("not_specified"):
-        # 已经问过、用户明确说不知道且宿主无产品可兜底：允许提交，标 unknown/low，
-        # 证据里写明"用户未指定"——这不算裸提交（问过了，只是确实没有答案）。
-        return
+        raise ToolError(
+            "用户没有提供产品，这条反馈**不能提交**：请告诉用户「没有产品归属的反馈我不提交，"
+            "因为不知道要转给哪个产品团队」，并请他补充是哪个产品；他仍不想说就说明这条先不提交。"
+            f"可选候选：{'、'.join(c['name'] + '（' + str(c['id']) + '）' for c in search_products({'query': '\n'.join(x[2] for x in items), 'limit': 5})['candidates'])}",
+            code=_UNRESOLVED_CODE)
     if os.environ.get("VOD_ALLOW_UNKNOWN_PRODUCT") == "1":
         # 旧客户端兼容（业界口径：可选字段 + 明确默认值，不做破坏性变更）：
         # 缺 product 的老客户端不让它直接失败，回执标 legacy_default/low，可追溯。
