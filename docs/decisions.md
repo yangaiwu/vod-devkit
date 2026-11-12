@@ -834,3 +834,34 @@ codearts_cli.json`、`KERNEL_CONFIG_DIR=~/.codeartsdoer`）。
 第一版实锤：没进共享名单，卸载把整份配置删了，已加目标白名单）。
 
 真机验收：本机装完 `codearts mcp list` → `✓ vod-devkit connected`；`doctor` OK。
+
+## D-meta-v2-1 对齐引擎 dev 2026-11-12（产品表驱动 / 分类按产品 / 别名删除）
+
+上游（VOD-Project dev 3e1b3205 起）实测变化：
+- 产品清单/分类改 DB 驱动（t_vod_product / ProductCatalogCache）；VodExternalProducts 的
+  VALID_PRODUCTS / DISPLAY / NAME_ALIASES / PROBLEM_TYPES 四份手写副本全删
+- meta 不再下发 nameAliases/aliases；分类要 `?productId=<id>` 才有 problemTypes
+  （真源写作「技术/业务咨询」带斜杠）
+- voiceId 换代：ext2_{ns}_{sha1[:12]} → VDPL/VDWD+yyyyMMdd+4 位序号；幂等键独立成
+  dedupe_key={productNamespace}_{source|deviceHash8}_{sha1(content)[:12]} 存关联表
+- **产品进入幂等命名空间**（渠道退出：客户端自报可漂移）
+
+插件侧落地分两笔（并行会话先落 1bb9f67，本笔补两处真机缺陷）：
+1. 1bb9f67（zhirong）：别名改为本地规则派生（去空格/拉丁核心词/大小写变体）+
+   BRAND_ALIASES 品牌俗称表（码道→CodeArts）；分类白名单改按产品拉 + 缓存；
+   draft 归因前移。实测修正 ModelArts(id4) 原被硬归 Maas(id5) 的错误。
+2. 本笔（真机实测发现的漏洞）：
+   - **全大写缩写被标成 caseless**：`obs://bucket`、`/obs/bin`、`a@obs` 全部误归
+     OBS(261)——S93 铁律被破。修：派生别名里 `alias == alias.upper()` 一律不 caseless；
+     `_ascii_hits` 增加 URL/路径上下文排除（前 `/ . @` 或后 `: / \`）。
+   - **取不到分类会抛异常**：`_allowed_tags` 只 catch ToolError，网络类异常直接冒泡，
+     与"不可达即不拦"的文档语义矛盾。修：catch Exception + 命中缓存后同步 _RT
+     （否则每次提交都外呼一次）。
+3. 回归锁 tests/test_meta_v2_alignment.py（8 例）：大小写变体不退化成单命中 /
+   全大写缩写在 URL 与路径里不命中 / ModelArts≠Maas / 码道来自本地清单 /
+   按产品取值域 + 缓存 + 失败即不过滤 / 提交侧白名单回执。
+
+遗留（需引擎侧确认，写进问题单）：
+- UNKNOWN 落库后运营补归因，dedupe_key 是否同步？不同步则同一句话补归因后再提
+  会变成第二条声音。
+- raw 不可变仍只是应用层承诺（152 个迁移、0 个 CREATE TRIGGER）。

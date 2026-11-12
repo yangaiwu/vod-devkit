@@ -218,8 +218,11 @@ def build_alias_index(meta: dict) -> list:
                 continue
             seen.add(key)
             entries.append({"product": slot["label"], "id": slot["id"], "alias": alias,
-                            # 派生写法允许大小写不敏感（见 _ascii_hits 说明）
-                            "caseless": alias in (slot.get("derived") or set())})
+                    # 派生写法允许大小写不敏感；但**全大写缩写永不 caseless**——
+                    # "对象存储服务 OBS" 派生的 OBS 曾因此命中 "obs://bucket" 与
+                    # "/obs/bin"（2026-11-12 实测，S93 铁律被破）
+                    "caseless": (alias in (slot.get("derived") or set())
+                                 and alias != alias.upper())})
     entries.sort(key=lambda e: len(e["alias"]), reverse=True)
     return entries
 
@@ -250,6 +253,11 @@ def _ascii_hits(text: str, alias: str, caseless: bool = False) -> list:
             elif nxt == "." and j + 1 < len(hay) and hay[j + 1].isalnum():
                 ok_after = False  # codearts.yaml 这类文件名不是产品名
         if ok_before and ok_after:
+            prev = hay[i - 1] if i else ""
+            nxt2 = hay[j] if j < len(hay) else ""
+            if prev in ("/", "\\", ".", "@") or nxt2 in (":", "/", "\\"):
+                start = i + 1
+                continue      # URL/路径上下文不是产品提及：obs://bucket、/obs/bin、a@obs
             out.append((i, j))
         start = i + 1
 

@@ -412,9 +412,12 @@ def _allowed_tags(product_id=None) -> set:
         data = out.get("data") or {}
         types = [str(t) for t in (data.get("problemTypes") or []) if str(t).strip()]
         by[pid] = types
-        _save_runtime({"ptype_cache": {"at": int(now), "by": by}})
+        cache = {"at": int(now), "by": by}
+        _save_runtime({"ptype_cache": cache})
+        _RT["ptype_cache"] = cache      # 同进程后续调用要能命中，否则每次提交都外呼
         return set(types)
-    except ToolError:
+    except Exception:
+        # 任何取不到（网络/超时/引擎异常）= 不知道值域 → 不过滤，绝不阻断提交
         return set(by.get(pid) or [])
 
 
