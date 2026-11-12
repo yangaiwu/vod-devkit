@@ -316,3 +316,9 @@
 - ba2901b chore(发版): 提交清单补根 skills/、hermes-plugin/、docs/decisions.md、build-info.json
 - cbbaf17 docs(技能): 补齐 0.5.2 同批文案 + 发版清单修正
 
+
+## v0.5.4（2026-11-12）
+
+- c1677c2 feat(工程化): doctor 分层报告 + explain + detect + 宿主矩阵进 CI + 发版 workflow
+- f9b732c fix(发版): publish_verify 不再误判 propagation 窗口（v0.5.3 实锤）
+
