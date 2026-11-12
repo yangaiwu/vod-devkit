@@ -14,12 +14,18 @@ from vod_mcp.host_adapters.base import ROOT, server_env, server_entry
 
 HOST = "hermes"
 SUPPORTS_REMOTE = True
-_SPEC = host_specs.load("hermes")
-_MCP_DIR = Path(_SPEC["configPath"]).parent
+def _spec() -> dict:
+    """调用期现读：host.json 的 ~ 必须在调用期按当前 HOME 解析。
+
+    2026-11-12 实锤：模块 import 期求值 _MCP_DIR 后，测试里 monkeypatch HOME
+    写不到隔离目录，直接把真实 ~/.hermes/mcp/vod-devkit.json 覆盖成了桩值
+    （command=/x/vod_mcp/server.py）——真机 doctor 当场读到坏条目。
+    """
+    return host_specs.load("hermes")
 
 
 def skills_dir(args):
-    return Path(_SPEC["skillsDir"])
+    return Path(_spec()["skillsDir"])
 
 
 PLUGIN_NAME = "vod-feedback-router"
@@ -67,7 +73,7 @@ def enable_plugin(name: str = PLUGIN_NAME) -> str:
 
 def install(args, packs: str) -> Path:
     """Hermes：官方途径 hermes mcp add（config.yaml mcp_servers）。"""
-    conf = _MCP_DIR / "vod-devkit.json"
+    conf = Path(_spec()["configPath"]).parent / "vod-devkit.json"
     conf.parent.mkdir(parents=True, exist_ok=True)
     conf.write_text(json.dumps({
         "name": "vod-devkit", "command": sys.executable,
@@ -112,7 +118,7 @@ def install_remote(args, url, token):
         print(f"[vod-devkit] hermes mcp add（remote）失败：{(r.stderr or r.stdout).strip()[-200:]}",
               file=sys.stderr)
         sys.exit(1)
-    conf = _MCP_DIR / "vod-devkit.json"
+    conf = Path(_spec()["configPath"]).parent / "vod-devkit.json"
     conf.parent.mkdir(parents=True, exist_ok=True)
     conf.write_text(json.dumps({"name": "vod-devkit", "url": url,
                                 "headers": {"Authorization": "Bearer ${MCP_VOD_DEVKIT_API_KEY}"}},

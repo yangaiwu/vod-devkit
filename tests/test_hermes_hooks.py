@@ -81,3 +81,21 @@ def test_install_deploys_plugin_dir(fake_home, monkeypatch):
 
     hermes.install(A(), "core")
     assert (fake_home / ".hermes" / "plugins" / "vod-feedback-router" / "router.py").exists()
+
+
+def test_install_writes_sidecar_under_current_home(fake_home, monkeypatch):
+    """路径必须在调用期按当前 HOME 解析（模块 import 期求值会写到真实 HOME）。
+
+    2026-11-12 实锤：import 期算好的 _MCP_DIR 让测试把真实
+    ~/.hermes/mcp/vod-devkit.json 覆盖成了桩值（command=/x/vod_mcp/server.py）。
+    """
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _R(out=""))
+    monkeypatch.setattr(hermes, "server_entry", lambda: "/payload/vod_mcp/server.py")
+
+    class A:
+        java_api_base = "http://stub.local"
+
+    hermes.install(A(), "core,collect")
+    fake_conf = fake_home / ".hermes" / "mcp" / "vod-devkit.json"
+    assert fake_conf.exists(), "sidecar 必须落在当前 HOME 下"
+    assert json.loads(fake_conf.read_text())["args"][0] == "/payload/vod_mcp/server.py"

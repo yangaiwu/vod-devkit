@@ -245,10 +245,64 @@ def run_host(host: str, home: Path, expect_version: str, verbose=False) -> tuple
     return ("PASS", msg) if ok else ("FAIL", msg)
 
 
+def audit_host(host: str, expect_version: str) -> tuple:
+    """只读巡检**真实机器**上的安装（不写任何文件）：条目在不在、入口存不存在、
+    自证版本是否等于构建版本。返回 PASS / DRIFT / NOT_INSTALLED。
+
+    动机（2026-11-12 实锤）：矩阵全绿不代表这台机器的安装是新的——巡检当场发现
+    opencode 指向仓内路径而非载荷、codex 停在 0.5.3、dsh 壳还钉着 0.4.4。
+    """
+    home = Path.home()
+    spec = EXPECT[host]
+    conf = home / spec["config"] if spec.get("config") else None
+    entry = None
+    if conf is not None:
+        if not conf.exists():
+            return "NOT_INSTALLED", f"缺配置 {conf}"
+        try:
+            data = json.loads(conf.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            return "DRIFT", f"配置不是合法 JSON：{e}"
+        if host == "codex-desktop":
+            if "vod-devkit" not in [p.get("name") for p in (data.get("plugins") or [])]:
+                return "DRIFT", "marketplace 未登记 vod-devkit"
+            mcp = home / "plugins" / "vod-devkit" / ".mcp.json"
+            if not mcp.exists():
+                return "DRIFT", "插件目录缺 .mcp.json"
+            entry = (json.loads(mcp.read_text(encoding="utf-8")).get("mcpServers") or {}
+                     ).get("vod-devkit")
+        else:
+            entry = data if host == "hermes" else _dig(data, spec["entry"])
+            if spec["entry"] and not entry:
+                return "DRIFT", f"缺条目 {'.'.join(str(x) for x in spec['entry'] if x)}"
+    if host == "codex":
+        cache = home / ".codex" / "plugins" / "cache"
+        found = sorted(cache.glob("*/*/*/.mcp.json")) if cache.exists() else []
+        if not found:
+            return "NOT_INSTALLED", "codex 插件缓存里没有 .mcp.json"
+        entry = (json.loads(found[-1].read_text(encoding="utf-8")).get("mcpServers") or {}
+                 ).get("vod-devkit")
+    if host == "dsh":
+        patches = sorted((home / ".dsh" / "profiles").glob("*/cordis.patch.yml"))
+        hit = [p for p in patches
+               if "- id: vod-devkit" in p.read_text(encoding="utf-8", errors="replace")]
+        if not hit:
+            return "NOT_INSTALLED", "dsh profile patch 里没有 vod-devkit 块"
+        cmd = entry or {}
+        ok, msg = _probe(cmd, expect_version) if cmd else (True, "patch 存在（壳自证跳过）")
+        return ("PASS" if ok else "DRIFT"), msg
+    if not entry:
+        return "NOT_INSTALLED", "无条目"
+    ok, msg = _probe(entry, expect_version)
+    return ("PASS" if ok else "DRIFT"), msg
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", action="append", default=[])
     ap.add_argument("--keep", action="store_true", help="保留隔离 HOME（排查用）")
+    ap.add_argument("--audit", action="store_true",
+                    help="只读巡检真实机器上的安装（不装/不卸/不写）")
     ap.add_argument("--verbose", action="store_true")
     a = ap.parse_args()
     build = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
@@ -258,6 +312,18 @@ def main():
     home = tmp / "home"
     home.mkdir()
     results = {}
+    if a.audit:
+        for h in hosts:
+            state, msg = audit_host(h, version)
+            results[h] = state
+            print(f"[{h}] {state}: {msg}")
+        drift = [h for h, s in results.items() if s == "DRIFT"]
+        missing = [h for h, s in results.items() if s == "NOT_INSTALLED"]
+        print(f"\n巡检：{len(results) - len(drift) - len(missing)} PASS / {len(drift)} DRIFT / "
+              f"{len(missing)} NOT_INSTALLED（构建 {version}）")
+        if drift:
+            print("DRIFT：" + "、".join(drift) + " → 重跑 install --target <host>")
+        sys.exit(1 if drift else 0)
     try:
         for h in hosts:
             state, msg = run_host(h, home, version, a.verbose)
