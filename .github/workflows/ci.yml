@@ -38,3 +38,19 @@ jobs:
         run: |
           python3 bin/vod-devkit build-info
           python3 -c "import ast; ast.parse(open('bin/vod-devkit').read()); print('bin 语法 OK')"
+
+  host-matrix:
+    # 宿主安装矩阵（E2E）：隔离 HOME 里 装 → 断言配置形态 → 拉起 server 自证 → 卸 → 验干净。
+    # runner 上没有 codex/dsh/hermes 等宿主 CLI 的项记 SKIP（不算失败）；自托管 runner
+    # 装了 CLI 时全量跑。这条门禁的意义：新加宿主时"配置写对了、卸载没带走用户东西"
+    # 不再靠人肉冒烟。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 构建信息（矩阵用它断言探针版本）
+        run: python3 bin/vod-devkit build-info
+      - name: 宿主矩阵
+        run: python3 scripts/host_matrix.py

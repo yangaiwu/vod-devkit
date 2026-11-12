@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from vod_mcp import hosts as host_specs
-from vod_mcp.host_adapters.base import ROOT
+from vod_mcp.host_adapters.base import ROOT, server_env, server_entry
 
 HOST = "codex"
 SUPPORTS_REMOTE = True
@@ -170,7 +170,16 @@ def install(args, packs: str) -> Path:
             mj = json.loads(Path(mcp_jsons[0]).read_text(encoding="utf-8"))
             srv = mj.get("mcpServers", {}).get("vod-devkit")
             if srv is not None:
-                srv.setdefault("env", {})["VOD_PACKS"] = packs
+                # 关键修正（2026-11-12 矩阵实锤）：插件自带的 .mcp.json 写的是
+                # command="vod-devkit" + args=["serve"] —— 依赖 PATH 上那个全局包。
+                # 机器上装着旧版（实测 0.4.2）时，codex 会静默跑旧副本：配置、
+                # 技能都是新的，工具面却是旧的。改成绝对解释器 + 载荷副本，与其它
+                # 宿主同一条铁律（入口不依赖 PATH / npx 缓存）。
+                srv["command"] = sys.executable
+                srv["args"] = [server_entry()]
+                merged = dict(srv.get("env") or {})
+                merged.update(server_env(args, packs))
+                srv["env"] = merged
                 Path(mcp_jsons[0]).write_text(
                     json.dumps(mj, ensure_ascii=False, indent=2) + "\n",
                     encoding="utf-8")

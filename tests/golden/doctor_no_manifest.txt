@@ -1,2 +1,5 @@
 $ vod-devkit doctor
+[环境]
 FAIL: 无 install-manifest.json（未 install？）
+       原因：还没装（或 manifest 被删）
+       动作：运行 install --target <宿主>

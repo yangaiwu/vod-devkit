@@ -278,3 +278,15 @@ install-manifest 名册对账（doctor 逐落点）+ 声明计数对账（对外
 ## 许可
 
 MIT（见 LICENSE.txt）。第三方素材见 NOTICE。
+
+## 诊断与识别（0.5.4 起）
+
+```bash
+vod-devkit doctor                 # 分层报告：环境/载荷/配置/技能/网络/插件，每条给动作
+vod-devkit explain -32010         # 解释一条错误码/错误文案：层 + 原因 + 动作
+vod-devkit detect --path .        # 只读识别项目语言/框架/构建（不写任何文件）
+python3 scripts/host_matrix.py    # 9 宿主安装矩阵：装→断言→拉起 server→卸→验干净
+```
+
+`doctor` 的失败按层分组，不再平铺一列 `FAIL`；`explain` 与它共用同一张规则表
+（`vod_mcp/diagnose.py`），所以"报告里出现的层/原因"和"解释出来的动作"永远一致。

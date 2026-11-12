@@ -1,0 +1,42 @@
+name: vod-devkit release
+
+# 发版入口：人工触发（选 bump 档位），走仓内同一套 release.sh —— 不另写一套逻辑，
+# 避免"CI 发的包"和"人手发的包"两套流程漂移。发布后必然执行终态断言
+# （publish_verify：目标版本可查 + tarball 内容/契约版本 + 两包同版）。
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "版本档位（patch/minor/major）"
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: 依赖
+        run: python3 -m pip install pytest pyflakes pyyaml 'mcp>=1.0'
+      - name: git 身份（release.sh 要提交 tag）
+        run: |
+          git config user.name "vod-devkit release bot"
+          git config user.email "release@vod-devkit.invalid"
+      - name: 发版（含质量门禁 + 打包自证 + 发布 + 终态断言）
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bash scripts/release.sh "${{ inputs.bump }}" --publish

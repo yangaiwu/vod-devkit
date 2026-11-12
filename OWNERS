@@ -1,0 +1,20 @@
+# OWNERS
+
+Maintainers of the vod-devkit project (安装器 / MCP server / 采集技能 / dsh 壳).
+
+## Maintainers
+
+| Role | 账号 | 说明 |
+| ---- | ---- | ---- |
+| Maintainer | xiaowu2119 | 项目维护者（发版、宿主适配、技能口径） |
+
+## Reviewers
+
+- xiaowu2119
+
+## Approvals
+
+- 归因/征询口径（skills/ 与 hermes-plugin/）的改动需 Maintainer 复核：它直接决定
+  会不会把错误产品写进引擎判重域。
+- 发版改动需跑 `scripts/release.sh <bump> --publish` 并通过终态断言（publish_verify），
+  "publish 回执成功"不是发版完成的证据。

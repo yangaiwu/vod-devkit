@@ -932,3 +932,27 @@ workbuddy / dsh / hermes（含 hooks 插件）这些都要具备」。落地口�
 3. **未真机验证要标明**：本机没有 workbuddy / atomcode / codeartswork / codex-desktop，
    这四个按上游 targets.ts + agents/*.ts 的形态实现，host.json 的 notes 里写「未真机验证」；
    真机到位后补冒烟（`scripts/smoke_hosts.py`）。
+
+## D-ops-1：工程化三件（doctor 分层 / 宿主矩阵 / 发版进 CI）＋ 只读项目识别（2026-11-12）
+
+负责人拍板"先做 A 类（无执行风险）"。落点：
+
+1. **doctor 分层报告 + explain**（`vod_mcp/diagnose.py`）：失败按
+   环境/载荷/配置/技能/网络/插件 归层，每条给「原因 → 动作」；`vod-devkit explain`
+   共用同一张关键词表。纪律：归层只按确定性关键词，未收录就如实进「未分类」，
+   不做语义猜测（误归层会把运维带偏）。
+2. **宿主安装矩阵**（`scripts/host_matrix.py`）：隔离 HOME 里 seed 用户配置 →
+   install → 断言配置形态 → 按宿主配置真拉起 stdio 自证版本 → uninstall →
+   断言条目消失且**用户自有内容原样保留**。CI 增 host-matrix job。
+3. **发版进 CI**（`.github/workflows/release.yml`）：workflow_dispatch 选 bump，
+   调用同一个 `scripts/release.sh --publish`（不另写一套），发布后必跑终态断言。
+4. **只读项目识别**（`vod_mcp/detect_framework.py`）：语言按扩展名统计、框架只认
+   清单里的显式依赖、跳过 vendor/node_modules、2 万文件上限（跑过 41s 全量索引
+   卡死 UI 的教训）。不做"猜测比例"。
+
+同批修掉一个真机缺陷（矩阵实锤）：codex 原生插件自带的 `.mcp.json` 写的是
+`command="vod-devkit" + args=["serve"]`，依赖 PATH 上的全局包——机器上装着旧版
+（实测 0.4.2）时，配置与技能都是新的、**工具面却是旧的**。现在安装期把它改成
+绝对解释器 + 载荷副本（与其它宿主同一条"入口不依赖 PATH"铁律）。
+
+不做（仍是 B 类，需业务决策）：审批令牌、沙箱、凭据 onboarding、云 CLI 面。

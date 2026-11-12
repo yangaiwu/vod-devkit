@@ -59,13 +59,24 @@ def build_info(strict: bool = False) -> dict:
 
 def write_build_info(strict: bool):
     info = build_info(strict)
+    # 隔离跑法（宿主矩阵/CI 用例）不许改真实仓的 build-info：它会被重烧成当前
+    # HEAD，而包内副本停在发版提交 → 结构门禁"根/包内不一致"假红（本轮实锤）。
+    if os.environ.get("VOD_DEVKIT_NO_BUILD_INFO"):
+        print("build-info.json: 跳过写入（VOD_DEVKIT_NO_BUILD_INFO）")
+        return
     (ROOT / "build-info.json").write_text(
         json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
     print("build-info.json:", json.dumps(info, ensure_ascii=False))
 
 
 def manifest_path() -> Path:
-    return ROOT / "install-manifest.json"
+    """安装名册位置：默认仓根；VOD_DEVKIT_MANIFEST 可覆盖（多安装根/隔离测试）。
+
+    契约上 manifest 落在"安装器所在的仓根"——npx 缓存下的仓被清掉时名册一起消失，
+    所以 doctor/uninstall 只在同一个仓上下文里自洽；需要另置一份或多份时用该 env。
+    """
+    override = (os.environ.get("VOD_DEVKIT_MANIFEST") or "").strip()
+    return Path(override) if override else ROOT / "install-manifest.json"
 
 
 PRESETS = {
@@ -689,6 +700,43 @@ def _repair_dsh_patch_block(mf: dict) -> str | None:
     return str(patch)
 
 
+def _render_problems(problems) -> str:
+    """分层报告（对表 devkit 的 doctor-report）：按 环境/载荷/配置/技能/网络/插件 分组，
+    每条失败给「原因」与「动作」，避免运维只看到一堆 FAIL 文案。"""
+    from vod_mcp import diagnose
+    return diagnose.render_problems(problems)
+
+
+def cmd_explain(args):
+    """解释一条失败文案/错误码（-32010 等）：给层 + 原因 + 动作。"""
+    from vod_mcp import diagnose
+    text = " ".join(args.text).strip()
+    if not text:
+        print("用法：vod-devkit explain '<错误文案或错误码>'", file=sys.stderr)
+        sys.exit(2)
+    info = diagnose.explain(text)
+    if not info["known"]:
+        print(f"未收录该问题：{text[:120]}", file=sys.stderr)
+        print("  排查入口：doctor 看分层报告；仍无头绪就把这段文案连同 doctor 输出一起贴出来",
+              file=sys.stderr)
+        sys.exit(2)
+    print(f"层：{info['layer']}")
+    print(f"原因：{info['cause']}")
+    print(f"动作：{info['action']}")
+
+
+def cmd_detect(args):
+    """只读识别项目语言/框架/构建（给采集端补上下文；不写任何文件）。"""
+    from vod_mcp import detect_framework
+    try:
+        info = detect_framework.detect(args.path or os.getcwd())
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(2)
+    print(json.dumps(info, ensure_ascii=False, indent=2))
+    print("摘要：" + detect_framework.summary_line(info))
+
+
 def cmd_doctor(_args):
     problems = []
     p = manifest_path()
@@ -789,8 +837,7 @@ def cmd_doctor(_args):
                 problems.append("CodeArts Agent 未列出 vod-devkit"
                                 "（codearts mcp list）——检查 codearts_cli.json 的 mcp 段")
     if problems:
-        for x in problems:
-            print("FAIL:", x)
+        print(_render_problems(problems))
         sys.exit(1)
     # key 探针（最佳努力）：配置了 key 就问一次引擎，无效当场报；网络不可达只提示不 FAIL
     #（离线环境 doctor 必须可用——网络问题不是 key 问题）
@@ -807,8 +854,7 @@ def cmd_doctor(_args):
         else:
             print(f"key: 有效（指纹 {chk['fingerprint']}）")
     if problems:
-        for x in problems:
-            print("FAIL:", x)
+        print(_render_problems(problems))
         sys.exit(1)
     print("doctor: OK")
 
@@ -1092,8 +1138,14 @@ def main():
     sp.set_defaults(fn=cmd_install)
     for name, fn in (("status", cmd_status), ("doctor", cmd_doctor),
                      ("verify", cmd_verify), ("update", cmd_update),
-                     ("uninstall", cmd_uninstall)):
+                     ("uninstall", cmd_uninstall),
+                     ("explain", cmd_explain),
+                     ("detect", cmd_detect)):
         s = sub.add_parser(name)
+        if name == "explain":
+            s.add_argument("text", nargs="+", help="错误文案或错误码（-32010 等）")
+        if name == "detect":
+            s.add_argument("--path", default="", help="要识别的项目目录（默认当前目录）")
         if name == "update":
             s.add_argument("--skip", action="store_true",
                            help="跳过当前 registry latest 的提醒（只压这一个版本，"
