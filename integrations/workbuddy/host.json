@@ -1,0 +1,8 @@
+{
+  "id": "workbuddy",
+  "cli": "workbuddy",
+  "detect": {"path": "~/.workbuddy"},
+  "config": "~/.workbuddy/mcp.json",
+  "skillsDir": "~/.workbuddy/skills",
+  "notes": "WorkBuddy 用户级 mcp.json（mcpServers.<name> = command/args/env）。宿主侧另有 settings.json 的 PostToolUse hook 与 plugins/hooks 目录——那是华为工具的采集链，我们不用；只写 mcpServers 一个键，卸载只摘该条目。路径实测来源：huaweicloud-devkit targets.ts workbuddyMcpConfigFile/workbuddySkillsDir。本机未装该宿主，配置形态按对表结论实现，未真机验证。"
+}

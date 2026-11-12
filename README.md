@@ -20,7 +20,7 @@
 |---|---|---|
 | Node | >= 18 | `npx` 引导器；dsh 宿主请按其官方要求（Node 24.9+） |
 | Python | >= 3.10 | 安装器与 MCP server；可用 `VOD_PYTHON` 指定解释器 |
-| 宿主 | hermes / opencode / codeartsdoer / codex / dsh 任一 | 用 `--target auto` 探测，或显式指定 |
+| 宿主 | hermes / opencode / codeartsdoer / codeartswork / codex / codex-desktop / dsh / workbuddy / atomcode 任一（另支持 claude-code / cursor / windsurf / cline 等走 `--target generic`） | 用 `--target auto` 探测，或显式指定 |
 | 网络 | 可达你的 VOD 引擎 | 缺省 `https://vod-dev.topxtopx.com`，可 `--java-api-base` 覆盖 |
 
 远程面额外需要官方 MCP SDK：`pip install 'vod-devkit[remote]'`（stdio 形态零第三方依赖）。
@@ -102,6 +102,46 @@ npx -y vod-devkit@latest uninstall   # 只摘 mcp.vod-devkit，provider/model �
 - 实测口径：写入后 `codearts mcp list` 显示 `✓ vod-devkit connected`
 - **不要**写 `~/.codeartsdoer/mcp/mcp_settings.json`——那是项目级路径；用户级
   mcp_settings 读的是 `~/.config/opencode/mcp/`
+
+### CodeArts Work（codeartswork）
+
+```bash
+npx -y vod-devkit@latest install --target codeartswork
+```
+
+- 落点：`~/.codearts/mcp/mcp_settings.json`（平台迁移后的新址；目录不存在时回退
+  `~/.codeartswork/mcp/mcp_settings.json`），条目形态 `mcp.vod-devkit =
+  {command: 数组, environment}`——环境键名是 `environment`，不是 `env`
+- 技能装到 `~/.codeartswork/skills`
+
+### Codex Desktop（codex-desktop）
+
+```bash
+npx -y vod-devkit@latest install --target codex-desktop
+```
+
+- 插件目录 `~/plugins/vod-devkit`（内含 `.mcp.json` 与 `.codex-plugin/plugin.json`），
+  并在 `~/.agents/plugins/marketplace.json` 的 `plugins[]` 里登记一条
+  `{name, source:{source:"local", path:"./plugins/vod-devkit"}}`
+- 卸载只摘自己那条登记 + 删插件目录，不碰 `~/.agents/skills` 等原生目录
+
+### WorkBuddy（workbuddy）
+
+```bash
+npx -y vod-devkit@latest install --target workbuddy
+```
+
+- 落点：`~/.workbuddy/mcp.json` 的 `mcpServers.vod-devkit`；技能装到 `~/.workbuddy/skills`
+
+### AtomCode（atomcode）
+
+```bash
+npx -y vod-devkit@latest install --target atomcode
+```
+
+- 配置根可由 `ATOMCODE_HOME` 覆盖（默认 `~/.atomcode`），落点 `mcp.json` 的
+  `mcpServers.vod-devkit`；技能装到 `<home>/skills`
+- 不装宿主的 `hooks.json` 遥测 hook（本插件不引入遥测）
 
 ### DeepSeek Harness (dsh)
 

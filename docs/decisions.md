@@ -903,3 +903,32 @@ codearts_cli.json`、`KERNEL_CONFIG_DIR=~/.codeartsdoer`）。
 
 未采（业界建议里不适用本仓的）：metadata 只做归因不参与业务判定这条我们已经在做（productSource
 仅留痕）；五到七轮追问上限不采用（一次抱怨只问一次，不连环追）。
+
+## D-hosts-2：宿主覆盖对齐到 huaweicloud-devkit 清单（2026-11-12，负责人要求）
+
+负责人要求「opencode / codex / codex-desktop / codearts / codearts-work / atomcode /
+workbuddy / dsh / hermes（含 hooks 插件）这些都要具备」。落地口径：
+
+| 宿主 | 落点 | 条目形态 | 卸载语义 |
+|---|---|---|---|
+| codeartsdoer | ~/.codeartsdoer/codearts_cli.json | mcp.<n> = {type:local, command:[], enabled, environment} | 摘条目 |
+| codeartswork | ~/.codearts/mcp/mcp_settings.json（旧址 ~/.codeartswork 回退） | mcp.<n> = {command:[], environment} | 摘条目 |
+| codex | codex plugin marketplace（原生插件） | — | codex plugin remove |
+| codex-desktop | ~/plugins/vod-devkit + ~/.agents/plugins/marketplace.json | marketplace.plugins[] {name, source} | 摘登记 + 删插件目录 |
+| dsh | profile patch（insert 块）+ ~/.dsh/skills | — | 删 patch 段 + dsh plugin remove |
+| hermes | hermes mcp add + ~/.hermes/plugins/vod-feedback-router | — | hermes mcp remove（插件保留说明） |
+| opencode | ~/.config/opencode/opencode.json | mcp.<n> = {type:local, command:[], enabled} | 摘条目 |
+| workbuddy | ~/.workbuddy/mcp.json | mcpServers.<n> = {command, args, env} | 摘条目 |
+| atomcode | ${ATOMCODE_HOME:-~/.atomcode}/mcp.json | mcpServers.<n> = {command, args, env} | 摘条目 |
+| generic | --mcp-config 指定 | mcpServers.<n> | 摘条目 |
+
+三条纪律（与既有条款同源）：
+
+1. **共享 JSON 只摘自己的键**：marketplace.json / mcp.json / mcp_settings.json
+   都可能载着用户别的配置；codex-desktop 的 mcpConfig 指向共享 marketplace，
+   绝不能走「整文件删」（本轮已在 `_cleanup_install_row` 加显式分支，否则卸载会删掉
+   用户其它插件登记）。
+2. **不引入遥测**：AtomCode/WorkBuddy 上游都在宿主 hooks 里塞遥测，我们只写 MCP 条目。
+3. **未真机验证要标明**：本机没有 workbuddy / atomcode / codeartswork / codex-desktop，
+   这四个按上游 targets.ts + agents/*.ts 的形态实现，host.json 的 notes 里写「未真机验证」；
+   真机到位后补冒烟（`scripts/smoke_hosts.py`）。

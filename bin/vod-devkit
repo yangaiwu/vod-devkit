@@ -314,7 +314,7 @@ def cmd_install(args):
                   f"（{args.mcp_config}）")
         elif not found:
             known = "、".join(h["label"] + "（" + h["config"] + "）" for h in generic_found)
-            print("未探测到可自动安装的宿主；用 --target hermes|opencode|codeartsdoer|codex|dsh 显式指定"
+            print("未探测到可自动安装的宿主；用 --target hermes|opencode|codeartsdoer|codeartswork|codex|codex-desktop|dsh|workbuddy|atomcode 显式指定"
                   + (f"，或通用写入：--target generic --mcp-config <配置>（探测到 {known}）"
                      if generic_found else ""), file=sys.stderr)
             sys.exit(2)
@@ -328,7 +328,7 @@ def cmd_install(args):
         g = [(h["id"], h["config"]) for h in generic_host.detect_known()]
         hint = ("\n  探测到通用 MCP 宿主：" + "；".join(f"{i}（{c}）" for i, c in g)
                 if g else "")
-        print(f"不支持目标: {target}（可选 hermes|opencode|codeartsdoer|codex|dsh|generic|auto）{hint}\n"
+        print(f"不支持目标: {target}（可选 hermes|opencode|codeartsdoer|codeartswork|codex|codex-desktop|dsh|workbuddy|atomcode|generic|auto）{hint}\n"
               "  通用宿主：install --target generic --mcp-config <配置文件>",
               file=sys.stderr)
         sys.exit(2)
@@ -904,7 +904,9 @@ _SHARED_CONFIG_NAMES = {"config.toml", "config.yaml", "config.yml",
 
 def _remove_managed_mcp_entry(target: str, path: Path) -> None:
     """从宿主共享配置里摘掉 vod-devkit 条目（保留其它键/其它 server）。"""
-    section = {"opencode": "mcp", "codeartsdoer": "mcp", "generic": "mcpServers"}.get(target)
+    section = {"opencode": "mcp", "codeartsdoer": "mcp", "codeartswork": "mcp",
+               "generic": "mcpServers", "workbuddy": "mcpServers",
+               "atomcode": "mcpServers"}.get(target)
     if section:
         if not path.exists():
             return
@@ -961,6 +963,12 @@ def _cleanup_install_row(row: dict, skill_hashes: dict | None = None) -> None:
     技能名清单来自 manifest 顶层 skillHashes（各安装行共用同一份技能集合）。
     """
     target = row.get("target")
+    # codex-desktop：mcpConfig 指向共享的 marketplace.json，绝不能走"整文件删"分支
+    # （那会删掉用户/其它插件的市场登记）。交给适配器只摘自己那一条 + 删插件目录。
+    if target == "codex-desktop":
+        from vod_mcp.host_adapters import codex_desktop as _cd
+        _cd.uninstall()
+        return
     mf = dict(row)
     mf["skillHashes"] = skill_hashes or {}
     for key in ("mcpConfig", "skillsDir"):
@@ -975,7 +983,8 @@ def _cleanup_install_row(row: dict, skill_hashes: dict | None = None) -> None:
         #（config.toml/opencode.json/codearts_cli.json/.claude.json 里有用户自己的
         # provider、其它 server）。JSON 合并型宿主一律走"摘条目"，与文件名无关——
         # codearts_cli.json 第一版没进 _SHARED_CONFIG_NAMES，卸载把整份配置删了（实锤）。
-        if target in ("opencode", "codeartsdoer", "generic") or path.name in _SHARED_CONFIG_NAMES:
+        if target in ("opencode", "codeartsdoer", "codeartswork", "generic",
+                      "workbuddy", "atomcode") or path.name in _SHARED_CONFIG_NAMES:
             print(f"skip（用户配置文件，uninstall 只摘托管条目）：{path}")
             _remove_managed_mcp_entry(target, path)
             continue
@@ -1052,7 +1061,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("install")
     sp.add_argument("--target", default="auto",
-                    help="hermes|opencode|codeartsdoer|codex|dsh|generic|auto（默认探测）")
+                    help="hermes|opencode|codeartsdoer|codeartswork|codex|codex-desktop|dsh|workbuddy|atomcode|generic|auto（默认探测）")
     sp.add_argument("--preset", default="collect", choices=list(PRESETS),
                     help="collect=对外默认（采集者）；full=内部全量")
     sp.add_argument("--api-base", default="http://127.0.0.1:8000")

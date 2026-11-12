@@ -1,0 +1,8 @@
+{
+  "id": "codex-desktop",
+  "cli": "codex",
+  "detect": {"path": "~/.agents"},
+  "config": "~/.agents/plugins/marketplace.json",
+  "skillsDir": "~/plugins/vod-devkit/skills",
+  "notes": "Codex Desktop 通过『个人市场』发现插件：~/.agents/plugins/marketplace.json 的 plugins[] 里登记 {name, source:{source:local,path:./plugins/vod-devkit}}，插件目录在 ~/plugins/<name>（内含 .mcp.json 与 .codex-plugin/plugin.json）。安装=写插件目录+登记一条；卸载=摘 marketplace 条目+删插件目录，不碰 ~/.agents/skills 等原生目录。路径来源：huaweicloud-devkit targets.ts codexDesktopPluginsDir/codexMarketplacePath 与 agents/codex-desktop.ts。本机未装该宿主，未真机验证。"
+}

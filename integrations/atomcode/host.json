@@ -1,0 +1,8 @@
+{
+  "id": "atomcode",
+  "cli": "atomcode",
+  "detect": {"path": "~/.atomcode"},
+  "config": "~/.atomcode/mcp.json",
+  "skillsDir": "~/.atomcode/skills",
+  "notes": "AtomCode 的配置根可由 ATOMCODE_HOME 覆盖（默认 ~/.atomcode），适配器每次调用期读取该 env，不缓存。mcp.json 形态 mcpServers.<name> = command/args/env。宿主另有 hooks.json 的 pre_tool_use 遥测 hook——属华为工具的埋点，我们刻意不装（不引入遥测）。路径来源：huaweicloud-devkit targets.ts atomcodeHome/atomcodeMcpConfigFile/atomcodeSkillsDir。本机未装该宿主，未真机验证。"
+}

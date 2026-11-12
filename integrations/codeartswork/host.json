@@ -1,0 +1,8 @@
+{
+  "id": "codeartswork",
+  "cli": "codearts",
+  "detect": {"path": "~/.codeartswork"},
+  "config": "~/.codeartswork/mcp/mcp_settings.json",
+  "skillsDir": "~/.codeartswork/skills",
+  "notes": "CodeArts Work（CodeArts Space）只有用户级配置。平台迁移后市场把插件放在 ~/.codearts/mcp/mcp_settings.json（新址），旧址 ~/.codeartswork 作为回退——适配器按『新址目录存在则用新址，否则旧址』选择，与上游 targets.ts codeartsWorkMcpSettingsFile 一致。条目形态是 mcp.<name> = {command: 数组, environment}（注意：环境键名是 environment，不是 env）。本机未装该宿主，未真机验证。"
+}
