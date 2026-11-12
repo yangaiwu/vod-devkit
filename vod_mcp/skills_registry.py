@@ -6,11 +6,12 @@
 **server data**：任何 MCP 宿主（包括没有原生技能目录的宿主，如 dsh headless）
 都能按需取到与包内完全一致的规则全文，且改规则不必碰四份宿主拷贝。
 
-分工（与 devkit 一致）：
-- 元技能（vod-core / vod-feedback-collect）仍原生安装——它们的价值在
-  宿主侧自动激活（触发词命中），走工具调用会丢掉激活时机。
-- 领域规则技能由本模块披露，归属 knowledge pack：pack 被裁剪时拒绝并
-  给恢复指引，不静默返回空。
+分工（与 devkit 一致，2026-11-12 复评校准）：
+- 元技能（vod-core / vod-feedback-collect）由安装器随对应 pack 拷进宿主技能目录；
+- 领域规则技能**双轨**：安装器无条件落地静态副本（采集侧偶尔要答"为什么归这类"），
+  本模块另提供同文本的按需取全文——给没有技能目录的宿主（generic/headless）兜底，
+  也保证改规则时不必依赖四份宿主拷贝同步。knowledge pack 控制的是**披露工具**
+  （vod_list_skills / vod_retrieve_skill），裁剪时拒绝并给指引，不是文件可见性。
 """
 import re
 from pathlib import Path

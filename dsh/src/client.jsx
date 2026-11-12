@@ -491,9 +491,8 @@ export function apply(ctx) {
     console.error(
       '[vod-devkit] 嵌入方未注入 __VOD_DSH_UI_PRODUCT__，反馈入口未激活。' +
       '产品归因是必配项：嵌入方装前设置 window.__VOD_DSH_UI_PRODUCT__ = "<产品名>"' +
-      '（取值=生态看板产品名：高校AI开发者平台/成长中心/AI云原生开发实践中心/鸿蒙开发实践中心/' +
-      'AI办公实践中心/IaC 实践中心/AI 开发者空间/AI Agent 集成/AI 工具集成/AI 运行环境/开放能力/' +
-      'Skills门户/GTD/VOD）');
+      '（取值=引擎产品名录：GET /external/meta 的 productCatalog，或用 vod_search_products 查；' +
+      '插件不内置产品名清单，不要凭记忆填）');
     return;
   }
   // dock 位名在 dsh 版本间漂移（2026-11-10 真机实锤：0.2.1-rc.5 真正渲染的是

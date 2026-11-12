@@ -89,13 +89,17 @@ JAVA_KEY = os.environ.get("VOD_JAVA_API_KEY", "") or _RT.get("java_key", "")   #
 _META_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/meta"
 _META_TTL = 24 * 3600
 # 快照兜底（引擎 meta 端点未上线/不可达时用；stale 语义见 _load_meta）
-_META_SNAPSHOT = {"products": ["agentarts", "codearts", "dataarts", "maas", "obs",
-                               "officeclaw", "modelarts"]}
+# **不预置任何产品名/短码**（2026-11-13 负责人纪律）：支持的产品列表唯一真源=
+# 引擎 meta 接口（productCatalog/products），插件自带的清单会随运营变更过期，
+# 而过期清单最危险的用法正是静默归因。名录不可达 → products=[]、归因一律
+# UNKNOWN→追问，只保留 stale 标记（引导文案据此提示"名录暂不可用"）。
+_META_SNAPSHOT: dict = {"products": []}
 
 
 def _load_meta(force: bool = False) -> dict:
     """可漂移值动态取：缓存 TTL 24h，引擎端点不可达时回退快照并标 stale。
-    真源=引擎 submit 校验常量。
+    真源=引擎 meta 接口（productCatalog/products）——**本模块不维护任何产品
+    清单**，离线时宁可不归因也不拿本地表猜。
 
     T7i：productCatalog=[{id,name}]（t_vod_product 运营预置，meta 组装）——
     提交产品归因按平台主键 id 的解析真源；老引擎无该键=catalog 空。
@@ -241,15 +245,9 @@ def _memory_put(client_info, **fields) -> None:
     _SESSION_MEM[key] = cur
 
 
-def _host_product() -> str | None:
-    """宿主产品（兜底用）：安装期写入 runtime.host_product，env 可覆盖。"""
-    return (os.environ.get("VOD_HOST_PRODUCT")
-            or str(_RT.get("host_product") or "").strip()
-            or str(_runtime_cfg().get("host_product") or "").strip() or None)
-
-
 def search_products(params: dict) -> dict:
-    """产品候选检索（只读）：给模型 3-5 个候选去问用户，而不是从 103 条里瞎猜。"""
+    """产品候选检索（只读）：给模型 3-5 个候选去问用户，而不是从名录里瞎猜。
+    名录=引擎 meta 接口的 productCatalog（长度随运营变更，插件不内置）。"""
     query = str(params.get("query") or "").strip()
     limit = int(params.get("limit") or 5)
     limit = max(1, min(limit, 20))
@@ -291,8 +289,10 @@ def _attribute_product(items: list, params: dict, client_info: dict | None = Non
       ② 原话唯一且高置信提及（多产品/歧义=低置信，转去问）
       ③ 会话记忆（30 分钟滑动，进程内；跨会话不继承）
       ④ 安装先验
-      ⑤ host_default：仅当用户明确说"不知道/随便"（params.productNotSpecified）
-    都拿不到 → 返回 source=unknown + confidence=low，由调用方抛可执行错误要求追问。
+    四级都拿不到（含用户明确说"不知道/随便"= params.productNotSpecified）→
+    返回 source=unknown + confidence=low，由调用方抛可执行错误要求追问。
+    **不做 host_default 兜底**（2026-11-12 复评删除：宿主产品也是一次推断，
+    错归的产品会进引擎幂等/判重域，污染静默且难追溯）。
     """
     text = "\n".join(content for _i, _v, content in items)
     meta = _load_meta()
@@ -344,11 +344,9 @@ def _attribute_product(items: list, params: dict, client_info: dict | None = Non
         result["confidence"] = "medium"
         return result
 
+    # 用户明确说"不知道/随便"：同样是"不猜、不提交"——只影响回执原因字段
+    # （productNotSpecified=true），不做任何兜底推断。
     not_specified = bool(params.get("productNotSpecified")) or bool(mem.get("not_specified"))
-    if not_specified:
-        # 用户明确说不知道：**不做任何猜测**（不按宿主产品兜底——那也是一次推断，
-        # 且产品会进引擎幂等域，错归代价比丢一条高）。交给调用方提示用户"缺产品不提交"。
-        pass
     ev = list(result.get("evidence") or [])
     if not_specified:
         ev = [{"reason": "user-not-specified"}] + ev

@@ -571,6 +571,12 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
   仍原生安装。理由：四份宿主拷贝各自漂移，D-drift-lock 只能事后发现；且
   dsh 这类没有规则技能原生目录的宿主此前拿不到规则全文。同时修掉
   vod-core 路由表教已删工具（vod_run_analysis 等）的存量漂移。
+  - 口径校准（2026-11-12 复评，负责人拍板 A）：上句"领域规则技能由披露面下发"
+    与安装器现状不符——规则技能是**双轨**（安装器无条件落地静态副本 + 披露面同文本
+    取全文），knowledge pack 只控制披露工具，不控制文件可见性。以代码现状为准
+    （不做安装器过滤：默认 collect 用户会失去规则能力，是能力回退），已同步
+    skills_registry docstring；description 里的内部真源路径一并挪出（description
+    最容易被模型原样复述），正文补"对外复述纪律"。
 - **D-devtoolchain-5 发版终态断言 + 功能级冒烟**：release.sh --publish 后必须
   过 publish_verify（轮询 npm view 到目标版本 + 拉回 tarball 查关键模块与
   契约版本）；smoke_hosts 从识别级升到功能级（读宿主实际配置拉起 stdio 真调
@@ -638,6 +644,21 @@ dsh 归因漂移锁已按新口径改写（旧「安装期绑定」句禁止回�
 
 未采（仍不抄）：devkit 的 56 工具/12 packs/sandbox/proxy/telemetry（云服务业务面）、
 5 宿主全适配（无消费者）、release-please（我们 release.sh 三重断言已反超）。
+
+## D-product-catalog-1 产品名录单一真源=引擎接口，插件不预置产品名（2026-11-13 负责人纪律）
+
+支持的产品列表由 VOD 引擎 meta 接口下发（`productCatalog` / `products`）。插件侧
+任何本地产品清单都是过期真源，且过期清单最危险的用法就是静默归因——已清除两处：
+- `_META_SNAPSHOT` 原带 7 个短码（agentarts/codearts/...）：删除，名录不可达时
+  `products=[]`，归因一律 UNKNOWN→追问，只留 stale 标记；`search_products`
+  在无 catalog 时返回空候选，不拼凑。
+- dsh UI 报错文案原列 15 个产品名（"取值=生态看板产品名：..."）：改为指向
+  `GET /external/meta` 的 productCatalog / `vod_search_products`。
+
+边界：`BRAND_ALIASES`（码道→CodeArts）保留，但只对**本次 catalog 里存在**的产品
+生效（不存在即跳过，不产生指向幻觉 id 的别名）；它是用户口语词表，不是产品名真源。
+回归锁：test_attribution（S98 名录空→UNKNOWN）、test_meta_unreachable_falls_back_snapshot
+（products 必须为空）、test_auth 归因块（短码/俗称在名录不可达时都不得归因）。
 
 ### D-attrib-B 复审触发与后续排期（2026-11-11，负责人拍板 A + P5/P6）
 
@@ -892,12 +913,12 @@ codearts_cli.json`、`KERNEL_CONFIG_DIR=~/.codeartsdoer`）。
 - 会话记忆改进程内（每次宿主会话=新进程）+ 身份哈希进 Scope，避免多租户串；覆盖/改口即时生效
 - 旧客户端兼容：`VOD_ALLOW_UNKNOWN_PRODUCT=1` 时走 legacy_default（low），不阻断老版本；
   默认关闭（新客户端必须问）
-- 宿主产品映射：integrations/<host>/host.json 的 `productDefault`（CodeArts Agent→CodeArts），
-  安装期写入 runtime.host_product（env VOD_HOST_PRODUCT 可覆盖）
+- 宿主产品映射**已删除**（2026-11-12 复评收口）：host.json `productDefault`、runtime.host_product、
+  `_host_product()` 均无消费方，随本轮清理移除；候选只走 `vod_search_products`（零兜底）
 - 话术三处统一：vod-core 铁律、vod-feedback-collect 第 0 步、路由插件、server instructions
   全部改为"产品未定先问一次，用户说不知道就 productNotSpecified=true"
 
-回归锁 tests/test_product_ask.py（11 例）：唯一命中不问 / 无产品 -32010+候选 / 不知道→host_default /
+回归锁 tests/test_product_ask.py（19 例，评审后补至）：唯一命中不问 / 无产品 -32010+候选 / 不知道→拒绝不兜底 /
 无宿主映射→unknown+证据 / 多产品先问 / 记忆跳过第二次+改口覆盖 / 记忆过期 / 旧客户端 legacy_default /
 候选检索 / draft 不阻断 / commit 强制。
 

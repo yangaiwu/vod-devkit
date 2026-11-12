@@ -156,22 +156,16 @@ def test_attribution_literal_match_resolves_catalog_id(monkeypatch):
     # 别名表（modelarts→maas）随目录缺失回落规范名通道：不静默丢
     out = run("modelarts 模型部署失败")
     assert out["product"] in ("MaaS", "maas"), out
-    # 目录不可用（快照/老引擎）：只短码可匹配，命中仍走 name 兼容通道
-    # 目录不可用：回退 _META_SNAPSHOT 的短码清单（快照里是小写短码）→ 命中
-    # 后无 id，走 name 兼容通道原样上送，不静默丢
+    # 名录不可达（快照/老引擎）：插件**不预置任何产品名/短码**（2026-11-13 纪律：
+    # 支持的产品列表真源=引擎 meta 接口）→ 短码与俗称都归不了，一律 UNKNOWN→追问，
+    # 绝不拿本地清单猜。
     monkeypatch.setattr(tools, "_load_meta",
-                        lambda force=False: {"products": list(tools._META_SNAPSHOT["products"]),
-                                             "catalog": [], "aliases": {}, "nameAliases": {},
-                                             "stale": True, "source": "snapshot"})
-    out = run("codearts 打不开")
-    assert out["product"].lower() == "codearts", out
-    # 2026-11-12 变更：品牌俗称改为 devkit 本地维护（BRAND_ALIASES），
-    # 不再依赖后端 nameAliases 下发——所以 meta 降级后「码道」仍能归到 CodeArts。
-    # 旧行为（依赖后端别名、降级即弃权）已被有意替换：能力自治，比依赖远端更稳。
-    out = run("码道打不开")
-    assert out["source"] == "user_input", out
-    # 快照无 catalog id → 走 name 兼容通道；标签取自快照小写短码，故比较大小写不敏感
-    assert out["product"].lower() == "codearts", out
+                        lambda force=False: {"products": [], "catalog": [], "aliases": {},
+                                             "nameAliases": {}, "stale": True,
+                                             "source": "snapshot"})
+    for text in ("codearts 打不开", "码道打不开"):
+        out = run(text)
+        assert out["source"] == "unknown" and out["product"] is None, (text, out)
 
 
 def test_meta_catalog_cached_t7i(monkeypatch):
@@ -263,7 +257,8 @@ def test_meta_unreachable_falls_back_snapshot(monkeypatch):
     monkeypatch.setattr(tools, "_http", fake_http)
     m = tools._load_meta(force=True)
     assert m["source"] == "snapshot" and m["stale"] is True
-    assert "codearts" in m["products"]
+    # 快照不预置产品名（2026-11-13 纪律）：不可达=名录空，归因走追问而不是本地清单
+    assert m["products"] == []
 
 
 def test_hoarding_missing_voiceids_not_counted_success(monkeypatch):

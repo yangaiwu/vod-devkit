@@ -401,10 +401,8 @@ def cmd_install(args):
         cfg["local_ledger"] = False
     # base 同步落 runtime.json：宿主 env 透传不稳是实测坑，透传挂了静默落回
     # 127.0.0.1:8090；文件兑底与 env 同值不构成双真源（优先级链 env>文件）
-    # 宿主产品（host_default 兜底用，D-product-ask-1）：只有 integrations 声明了才写
-    spec_raw = host_specs.raw(target) if target in host_specs.hosts() else {}
-    if spec_raw.get("productDefault"):
-        cfg["host_product"] = spec_raw["productDefault"]
+    # 宿主产品（host_default）已删除（2026-11-12 复评）：宿主产品也是一次推断，
+    # 错归会进引擎幂等/判重域。候选只走 vod_search_products，这里不再写 host_product。
     cfg["java_base"] = args.java_api_base
     rt.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 

@@ -1,6 +1,6 @@
 ---
 name: vod-scoring-rules
-description: VOD 评分规则（引擎 v2 真实公式）— 四项加法、上下限、优先级映射。真源=workflow/src/workflow_v2.py（VOD-Project 2bb3fc82 实测核对）。
+description: VOD 评分规则（引擎 v2 真实公式）— 四项加法、上下限、优先级映射。
 tags: [vod, scoring, rules]
 metadata:
   version: 2
@@ -11,6 +11,7 @@ metadata:
 > 真源纪律：以 workflow_v2.py 评分函数为准，2026-11-03 逐行核对。
 > 旧版"五项维度含用户价值"口径作废——引擎是四项，且非重点问题
 > 上限不同（下方原文），旧文档没写。
+> 对外复述纪律：可讲公式要点与上下限，不引用仓库路径、文件行号、提交号。
 
 ## 评分公式（引擎代码原文语义）
 
