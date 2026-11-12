@@ -16,11 +16,24 @@ _AGENTS_MARKER_BEGIN = "<!-- vod-devkit:feedback-skill BEGIN -->"
 # 且 1705 个历史会话带着它跑（实测）。清理逻辑必须认这个标记，否则残留继续生效。
 _LEGACY_ONE_LINER = "<!-- vod-submit-one-liner -->"
 _AGENTS_MARKER_END = "<!-- vod-devkit:feedback-skill END -->"
-_SPEC = host_specs.load("codex")
+_SPEC: dict | None = None
+
+
+def _spec() -> dict:
+    """调用期解析宿主配置（模块 import 期读 integrations/ 会在载荷副本里炸）。
+
+    2026-11-12 实锤：载荷副本不含 integrations/，import 期 host_specs.load("codex")
+    直接 KeyError → 远程面每个请求 500。宿主配置只在 install 期用得上，运行期
+    server 不需要它。
+    """
+    global _SPEC
+    if _SPEC is None:
+        _SPEC = host_specs.load("codex")
+    return _SPEC
 
 
 def skills_dir(args):
-    d = _SPEC.get("skillsDir")
+    d = _spec().get("skillsDir")
     return Path(d) if d else None
 
 
@@ -98,7 +111,7 @@ def install(args, packs: str) -> Path:
     if not codex:
         print("[vod-devkit] 未找到 codex CLI，无法走原生插件安装", file=sys.stderr)
         sys.exit(2)
-    spec = host_specs.load("codex")
+    spec = _spec()
     conf = Path(spec["configPath"])
     if conf.exists():  # 历史遗留：config.toml MCP 段与插件同名=双注册，移除
         text = conf.read_text(encoding="utf-8")

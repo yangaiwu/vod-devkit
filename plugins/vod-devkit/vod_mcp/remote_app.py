@@ -19,7 +19,6 @@
 """
 import asyncio
 import json
-import os
 
 from mcp import types
 from mcp.server.lowlevel import Server

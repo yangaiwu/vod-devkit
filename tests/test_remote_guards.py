@@ -44,11 +44,10 @@ def test_stdio_build_does_not_require_skills(monkeypatch, tmp_path):
 
 def test_payload_problems_detects_tampering(tmp_path, monkeypatch):
     from vod_mcp import payload, transport_remote
-    from vod_mcp.host_adapters import base
 
     monkeypatch.setenv("HOME", str(tmp_path))
     dest = payload.stage(quiet=True)
-    base.set_payload_dir(dest)
+    monkeypatch.setenv("VOD_PAYLOAD_DIR", str(dest))  # 显式 env 优先（安装期注入同款）
     try:
         assert transport_remote.payload_problems(force=True) == []
         target = dest / "vod_mcp" / "server.py"
@@ -56,13 +55,13 @@ def test_payload_problems_detects_tampering(tmp_path, monkeypatch):
         problems = transport_remote.payload_problems(force=True)
         assert problems and any("server.py" in p for p in problems)
     finally:
-        base.set_payload_dir(None)
+        monkeypatch.delenv("VOD_PAYLOAD_DIR", raising=False)
 
 
-def test_no_payload_dir_means_no_guard():
+def test_no_payload_dir_means_no_guard(monkeypatch):
     from vod_mcp import transport_remote
-    from vod_mcp.host_adapters import base
-    base.set_payload_dir(None)
+    monkeypatch.delenv("VOD_PAYLOAD_DIR", raising=False)
+    # 仓内直跑：ROOT 没有 payload.json → 不校验（stdio 形态不误伤）
     assert transport_remote.payload_problems(force=True) == []
 
 

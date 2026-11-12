@@ -976,3 +976,27 @@ workbuddy / dsh / hermes（含 hooks 插件）这些都要具备」。落地口�
 纪律：矩阵 PASS 只证明"配置形态 + 载荷入口 + 拉起自证"这一层；宿主程序读不读得到、
 会话里模型会不会真调，必须在那台装了宿主程序的机器上跑一次才算闭环。未闭环的宿主
 在 host.json notes 里显式标注「未真机验证」，不许用矩阵 PASS 冒充。
+
+## D-remote-2：远程面两条守卫（对齐 devkit verifySkillTree / remoteSurface）＋ 部署边界（2026-11-12）
+
+对照 huaweicloud-devkit 的远程面实现（mcp-server-remote.ts + mcp-protocol.ts）补齐：
+
+1. **构造期技能树自校验**（vod_mcp/remote_app.py: verify_servable_skills）
+   SKILLS_ROOT 不存在 / 无目录型技能 / 技能缺 SKILL.md → 拒绝构造。
+   理由同参照物：list_skills 由注册表驱动，技能缺失会"宣传 retrieve_skill 取不到的名字"。
+2. **每请求载荷自校验**（vod_mcp/transport_remote.py: payload_problems）
+   按 30s TTL（payload.json mtime 作签名）校验副本 sha256 全集；被改/缺文件 → 503 + 问题清单。
+   载荷目录来源优先级：VOD_PAYLOAD_DIR > 自身所在树（有 payload.json 即视为副本）。
+3. **部署边界（写进文档，不写进代码）**
+   绑回环 + 反代 TLS；**每个 agent 一把 engine key**（引擎按 key 身份算幂等/归因，
+   共用一把会让不同 agent 的同句被判重）；远程面不吃 draft/commit/list_submitted。
+
+同批修掉一个真机缺陷（做第 2 条时暴露）：
+`vod_mcp/host_adapters/codex.py` 在 **import 期** 调 host_specs.load("codex")；
+载荷副本不含 integrations/，于是远程面每个请求在请求线程里 KeyError → 500。
+改为调用期 _spec() 惰性解析（同一类"import 期求值"缺陷，hermes 那次已修过一次）。
+另外 payload_problems 一开始 import host_adapters.base，触发同样连锁：已改为不依赖该包。
+
+真机验证：
+  干净载荷副本（payload.stage 重打）→ HTTP 200，7 个工具；
+  人为篡改 server.py 的副本 → HTTP 503「载荷校验未通过：vod_mcp/server.py …」

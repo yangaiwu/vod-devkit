@@ -21,6 +21,7 @@ devkit 的契约（mcp-server-remote.ts + test/remote-mcp-server.test.ts 实测�
 """
 import asyncio
 import json
+import os
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,10 +44,20 @@ def payload_problems(force: bool = False) -> list:
     只校验"载荷副本"形态：stdio/仓内直跑没有 payload.json，返回空（不误伤）。
     """
     import time as _t
-    from pathlib import Path as _P
+    from pathlib import Path
     from vod_mcp import payload as _pl
-    from vod_mcp.host_adapters import base as _base
-    d = _base.payload_dir()
+    _P = Path
+    # 显式 env 优先（安装期注入），否则按自身所在树推断——*不许* import
+    # host_adapters：它的 __init__ 会连带 import 各宿主适配模块，而载荷副本不含
+    # integrations/（2026-11-12 实锤：请求线程 KeyError → 每个请求 500）。
+    env_dir = (os.environ.get("VOD_PAYLOAD_DIR") or "").strip()
+    d = _P(env_dir) if env_dir else None
+    if d is None:
+        # 从载荷副本直接起来的服务（entry = <payload>/vod_mcp/server.py）没有
+        # install 期注入的 payload_dir —— 用自身所在树推断：载荷根里有 payload.json
+        # 就说明"我就是那份副本"，必须自校验（否则被改的副本会一直对外服务）。
+        root = _P(__file__).resolve().parent.parent
+        d = root if (root / "payload.json").exists() else None
     if d is None:
         return []
     meta = _P(d) / "payload.json"
