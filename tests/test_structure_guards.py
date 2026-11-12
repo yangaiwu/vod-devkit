@@ -154,4 +154,4 @@ def test_server_instructions_match_attribution_design():
     product，等于把已推翻的语义重新说给模型听。"""
     text = (ROOT / "vod_mcp" / "server.py").read_text(encoding="utf-8")
     assert "安装绑定完成" not in text
-    assert "从用户原话解析" in text
+    assert "必须问用户一次" in text and "禁止询问用户" not in text

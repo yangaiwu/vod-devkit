@@ -22,7 +22,8 @@ TOKEN = "tenant-key-A"
 
 # 远程面工具集（契约 - REMOTE_WITHHELD）
 REMOTE_TOOLS = ["vod_submit_voices", "vod_devkit_info", "vod_auth_status",
-                "vod_list_skills", "vod_retrieve_skill", "vod_check_update"]
+                "vod_list_skills", "vod_retrieve_skill", "vod_check_update",
+                "vod_search_products"]
 
 
 class _Mcp(BaseHTTPRequestHandler):

@@ -104,15 +104,17 @@ def test_s96_expired_memory_falls_back_to_binding_then_unknown():
 
 # ---- S97：模型自报不采信（D-attrib-A 事故语义保留） ----
 
-def test_s97_runtime_self_report_is_ignored_but_recorded(monkeypatch):
+def test_s97_explicit_answer_is_user_answer_source(monkeypatch):
+    """S97（2026-11-11 改判）：模型传的 product 只当"用户回答"用，来源标 user_answer。
+
+    老口径"自报一律不采信"随 D-product-ask-1 推翻；现在的防线是：只有问过用户才该填，
+    回执用 productSource=user_answer + rawText 可追。
+    """
     monkeypatch.setattr(tools, "_load_meta", lambda force=False: META)
     monkeypatch.setattr(tools, "_RT", {})
     out = tools._attribute_product([(0, {}, "导出很慢")], {"product": "hermes"})
-    assert out["product"] is None, "自报不是归因来源"
-    assert out["ignored"] == "hermes"
-
-
-# ---- S98：名录不可用不猜 ----
+    assert out["source"] == "user_answer"
+    assert out["product"] == "hermes" and out["confidence"] == "low"
 
 def test_s98_snapshot_only_matches_short_codes_and_never_guesses():
     snap = {"products": [], "catalog": [], "aliases": {}, "nameAliases": {},

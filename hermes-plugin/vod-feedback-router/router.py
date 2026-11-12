@@ -29,8 +29,8 @@ _COMPLAINT_RE = re.compile("|".join(re.escape(w) for w in TRIGGER_WORDS))
 _DIRECTIVE = (
     "[vod-router] 确定性意图路由命中：本消息匹配产品反馈采集意图（规则命中，非模型判断）。"
     "必须按 vod-feedback-collect 技能流程处理：先承接用户，再征得提交同意"
-    "（禁止询问产品归属——归因由插件从用户原话解析，安装绑定仅作先验；"
-    "禁止进入复现排查模式）。"
+    "（产品未定时必须问一次『这条是哪个产品的反馈』，不许裸提交；"
+    "用户说不知道就传 productNotSpecified=true；禁止进入复现排查模式）。"
     "提交时 content=用户原话逐字，一次抱怨一条，回执按 echo 原样转述。"
 )
 

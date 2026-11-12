@@ -390,6 +390,10 @@ def cmd_install(args):
         cfg["local_ledger"] = False
     # base 同步落 runtime.json：宿主 env 透传不稳是实测坑，透传挂了静默落回
     # 127.0.0.1:8090；文件兑底与 env 同值不构成双真源（优先级链 env>文件）
+    # 宿主产品（host_default 兜底用，D-product-ask-1）：只有 integrations 声明了才写
+    spec_raw = host_specs.raw(target) if target in host_specs.hosts() else {}
+    if spec_raw.get("productDefault"):
+        cfg["host_product"] = spec_raw["productDefault"]
     cfg["java_base"] = args.java_api_base
     rt.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -468,6 +472,20 @@ def _stage_payload():
     from vod_mcp import payload as _payload
     from vod_mcp.host_adapters import base as _base
     dest = _payload.stage()
+    # 把安装期运行配置种进载荷（载荷 runtime 与仓内 runtime 是两份文件）：
+    # 否则 host_product/product/java_base 只写在仓内，真正跑起来的副本看不到
+    seeded = {k: v for k, v in _runtime_cfg_read().items()
+              if k in ("product", "host_product", "java_base", "local_ledger")}
+    if seeded:
+        rt = dest / "vod_mcp" / "runtime.json"
+        cur = {}
+        if rt.exists():
+            try:
+                cur = json.loads(rt.read_text(encoding="utf-8"))
+            except Exception:
+                cur = {}
+        cur.update(seeded)
+        rt.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding="utf-8")
     _base.set_payload_dir(dest)
     return dest
 

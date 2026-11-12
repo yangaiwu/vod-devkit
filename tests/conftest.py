@@ -13,3 +13,12 @@ def _isolate_runtime(tmp_path, monkeypatch):
     from vod_mcp import tools
     monkeypatch.setattr(tools, "_runtime_path", lambda: tmp_path / "runtime.json")
     yield
+
+
+@pytest.fixture(autouse=True)
+def _legacy_product_switch(monkeypatch):
+    """D-product-ask-1 前写的老用例默认走兼容开关；专项用例把它 delenv 掉验证强制。"""
+    monkeypatch.setenv("VOD_ALLOW_UNKNOWN_PRODUCT", "1")
+    # 会话记忆是进程内全局（D-product-ask-1），跨用例会串——每个用例清空
+    from vod_mcp import tools as _t
+    _t._SESSION_MEM.clear()

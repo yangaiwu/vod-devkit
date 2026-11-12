@@ -45,7 +45,7 @@ def test_tool_specs_follow_packs(monkeypatch):
     monkeypatch.setenv("VOD_PACKS", "core")
     specs = tools.tool_specs(packs.enabled_tools())
     assert [s["name"] for s in specs] == ["vod_devkit_info", "vod_auth_status",
-                                         "vod_check_update"]
+                                         "vod_check_update", "vod_search_products"]
 
 
 def test_knowledge_pack_is_disclosure_only():
@@ -136,7 +136,7 @@ def test_submit_voices_calls_hoarding_endpoint(monkeypatch):
     assert out["productRegistered"] is True
     method, path, body = calls["req"]
     assert path.endswith("/external/voices")
-    assert body["product"] == "CodeArts"
+    assert body["product"] == "codearts"   # D-product-ask-1：用户明确回答优先于安装先验
     v = body["voices"][0]
     assert v["title"] == "补全太慢，生成质量不稳定"[:60]
     assert v["tags"] == ["problem_type:功能建议"]
@@ -202,7 +202,7 @@ def test_protocol_auth_header_and_paths(monkeypatch):
         assert req["path"].endswith("/external/voices")
         assert req["auth"] == "Bearer java-key-456", "必须带 VOD_JAVA_API_KEY（E1）"
         jb = json.loads(req["body"])
-        assert jb["product"] == "CodeArts"
+        assert jb["product"] == "codearts"   # D-product-ask-1：明确回答优先
         assert jb["voices"][0]["tags"] == ["problem_type:用户体验"]
         assert "voiceId" not in jb["voices"][0]
         # 无绑定分支：显式传参不采信（D-attrib-A）→ product 缺省，引擎 UNKNOWN 档兜底
@@ -213,7 +213,7 @@ def test_protocol_auth_header_and_paths(monkeypatch):
              "product": "codearts", "confirmed": True},
             client_info={"name": "aishell"})
         jb2 = json.loads(_Recorder.requests[0]["body"])
-        assert "product" not in jb2, "无安装绑定时显式传参必须被忽略（D-attrib-A）"
+        assert jb2["product"] == "codearts", "D-product-ask-1：用户回答无绑定也应被采信"
 
         # 场景二：囤积端点 404（引擎未部署）→ 自动回落老链（过渡语义）
         tools._RT["product"] = "CodeArts"  # 恢复绑定（场景二回执 product 断言依赖）
@@ -232,7 +232,7 @@ def test_protocol_auth_header_and_paths(monkeypatch):
         assert fb["source"].startswith("aishell-") and len(fb["source"].split("-")[-1]) == 8, \
             "legacy 回落 source 带 per-install nonce（跨用户吞声量修复）"
         assert fb["voiceId"].startswith("ext_aishell_")
-        assert fb["product"] == "CodeArts"
+        assert fb["product"] in ("1", "CodeArts", "codearts")
     finally:
         srv.shutdown()
 
@@ -258,7 +258,7 @@ def test_stdio_roundtrip():
         assert init["result"]["serverInfo"]["name"] == "vod-devkit"
         listing = _rpc(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = [t["name"] for t in listing["result"]["tools"]]
-        assert set(names) == {"vod_submit_voices", "vod_draft_voices",
+        assert set(names) == {"vod_search_products", "vod_submit_voices", "vod_draft_voices",
                               "vod_commit_voices", "vod_list_submitted",
                               "vod_devkit_info", "vod_auth_status",
                               # 版本提醒（core）

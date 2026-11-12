@@ -62,6 +62,15 @@
             "type": "boolean",
             "default": false,
             "description": "用户已确认为 true 才执行（confirm 护栏，逐次同意）"
+          },
+          "product": {
+            "type": "string",
+            "description": "用户明确回答的产品（产品名或平台主键 ID）。**只有在已经问过用户、并得到回答后才能填**；不要用模型自己的猜测。插件仍会先用用户原话里的产品名做归因，回答只用于补齐。"
+          },
+          "productNotSpecified": {
+            "type": "boolean",
+            "default": false,
+            "description": "用户明确表示不知道/随便/不指定时传 true → 按宿主产品记录，回执标 productSource=host_default、confidence=low，可被运营修正。不是用来跳过询问的开关。"
           }
         },
         "required": [
@@ -284,6 +293,15 @@
             "type": "boolean",
             "default": false,
             "description": "用户已确认为 true 才执行（confirm 护栏，逐次同意）"
+          },
+          "product": {
+            "type": "string",
+            "description": "用户明确回答的产品（产品名或平台主键 ID）。**只有在已经问过用户、并得到回答后才能填**；不要用模型自己的猜测。插件仍会先用用户原话里的产品名做归因，回答只用于补齐。"
+          },
+          "productNotSpecified": {
+            "type": "boolean",
+            "default": false,
+            "description": "用户明确表示不知道/随便/不指定时传 true → 按宿主产品记录，回执标 productSource=host_default、confidence=low，可被运营修正。不是用来跳过询问的开关。"
           }
         },
         "required": [
@@ -358,9 +376,59 @@
             "type": "boolean",
             "description": "撤销之前的版本跳过设置，恢复正常提醒"
           }
-          },
-          "additionalProperties": false
+        },
+        "additionalProperties": false
       }
+    },
+    "vod_search_products": {
+      "description": "按关键词检索产品名录，返回候选产品（含主键 ID）。用于**问用户是哪个产品之前**给 3-5 个候选，或在用户回答后把名字解析成 ID。只读，不触上游写接口。",
+      "input": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "关键词（用户原话片段或用户回答的产品名）"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 5,
+            "description": "返回候选数上限（默认 5）"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "score": {
+                  "type": "number",
+                  "description": "匹配强度（0-1）"
+                }
+              }
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "candidates"
+        ]
+      },
+      "backend": "local"
     }
   },
   "backends": {

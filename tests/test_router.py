@@ -32,7 +32,7 @@ def test_h2_complaint_variants_directive():
         out = router.route(msg)
         assert out is not None, msg
         assert "vod-feedback-collect" in out
-        assert "禁止询问产品归属" in out
+        assert "必须问一次" in out
 
 
 def test_h3_ordinary_messages_zero_injection():

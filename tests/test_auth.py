@@ -204,35 +204,33 @@ def test_meta_catalog_cached_t7i(monkeypatch):
 
 
 def test_product_attribution_layers(monkeypatch):
-    """归因三层（D-attrib-A，2026-11-06 拍板，推翻 2026-11-03 宽容口径）：
-    归因只由安装绑定决定——显式传参仅绑定一致才采信；无绑定一律 UNKNOWN 档。"""
-    monkeypatch.setattr(tools, "_load_meta",
-                        lambda force=False: {"products": [], "catalog": [],
-                                             "stale": False, "source": "cache"})
+    """D-product-ask-1（2026-11-11 拍板）：明确回答 > 原话唯一 > 记忆 > 先验 > host_default。
+
+    老口径"D-attrib-A 只认安装绑定、自报一律不采信"已推翻——用户回答是合法证据。
+    """
+    meta = {"products": ["CodeArts"], "stale": False, "source": "meta",
+            "catalog": [{"id": "1", "name": "CodeArts"}]}
+    monkeypatch.setattr(tools, "_load_meta", lambda force=False: meta)
     monkeypatch.setattr(tools, "JAVA_KEY", "k")
     captured = {}
     monkeypatch.setattr(tools, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
-                        captured.update(body=body) or {"code": 201, "voiceIds": ["ext_vod-agent_t1"], "statuses": ["new"]})
-    # ③ 无绑定（无论传不传参）→ body 不带 product（引擎 UNKNOWN 档人工归因）
+                        captured.update(body=body) or
+                        {"code": 201, "voiceIds": ["ext_vod-agent_t1"], "statuses": ["new"]})
     monkeypatch.setattr(tools, "_RT", {})
+    monkeypatch.delenv("VOD_ALLOW_UNKNOWN_PRODUCT", raising=False)   # 关掉旧客户端兼容开关
+    # ① 没有回答、没有线索、用户没说不知道 → 拒绝并要求追问
+    import pytest as _pytest
+    with _pytest.raises(tools.ToolError) as ei:
+        tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
+                             "confirmed": True}, client_info={"name": "t"})
+    assert ei.value.code == -32010
+    # ② 用户回答 → 按回答提交（source=user_answer）
     out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
-                                "confirmed": True}, client_info={"name": "t"})
-    assert out["accepted"] == 1 and "product" not in captured["body"]
-
-    # ③' 宿主自报产品（无绑定）→ 不采信，仍 UNKNOWN；回执留痕
-    out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
-                                "product": "hermes", "confirmed": True},
+                               "product": "CodeArts", "confirmed": True},
                               client_info={"name": "t"})
-    assert out["accepted"] == 1 and "product" not in captured["body"]
-    assert out["ignoredRuntimeProduct"] == "hermes"
-
-    # ① 绑定生效（无传参取 runtime 绑定；目录空走规范名通道）
-    monkeypatch.setattr(tools, "_RT", {"product": "aishell"})
-    out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
-                               "confirmed": True}, client_info={"name": "t"})
-    assert out["accepted"] == 1 and captured["body"]["product"] == "aishell"
-
+    assert captured["body"].get("product") in ("1", "CodeArts")
+    assert out["productSource"] == "user_answer" and out["productConfidence"] == "high"
 
 def test_meta_fetch_and_cache(monkeypatch):
     """meta 端点可用：拉取→落 runtime 缓存→命中缓存不再请求。"""
@@ -307,37 +305,32 @@ def test_hoarding_engine_rejected_passthrough(monkeypatch):
 
 
 def test_attribution_chain_evidence_over_binding(monkeypatch):
-    """D-attrib-B 优先级链：字面证据 > 记忆 > 安装先验 > UNKNOWN；
-    模型自报 product 永远不参战（D-attrib-A 事故语义不解除）。"""
-    meta = {"products": ["CodeArts"], "stale": False, "source": "meta",
-            "catalog": [{"id": "1", "name": "CodeArts"}],
-            "nameAliases": {"CODEARTS": ["码道", "CodeArts"]}, "aliases": {}}
+    """优先级：用户明确回答 > 原话唯一高置信 > 记忆 > 安装先验。"""
+    meta = {"products": ["CodeArts", "Maas"], "stale": False, "source": "meta",
+            "catalog": [{"id": "1", "name": "CodeArts"}, {"id": "5", "name": "Maas"}],
+            "nameAliases": {}, "aliases": {}}
     monkeypatch.setattr(tools, "_load_meta", lambda force=False: meta)
     captured = {}
     monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "_RT", {"product": "CodeArts"})
+    monkeypatch.setattr(tools, "_RT", {"product": "Maas"})
     monkeypatch.setattr(tools, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         captured.update(body=body) or
                         {"code": 201, "voiceIds": ["ext_v1"], "statuses": ["new"]})
-
-    # ① 无字面证据 → 安装先验（主键化）
-    out = tools.submit_voices({"voices": [{"content": "导出转圈两分钟"}],
+    # 原话唯一命中 CodeArts → 证据赢过安装先验 Maas
+    out = tools.submit_voices({"voices": [{"content": "CodeArts 导出失败"}],
                                "confirmed": True}, client_info={"name": "t"})
-    assert captured["body"]["product"] == "1" and out["productSource"] == "install_binding"
-    # ② 字面证据（中文别名）压过先验；自报仍留痕不采信
-    out = tools.submit_voices({"voices": [{"content": "码道导出转圈两分钟"}],
-                               "product": "hermes", "confirmed": True},
-                              client_info={"name": "t"})
     assert captured["body"]["product"] == "1"
     assert out["productSource"] == "user_input"
-    assert out["ignoredRuntimeProduct"] == "hermes"
-    assert out["productEvidence"][0]["alias"] == "码道"
+    # 用户明确回答 → 回答赢过原话（"这条不是 CodeArts，是 Maas"）
+    out2 = tools.submit_voices({"voices": [{"content": "CodeArts 导出失败"}],
+                                "product": "Maas", "confirmed": True},
+                               client_info={"name": "t"})
+    assert captured["body"]["product"] == "5"
+    assert out2["productSource"] == "user_answer"
 
-
-def test_attribution_no_binding_ignores_runtime_param(monkeypatch):
-    """D-attrib-A：无绑定时运行期传参同样不采信（归因只由 install 决定），
-    body 不带 product → 引擎 UNKNOWN 档兜底。"""
+def test_attribution_accepts_explicit_answer_without_binding(monkeypatch):
+    """无安装先验时，用户回答照样可提交（老口径"运行期传参一律不采信"已推翻）。"""
     monkeypatch.setattr(tools, "_load_meta",
                         lambda force=False: {"products": [], "stale": False,
                                              "source": "meta", "catalog": []})
@@ -351,8 +344,8 @@ def test_attribution_no_binding_ignores_runtime_param(monkeypatch):
     out = tools.submit_voices({"voices": [{"content": "反馈四"}],
                                "product": "hermes", "confirmed": True},
                               client_info={"name": "t"})
-    assert "product" not in captured["body"], "无绑定+自报 → 不带 product 走 UNKNOWN"
-    assert out.get("ignoredRuntimeProduct") == "hermes"
+    assert out["productSource"] == "user_answer"
+    assert out["productConfidence"] == "low", "名录未命中=低置信（原样上报，引擎归一）"
 
 def test_submit_echo_requires_verbatim_relay(monkeypatch):
     """方案 A 回归锁：回执必须携带 echo（原话回显），content 与提交原话逐字一致。"""

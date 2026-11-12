@@ -206,35 +206,187 @@ _PRODUCT_MAP = {
 }
 
 
-def _attribute_product(items: list, params: dict) -> dict:
-    """归因（D-attrib-B，2026-11-11 负责人拍板 A/A/A/A；推翻 D-attrib-A 的
-    绑定独占与 D-product-id-2 的安装必配）：
+_SESSION_TTL = 30 * 60          # 会话内滑动记忆（D-product-ask-1）
+_SESSION_MEM: dict = {}         # 进程=一次宿主会话：重启即清，跨会话不继承
+_UNRESOLVED_CODE = -32010       # 「需要先问用户是哪个产品」的可执行错误码
 
-    优先级=用户原话字面证据 > 记忆（TTL 30 分钟）> 安装先验 > UNKNOWN。
-    - 唯一命中才采信；多产品命中=歧义 → UNKNOWN + 全部命中片段留痕
-    - 模型自报 product 一律不采信（事故语义不解除），只回执 ignoredRuntimeProduct
-    - 记忆只在 0 命中时启用，且只复用「有字面证据」的历史归因
-    返回 {"product","productName","source","evidence","ignored"}。
+
+def _session_key(client_info) -> str:
+    """记忆作用域（Scope）：宿主 + 身份。
+
+    进程内即一次 stdio 会话；远程面是多租户共享进程，所以身份也必须进 key，
+    否则 A 用户的"不知道→CodeArts"会串到 B 用户。
     """
-    raw = str(params.get("product") or "").strip()
-    result = _attrib.attribute(
-        "\n".join(content for _i, _v, content in items),
-        _load_meta(),
-        memory=_RT.get("attribution_memory") or {},
-        binding=str(_RT.get("product") or "").strip() or None,
-    )
-    result["ignored"] = raw or None
-    return result
+    ci = client_info or {}
+    import hashlib
+    ident = _eff_key() or ""
+    ident_hash = hashlib.sha256(ident.encode()).hexdigest()[:8] if ident else _install_nonce()
+    return f"{ci.get('name') or 'unknown'}|{ident_hash}"
+
+
+def _memory_get(client_info) -> dict:
+    import time as _t
+    cur = _SESSION_MEM.get(_session_key(client_info)) or {}
+    if cur and _t.time() - float(cur.get("at") or 0) > _SESSION_TTL:
+        return {}
+    return dict(cur)
+
+
+def _memory_put(client_info, **fields) -> None:
+    import time as _t
+    key = _session_key(client_info)
+    cur = _memory_get(client_info)
+    cur.update(fields)
+    cur["at"] = int(_t.time())      # 滑动过期
+    _SESSION_MEM[key] = cur
+
+
+def _host_product() -> str | None:
+    """宿主产品（兜底用）：安装期写入 runtime.host_product，env 可覆盖。"""
+    return (os.environ.get("VOD_HOST_PRODUCT")
+            or str(_RT.get("host_product") or "").strip()
+            or str(_runtime_cfg().get("host_product") or "").strip() or None)
+
+
+def search_products(params: dict) -> dict:
+    """产品候选检索（只读）：给模型 3-5 个候选去问用户，而不是从 103 条里瞎猜。"""
+    query = str(params.get("query") or "").strip()
+    limit = int(params.get("limit") or 5)
+    limit = max(1, min(limit, 20))
+    meta = _load_meta()
+    catalog = meta.get("catalog") or []
+    if not query:
+        return {"candidates": [], "total": len(catalog)}
+    idx = _attrib.build_alias_index(meta)
+    hits = _attrib.match_products(query, idx)
+    seen, cands = set(), []
+    for h in hits:
+        pid = str(h.get("id") or "")
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        cands.append({"id": pid, "name": h["product"],
+                      "score": round(min(1.0, len(h["alias"]) / max(len(query), 1)), 2)})
+    if not cands:                      # 别名没命中：退回名字子串（用户可能打错/只说一半）
+        q = query.lower()
+        for item in catalog:
+            name = str(item.get("name") or "")
+            if q and (q in name.lower() or name.lower() in q):
+                cands.append({"id": str(item.get("id")), "name": name, "score": 0.5})
+    if not cands:                      # 完全无关联词：给名录前 N 个当"可选项"（问用户用）
+        for item in catalog[:limit]:
+            cands.append({"id": str(item.get("id")), "name": str(item.get("name") or ""),
+                          "score": 0.0})
+    cands.sort(key=lambda c: (c["score"], len(c["name"])), reverse=True)
+    return {"candidates": cands[:limit], "total": len(catalog)}
+
+
+def _attribute_product(items: list, params: dict, client_info: dict | None = None) -> dict:
+    """归因（D-product-ask-1，2026-11-11 负责人拍板：不许裸 UNKNOWN，缺产品先问）。
+
+    优先级（按拍板口径，不是"原话永远第一"）：
+      ① 用户明确回答/确认（params.product，仅问过用户后由模型填）
+      ② 原话唯一且高置信提及（多产品/歧义=低置信，转去问）
+      ③ 会话记忆（30 分钟滑动，进程内；跨会话不继承）
+      ④ 安装先验
+      ⑤ host_default：仅当用户明确说"不知道/随便"（params.productNotSpecified）
+    都拿不到 → 返回 source=unknown + confidence=low，由调用方抛可执行错误要求追问。
+    """
+    text = "\n".join(content for _i, _v, content in items)
+    meta = _load_meta()
+    answer = str(params.get("product") or "").strip()
+    mem = _memory_get(client_info)
+    binding = str(_RT.get("product") or "").strip() or None
+
+    if answer:
+        rid = _attrib.resolve_id(answer, meta)
+        hit = [c for c in (meta.get("catalog") or [])
+               if str(c.get("id")) == str(rid)
+               or str(c.get("name") or "").lower() == answer.lower()]
+        name = (hit[0].get("name") if hit else answer)
+        return {"product": rid, "productName": name, "source": "user_answer",
+                "confidence": "high" if hit else "low", "rawText": answer,
+                "evidence": [{"product": name, "alias": "用户回答", "snippet": answer}],
+                "ignored": None}
+
+    result = _attrib.attribute(text, meta,
+                               memory={k: v for k, v in mem.items()
+                                       if k in ("product", "productName", "alias",
+                                                "snippet", "at")},
+                               binding=binding)
+    result["rawText"] = None
+    result["ignored"] = None
+    if result["source"] == "user_input":
+        result["confidence"] = "high"
+        return result
+    if result["source"] == "memory" and mem.get("product") and not mem.get("not_specified"):
+        result["confidence"] = "medium"
+        return result
+    if result["source"] == "install_binding":
+        result["confidence"] = "medium"
+        return result
+
+    not_specified = bool(params.get("productNotSpecified")) or bool(mem.get("not_specified"))
+    if not_specified:
+        hp = _host_product()
+        if hp:
+            return {"product": _attrib.resolve_id(hp, meta), "productName": hp,
+                    "source": "host_default", "confidence": "low", "rawText": None,
+                    "evidence": [{"reason": "user-not-specified",
+                                  "hostProduct": hp}], "ignored": None,
+                    "not_specified": True}
+    ev = list(result.get("evidence") or [])
+    if not_specified:
+        ev = [{"reason": "user-not-specified"}] + ev
+    return {"product": None, "productName": None, "source": "unknown",
+            "not_specified": not_specified,
+            "confidence": "low", "rawText": None,
+            "evidence": (ev or [{"reason": "no-evidence"}]),
+            "ignored": None}
+
+
+def _require_product_or_ask(attr: dict, items: list) -> None:
+    """缺产品且用户没说不知道 → 可执行错误：先问一次（D-product-ask-1）。
+
+    错误里带候选（来自原话关键词），模型照着问一句就能补齐；不是"参考文档"。
+    """
+    if attr.get("product"):
+        return
+    if attr.get("not_specified"):
+        # 已经问过、用户明确说不知道且宿主无产品可兜底：允许提交，标 unknown/low，
+        # 证据里写明"用户未指定"——这不算裸提交（问过了，只是确实没有答案）。
+        return
+    if os.environ.get("VOD_ALLOW_UNKNOWN_PRODUCT") == "1":
+        # 旧客户端兼容（业界口径：可选字段 + 明确默认值，不做破坏性变更）：
+        # 缺 product 的老客户端不让它直接失败，回执标 legacy_default/low，可追溯。
+        attr["source"] = "legacy_default"
+        attr["confidence"] = "low"
+        return
+    text = "\n".join(c for _i, _v, c in items)
+    cands = search_products({"query": text, "limit": 5})["candidates"]
+    hint = "、".join(f"{c['name']}（{c['id']}）" for c in cands) or "（名录未命中，可问用户直接说产品名）"
+    raise ToolError(
+        "这条反馈还没确定是哪个产品：请先问用户一次『这条是哪个产品的反馈？』，"
+        "把回答填进 product（产品名或 ID）；用户明确说不知道/随便时，传 productNotSpecified=true。"
+        f"候选：{hint}", code=_UNRESOLVED_CODE)
 
 
 def _attach_attribution(result: dict, attr: dict) -> None:
-    """回执留痕：来源 + 证据（S99）。模型自报只留 ignoredRuntimeProduct，
-    不进 productSource（自报永远不是归因来源）。"""
+    """回执留痕（D-product-ask-1）：来源 + 置信 + 原始回答 + 证据。
+
+    productSource 枚举：user_input | user_answer | memory | install_binding |
+    host_default（后者恒 confidence=low，必须可人工修正）。
+    """
     result["productSource"] = attr.get("source") or "unknown"
+    result["productConfidence"] = attr.get("confidence") or "low"
+    if attr.get("productName"):
+        result["productName"] = attr["productName"]
+    if attr.get("product") is not None:
+        result["productId"] = str(attr["product"])
+    if attr.get("rawText"):
+        result["productRawText"] = attr["rawText"]
     if attr.get("evidence"):
         result["productEvidence"] = attr["evidence"]
-    if attr.get("ignored"):
-        result["ignoredRuntimeProduct"] = attr["ignored"]
 
 
 def _merge_ledger(extra: dict | None, attr: dict) -> dict:
@@ -249,13 +401,22 @@ def _merge_ledger(extra: dict | None, attr: dict) -> dict:
 _ATTR_HISTORY_CAP = 10
 
 
-def _remember_attribution(result: dict) -> None:
+def _remember_attribution(result: dict, client_info: dict | None = None) -> None:
     """写记忆：只接受「字面证据唯一命中」，歧义/无证据/记忆本身不写（S100）。
 
     覆盖时留快照（D-attrib-B 追加，评审意见采纳项）：旧条目进
     attribution_history（cap 10，带 replacedAt），事后能回答「当时为什么归
     到 A 而不是 B」——单条记忆被覆盖后判据不可追是排障黑洞。
     """
+    # 会话记忆（D-product-ask-1）：只记「有证据/用户明确回答/用户说不知道」三种
+    src = result.get("source")
+    if src in ("user_input", "user_answer"):
+        _memory_put(client_info, product=result.get("product"),
+                    productName=result.get("productName"),
+                    alias=(result.get("evidence") or [{}])[0].get("alias"))
+    elif src == "host_default":
+        _memory_put(client_info, not_specified=True,
+                    product=result.get("product"), productName=result.get("productName"))
     mem = _attrib.remember_if_evidenced(result)
     if not mem:
         return
@@ -544,7 +705,8 @@ def submit_voices(params: dict, client_info: dict | None = None,
     if not items:
         return {"accepted": 0, "voiceIds": [], "taskIds": [], "rejected": rejected}
     # 归因（D-attrib-B）：证据来自用户原话，模型自报不参战
-    attr = _attribute_product(items, params)
+    # 归因（D-product-ask-1）：身份/鉴权优先于产品追问，产品校验放在下面 key 守卫之后
+    attr = _attribute_product(items, params, client_info)
     product = attr["product"]
 
     def _legacy_submit(i, v, content):
@@ -572,6 +734,8 @@ def submit_voices(params: dict, client_info: dict | None = None,
             "<VOD key>（插件只搬运身份，不产生身份；落库与配额都在服务端）",
             code=-32012)
 
+    # 缺产品且用户没说不知道 → 可执行错误（先问一次），不许裸提交 UNKNOWN
+    _require_product_or_ask(attr, items)
     # ---- 主路径：囤积端点批式提交 ----
     # 分类白名单按产品取（引擎 ?productId= 下发）；product 非数字 id 时取不到→不过滤
     allowed_tags = _allowed_tags(product)
@@ -643,7 +807,7 @@ def submit_voices(params: dict, client_info: dict | None = None,
         if out.get("productRegistered") is not None:
             result["productRegistered"] = out.get("productRegistered")
         _attach_attribution(result, attr)      # 来源+证据留痕（S99）
-        _remember_attribution(attr)            # 只记有字面证据的归因（S95/S100）
+        _remember_attribution(attr, client_info)   # 会话记忆 + 审计（S95/S100）
         _ledger_submit(items, voice_ids, task_ids, product,
                         _merge_ledger(ledger_extra, attr))
         result["pendingFlush"] = _flush_pending(product)
@@ -684,7 +848,7 @@ def submit_voices(params: dict, client_info: dict | None = None,
               "echo": _echo_plan(items, voice_ids)}
     _attach_attribution(result, attr)
     if accepted:
-        _remember_attribution(attr)
+        _remember_attribution(attr, client_info)
     _ledger_submit(items, voice_ids, task_ids, product,
                    _merge_ledger(ledger_extra, attr))
     result["pendingFlush"] = _flush_pending(product)
@@ -985,7 +1149,9 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
         _c = str(v.get("content", "")).strip()
         if _c:
             _attr_items.append((i, v, _c))
-    attr = _attribute_product(_attr_items, params) if _attr_items else {"product": None}
+    attr = (_attribute_product(_attr_items, params, client_info)
+            if _attr_items else {"product": None, "source": "unknown",
+                                 "confidence": "low"})
     product = attr.get("product")
     allowed_tags = _allowed_tags(product)
 
@@ -1010,7 +1176,7 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
         clean.append(item)
     if not clean:
         raise ToolError("voices 为必填且至少 1 条", code=-32602)
-    _remember_attribution(attr)
+    _remember_attribution(attr, client_info)
 
     import secrets
     draft_id = "draft_" + secrets.token_hex(8)
@@ -1115,6 +1281,7 @@ def retrieve_skill(params: dict, client_info: dict | None = None) -> dict:
 
 
 _HANDLERS = {
+    "vod_search_products": search_products,
     "vod_check_update": check_update,
     "vod_list_skills": list_skills,
     "vod_retrieve_skill": retrieve_skill,

@@ -44,7 +44,9 @@ def handle(message: dict, client_info: dict | None = None) -> dict | None:
                 "本产品的不满/建议/期望（触发词：慢/报错/体验差/希望支持/提单等）。"
                 "提交前必须征得用户明确同意（用户抱怨本身不构成同意）；提交回执"
                 "echo.contents 必须逐条原样转述给用户（「已收录原话：<content>」），"
-                "禁止改写、概括、增删字词。product 归因由插件从用户原话解析（安装绑定仅作先验），禁止询问用户。"
+                "禁止改写、概括、增删字词。product 归因：原话唯一命中可直接用；"
+                "未命中或多产品歧义时必须问用户一次\"这条是哪个产品的反馈\"，"
+                "回答填 product；用户说不知道则 productNotSpecified=true。不许不填直接提交。"
             ),
             "serverInfo": {
                 "name": "vod-devkit",

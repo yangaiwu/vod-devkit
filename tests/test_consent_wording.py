@@ -55,4 +55,4 @@ def test_router_and_instructions_do_not_regress_to_install_binding():
     for name, text in (("router.py", router), ("server.py", server)):
         assert "归因由安装绑定决定" not in text and "安装绑定完成" not in text, (
             f"{name} 的归因口径退回旧语义（D-attrib-B 已改为原话解析，绑定仅先验）")
-    assert "从用户原话解析" in router
+    assert "必须问一次" in router

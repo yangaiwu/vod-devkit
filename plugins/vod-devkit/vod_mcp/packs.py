@@ -8,7 +8,9 @@ import sys
 ALL_PACKS = ("core", "collect", "knowledge")
 
 PACK_TOOLS = {
-    "core": ["vod_devkit_info", "vod_auth_status", "vod_check_update"],
+    # vod_search_products：问用户"是哪个产品"前给候选（只读，D-product-ask-1）
+    "core": ["vod_devkit_info", "vod_auth_status", "vod_check_update",
+             "vod_search_products"],
     # 两段式（D-token-approval-2 极简形态）随 collect 下发；codex 话术走 draft→commit
     "collect": ["vod_submit_voices", "vod_draft_voices", "vod_commit_voices", "vod_list_submitted"],
     # 领域规则技能披露（第二轨）：知道有哪几本规则、按需取全文。

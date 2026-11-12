@@ -865,3 +865,35 @@ codearts_cli.json`、`KERNEL_CONFIG_DIR=~/.codeartsdoer`）。
 - UNKNOWN 落库后运营补归因，dedupe_key 是否同步？不同步则同一句话补归因后再提
   会变成第二条声音。
 - raw 不可变仍只是应用层承诺（152 个迁移、0 个 CREATE TRIGGER）。
+
+## D-product-ask-1 缺产品必须问一次，不许裸提交 UNKNOWN（2026-11-11 负责人拍板）
+
+推翻两条旧口径：D-attrib-A「禁止询问产品」、P3-A「契约删除 product 入参」。
+需求原话：不允许"一页 UNKNOWN"——用户没说产品就必须追问具体产品。
+
+归因优先级（新，按负责人口径修正后的顺序）：
+  ① 用户明确回答/确认（contract.product）→ user_answer
+  ② 原话唯一且高置信提及（多产品/对比语境=低置信，转去问）→ user_input
+  ③ 会话记忆（30 分钟滑动、进程内、跨会话不继承、作用域含身份哈希）→ memory
+  ④ 安装先验 → install_binding
+  ⑤ host_default：**仅**用户明确说不知道/随便（productNotSpecified=true）时用宿主产品，
+     confidence=low、证据写 user-not-specified，可人工修正
+  ⑥ 都没有 → 工具以 -32010 拒绝，错误里带候选（模型据此问一句），不写引擎
+
+落地：
+- 契约：submit/draft 重新加 `product`（可选，产品名或 ID）+ `productNotSpecified`（可选布尔）
+- 新只读工具 `vod_search_products`（core）：问之前给 3-5 个候选，不让模型从 103 条里猜
+- 会话记忆改进程内（每次宿主会话=新进程）+ 身份哈希进 Scope，避免多租户串；覆盖/改口即时生效
+- 旧客户端兼容：`VOD_ALLOW_UNKNOWN_PRODUCT=1` 时走 legacy_default（low），不阻断老版本；
+  默认关闭（新客户端必须问）
+- 宿主产品映射：integrations/<host>/host.json 的 `productDefault`（CodeArts Agent→CodeArts），
+  安装期写入 runtime.host_product（env VOD_HOST_PRODUCT 可覆盖）
+- 话术三处统一：vod-core 铁律、vod-feedback-collect 第 0 步、路由插件、server instructions
+  全部改为"产品未定先问一次，用户说不知道就 productNotSpecified=true"
+
+回归锁 tests/test_product_ask.py（11 例）：唯一命中不问 / 无产品 -32010+候选 / 不知道→host_default /
+无宿主映射→unknown+证据 / 多产品先问 / 记忆跳过第二次+改口覆盖 / 记忆过期 / 旧客户端 legacy_default /
+候选检索 / draft 不阻断 / commit 强制。
+
+未采（业界建议里不适用本仓的）：metadata 只做归因不参与业务判定这条我们已经在做（productSource
+仅留痕）；五到七轮追问上限不采用（一次抱怨只问一次，不连环追）。

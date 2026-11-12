@@ -6,5 +6,6 @@
   },
   "config": "~/.codeartsdoer/codearts_cli.json",
   "skillsDir": "~/.codeartsdoer/skills",
-  "notes": "CodeArts Agent 是 OpenCode 分支（SCENARIO=codeartsdoer、OPENCODE_CONFIG=codearts_cli.json）：mcp 段与 opencode 同 schema（type=local、command=数组、enabled）。实测 2026-11-11：写入 codearts_cli.json 的 mcp.<name> 后 `codearts mcp list` 可见；mcp_settings.json 只对项目级 .codeartsdoer/mcp/ 生效，用户级读 ~/.config/opencode/mcp/，故不要写 ~/.codeartsdoer/mcp/。"
+  "notes": "CodeArts Agent 是 OpenCode 分支（SCENARIO=codeartsdoer、OPENCODE_CONFIG=codearts_cli.json）：mcp 段与 opencode 同 schema（type=local、command=数组、enabled）。实测 2026-11-11：写入 codearts_cli.json 的 mcp.<name> 后 `codearts mcp list` 可见；mcp_settings.json 只对项目级 .codeartsdoer/mcp/ 生效，用户级读 ~/.config/opencode/mcp/，故不要写 ~/.codeartsdoer/mcp/。",
+  "productDefault": "CodeArts"
 }
