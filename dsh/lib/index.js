@@ -756,7 +756,9 @@ export function apply(ctx, config) {
                 // 显式标注防模型误诊（实锤：模型曾把 null 读成"凭据没配置"端给用户）
                 const authMode = c.key ? 'key-configured' : (rt.token_tier ? 'anonymous-token' : 'anonymous (auto on first submit)');
                 return textResult({
-                    version: '0.1.0',
+                    // 版本必须跟随包（PKG_VERSION）：写死 '0.1.0' 会让壳永远自称旧版，
+                    // 真机实测就吃过这个亏（会话里工具回执报 0.1.0，误判成"装的是老壳"）。
+                    version: PKG_VERSION,
                     host: 'dsh',
                     apiBase: c.base,
                     apiKeyFingerprint: fp(c.key),
