@@ -1,4 +1,4 @@
 $ vod-devkit doctor
-[doctor] 载荷已换（<HOME>/.vod-devkit/payloads/0.5.1）——重启宿主会话生效
+[doctor] 载荷已换（<HOME>/.vod-devkit/payloads/0.5.2）——重启宿主会话生效
 FAIL: 技能拷贝件与安装产物漂移（D-drift-lock）：vod-core/SKILL.md（内容被改）——重跑 install 恢复
 FAIL: 技能文件漂移（hermes）：vod-core/SKILL.md
