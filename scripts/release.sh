@@ -128,7 +128,8 @@ RANGE="${PREV_TAG}..HEAD" && [ -z "$PREV_TAG" ] && RANGE="HEAD"
 git add package.json pyproject.toml vod_mcp/__init__.py contract/tools.schema.json \
         plugins/vod-devkit/.codex-plugin/plugin.json plugins/vod-devkit/build-info.json \
         plugins/vod-devkit/vod_mcp plugins/vod-devkit/skills dsh/package.json CHANGELOG.md \
-        tests/golden
+        tests/golden \
+        skills hermes-plugin docs/decisions.md build-info.json
 git commit -qm "release: v$BUMP"
 git tag "v$BUMP"
 git push origin main --tags || { echo "FAIL: GitCode 推送失败（pre-push 门禁或网络），发版未完成"; exit 1; }
