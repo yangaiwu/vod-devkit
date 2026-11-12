@@ -163,19 +163,19 @@ def build_alias_index(meta: dict) -> list:
 
     # ② 品牌俗称表：把无法从表名推导的口语词挂到目标产品上
     for target_name, colloquials in (BRAND_ALIASES or {}).items():
-        slot = canon.get(str(target_name).lower())
-        if slot is None:
+        brand_slot: dict | None = canon.get(str(target_name).lower())
+        if brand_slot is None:
             # 目标产品不在本次 catalog（引擎换库/改名）：别名不落地，避免指向
             # 不存在的 id。宁可丢俗称，也不产生错归。
             continue
         for word in (colloquials or []):
             if word:
-                slot["aliases"].add(str(word).strip())
+                brand_slot["aliases"].add(str(word).strip())
 
     # ③ 兼容：若引擎仍下发旧字段（回滚场景），继续采纳，避免双向改造期丢能力
     for key, aliases in (meta.get("nameAliases") or {}).items():
         aliases = [str(a) for a in (aliases or []) if a]
-        target = canon.get(str(key).lower())
+        target: dict | None = canon.get(str(key).lower())
         if target is None:
             for a in aliases:
                 if a.lower() in canon:
@@ -187,10 +187,10 @@ def build_alias_index(meta: dict) -> list:
             target["aliases"].add(a)
         target["aliases"].add(str(key))
     for key, target_name in (meta.get("aliases") or {}).items():
-        slot = canon.get(str(target_name).lower())
-        if slot is None:  # 目录/展示名都没有该目标：按别名目标建槽，别丢别名
-            slot = _slot(target_name, False)
-        slot["aliases"].add(str(key))
+        alias_slot: dict | None = canon.get(str(target_name).lower())
+        if alias_slot is None:  # 目录/展示名都没有该目标：按别名目标建槽，别丢别名
+            alias_slot = _slot(target_name, False)
+        alias_slot["aliases"].add(str(key))
 
     for slot in canon.values():          # 名字/别名任一命中 catalog → 拿 id
         for alias in list(slot["aliases"]) + [slot["label"]]:

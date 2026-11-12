@@ -19,6 +19,7 @@
 """
 import asyncio
 import json
+import os
 
 from mcp import types
 from mcp.server.lowlevel import Server
@@ -58,7 +59,32 @@ class _RemoteServer(Server):
         return super().create_initialization_options(*args, **kwargs)
 
 
+def verify_servable_skills() -> None:
+    """远程面构造期自校验（对齐 devkit 的 verifySkillTree）。
+
+    动机：list_skills 是注册表驱动的——如果技能文件缺失/被删，工具仍会宣传一堆
+    retrieve_skill 取不到的名字，调用方只能反复失败。远程面是无鉴权的长驻服务，
+    这种"宣传了但给不出"的状态必须在构造期就拒绝，而不是每个用户踩一次。
+    """
+    from vod_mcp import skills_registry as sr
+    if not sr.SKILLS_ROOT.is_dir():
+        raise RuntimeError(
+            f"远程面拒绝启动/构造：技能树不存在 {sr.SKILLS_ROOT}"
+            "——list_skills/retrieve_skill 会整体失效（重跑 install 重建载荷）")
+    dirs = sr._skill_dirs()
+    if not dirs:
+        raise RuntimeError(
+            f"远程面拒绝启动/构造：{sr.SKILLS_ROOT} 下没有任何目录型技能（缺 SKILL.md）"
+            "——远程面不许在没有规则文本的情况下对外服务")
+    broken = [d.name for d in dirs if not (d / "SKILL.md").is_file()]
+    if broken:
+        raise RuntimeError("远程面拒绝启动/构造：技能文件缺失 "
+                           + "、".join(sorted(broken)) + "（重跑 install 重建载荷）")
+
+
 def build_server(remote: bool = True) -> Server:
+    if remote:
+        verify_servable_skills()
     version = tools.load_contract()["version"]
 
     async def on_list_tools(ctx, params):

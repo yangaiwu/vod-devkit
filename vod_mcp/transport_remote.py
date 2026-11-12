@@ -30,6 +30,34 @@ DEFAULT_PORT = 9528
 MAX_BODY = 4 * 1024 * 1024
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 
+# 载荷自校验缓存：远程面是长驻无鉴权服务，被改过的服务端载荷要当场拒绝服务，
+# 不能等运维跑 doctor 才发现（devkit 的每请求 verifySkillTree 同思路）。
+# TTL 缓存避免每个请求都做一遍 sha256 全集（40+ 文件）。
+_PAYLOAD_GUARD = {"at": 0.0, "sig": None, "problems": []}
+_PAYLOAD_GUARD_TTL = 30.0
+
+
+def payload_problems(force: bool = False) -> list:
+    """远程面载荷完整性检查（载荷目录不存在/被改 → 非空列表）。
+
+    只校验"载荷副本"形态：stdio/仓内直跑没有 payload.json，返回空（不误伤）。
+    """
+    import time as _t
+    from pathlib import Path as _P
+    from vod_mcp import payload as _pl
+    from vod_mcp.host_adapters import base as _base
+    d = _base.payload_dir()
+    if d is None:
+        return []
+    meta = _P(d) / "payload.json"
+    sig = (str(meta), meta.stat().st_mtime if meta.exists() else 0.0)
+    now = _t.time()
+    if not force and _PAYLOAD_GUARD["sig"] == sig and now - _PAYLOAD_GUARD["at"] < _PAYLOAD_GUARD_TTL:
+        return list(_PAYLOAD_GUARD["problems"])
+    problems = _pl.verify(_P(d))
+    _PAYLOAD_GUARD.update({"at": now, "sig": sig, "problems": list(problems)})
+    return problems
+
 
 class RemoteRuntime:
     """持有 asyncio 事件循环 + SDK session manager 的生命周期。"""
@@ -250,6 +278,15 @@ class _Handler(BaseHTTPRequestHandler):
         if isinstance(message, dict) and "id" not in message:
             self._empty(202)
             return
+        # 服务端载荷自校验：被改/缺文件的载荷不许继续对外服务
+        problems = payload_problems()
+        if problems:
+            self._json(503, {"jsonrpc": "2.0", "id": message.get("id") if isinstance(message, dict) else None,
+                             "error": {"code": -32603,
+                                       "message": "服务端载荷校验未通过（拒绝服务）："
+                                                  + "；".join(problems[:5])}})
+            return
+
         raw_auth = (self.headers.get("Authorization") or "").strip()
         key = raw_auth[7:].strip() if raw_auth.lower().startswith("bearer ") else ""
 

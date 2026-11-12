@@ -149,6 +149,16 @@ client 半实现+表单 1.5 天 → 联调（等 MR !152 部署）0.5 天 →
 - 官方 client factory 三坑见 §三（dsh.client.platform 声明/exports.inject
   =["slots"]/React 不 vendor 走模块表，esbuild transform 模式）
 - dsh web 公网暴露需 --trusted-host（browser-trust 栅栏，Host 不在名单 403）
+- **公网反代形态（2026-11-10 真机实锤，踩过两个坑）**：页面经 nginx
+  `location /dsh/` → 127.0.0.1:3180 暴露公网时，
+  ① **uiBase 必须走同源**（配 `/dsh`，nginx 另加 `location /dsh/rest/`
+  → 远端引擎 /rest/，并 `proxy_set_header Origin ""`）：直接配远端绝对
+  uiBase 会让浏览器带着 `Origin: http://<公网IP>` 打引擎，引擎 CORS 白名单
+  只认自家域名 → 预检 403、`Failed to load resource`；
+  ② 浏览器侧 cookie/授权随实例重启轮换，旧页面会持续
+  `ws://…/api/remote.mux failed` + `connection lost retry` +
+  `Session reference … is released`——重启后必须用新 token URL 重开页面，
+  这些报错是陈旧会话的级联症状，不是后端故障。
 - 测试盲区教训：127.0.0.1 验证是安全上下文，公网 http 的坑测不出
 
 ## 十二、场景用例（插件侧，对应引擎 proposal §八 S1-S7）
