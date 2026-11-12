@@ -94,19 +94,24 @@ _META_SNAPSHOT = {"products": ["agentarts", "codearts", "dataarts", "maas", "obs
 
 
 def _load_meta(force: bool = False) -> dict:
-    """可漂移值（product 白名单等）动态取：缓存 TTL 24h，
-    引擎端点不可达时回退快照并标 stale。真源=引擎 submit 校验常量。
+    """可漂移值动态取：缓存 TTL 24h，引擎端点不可达时回退快照并标 stale。
+    真源=引擎 submit 校验常量。
+
     T7i：productCatalog=[{id,name}]（t_vod_product 运营预置，meta 组装）——
-    提交产品归因按平台主键 id 的解析真源；老引擎无该键=catalog 空。"""
+    提交产品归因按平台主键 id 的解析真源；老引擎无该键=catalog 空。
+
+    **2026-11-12 引擎契约收紧**：
+      · `nameAliases` / `aliases` 已由引擎删除 → 本函数不再读取；别名能力改由
+        attribution 的规则派生 + BRAND_ALIASES 提供。
+      · `problemTypes` 改为按产品下发（`?productId=`）：**无参请求不含该键**。
+        分类白名单必须用 `_allowed_tags(product_id)` 按产品取，见下。
+    """
     import time
     cache = _RT.get("meta_cache") or {}
     now = time.time()
     if not force and cache.get("data") and now - cache.get("fetchedAt", 0) < _META_TTL:
         return {"products": cache["data"].get("products", _META_SNAPSHOT["products"]),
                 "catalog": cache["data"].get("productCatalog") or [],
-                "aliases": cache["data"].get("aliases") or {},
-                "nameAliases": cache["data"].get("nameAliases") or {},
-                "problemTypes": cache["data"].get("problemTypes") or [],
                 "dictVersion": cache["data"].get("dictVersion"),
                 "stale": False, "source": "cache"}
     try:
@@ -116,17 +121,14 @@ def _load_meta(force: bool = False) -> dict:
             _save_runtime({"meta_cache": {"fetchedAt": int(now), "data": data}})
             return {"products": data["products"],
                     "catalog": data.get("productCatalog") or [],
-                    "aliases": data.get("aliases") or {},
-                    "nameAliases": data.get("nameAliases") or {},
-                    "problemTypes": data.get("problemTypes") or [],
                     "dictVersion": data.get("dictVersion"),
                     "stale": False, "source": "meta"}
     except ToolError:
         pass
+    # 快照不含分类白名单：_allowed_tags 取不到产品分类时 allowed 为空=不校验
+    # （宁可放行也不误杀采集）
     return {"products": _META_SNAPSHOT["products"], "catalog": [],
-            "aliases": {}, "nameAliases": {},
-            # 快照不含分类白名单：allowed 为空=不校验（宁可放行也不误杀）
-            "problemTypes": [], "dictVersion": None,
+            "dictVersion": None,
             "stale": True, "source": "snapshot"}
 
 
@@ -385,12 +387,35 @@ def _flush_pending(product):
 
 
 
-def _allowed_tags() -> set:
+def _allowed_tags(product_id=None) -> set:
     """分类白名单（引擎 meta.problemTypes，单一真源）。
 
-    空集=不知道白名单（老引擎/快照/未上线）→ 不过滤：宁可放行也不误杀采集。
+    2026-11-12 引擎契约变更：problemTypes 不再随无参 meta 下发（那是"全部分类"
+    的假全集），改为 `GET /external/meta?productId=<id>` 按产品下发——真源是
+    t_vod_problem_category 按 product_id 分组，不同产品的分类集不同。
+
+    取不到（无 product_id / 老引擎 / 快照降级 / 该产品无分类）→ 空集=不知道
+    白名单 → 不过滤：宁可放行也不误杀采集。
     """
-    return set(_load_meta().get("problemTypes") or [])
+    pid = str(product_id or "").strip()
+    if not pid or not pid.isdigit():
+        return set()
+    import time
+    cache = _RT.get("ptype_cache") or {}
+    now = time.time()
+    if now - float(cache.get("at") or 0) < _META_TTL and pid in (cache.get("by") or {}):
+        return set(cache["by"][pid] or [])
+    by = dict(cache.get("by") or {})
+    try:
+        path = f"{_META_PATH}?productId={pid}"
+        out = _http("GET", path, None, base=JAVA_BASE, key=_eff_key(), timeout=10)
+        data = out.get("data") or {}
+        types = [str(t) for t in (data.get("problemTypes") or []) if str(t).strip()]
+        by[pid] = types
+        _save_runtime({"ptype_cache": {"at": int(now), "by": by}})
+        return set(types)
+    except ToolError:
+        return set(by.get(pid) or [])
 
 
 _PROBLEM_TYPE_PREFIX = "problem_type:"
@@ -545,7 +570,8 @@ def submit_voices(params: dict, client_info: dict | None = None,
             code=-32012)
 
     # ---- 主路径：囤积端点批式提交 ----
-    allowed_tags = _allowed_tags()
+    # 分类白名单按产品取（引擎 ?productId= 下发）；product 非数字 id 时取不到→不过滤
+    allowed_tags = _allowed_tags(product)
     hoard, invalid_tags = [], []
     for i, v, content in items:
         hv = _hoard_voice(v, content)
@@ -945,9 +971,21 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
     """两段式第一步：校验+暂存草稿+签发一次性令牌（不提交任何数据）。"""
     import time as _time
     voices_in = params.get("voices", [])
-    allowed_tags = _allowed_tags()
     invalid_tags = []
     clean = []
+
+    # 归因（D-attrib-B）前移：分类白名单按产品下发（?productId=），必须先知道
+    # 产品才能取到该产品的分类集，否则过滤会拿到空集而静默失效。
+    # 归因只看 content，不依赖 tags，前移不改变其它语义。
+    _attr_items = []
+    for i, v in enumerate(voices_in):
+        _c = str(v.get("content", "")).strip()
+        if _c:
+            _attr_items.append((i, v, _c))
+    attr = _attribute_product(_attr_items, params) if _attr_items else {"product": None}
+    product = attr.get("product")
+    allowed_tags = _allowed_tags(product)
+
     for i, v in enumerate(voices_in):
         content = str(v.get("content", "")).strip()
         if not content:
@@ -969,9 +1007,6 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
         clean.append(item)
     if not clean:
         raise ToolError("voices 为必填且至少 1 条", code=-32602)
-    # 归因（D-attrib-B）：草稿与提交同一优先级链，证据入库可审
-    attr = _attribute_product([(i, v, v["content"]) for i, v in enumerate(clean)], params)
-    product = attr["product"]
     _remember_attribution(attr)
 
     import secrets

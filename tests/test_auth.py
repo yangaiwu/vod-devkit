@@ -165,8 +165,13 @@ def test_attribution_literal_match_resolves_catalog_id(monkeypatch):
                                              "stale": True, "source": "snapshot"})
     out = run("codearts 打不开")
     assert out["product"].lower() == "codearts", out
-    # 快照里没有中文别名原料 → 中文点名不猜（S98）
-    assert run("码道打不开")["source"] == "unknown"
+    # 2026-11-12 变更：品牌俗称改为 devkit 本地维护（BRAND_ALIASES），
+    # 不再依赖后端 nameAliases 下发——所以 meta 降级后「码道」仍能归到 CodeArts。
+    # 旧行为（依赖后端别名、降级即弃权）已被有意替换：能力自治，比依赖远端更稳。
+    out = run("码道打不开")
+    assert out["source"] == "user_input", out
+    # 快照无 catalog id → 走 name 兼容通道；标签取自快照小写短码，故比较大小写不敏感
+    assert out["product"].lower() == "codearts", out
 
 
 def test_meta_catalog_cached_t7i(monkeypatch):
