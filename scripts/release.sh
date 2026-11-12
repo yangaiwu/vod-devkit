@@ -166,7 +166,10 @@ if [ "$PUBLISH" = "1" ]; then
   # 断言不过即 exit 1——"publish 回执成功"从来不是发版完成的证据。
   echo "发布两颗包…"
   npm publish "$TGZ" --access public || { echo "FAIL: vod-devkit publish 失败"; exit 1; }
-  npm publish "$DSH_TGZ" --access public || { echo "FAIL: dsh 壳 publish 失败"; exit 1; }
+  # 用子 shell + 本地文件名：v0.5.2 实锤——从仓根用相对路径 dsh/xxx.tgz 发布时
+  # npm 把不存在的相对路径当 git 地址（ssh://git@github.com/dsh/...），报 publickey 失败。
+  ( cd dsh && npm publish "./dsh-vod-devkit-$BUMP.tgz" --access public ) \
+    || { echo "FAIL: dsh 壳 publish 失败"; exit 1; }
   python3 scripts/publish_verify.py --version "$BUMP" \
       --pkg vod-devkit --pkg dsh-vod-devkit \
     || { echo "FAIL: 发版终态断言未过（registry 未上线或包内容不符）"; exit 1; }
