@@ -1,5 +1,5 @@
 {
-  "version": "0.5.0",
+  "version": "0.5.1",
   "source": {
     "type": "git",
     "remote": "<ORIGIN>",
@@ -39,7 +39,7 @@
       "mcpConfig": "<HOME>/.hermes/mcp/vod-devkit.json",
       "skillsDir": "<HOME>/.hermes/skills/devops/vod-devkit",
       "payloadDir": "<PAYLOAD>",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "commitSha": "<SHA>",
       "skillInstalls": [
         {

@@ -275,3 +275,30 @@
 - 061ca39 docs: dsh 插件接入安装手册（三条安装路径/配置/验证/公网反代/FAQ）
 - dbfb31c chore(release): golden 随 v0.4.4 重录（仅 version 字段，人工过目合规）
 
+
+## v0.5.1（2026-11-12）
+
+- 61577bc fix(归因): 没有产品就不提交——删掉 host_default 猜路径 + 名录外回答改为再确认
+- c47e504 feat(采集): 缺产品必须问一次，不许裸提交 UNKNOWN（D-product-ask-1）
+- a50877f fix(归因/分类): 补 1bb9f67 的两个真机缺陷（全大写缩写误归 + 分类取值抛异常）
+- 1bb9f67 refactor(contract): 适配后端外部接口契约收紧——别名本地派生 + 分类按产品取
+- e43e970 fix(codex): 清理旧一代 AGENTS.md 注入——consent 红线的真实破口（真机语料实证）
+- eb5b3e8 fix(doctor): 路由插件副本漂移检查（真机实锤）
+- d703b24 feat(反例集): 原话逐字 + tags 值域（S101/S102，CodeArts 真机实锤）
+- 0b68cb5 feat(技能): 征询话术「给范围不给结论」边界 + 门禁（负责人拍板 A）
+- 11ff813 fix(指路文案): instructions 里归因口径回正 + 文案漂移门禁
+- ae9e163 chore(构建): 重烧 build-info 对齐 head 09eeb47（双副本一致）
+- 09eeb47 feat(宿主): 安装载荷固化 + CodeArts Agent 适配 + 多宿主安装记录（D-payload-1/D-codeartsdoer-1/D-installs-1）
+- 8ffa7fd chore(卫生): 停止跟踪 E2E 运行日志，忽略日志与本地 tgz
+- 72208b4 refactor(宿主): 宿主适配分层 + 通用 MCP 写入器（D-hosts-1，A+B）
+- b4bb21f feat(分类/规则): tags 白名单校验 + 等级定义入评分技能（D-tags-1）
+- 1daa437 chore(技能): 结构/触发词门禁 + 技能级验证文档（对标 huaweicloud-skills，D-skill-structure-1）
+- c8b7b94 docs(归因): 撤回 P6（无消费者）；度量改用零 schema 变更方案
+- 1b169f0 docs(归因): 撤回 P5 productKeywords（负责人否），P6 提前为度量前置
+- 3fa6dc8 docs(归因): A 维持 + P5/P6 排序 + B 的复审触发条件（负责人 2026-11-11 拍板）
+- 2a1c387 feat(安装): 远程 attach 模式——MCP 单独部署，宿主一条命令指过去（D-attach-1）
+- 0292248 chore(更新链): skip-version + registry 状态对账 + 类型门禁（D-devtoolchain-7）
+- 4d4e6cb chore(治理): 结构守卫 + 花名册显式清单 + 规则真源对账（D-devtoolchain-6）
+- e613449 feat(dsh): 归因与 MCP 侧同口径——运行期字面解析 + 记忆 + 先验 + 弃权（D-attrib-B）
+- 9b785dd feat(归因): 运行期字面解析取代安装绑定——名录别名 + 短 TTL 记忆 + 弃权（D-attrib-B）
+
