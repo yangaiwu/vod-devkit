@@ -956,3 +956,23 @@ workbuddy / dsh / hermes（含 hooks 插件）这些都要具备」。落地口�
 绝对解释器 + 载荷副本（与其它宿主同一条"入口不依赖 PATH"铁律）。
 
 不做（仍是 B 类，需业务决策）：审批令牌、沙箱、凭据 onboarding、云 CLI 面。
+
+## D-host-verify-1：真机验证的可达边界（2026-11-12）
+
+负责人要求"支持多种 agent 并完成真实的验证"。本机（Huawei Cloud EulerOS aarch64）实测结果：
+
+| 宿主 | 本机可装 | 真机状态 |
+|---|---|---|
+| hermes | 是 | 装好，MCP + 路由插件，doctor OK |
+| opencode | 是（1.19.5） | 装好，matrix PASS |
+| codex | 是 | 装好；原生插件入口已改为载荷副本（旧版会跑 PATH 上的 0.4.2） |
+| codex-desktop | 由 codex CLI 承载 | `codex plugin add vod-devkit@personal` + `codex mcp list` 显示 enabled |
+| dsh | 是 | 装好，matrix PASS（10 工具） |
+| codeartsdoer | 是 | 装好，`codearts mcp list` 显示 connected |
+| atomcode | 是（v5.2.6 linux-arm64） | **本轮新装**：`atomcode mcp add --global` 写 ~/.atomcode/mcp.json，与我们写入的条目共存；matrix PASS |
+| workbuddy | 否 | 桌面端（Win/macOS，官网用扫码下载），无 Linux 包 → 只能验形态 |
+| codeartswork | 否 | 仅用户级桌面/工作台配置，官网未发布 Linux CLI → 只能验形态 |
+
+纪律：矩阵 PASS 只证明"配置形态 + 载荷入口 + 拉起自证"这一层；宿主程序读不读得到、
+会话里模型会不会真调，必须在那台装了宿主程序的机器上跑一次才算闭环。未闭环的宿主
+在 host.json notes 里显式标注「未真机验证」，不许用矩阵 PASS 冒充。

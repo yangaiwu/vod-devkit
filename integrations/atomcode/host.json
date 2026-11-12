@@ -1,8 +1,10 @@
 {
   "id": "atomcode",
   "cli": "atomcode",
-  "detect": {"path": "~/.atomcode"},
+  "detect": {
+    "path": "~/.atomcode"
+  },
   "config": "~/.atomcode/mcp.json",
   "skillsDir": "~/.atomcode/skills",
-  "notes": "AtomCode 的配置根可由 ATOMCODE_HOME 覆盖（默认 ~/.atomcode），适配器每次调用期读取该 env，不缓存。mcp.json 形态 mcpServers.<name> = command/args/env。宿主另有 hooks.json 的 pre_tool_use 遥测 hook——属华为工具的埋点，我们刻意不装（不引入遥测）。路径来源：huaweicloud-devkit targets.ts atomcodeHome/atomcodeMcpConfigFile/atomcodeSkillsDir。本机未装该宿主，未真机验证。"
+  "notes": "AtomCode 的配置根可由 ATOMCODE_HOME 覆盖（默认 ~/.atomcode），适配器每次调用期读取该 env，不缓存。真机验证（2026-11-12，本机 aarch64 Linux 装 atomcode 5.2.6）：`atomcode mcp add <name> <cmd>... --global` 写的正是 ~/.atomcode/mcp.json 的 mcpServers.<name>；用它的写入器追加一条后我们的条目原样保留，说明 schema 兼容、可共存。host_matrix --host atomcode → PASS（8 工具，版本=构建版本）。宿主另有 hooks.json 的 pre_tool_use 遥测 hook 与 telemetry 开关——我们刻意不装/不开启。"
 }
