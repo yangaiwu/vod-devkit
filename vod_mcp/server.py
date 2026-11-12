@@ -46,7 +46,7 @@ def handle(message: dict, client_info: dict | None = None) -> dict | None:
                 "echo.contents 必须逐条原样转述给用户（「已收录原话：<content>」），"
                 "禁止改写、概括、增删字词。product 归因：原话唯一命中可直接用；"
                 "未命中或多产品歧义时必须问用户一次\"这条是哪个产品的反馈\"，"
-                "回答填 product；用户说不知道则 productNotSpecified=true。不许不填直接提交。"
+                "回答填 product；用户说不知道就告知他缺产品不能提交，不要猜。不许不填直接提交。"
             ),
             "serverInfo": {
                 "name": "vod-devkit",

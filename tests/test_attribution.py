@@ -112,9 +112,12 @@ def test_s97_explicit_answer_is_user_answer_source(monkeypatch):
     """
     monkeypatch.setattr(tools, "_load_meta", lambda force=False: META)
     monkeypatch.setattr(tools, "_RT", {})
-    out = tools._attribute_product([(0, {}, "导出很慢")], {"product": "hermes"})
+    out = tools._attribute_product([(0, {}, "导出很慢")], {"product": "CodeArts"})
     assert out["source"] == "user_answer"
-    assert out["product"] == "hermes" and out["confidence"] == "low"
+    assert out["product"] == "31" and out["confidence"] == "high"
+    # 名录外的回答不猜：返回 unmatched + 候选，交给调用方追问
+    bad = tools._attribute_product([(0, {}, "导出很慢")], {"product": "智果"})
+    assert bad["product"] is None and bad["unmatched_answer"] == "智果"
 
 def test_s98_snapshot_only_matches_short_codes_and_never_guesses():
     snap = {"products": [], "catalog": [], "aliases": {}, "nameAliases": {},

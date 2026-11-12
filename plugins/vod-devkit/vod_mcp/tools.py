@@ -266,17 +266,19 @@ def search_products(params: dict) -> dict:
             continue
         seen.add(pid)
         cands.append({"id": pid, "name": h["product"],
-                      "score": round(min(1.0, len(h["alias"]) / max(len(query), 1)), 2)})
+                      "score": round(min(1.0, len(h["alias"]) / max(len(query), 1)), 2),
+                      "matchReason": f"alias:{h['alias']}"})
     if not cands:                      # 别名没命中：退回名字子串（用户可能打错/只说一半）
         q = query.lower()
         for item in catalog:
             name = str(item.get("name") or "")
             if q and (q in name.lower() or name.lower() in q):
-                cands.append({"id": str(item.get("id")), "name": name, "score": 0.5})
+                cands.append({"id": str(item.get("id")), "name": name, "score": 0.5,
+                              "matchReason": "name-substring"})
     if not cands:                      # 完全无关联词：给名录前 N 个当"可选项"（问用户用）
         for item in catalog[:limit]:
             cands.append({"id": str(item.get("id")), "name": str(item.get("name") or ""),
-                          "score": 0.0})
+                          "score": 0.0, "matchReason": "catalog-default"})
     cands.sort(key=lambda c: (c["score"], len(c["name"])), reverse=True)
     return {"candidates": cands[:limit], "total": len(catalog)}
 
@@ -357,25 +359,35 @@ def _attribute_product(items: list, params: dict, client_info: dict | None = Non
             "ignored": None}
 
 
-def _require_product_or_ask(attr: dict, items: list) -> None:
+def _require_product_or_ask(attr: dict, items: list, client_info: dict | None = None) -> None:
     """缺产品且用户没说不知道 → 可执行错误：先问一次（D-product-ask-1）。
 
     错误里带候选（来自原话关键词），模型照着问一句就能补齐；不是"参考文档"。
     """
     if attr.get("product"):
         return
+    # 追问轮次上限（2026-11-12 评审采纳）：同一会话最多追问 2 次，之后明确终止——
+    # 避免"用户连续给两个都查不到的名字"时模型无限重问。
+    mem = _memory_get(client_info)
+    fails = int(mem.get("ask_failures") or 0) + 1
+    _memory_put(client_info, ask_failures=fails)
+    stop = fails > 2
+    tail = "（已追问 2 次仍未确认：别再问了，直接告诉用户这条反馈因为没有产品归属而不提交）"
+
     if attr.get("unmatched_answer"):
         cands = attr.get("candidates") or []
         hint = "、".join(f"{c['name']}（{c['id']}）" for c in cands) or "（名录为空）"
         raise ToolError(
             f"用户说的产品「{attr['rawText']}」不在产品名录里，不能按它提交。"
-            f"请按名录再确认一次是哪一个：{hint}；用户仍说不出来就说明这条先不提交。",
+            f"请按名录再确认一次是哪一个：{hint}；用户仍说不出来就说明这条先不提交。"
+            + (tail if stop else ""),
             code=_UNRESOLVED_CODE)
     if attr.get("not_specified"):
         raise ToolError(
             "用户没有提供产品，这条反馈**不能提交**：请告诉用户「没有产品归属的反馈我不提交，"
             "因为不知道要转给哪个产品团队」，并请他补充是哪个产品；他仍不想说就说明这条先不提交。"
-            f"可选候选：{'、'.join(c['name'] + '（' + str(c['id']) + '）' for c in search_products({'query': '\n'.join(x[2] for x in items), 'limit': 5})['candidates'])}",
+            f"可选候选：{'、'.join(c['name'] + '（' + str(c['id']) + '）' for c in search_products({'query': '\n'.join(x[2] for x in items), 'limit': 5})['candidates'])}"
+            + (tail if stop else ""),
             code=_UNRESOLVED_CODE)
     if os.environ.get("VOD_ALLOW_UNKNOWN_PRODUCT") == "1":
         # 旧客户端兼容（业界口径：可选字段 + 明确默认值，不做破坏性变更）：
@@ -431,6 +443,8 @@ def _remember_attribution(result: dict, client_info: dict | None = None) -> None
     """
     # 会话记忆（D-product-ask-1）：只记「有证据/用户明确回答/用户说不知道」三种
     src = result.get("source")
+    if result.get("product"):
+        _memory_put(client_info, ask_failures=0)
     if src in ("user_input", "user_answer"):
         _memory_put(client_info, product=result.get("product"),
                     productName=result.get("productName"),
@@ -756,7 +770,7 @@ def submit_voices(params: dict, client_info: dict | None = None,
             code=-32012)
 
     # 缺产品且用户没说不知道 → 可执行错误（先问一次），不许裸提交 UNKNOWN
-    _require_product_or_ask(attr, items)
+    _require_product_or_ask(attr, items, client_info)
     # ---- 主路径：囤积端点批式提交 ----
     # 分类白名单按产品取（引擎 ?productId= 下发）；product 非数字 id 时取不到→不过滤
     allowed_tags = _allowed_tags(product)
