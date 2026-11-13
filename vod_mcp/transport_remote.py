@@ -314,7 +314,6 @@ class _Handler(BaseHTTPRequestHandler):
         raw_auth = (self.headers.get("Authorization") or "").strip()
         key = raw_auth[7:].strip() if raw_auth.lower().startswith("bearer ") else ""
 
-        from vod_mcp import tools
         # 身份经 scope 传递（x_vod_key），由 RemoteRuntime.request 在事件循环线程
         # 的协程体内 set _REQ_KEY/_SERVER_FACE——HTTP 线程直接 set 的 contextvar
         # 过不了 run_coroutine_threadsafe 的线程边界（2026-11-13 真机实锤）。
