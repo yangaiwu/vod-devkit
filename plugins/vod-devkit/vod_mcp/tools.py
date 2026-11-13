@@ -193,8 +193,11 @@ def _http(method: str, path: str, body: dict | None = None,
     except urllib.error.HTTPError as e:
         detail = e.read().decode()[:200]
         if e.code == 401:
+            # 引擎 401 原文透传（probe_key 靠它区分"设备绑定校验失败"=匿名令牌
+            # 跨设备（token 有效,本机没用过）vs "API Key 无效"=真坏 key；丢原文
+            # 会让探针把正常匿名场景误判成 rejected）
             raise ToolError(
-                f"鉴权失败（{base}）：检查 VOD_JAVA_API_KEY 配置",
+                f"鉴权失败（{base}）：{detail or '检查 VOD_JAVA_API_KEY 配置'}",
                 code=-32012) from e
         raise ToolError(f"上游返回 {e.code}: {detail}", code=e.code) from e
     except urllib.error.URLError as e:
@@ -902,6 +905,7 @@ def probe_key(key: str | None = None, timeout: int = 8) -> dict:
     - 其他错误（网络不可达/超时/5xx）→ {"ok": None, "reason": "unreachable"}：
       不判定——网络问题不是 key 问题，报"无法验证"而非"无效"
     """
+    explicit = key is not None  # 显式传参（服务面=请求头 Bearer）按显式口径判
     key = key if key is not None else JAVA_KEY
     fp = _fingerprint(key)
     if not key:
@@ -911,11 +915,25 @@ def probe_key(key: str | None = None, timeout: int = 8) -> dict:
         return {"ok": True, "reason": "verified", "fingerprint": fp}
     except ToolError as ex:
         code = ex.code
+        msg = str(ex)
         if code == 401 or code == -32012:
-            # 匿名令牌 401 ≠ 配置错误：报"过期待重领"而非"rejected"，
-            # 避免 runtime 残留过期匿名令牌时被误读为正式 key 失效
-            # （显式 key 被拒仍报 rejected——fail fast 口径不变）
-            if not _explicit_key():
+            # 引擎 401 两类语义（原文区分，实锤 2026-11-13）：
+            # - "设备绑定校验失败"：匿名令牌是设备锚点绑定的——token 本身有效，
+            #   只是本机（nonce）不是签发设备。这是正常场景（换机/重装/仓内与
+            #   payloads 两份 runtime 的 nonce 漂移），不是 key 坏。归
+            #   device-mismatch：不拦（放行），提示在本设备重领。
+            # - "API Key 无效或已失效"：真坏 key → rejected（fail fast 不变）。
+            # 旧语义（显式→rejected / 非显式→expired-anonymous）保留为无原文
+            # 时的兜底分类。
+            if "设备绑定校验失败" in msg:
+                return {"ok": False, "reason": "device-mismatch", "fingerprint": fp,
+                        "note": "匿名令牌与本设备不匹配：令牌本身有效，"
+                                "在本设备重新申请令牌后可继续（POST /external/token，"
+                                "首次提交自动完成）"}
+            if not (explicit or _explicit_key()):
+                # 匿名令牌 401 ≠ 配置错误：报"过期待重领"而非"rejected"，
+                # 避免 runtime 残留过期匿名令牌时被误读为正式 key 失效
+                # （显式 key 被拒仍报 rejected——fail fast 口径不变）
                 return {"ok": False, "reason": "expired-anonymous", "fingerprint": fp,
                         "note": "匿名令牌已过期：下次提交自动重领，无需操作"}
             return {"ok": False, "reason": "rejected", "fingerprint": fp}
@@ -932,22 +950,32 @@ def _key_state() -> dict:
 
 
 def auth_status(params: dict, client_info: dict | None = None) -> dict:
-    """认证自检：指纹化输出（明文永不出现），无 key 也跑并给引导。"""
+    """认证自检：指纹化输出（明文永不出现），无 key 也跑并给引导。
+
+    远程面（HTTP）缺陷修正：keyCheck 探针旧实现只看本地 JAVA_KEY（env/runtime），
+    远程面没有本地 key 时 keyCheck 永远 null——远程 agent 永远无法验证自己
+    请求头里的 key（真实场景：坏 key 装上、提交才 401）。修法：服务面下探
+    _eff_key()（请求头 Bearer），本地态 javaKey 段照实报"本机未配置"，另加
+    requestKey 段报请求头 key 的指纹与探针结果——身份随请求走，两段不混。
+    """
+    req_key = _eff_key() if _SERVER_FACE.get() else None
     out = {
         "javaKey": _key_state(),
         "packs": sorted(__import__("vod_mcp.packs", fromlist=["enabled_packs"]).enabled_packs()),
     }
-    meta = _load_meta()
-    out["meta"] = {"source": meta["source"], "stale": meta["stale"],
-                   "productCount": len(meta["products"])}
-    if JAVA_KEY:
+    if req_key:
+        out["requestKey"] = {"fingerprint": _fingerprint(req_key),
+                             "note": "服务面：身份来自请求头 Bearer"}
+        # 探针显式传请求头 key（probe_key 默认取本地 JAVA_KEY——服务面必须覆盖）
+        out["keyCheck"] = probe_key(req_key)
+    elif JAVA_KEY:
         # 主动探针（devkit auth init 真调 IAM 的廉价版）：用户问"key 好没好"有确定答案
         out["keyCheck"] = probe_key()
         if _explicit_key():
             # 旧版残留凭据检测位（评审拍板项）：显式 key 存活即在位提示自愈路径，
             # 不等提交撞 401 才发现（codex 0.2.3 残留 key 挡匿名链的实锤教训）
             out["legacyKeyHint"] = _legacy_key_hint()
-    if not JAVA_KEY:
+    if not JAVA_KEY and not req_key:
         out["guidance"] = _KEY_GUIDANCE
         out["tokenReady"] = "首次提交时将自动申请匿名令牌（零字段，日限额低）"
     return out
