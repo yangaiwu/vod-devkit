@@ -46,6 +46,21 @@ PY=$(ls /root/.hermes/tools/python-3.14.7*/bin/python3 2>/dev/null || command -v
 export PYTHONPATH="/root/.hermes/cache/scratch/pylibs:$PYTHONPATH"
 "$PY" -m pyflakes vod_mcp/*.py tests/*.py && "$PY" -m pytest tests/ -q || { echo "FAIL: 质量门未过，拒绝发版"; exit 1; }
 
+# 旧解释器语法门（B4 实锤）：pyflakes/pytest 跑在 3.14 上测不出 ≤3.11 的语法错
+# （f-string 表达式内反斜杠 PEP 701 前禁止）。用固定旧解释器逐文件 py_compile，
+# SyntaxError 即拦。探测顺序：显式 VOD_SYNTAX_PY > 3.9（同规则可代 3.10/3.11 判定）。
+SYNTAX_PY=${VOD_SYNTAX_PY:-$(ls /usr/bin/python3.9* 2>/dev/null | head -1)}
+if [ -n "$SYNTAX_PY" ] && [ -x "$SYNTAX_PY" ]; then
+  FAILS=""
+  while IFS= read -r f; do
+    "$SYNTAX_PY" -m py_compile "$f" 2>/dev/null || FAILS="$FAILS $f"
+  done < <(git ls-files '*.py' | grep -v '^dsh/')
+  [ -z "$FAILS" ] || { echo "FAIL: 旧解释器($SYNTAX_PY)语法门未过：$FAILS"; exit 1; }
+  echo "语法门($SYNTAX_PY)：全绿"
+else
+  echo "WARN: 本机无 3.9/旧解释器，语法门跳过（设 VOD_SYNTAX_PY 指定）"
+fi
+
 # 双副本同步门（实锤教训：npm 0.4.1 曾以滞后 10 提交的旧插件副本发出——
 # pending 队列缺失、包内 build-info 落后 HEAD）：发版起点必须双副本零漂移。
 # sync 重跑一遍，若产生未提交变更=提交前忘了同步，拒绝发版（sync 结果应单独

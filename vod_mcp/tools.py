@@ -384,10 +384,13 @@ def _require_product_or_ask(attr: dict, items: list, client_info: dict | None = 
             + (tail if stop else ""),
             code=_UNRESOLVED_CODE)
     if attr.get("not_specified"):
+        # 兼容 Python 3.10/3.11：PEP 701 之前 f-string 表达式内不允许反斜杠
+        # （'\n' 会触发 SyntaxError），故先在 f-string 外计算查询串再引用。
+        _query = "\n".join(x[2] for x in items)
         raise ToolError(
             "用户没有提供产品，这条反馈**不能提交**：请告诉用户「没有产品归属的反馈我不提交，"
             "因为不知道要转给哪个产品团队」，并请他补充是哪个产品；他仍不想说就说明这条先不提交。"
-            f"可选候选：{'、'.join(c['name'] + '（' + str(c['id']) + '）' for c in search_products({'query': '\n'.join(x[2] for x in items), 'limit': 5})['candidates'])}"
+            f"可选候选：{'、'.join(c['name'] + '（' + str(c['id']) + '）' for c in search_products({'query': _query, 'limit': 5})['candidates'])}"
             + (tail if stop else ""),
             code=_UNRESOLVED_CODE)
     if os.environ.get("VOD_ALLOW_UNKNOWN_PRODUCT") == "1":
