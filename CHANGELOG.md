@@ -341,3 +341,8 @@
 - 55610b6 docs(手册): README/QUICKINSTALL 对齐 token 探活三态与远程部署形态
 - d85db82 fix(远程attach): B1/B2/B3 三缺陷修复——探活验token、hermes防静默、contextvars身份传播
 
+
+## v0.5.7（2026-11-13）
+
+- 3c20721 fix(兼容): tools.py f-string 表达式内反斜杠致 Python 3.10/3.11 SyntaxError——join 提至 f-string 外（行为等价），双副本同步；release.sh 质量门新增旧解释器语法扫（B4）
+
