@@ -135,6 +135,10 @@ npm 首发已解锁，收录审核进行中。
 - **`-32014` 非 https 且非回环**：`--java-api-base` 配了公网 http——改 https 或回环地址
 - **`-32011` confirm 拦截**：写操作需逐次确认，重试并带 `confirmed=true`
 - **`-32013` 产品归因引导**：`--product` 未传或传了非法值，报错含权威名单
+- **attach 时 `token 无效（引擎判定 rejected）`**：坏 key 被探活拦下——确认是
+  VOD 平台签发的 key（引擎 401 原文「API Key 无效或已失效」）
+- **`设备绑定校验失败`**：匿名令牌跨设备使用——token 有效但本机不是签发设备，
+  在本设备首次提交时自动重领（探活归 `device-mismatch` 放行，不拦）
 - 更多：[QUICKSTART.md](QUICKSTART.md)（任意 MCP 客户端手动配置片段）
 - 排障日志：`/tmp/vod_mcp_server.log`（每次 HTTP 的 URL/key 有无）
 

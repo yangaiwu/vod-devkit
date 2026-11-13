@@ -13,33 +13,29 @@
 
 ## 前置
 
-- Python 3.10+
-- 任意支持 MCP stdio 的宿主（Hermes/OpenCode/Codex/…）
+- Node >= 18（`npx` 引导器；dsh 宿主按其官方要求 Node 24.9+）
+- Python 3.10+（可用 `VOD_PYTHON` 指定解释器）
+- 宿主任选其一：hermes / opencode / codeartsdoer / codeartswork / codex /
+  codex-desktop / dsh / workbuddy / atomcode（其它 MCP 客户端走
+  `--target generic`）
+- 网络可达 VOD 引擎（缺省 `https://vod-dev.topxtopx.com`）
 
-## 方式一：Hermes（自动安装）
-
-```bash
-git clone <repo-url> vod-devkit && cd vod-devkit
-bin/vod-devkit install --target hermes --preset collect --product <你的产品>  # --product 可选先验
-# 重启 Hermes 会话，工具以 mcp_vod_devkit_* 出现
-```
-
-## 方式二：OpenCode / Codex（自动安装，2026-11-03 起支持）
+## 方式一：npm（推荐，一条命令）
 
 ```bash
-git clone <repo-url> vod-devkit && cd vod-devkit
-bin/vod-devkit install --target opencode --product <你的产品>   # 或 codex
-# install --target auto 会探测已装宿主（0/1/N 三分支）
+npx -y vod-devkit@latest install --target auto --product <你的产品>
+# --target auto 探测已装宿主；显式指定如 --target hermes / opencode / codex
 ```
-> opencode/codex 适配层已过配置写出验证（真实宿主回归待首个用户反馈）。
 
-## 方式三：npm（npx 一条命令，包已就绪待发布）
+## 方式二：从仓库装
 
 ```bash
-npx vod-devkit install --target <hermes|opencode|codex> --product <你的产品>
+git clone https://gitcode.com/xiaowu2119/vod-devkit.git && cd vod-devkit
+bin/vod-devkit install --target hermes --product <你的产品>   # 宿主任选
+# 重启宿主会话后工具出现（宿主在启动时读 MCP 配置）
 ```
 
-## 方式四：任意 MCP 客户端（手动配置）
+## 方式三：任意 MCP 客户端（手动配置）
 
 把以下片段并入你宿主的 mcpServers 配置：
 
@@ -51,7 +47,6 @@ npx vod-devkit install --target <hermes|opencode|codex> --product <你的产品>
       "args": ["/path/to/vod-devkit/vod_mcp/server.py"],
       "env": {
         "VOD_JAVA_API_BASE": "https://vod-dev.topxtopx.com",
-        "VOD_JAVA_API_KEY": "",
         "VOD_PACKS": "core,collect,knowledge"
       }
     }
@@ -59,21 +54,50 @@ npx vod-devkit install --target <hermes|opencode|codex> --product <你的产品>
 }
 ```
 
-配置好后重启会话。
+配置好后重启会话。装完自检：`npx -y vod-devkit@latest doctor` /
+`status`（针对已装实例，读 install-manifest）。
+
+## 方式四：远程部署（MCP 单独服务多 agent）
+
+```bash
+# 1) 服务端：起远程面（需官方 MCP SDK；对外自建 TLS 反代）
+pip install 'vod-devkit[remote]'
+vod-devkit serve --transport remote --port 9528 --host 127.0.0.1
+
+# 2) agent 侧 attach（token 必填——远程面不代签匿名身份）
+npx -y vod-devkit@latest install --target opencode \
+    --mcp-url http://<host>:9528/mcp --mcp-token <VOD key> --product <你的产品>
+```
+
+attach 前安装器会**探活**：连接（initialize）、工具面（tools/list 与契约
+比对）、**key 真伪**（经远程面真调 vod_auth_status，引擎判定）。坏 key 当场
+拒装零副作用；匿名令牌设备漂移（`device-mismatch`）和引擎不可达会放行——
+网络问题不是 key 问题。详见 [INSTALL.md](INSTALL.md) 远程部署节。
 
 ## 验证
 
-- 会话里让 agent 调用 `vod_auth_status` → key 状态（指纹）+ 三步引导
+- 会话里让 agent 调用 `vod_auth_status` → key 状态（指纹）+ 引导
 - 提交一条测试反馈：`vod_submit_voices`（voices + confirmed=true）
 
 ## 升级正式 key（提交量达匿名上限后）
 
-联系 VOD 运营 → `bin/vod-devkit install --java-key <KEY>` 重新落位。
+联系 VOD 运营拿 key → 安装/更新时经 env 提供（安装器写入宿主 MCP 配置）：
+
+```bash
+VOD_JAVA_API_KEY=<KEY> npx -y vod-devkit@latest \
+    install --target <宿主> --product <你的产品>
+```
+
+升级后 `vod_auth_status` 的 keyCheck 会显示 `verified`。
 
 ## 故障排查
 
 | 症状 | 含义 |
-|---|---|
+| --- | --- |
 | `上游不可达` | 引擎/网络未就绪，检查 VOD_JAVA_API_BASE |
 | `-32012 鉴权失败` | key 无效或被吊销；无 key 会自动取令牌重试 |
+| `token 无效（引擎判定 rejected）` | attach 时坏 key——确认 VOD 平台签发的 key |
+| `设备绑定校验失败` | 匿名令牌跨设备使用——本设备首次提交会自动重领 |
 | 工具不出现 | 确认 VOD_PACKS 含对应 pack；重启会话 |
+
+更多：[INSTALL.md](INSTALL.md)（每宿主安装细节/故障表/安全边界）。

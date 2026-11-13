@@ -210,8 +210,12 @@ npx -y vod-devkit@latest install --target opencode --mcp-url https://<网关>/mc
 npx -y vod-devkit@latest install --target codex    --mcp-url https://<网关>/mcp --mcp-token <key>
 ```
 
-写入前先探活：`initialize` + `tools/list` 必须等于远程面工具集，不符即拒装且
-**不写任何配置**；`doctor` 复查端点与工具面。远程面与 stdio 面的实质差别：
+写入前先探活（三步）：`initialize`（连接）+ `tools/list`（工具面必须等于
+远程面工具集）+ **key 真伪**（经远程面真调 `vod_auth_status`，引擎三态：
+`rejected` = API Key 无效 → 拒装且**不写任何配置**；`device-mismatch` =
+匿名令牌设备锚点漂移（token 有效、本机非签发设备）→ 放行，首次提交自动
+重领；引擎不可达 → 放行，网络问题不是 key 问题）。`doctor` 复查端点与
+工具面。远程面与 stdio 面的实质差别：
 
 - **工具面收窄**：草稿/本机账本类工具（`vod_draft_voices` / `vod_commit_voices` /
   `vod_list_submitted`）不在远程面——它们写"本机状态"，共享进程没有"本机"

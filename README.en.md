@@ -149,8 +149,13 @@ npx -y vod-devkit@latest install --target opencode --mcp-url https://<gateway>/m
 npx -y vod-devkit@latest install --target codex    --mcp-url https://<gateway>/mcp --mcp-token <key>
 ```
 
-Liveness is probed before any write: `initialize` + `tools/list` must equal the
-remote tool set, otherwise the install is refused with zero side effects. The
+Liveness is probed before any write — three steps: `initialize` (connectivity),
+`tools/list` (must equal the remote tool set, otherwise refuse with zero side
+effects), and **key validity** (a real `vod_auth_status` call through the
+remote face; the engine decides: `rejected` = invalid API key → refuse
+install; `device-mismatch` = anonymous token bound to another device (the
+token itself is fine) → allow, re-minted automatically on first submit; engine
+unreachable → allow — a network problem is not a key problem). The
 remote face withholds machine-local tools (`vod_draft_voices`,
 `vod_commit_voices`, `vod_list_submitted`) — a shared process has no "local".
 There is no built-in auth: bind to loopback and front it with TLS + identity.
