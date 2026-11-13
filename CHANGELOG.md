@@ -333,3 +333,11 @@
 - 6c2d9a1 fix(宿主): hermes 路径改为调用期解析 + 新增 host_matrix --audit 巡检
 - 0e688e3 docs(验证): 记真机可达边界 + AtomCode 真机验证结论
 
+
+## v0.5.6（2026-11-13）
+
+- 71cd3c7 chore(sync): plugins 副本同步远程 attach 修复（发版守卫拦出）
+- 665b313 chore(lint): 清 pyflakes 未用 import（release 质量门拦出）
+- 55610b6 docs(手册): README/QUICKINSTALL 对齐 token 探活三态与远程部署形态
+- d85db82 fix(远程attach): B1/B2/B3 三缺陷修复——探活验token、hermes防静默、contextvars身份传播
+
