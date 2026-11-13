@@ -108,6 +108,13 @@ class RemoteRuntime:
         逐块而不是攒全再写：devkit 的 shell 也是 `for await (chunk of
         response.body) res.write(chunk)`——SSE 这种长响应攒全再写等于把流式
         语义废掉（客户端一个字节都看不到，直到响应结束）。
+
+        身份传播（2026-11-13 真机实锤修复）：contextvars 不跨线程——do_POST
+        在 HTTP 线程 set 的 _REQ_KEY/_SERVER_FACE 到不了事件循环线程的
+        on_call_tool（submit 的 -32012 之所以还能触发，是走运的本地态分支）。
+        修法：把 key/face 作为参数传入，投递协程体内 set——run_coroutine_threadsafe
+        在 loop 线程为 run() 建任务，任务继承创建时刻的 context，体内 set 即对
+        handle_request 派生的整个协程链（含 asyncio.to_thread 复制）可见。
         """
         state = {"body_sent": False}
 
@@ -129,9 +136,15 @@ class RemoteRuntime:
                     sink.body(chunk)
 
         async def run():
+            from vod_mcp import tools
+            # 协程体内 set：见 request() docstring 的身份传播修复说明
+            tok_key = tools._REQ_KEY.set(scope.get("x_vod_key") or None)
+            tok_face = tools._SERVER_FACE.set(True)
             try:
                 await self.manager.handle_request(scope, receive, send)
             finally:
+                tools._SERVER_FACE.reset(tok_face)
+                tools._REQ_KEY.reset(tok_key)
                 sink.end()
 
         fut = asyncio.run_coroutine_threadsafe(run(), self._loop)
@@ -302,19 +315,18 @@ class _Handler(BaseHTTPRequestHandler):
         key = raw_auth[7:].strip() if raw_auth.lower().startswith("bearer ") else ""
 
         from vod_mcp import tools
+        # 身份经 scope 传递（x_vod_key），由 RemoteRuntime.request 在事件循环线程
+        # 的协程体内 set _REQ_KEY/_SERVER_FACE——HTTP 线程直接 set 的 contextvar
+        # 过不了 run_coroutine_threadsafe 的线程边界（2026-11-13 真机实锤）。
+        scope = _scope(self, body)
+        scope["x_vod_key"] = key
         sink = _StreamSink(self)
-        tok_key = tools._REQ_KEY.set(key or None)
-        tok_face = tools._SERVER_FACE.set(True)
         try:
-            self.server.runtime.request(_scope(self, body), body, sink)
+            self.server.runtime.request(scope, body, sink)
         except Exception as e:  # 传输层异常：能答就答 500，已经流出去就断连
             if not sink.started:
                 self._json(500, {"jsonrpc": "2.0", "id": None,
                                  "error": {"code": -32603, "message": str(e)}})
-            return
-        finally:
-            tools._SERVER_FACE.reset(tok_face)
-            tools._REQ_KEY.reset(tok_key)
 
 
 def serve(host: str, port: int) -> int:

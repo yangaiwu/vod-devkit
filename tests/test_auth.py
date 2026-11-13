@@ -564,6 +564,44 @@ def test_probe_key_expired_anonymous_token(monkeypatch):
     assert "重领" in out["note"] and tools._fingerprint("anon-token-stale") == out["fingerprint"]
 
 
+def test_probe_key_device_mismatch_is_not_rejected(monkeypatch):
+    """匿名令牌设备锚点漂移 → device-mismatch（放行级），不是 rejected。
+
+    实锤（2026-11-13 真机）：匿名令牌绑定设备（X-Vod-Device-Id=install_nonce），
+    换机/重装/仓内与 payloads 两份 runtime 的 nonce 漂移时引擎 401 原文是
+    「令牌与请求设备不匹配（设备绑定校验失败）」——token 本身有效，只是本机
+    不是签发设备，提交时自动重领即可。这是正常场景：探针必须区分它和
+    「API Key 无效或已失效」（真坏 key → rejected 拦截）。区分依据=引擎 401
+    原文（_http 已透传，丢原文就是误拦根源）。
+    显式传参（服务面 auth_status 传请求头 key）与本地档同语义：按原文判。
+    """
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
+    monkeypatch.setattr(tools, "JAVA_KEY", "anon-token-device-drift")
+
+    def mismatch(method, path, body=None, timeout=30, base=None, key=None):
+        raise tools.ToolError(
+            "鉴权失败（https://vod-dev.topxtopx.com）："
+            "令牌与请求设备不匹配（设备绑定校验失败），请在本设备重新申请令牌"
+            "（POST /external/token）", code=-32012)
+
+    monkeypatch.setattr(tools, "_http", mismatch)
+    out = tools.probe_key("anon-token-device-drift")  # 显式传参（服务面场景）
+    assert out["ok"] is False and out["reason"] == "device-mismatch"
+    assert "重新申请" in out["note"] or "不匹配" in out["note"]
+    assert out["reason"] != "rejected", "设备漂移不是坏 key，不许误拦"
+
+    # 对照：真坏 key（引擎原文「API Key 无效」）即使显式传参也必须 rejected
+    def invalid(method, path, body=None, timeout=30, base=None, key=None):
+        raise tools.ToolError(
+            "鉴权失败（https://vod-dev.topxtopx.com）："
+            "API Key 无效或已失效，可重新申请令牌（POST /external/token）"
+            "或联系 VOD 运营升级正式 key", code=-32012)
+
+    monkeypatch.setattr(tools, "_http", invalid)
+    out = tools.probe_key("explicitly-bad-key")
+    assert out["ok"] is False and out["reason"] == "rejected"
+
+
 def test_auth_status_no_key_material_anywhere(monkeypatch):
     """脱敏复查（D-key-guard-1③）：auth_status/账本全输出面 grep 不到 key 明文。"""
     secret = "super-secret-key-value-9f2e"  # secret-scan:allow 测试夹具

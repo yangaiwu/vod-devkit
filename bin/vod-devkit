@@ -167,11 +167,20 @@ def _expected_remote_tools() -> set:
     return set(contract["tools"]) - set(_packs.REMOTE_WITHHELD)
 
 
-def _probe_remote(url: str, token: str, timeout: int = 15) -> list:
+def _probe_remote(url: str, token: str, timeout: int = 15,
+                  verify_token: bool = True) -> list:
     """远程 MCP 端点探活：initialize + tools/list，返回工具名清单（失败抛 RuntimeError）。
 
     走 stdlib urllib（安装器零第三方依赖红线）；Accept 双类型，兼容 SSE 单事件响应。
     探活在**写入任何配置之前**执行——装不上就不留半成品。
+
+    B2（2026-11-13 真机实锤）：握手+工具面是连接级，token 有效性没验——坏 key
+    照样装上，用户首次提交才发现 401。与"--product fail fast（归因错误比报错
+    糟）"纪律不对称。verify_token=True 时追加第 3 步：经远程面真调一次
+    vod_auth_status（远程面把请求头 Bearer 透传引擎做 keyCheck 探针），引擎判
+    无效（探针回 rejected）→ RuntimeError 拒装；探针不可达（引擎/网络问题）→
+    放行（网络问题不是 key 问题，不许误伤断网环境安装）。doctor 的旧调用途
+    （用户可能没配 token）与安装期不同，verify_token=False 保持旧连接级语义。
     """
     import urllib.request
 
@@ -197,11 +206,68 @@ def _probe_remote(url: str, token: str, timeout: int = 15) -> list:
            "params": {"protocolVersion": "2025-06-18",
                       "clientInfo": {"name": "vod-devkit-installer", "version": "1"},
                       "capabilities": {}}})
+    _post({"jsonrpc": "2.0", "method": "notifications/initialized"})
     listed = _post({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     names = [t.get("name") for t in (listed.get("result") or {}).get("tools") or []]
     if not names:
         raise RuntimeError("tools/list 返回空——端点可能不是 Streamable HTTP MCP")
+    if verify_token and token and "vod_auth_status" in names:
+        _probe_remote_token(url, token, timeout)
     return names
+
+
+def _probe_remote_token(url: str, token: str, timeout: int) -> None:
+    """B2 第 3 步：经远程面真调 vod_auth_status 验 token（引擎是唯一权威）。
+
+    远程面把请求头 Bearer 透传给 keyCheck 探针打引擎 GET /external/meta：
+    - keyCheck.ok=True（verified）→ 通过
+    - keyCheck.reason=rejected → RuntimeError（坏 key 拒装，零副作用）
+    - reason ∈ {no-key, unreachable, expired-anonymous, device-mismatch} 或
+      keyCheck 缺失/探针不可用 → 放行（无法验证≠无效；三态判定语义与
+      tools.probe_key 一致——device-mismatch 是匿名令牌设备锚点漂移的正常
+      场景：token 有效只是本机不是签发设备，提交时会自动重领）
+    """
+    import urllib.request
+    import urllib.error
+
+    def _post(payload: dict) -> dict:
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode(), method="POST",
+            headers={"content-type": "application/json",
+                     "accept": "application/json, text/event-stream",
+                     "Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", "replace")
+        if body.startswith("event:") or body.startswith("data:"):
+            for line in body.splitlines():
+                if line.startswith("data:"):
+                    body = line[5:].strip()
+                    break
+        data = json.loads(body or "{}")
+        if isinstance(data, dict) and data.get("error"):
+            raise RuntimeError(f"JSON-RPC 错误：{data['error']}")
+        return data
+
+    _post({"jsonrpc": "2.0", "id": 10, "method": "initialize",
+           "params": {"protocolVersion": "2025-06-18",
+                      "clientInfo": {"name": "vod-devkit-installer", "version": "1"},
+                      "capabilities": {}}})
+    _post({"jsonrpc": "2.0", "method": "notifications/initialized"})
+    called = _post({"jsonrpc": "2.0", "id": 11, "method": "tools/call",
+                    "params": {"name": "vod_auth_status", "arguments": {}}})
+    content = ((called.get("result") or {}).get("content") or [{}])[0]
+    try:
+        status = json.loads(content.get("text") or "{}")
+    except ValueError:
+        return  # 回执异常（旧版远程面等）：无法验证≠无效，放行
+    check = status.get("keyCheck")
+    if not isinstance(check, dict):
+        return  # 远程面未透传 keyCheck（旧版）：连接级已过，放行
+    if check.get("reason") == "rejected":
+        fp = check.get("fingerprint")
+        raise RuntimeError(
+            f"token 无效（引擎判定 rejected，指纹 {fp}）——"
+            "请确认 VOD 平台签发的 key；探活先于写入，未装任何配置")
 
 
 def _remote_reachable(url: str, timeout: int = 6) -> bool:

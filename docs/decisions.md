@@ -1021,3 +1021,45 @@ workbuddy / dsh / hermes（含 hooks 插件）这些都要具备」。落地口�
 真机验证：
   干净载荷副本（payload.stage 重打）→ HTTP 200，7 个工具；
   人为篡改 server.py 的副本 → HTTP 503「载荷校验未通过：vod_mcp/server.py …」
+
+## D-attach-2 远程 attach 三个真机缺陷修复（2026-11-13，探活与身份传播）
+
+全宿主安装演练（8 宿主真机）中实锤的三个缺陷，同根因链路（远程 attach 链路
+"探活→hermes 注册→远程面身份"），一并修复：
+
+1. **B1 hermes attach 静默假绿**（`host_adapters/hermes.py: install_remote`）：
+   `hermes mcp add` 覆盖已存在条目时交互链是三问（Overwrite→认证→Enable
+   tools），管道 `input="y\ny\n"` 只答两问 → hermes 端 Cancelled 仍 exit 0 →
+   安装器打印"已注册"但 config.yaml 纹丝不动。修法：①stdin 喂不封顶 y 流
+   （不数提示个数——hermes 升级加问不破）②rc=0 不算数：读回 config.yaml
+   断言远程条目真落盘（`_hermes_registration_is_remote`，受限文本扫描
+   mcp_servers 段，零 yaml 依赖红线不破），缺失即非零退出。
+   教训记档：旧测试桩 hermes 只记调用不落配置，正是这个盲区让 B1 漏网——
+   桩必须按真 CLI 的**可观察行为**模拟（注册落盘才算 rc=0 语义完整）。
+
+2. **B2 探活不验 token**（`bin/vod-devkit: _probe_remote/_probe_remote_token`）：
+   握手+工具面是连接级，坏 key 照装、首次提交才发现 401——与 --product
+   fail fast 纪律不对称。修法：探活第 3 步经远程面真调 vod_auth_status 读
+   keyCheck（引擎三态），rejected 拒装零副作用。
+
+3. **B3 contextvars 不跨线程（最深的）**（`transport_remote.py` + `tools.py`）：
+   远程面在 HTTP 线程 set 的 `_REQ_KEY/_SERVER_FACE` 传不到事件循环线程的
+   on_call_tool（run_coroutine_threadsafe 不继承调用线程 context）——
+   **请求头身份从未到达过 tools 层**（submit 报 -32012 是走运的本地态分支）。
+   修法：身份经 scope（x_vod_key）传递、投递协程体内 set（协程链+to_thread
+   可见，最小传播模型已实证）；auth_status 服务面下探请求头 key（新增
+   requestKey 段）而非本地 JAVA_KEY。
+
+**匿名场景区分（探针不误拦，引擎 401 原文是唯一区分依据）**：
+- `_http` 401 原文透传（旧实现丢原文换固定文案=无法区分的根源）；
+- probe_key 新增 device-mismatch 分类：引擎 401 原文「令牌与请求设备不匹配
+  （设备绑定校验失败）」= 匿名令牌设备锚点漂移（token 有效、本机非签发设备，
+  提交自动重领）→ 放行；「API Key 无效或已失效」= 真坏 → rejected 拦截。
+- 真机矩阵：同机匿名令牌 attach 正常部署远程面 → verified 正常装（rc=0）；
+  设备漂移 → device-mismatch 放行；真坏 key → rc=2 拒装零副作用；引擎不可达
+  → unreachable 放行（网络≠key）。匿名链（stdio 面）不受任何影响。
+
+测试锁：tests/test_remote_attach_b1b2.py（6 用例）+ test_auth.py 增
+device-mismatch/rejected 对照用例 + test_remote_attach.py 桩 hermes 补
+"真注册落盘"模拟。全量 447 passed（installer update 3 例失败为本地 origin
+fetch 环境噪音，基线同款）。

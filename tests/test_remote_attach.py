@@ -85,11 +85,22 @@ def env(tmp_path):
     calls = tmp_path / "calls.log"
     for name in ("hermes", "codex"):
         p = stub / name
-        p.write_text(
+        stub_body = (
             "#!/bin/sh\n"
             f'echo "{name} $@ env_token=${{MCP_VOD_DEVKIT_API_KEY:-}} vmt=${{VOD_MCP_TOKEN:-}}" '
-            f">> {calls}\n"
-            "exit 0\n")
+            f">> {calls}\n")
+        if name == "hermes":
+            # 模拟真 hermes mcp add --url：把远程条目写进 config.yaml
+            # （B1 教训：桩只记调用不落配置，防静默断言会把这类桩打成 FAIL，
+            #  桩必须按真 CLI 的可观察行为模拟——注册落盘才算 rc=0 语义完整）
+            stub_body += (
+                'if echo "$@" | grep -q "mcp add.*--url"; then\n'
+                '  mkdir -p "$HOME/.hermes"\n'
+                '  printf "mcp_servers:\\n  vod-devkit:\\n    url: %s\\n" '
+                '"$(echo "$@" | grep -o "http[^ ]*/mcp")" >> "$HOME/.hermes/config.yaml"\n'
+                "fi\n")
+        stub_body += "exit 0\n"
+        p.write_text(stub_body)
         p.chmod(0o755)
     repo = tmp_path / "repo"
     shutil.copytree(ROOT, repo, dirs_exist_ok=True, ignore=shutil.ignore_patterns(

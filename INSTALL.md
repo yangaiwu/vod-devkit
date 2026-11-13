@@ -25,6 +25,33 @@ npx --yes vod-devkit install --target opencode --product codearts
 
 安装器做三件事：写宿主 MCP 配置段（无损合并，只动 vod-devkit 自己的键）、按 packs 拷贝技能、写 install-manifest.json（commitSHA 来源主键）。
 
+## 远程部署（MCP 单独服务多 agent）
+
+```bash
+# 1) 单独部署远程面（Streamable HTTP；需要官方 MCP SDK：pip install 'vod-devkit[remote]'）
+npx --yes vod-devkit serve --transport remote --port 9528 --host 127.0.0.1
+
+# 2) agent 侧 attach（配置指向远程端点 + 本地装技能）
+npx --yes vod-devkit install --target opencode --mcp-url http://<host>:9528/mcp \
+    --mcp-token <VOD key> --product codearts
+```
+
+- `--mcp-token` 必填：远程面**不代签匿名令牌**（身份只从请求头 Bearer 走，
+  引擎侧落库/配额按请求方记账）。hermes/codex 的 token 落 env 引用，opencode
+  明文入配置（注意文件权限）。dsh 不走 MCP，此模式显式拒绝。
+- **token 探活**（安装期 fail fast）：attach 前探活三步——连接（initialize）、
+  工具面（tools/list 必须等于契约 − 远程面裁剪集）、**key 真伪**（经远程面真调
+  `vod_auth_status`，引擎三态判定）：
+  - 引擎判 `rejected`（API Key 无效或已失效）→ 拒装，零副作用；
+  - `device-mismatch`（引擎 401 原文「令牌与请求设备不匹配」）→ **放行**：
+    匿名令牌是设备锚点绑定的，token 本身有效只是本机不是签发设备，提交时
+    自动重领——匿名令牌不能当跨机远程 token 用，但同机部署（nonce 一致）
+    探活即 `verified`，正常装；
+  - 引擎不可达/超时 → 放行（网络问题不是 key 问题，不误伤断网环境）。
+- `--skills-only`：MCP 已由别处注册时只装技能不动宿主配置。
+- 远程面无 draft/commit/本地账本三个本机工具（面语义裁剪，非缺陷）；技能
+  双面按 SKILL 的「先看工具面再定流程」走。
+
 ## 按宿主验证
 
 **连接级**（配置被接受，≠能用）：

@@ -107,16 +107,40 @@ def install(args, packs: str) -> Path:
 
 
 def install_remote(args, url, token):
-    """hermes mcp add --url：token 经 env 注入，配置里只留 ${MCP_VOD_DEVKIT_API_KEY} 引用。"""
+    """hermes mcp add --url：token 经 env 注入，配置里只留 ${MCP_VOD_DEVKIT_API_KEY} 引用。
+
+    B1（2026-11-13 真机实锤）：hermes mcp add 对已存在条目的交互链是三问
+    （Overwrite? → 认证? → Enable all tools?），管道 input 只给两个 y 时第三问
+    读不到输入 → hermes 端 Cancelled 且仍 exit 0 → 安装器打印"已注册"但
+    config.yaml 纹丝不动（静默假绿）。修法两道：
+    ①stdin 喂不封顶的 y 流（迭代器持续供给，hermes 问几问答几个——多问多答、
+      少问即 EOF 收尾），不再数提示个数；
+    ②rc=0 不算数——读回 hermes 配置真源（config.yaml mcp_servers.vod-devkit
+      的 url），断言远程条目真的写进去了；没写进去就非零退出报"未注册"，
+      绝不静默。
+    """
     import os
     env = os.environ.copy()
     env["MCP_VOD_DEVKIT_API_KEY"] = token
+
+    def _yes_forever():
+        # 交互问数随 hermes 版本变化（首次装=2 问，覆盖装=3 问），流式供给不数数
+        for _ in range(64):
+            yield "y\n"
+
     r = subprocess.run(
         ["hermes", "mcp", "add", "vod-devkit", "--url", url, "--auth", "header"],
-        input="y\ny\n", capture_output=True, text=True, env=env, timeout=180)
-    if r.returncode != 0:
-        print(f"[vod-devkit] hermes mcp add（remote）失败：{(r.stderr or r.stdout).strip()[-200:]}",
-              file=sys.stderr)
+        input="".join(_yes_forever()), capture_output=True, text=True, env=env,
+        timeout=180)
+    # 防静默：读回 config.yaml 断言远程条目在（Cancelled 会 rc=0 但不落配置）
+    registered = _hermes_registration_is_remote(url)
+    if r.returncode != 0 or not registered:
+        reason = (f"hermes mcp add rc={r.returncode}，"
+                  + ("配置读回未见远程条目（交互确认被跳过即静默取消）" if not registered
+                     else f"stderr={(r.stderr or '').strip()[-150:]}"))
+        print(f"[vod-devkit] Hermes 远程 MCP 注册未落盘：{reason}\n"
+              "  可手工执行：hermes mcp add vod-devkit --url <url> --auth header "
+              "（逐问回答 y）", file=sys.stderr)
         sys.exit(1)
     conf = Path(_spec()["configPath"]).parent / "vod-devkit.json"
     conf.parent.mkdir(parents=True, exist_ok=True)
@@ -125,3 +149,40 @@ def install_remote(args, url, token):
                                ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"已注册 Hermes 远程 MCP（{url}；token 存 ~/.hermes/.env，配置内只留引用）")
     return conf
+
+
+def _hermes_registration_is_remote(url: str) -> bool:
+    """读回 hermes 内部注册真源（config.yaml mcp_servers），断言 vod-devkit 是远程条目。
+
+    hermes mcp add 写 ~/.hermes/config.yaml 的 mcp_servers.vod-devkit（url 字段
+    为远程形态标志）；Cancelled 的假绿在这里现形。无 yaml 依赖红线：远端
+    安装器零第三方依赖，这里用受限文本扫描（顶层 mcp_servers: 段下缩进块内
+    找 vod-devkit 与 url 行），而非完整 yaml 解析。
+    """
+    cfg = Path.home() / ".hermes" / "config.yaml"
+    if not cfg.is_file():
+        return False
+    in_section = False
+    saw_entry = False
+    saw_url = False
+    for raw_line in cfg.read_text(encoding="utf-8").splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        indented = raw_line[0] == " "
+        stripped = raw_line.strip()
+        if not indented:
+            in_section = stripped.startswith("mcp_servers:")
+            continue
+        if not in_section:
+            continue
+        # mcp_servers 段内的行：条目名（一级缩进）与字段（更深缩进）
+        if stripped.startswith("vod-devkit:"):
+            saw_entry = True
+        elif saw_entry and stripped.startswith("url:"):
+            if url in stripped:
+                saw_url = True
+            break
+        elif saw_entry and not raw_line.startswith("  vod-devkit") and stripped.endswith(":"):
+            if not raw_line.startswith(" " * 4):  # 下一个一级条目：停止
+                break
+    return saw_entry and saw_url
