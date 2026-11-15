@@ -389,6 +389,9 @@ hermes hooks test pre_llm_call --payload-file payload.json
 诚实残留（写清楚，不掩）：
 
 - 钩子只"提醒"，不拦工具调用；`pre_tool_call` 拦截（读 `runtime.json`/`env` 导出）**未做**。
+- 宿主对 `runtime.json` 的读取门控（沙箱规则 / allow 列表）**未验证**：插件侧探测不到宿主的
+  权限策略，因此不声称"已拦"。降低暴露面的做法是 `runtime.json` 不种 key（安装器故意不把
+  `java_key` 写进载荷副本，运行期走匿名令牌）+ `auth status` 只输出指纹。
 - 远程面**不内置鉴权**：默认只绑回环，对外必须自建 TLS 反代与身份校验；插件不代签身份。
 - 不允许把 key 写进宿主 MCP 配置的 `env`（明文且随配置进 git）——用 `auth init`。
 
@@ -435,3 +438,15 @@ python3 scripts/host_matrix.py    # 9 宿主安装矩阵：装→断言→拉起
 
 `doctor` 的失败按层分组，不再平铺一列 `FAIL`；`explain` 与它共用同一张规则表
 （`vod_mcp/diagnose.py`），所以"报告里出现的层/原因"和"解释出来的动作"永远一致。
+
+`doctor` 末尾固定打两行**出站面**（只报告、不改退出码，离线环境仍可用）：
+
+```
+[doctor] 出站代理：HTTPS_PROXY=http://***:***@proxy:3128；NO_PROXY=127.0.0.1
+[doctor] 引擎可达：HTTP 401（可达；鉴权/路径响应）http://…/external/meta
+```
+
+- 代理只报 env 生效值（`HTTPS_PROXY/HTTP_PROXY/ALL_PROXY/NO_PROXY`），**不建配置文件**
+  ——尊重既有 HTTP 约定；URL 里的口令一律掩码（doctor 输出常被贴进工单）。
+- 引擎可达**无 key 也探**：401/403 算「可达」（鉴权问题≠网络问题），连不上只 `warn`
+  （离线装机 doctor 必须还能用），且不因此改退出码。

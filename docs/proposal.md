@@ -1280,3 +1280,22 @@ S3 运行时入口路径收进 `src/`；S4 运行期状态收进用户目录）�
 验收口径：`python3 -m pytest tests/test_structure_guards.py -q`；`git ls-files | cut -d/ -f1`
 与预算表逐项比对。
 
+
+
+## doctor 出站面报告（S134，D-doctor-egress-1，2026-11-16）
+
+需求变更：doctor 有 key 时才探引擎，没 key 时对网络一无所知；代理在插件里完全没有可观测面
+（urllib 隐式读 env，但没人能回答"现在走哪个代理"）。两条都只**报告**，不建配置、不改路由、
+不 FAIL（离线装机 doctor 必须可用）。
+
+- `[doctor] 出站代理：…`：读 `HTTPS_PROXY/HTTP_PROXY/ALL_PROXY/NO_PROXY`（含小写）生效值，
+  **URL 里的口令一律掩码**（输出会被贴进工单）；未设时明说"直连，urllib 会读 env、无需另配"。
+- `[doctor] 引擎可达：…`：无条件探一次 `apiBase` 的 `/external/meta`（4s 超时、不重试、不带 key）。
+  200=`ok`；401/403=`auth`（**可达**，鉴权问题≠网络问题）；连不上=`unreachable` 只 warn，
+  退出码不变。
+- 诚实标注：宿主权限缝（沙箱/allow 对 `runtime.json` 的读取门控）插件侧**探测不到**，
+  写进 README 的「诚实残留」而不是假装拦住了。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S134 | 出站面只报告 | 代理含口令时输出无 `user`/`secret`；未设代理时说"直连"；引擎 200→ok、401→auth 且文案含"可达"、死端口→unreachable 且只 warn；空 apiBase 明说未配置 |
