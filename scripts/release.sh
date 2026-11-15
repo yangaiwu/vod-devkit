@@ -66,8 +66,11 @@ fi
 # sync 重跑一遍，若产生未提交变更=提交前忘了同步，拒绝发版（sync 结果应单独
 # 提交）。build-info 每次重写时间戳，不参与本检查（随发版提交再生）。
 python3 scripts/sync_plugin.py
-if ! git diff --quiet -- plugins/vod-devkit/vod_mcp plugins/vod-devkit/skills; then
-  echo "FAIL: 双副本漂移——sync 产生了未提交变更。请先提交 sync 结果（git add plugins/vod-devkit/vod_mcp plugins/vod-devkit/skills）再发版" >&2
+# 四目录全覆盖（v0.5.8 实锤：只查 vod_mcp/skills 时，contract 的版本落点
+# 被 sync 写到插件副本却无人提交 → 工作区残留、tarball 内容 ≠ tag）。
+if ! git diff --quiet -- plugins/vod-devkit/vod_mcp plugins/vod-devkit/skills \
+      plugins/vod-devkit/contract plugins/vod-devkit/safety; then
+  echo "FAIL: 双副本漂移——sync 产生了未提交变更。请先提交 sync 结果（git add plugins/vod-devkit/{vod_mcp,skills,contract,safety}）再发版" >&2
   exit 1
 fi
 
@@ -143,6 +146,7 @@ RANGE="${PREV_TAG}..HEAD" && [ -z "$PREV_TAG" ] && RANGE="HEAD"
 git add package.json pyproject.toml vod_mcp/__init__.py contract/tools.schema.json \
         plugins/vod-devkit/.codex-plugin/plugin.json plugins/vod-devkit/build-info.json \
         plugins/vod-devkit/vod_mcp plugins/vod-devkit/skills dsh/package.json CHANGELOG.md \
+        plugins/vod-devkit/contract plugins/vod-devkit/safety \
         tests/golden \
         skills hermes-plugin docs/decisions.md build-info.json
 git commit -qm "release: v$BUMP"
