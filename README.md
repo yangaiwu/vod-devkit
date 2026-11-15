@@ -386,11 +386,18 @@ hermes hooks test pre_llm_call --payload-file payload.json
 ## 目录结构（摘要）
 
 ```
-src/            运行时与安装器源码（真源）           plugins/   宿主发布物（清单+生成副本）
-integrations/   宿主规格（探测/落点）               scripts/   生成器与门禁（成对）
-hooks/          宿主无关钩子脚本                    tests/     pytest（含结构/范围/花名册门禁）
-docs/           架构/设计/需求/决策/安全/钩子    packages/dsh/ npm/ bin/  独立包与薄壳
+src/            可导入 Python 包（真源）：vod_mcp/ 运行时、vodkit_cli/ 安装器
+assets/         项目级资产（真源）：skills/ 技能树、contract/ 工具契约、safety/ 护栏策略
+integrations/   宿主规格 host.json（探测/落点）+ hermes/hooks/vod_router.py（宿主侧钩子）
+packages/dsh/   dsh 壳（独立 npm 包）              scripts/   生成器与门禁（成对）
+plugins/        宿主发布物（清单 + 生成副本，副本零提交）  tests/  pytest（含结构/范围/花名册门禁）
+docs/           架构/设计/需求/决策/安全/钩子      npm/ bin/  薄壳（找解释器 + 设根 + 透传）
 ```
+
+**技能在哪**：真源是 `assets/skills/<技能名>/SKILL.md`（4 个：vod-core、
+vod-feedback-collect、vod-problem-classification-rules、vod-scoring-rules）。
+`plugins/vod-devkit/skills/` 与载荷 `~/.vod-devkit/payloads/<ver>/skills/` 都是**生成副本**
+（v0.5.9 起零提交，`scripts/sync_plugin.py` 生成），不要在仓里找它们。
 
 根目录条目受**预算**约束（`tests/test_structure_guards.py::test_s129_*`）：新增顶层目录/文件
 必须先改 [docs/architecture.md](docs/architecture.md)（结构契约与迁移分阶）。
