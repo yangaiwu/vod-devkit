@@ -10,7 +10,7 @@ ALL_PACKS = ("core", "collect", "knowledge")
 PACK_TOOLS = {
     # vod_search_products：问用户"是哪个产品"前给候选（只读，D-product-ask-1）
     "core": ["vod_devkit_info", "vod_auth_status", "vod_check_update",
-             "vod_search_products"],
+             "vod_search_products", "vod_packs_configure"],
     # 两段式（D-token-approval-2 极简形态）随 collect 下发；codex 话术走 draft→commit
     "collect": ["vod_submit_voices", "vod_draft_voices", "vod_commit_voices", "vod_list_submitted"],
     # 领域规则技能披露（第二轨）：知道有哪几本规则、按需取全文。
@@ -78,14 +78,63 @@ def _resolve(raw: str) -> tuple:
 #                 "本机草稿"既不隔离也不可审计；
 #   list_submitted：本地账本是装机维度的记录，服务面读它不是客户端想要的答案
 #                 （跨机对账走引擎端点）。
+#   packs_configure：会话内开关是**进程内状态**，HTTP 面每请求现造 server、无会话，
+#                 开关会在下一个请求消失（"以为改了其实没改"）。
 # 注意：submit 不摘——它对 VOD 的唯一动作是调用引擎 HTTP API，落库是服务端的事。
-REMOTE_WITHHELD = ("vod_draft_voices", "vod_commit_voices", "vod_list_submitted")
+REMOTE_WITHHELD = ("vod_draft_voices", "vod_commit_voices", "vod_list_submitted",
+                   "vod_packs_configure")
 
 
 def enabled_tools(remote: bool = False) -> list:
     tools = []
-    for pack in enabled_packs():
+    for pack in effective_packs():
         tools.extend(PACK_TOOLS[pack])
     if remote:
         tools = [t for t in tools if t not in REMOTE_WITHHELD]
     return tools
+
+
+# ── 会话内开关（D-packs-configure-1） ─────────────────────
+#
+# 与 CLI `packs enable|disable --apply` 分工：CLI 写宿主配置（持久，重启用），
+# 这里只改进程内状态（立即生效，重启即清）。**不写 env、不写配置**——MCP 工具
+# 去改宿主配置文件会把"谁改的"变成猜谜，而持久化面已经有一个可解释入口。
+
+_RUNTIME: tuple | None = None
+
+
+class PackRefused(PermissionError):
+    """运行期拒绝（安全门禁，如采集熔断）。与 UnknownPack（拼写错）分开报。"""
+
+
+def effective_packs() -> tuple:
+    """当前生效的包：会话内开关优先，否则按 VOD_PACKS（含 core 强制与熔断）。"""
+    return _RUNTIME if _RUNTIME is not None else enabled_packs()
+
+
+def normalize_packs(ids) -> tuple:
+    """归一请求的包列表：去重、kb 别名、core 强制、未知 id 报错、熔断拦截。"""
+    want = []
+    for p in ids:
+        p = (p or "").strip()
+        if not p:
+            continue
+        p = "knowledge" if p == "kb" else p
+        if p not in ALL_PACKS:
+            raise UnknownPack(
+                f"未知包 id: {p}；可用: {','.join(ALL_PACKS)}")
+        if p not in want:
+            want.append(p)
+    if "collect" in want and any(os.path.isfile(m) for m in BREAKER_MARKERS):
+        # 熔断是安全门禁：显式开启也不能绕过。静默摘掉等于"配了没生效"。
+        raise PackRefused(
+            "采集熔断生效（codex 未确认提交 ≥2 次，D-codex-circuit-breaker-1）："
+            "会话内不能开启 collect；解除须删熔断标记")
+    return tuple(dict.fromkeys(["core"] + want))
+
+
+def set_runtime_packs(ids) -> tuple:
+    """设置会话内生效包；ids 为 None 时恢复按 VOD_PACKS。返回新生效 tuple。"""
+    global _RUNTIME
+    _RUNTIME = None if ids is None else normalize_packs(ids)
+    return effective_packs()

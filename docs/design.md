@@ -974,7 +974,37 @@ cache 内 .mcp.json 被改写成 `python3` 绝对路径 + `payloads/0.5.9/vod_mc
 "报错列选项"，因为猜错宿主的代价是写坏别人的配置。多选与 `--target all` 共用同一个
 安装循环（`_install_many`）：缺落点（dsh 无 `--profile`）跳过并说明，单宿主失败不阻塞其它。
 
-用例承载：`tests/test_global_cmds.py`（S116-S123、S126-S128、S130-S131）。
+用例承载：`tests/test_global_cmds.py`（S116-S123、S126-S128、S130-S131）、
+`tests/test_packs_configure.py`（S132-S133）。
+
+## 会话内能力面开关（D-packs-configure-1，2026-11-16）
+
+能力面此前只有 `VOD_PACKS`：安装期写进宿主配置、启动期读一次，改了要重启会话，
+也没有工具能回答"现在开的是哪几个"。`vod_packs_configure`（core）补会话内开关。
+
+**三层写面的分工（不许混）**：
+
+| 面 | 入口 | 作用域 | 谁写 |
+|---|---|---|---|
+| 持久 | CLI `packs enable\|disable\|all --apply` | 宿主配置文件（重启生效） | 运维/用户 |
+| 会话 | `vod_packs_configure` | 进程内 `_RUNTIME`（重启即清） | 模型（会话内，不落盘） |
+| 环境 | `VOD_PACKS` env | 进程启动快照 | 平台/CI 注入 |
+
+`effective_packs()` 的优先级：会话内开关 > `VOD_PACKS`（含 core 强制与熔断）。
+**MCP 工具不写宿主配置文件**——那会让"谁改的"变成猜谜，而持久化面已经有可解释入口。
+
+**熔断不能被绕过**：`normalize_packs()` 里 `collect` 遇到 `BREAKER_MARKERS` 直接抛
+`PackRefused`（工具层转 `-32015`），不是静默摘掉——静默摘等于"配了没生效"，而这里是
+**显式动作被安全门禁拒绝**，两者必须用不同信号。启动期的 `_resolve` 仍走静默摘除+stderr
+告警（那是"配置优先"的既有语义，不动）。
+
+**通知只发在真变化时**：`changed` 为真的 `tools/call` 才追加
+`notifications/tools/list_changed`；同一次调用在 stdio 上输出两行（响应在前、通知在后）。
+`handle()` 因此允许返回 list，`main()` 逐条写出——这是全仓唯一会主动向客户端发消息的位置。
+capabilities 必须声明 `tools.listChanged=true`，否则合规客户端不会重拉 `tools/list`。
+
+**远程面摘除**：`REMOTE_WITHHELD` 加该工具。理由不是"安全"而是语义：HTTP 面每请求现造
+server、无会话，开关写完下一个请求就没了（"以为改了其实没改"）。dsh 壳同理不提供。
 
 ## 凭据单入口与技能读取教法（D-auth-init-1 / D-skill-teaching-1，2026-11-15）
 

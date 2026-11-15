@@ -201,6 +201,76 @@
       },
       "backend": "local(无上游；探测时轻量 ping)"
     },
+    "vod_packs_configure": {
+      "description": "会话内开关能力包（stdio 面）：enable/disable 包 id 或 reset=true，立即改工具面并推 tools/list_changed。不写 env/宿主配置、重启即清；持久化用 CLI `vod-devkit packs enable|disable <id> --apply`。core 强制包含；未知 id 报错；采集熔断期间不能开启 collect（安全门禁）。",
+      "input": {
+        "type": "object",
+        "properties": {
+          "enable": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "要开启的包 id（core/collect/knowledge）"
+          },
+          "disable": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "要关闭的包 id"
+          },
+          "reset": {
+            "type": "boolean",
+            "description": "恢复按 VOD_PACKS 的启动配置（清会话内开关）"
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "packs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "added": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "changed": {
+            "type": "boolean"
+          },
+          "persisted": {
+            "type": "boolean"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "packs",
+          "changed",
+          "persisted"
+        ]
+      },
+      "backend": "local(无上游)"
+    },
     "vod_list_submitted": {
       "description": "查询本机已提交的声音（只读）。本地账本（cap 200），最新在前；跨机/权威查询随引擎端点（VOD-VOI）。终端用户进度追问由 agent 凭此对账回答。",
       "input": {

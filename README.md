@@ -364,10 +364,14 @@ hermes hooks test pre_llm_call --payload-file payload.json
 
 ## 能力包与技能披露
 
-- `VOD_PACKS` 三层：环境变量（持久，重启生效）；会话内开关 **未做**（远程面无状态，
-  不做；stdio 面待评估）；CLI `packs enable/disable/all --apply`（直接改写各宿主配置里的
-  `VOD_PACKS`，缺省 dry-run，`core` 强制包含）
-- 未知包 id：安装口与 server 启动口都 `exit 2` 并列出可用 id——不静默过滤（"配了没生效"最难查）
+- `VOD_PACKS` 三层：环境变量（平台/CI 注入，启动生效）；**会话内开关** `vod_packs_configure`
+  工具（stdio 面：`enable`/`disable`/`reset`，立即改工具面并推 `tools/list_changed`，
+  **不落盘、重启即清**；远程面无会话、不提供）；CLI `packs enable/disable/all --apply`
+  （持久，直接改写各宿主配置里的 `VOD_PACKS`，缺省 dry-run，`core` 强制包含）
+- 三层分工一句话：要**当前会话立刻变**用工具，要**以后都变**用 CLI，平台注入用 env。
+  MCP 工具不写你的配置文件（持久化只走 CLI 这一个入口）
+- 未知包 id：安装口、server 启动口与 `vod_packs_configure` 都报错并列出可用 id——不静默过滤
+  （"配了没生效"最难查）；采集熔断期间开启 `collect` 会被拒（`-32015`，安全门禁不可绕过）
 - 技能读取：stdio 面 `vod_list_skills` 给 `skillRoot` 与每技能 `path`，教法是**动作优先**
   （先直读 `<skillRoot>/<name>/SKILL.md`，被拒/失败才回落 `vod_retrieve_skill`，绝不反复请求）；
   远程面不给服务器本机路径，规则文本走 `vod_retrieve_skill`
