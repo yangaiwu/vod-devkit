@@ -7,6 +7,8 @@
 现在的契约：
 - **根由入口显式设置**（`bin/vod-devkit`、`npm/cli.js`、`server.main()`、`tests/conftest`、
   `scripts/host_matrix.py` 各设 `VOD_DEVKIT_SRC_ROOT` / `VOD_DEVKIT_DIST_ROOT`）；
+  入口不覆盖已存在的环境变量（测试注入/重定位要用它），但**继承值与入口所在仓不一致时
+  必然在 stderr 告警**——静默用错根的表现是"未知宿主 xxx（可选：）"这类无从解释的错；
 - 本模块**只读不猜**；读不到时 derive-once 兜底（仅仓内开发/旧脚本），并告警；
 - 两处都不可知 → 硬失败并提示应设哪个变量。
 

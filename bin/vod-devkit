@@ -29,6 +29,14 @@ from vodkit_cli.install import detect_targets  # noqa: E402
 __all__ = ["main", "PRESETS", "detect_targets", "build_info", "write_build_info"]
 
 if __name__ == "__main__":
+    # 继承到一个**过期**的根会让整个 CLI 用错仓（表现是"未知宿主 xxx（可选：）"这类
+    # 无从解释的错，评审实测复现过一次）。显式设置仍被尊重（测试注入/重定位要用它），
+    # 但必须当场说清是哪来的——静默用错根比报错更难查。
+    for _name, _want in (("VOD_DEVKIT_SRC_ROOT", _SRC), ("VOD_DEVKIT_DIST_ROOT", _DIST)):
+        _got = os.environ.get(_name)
+        if _got and Path(_got).resolve() != _want.resolve():
+            print(f"[vod-devkit] warn: 继承的 {_name}={_got} 不是本入口所在的仓"
+                  f"（{_want}）——若命令行为异常，先 unset 它", file=sys.stderr)
     os.environ.setdefault("VOD_DEVKIT_SRC_ROOT", str(_SRC))
     os.environ.setdefault("VOD_DEVKIT_DIST_ROOT", str(_DIST))
     main()

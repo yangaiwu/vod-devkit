@@ -1347,3 +1347,23 @@ needs_host 清单 → 按签名判参（漏登记会静默丢 client_info）。
 |---|---|---|
 | S136 | 开关三面一致 | 关掉 knowledge 后 `vod_devkit_info`/`vod_auth_status` 的 packs、`vod_list_skills` 的 packs 与 enabled 标记、`vod_retrieve_skill` 的拒绝文案都与 `effective_packs()` 一致；`dispatch` 按签名给双参 handler 传 client_info、单参不传 |
 | S137 | 状态原子性 | 4 子进程各写 25 次 → 落盘 100 条；写 300 次期间并发读 0 次半截 JSON；坏文件产生 `.corrupt-*` 备份且 stderr 告警、新文件可用；正常文件不产生备份 |
+
+
+## 卸载面收口（S138，2026-11-16，并行评审 P2）
+
+需求变更（三条，都是实测出的状态/破坏性问题）：
+
+- **技能落点用 skillInstalls（按 host）而不是 row.skillsDir**：历史 manifest 把每一行的
+  `skillsDir` 都写成 hermes 目录（`common.py` 单值形态），于是 `uninstall --target opencode`
+  会去删 hermes 的技能副本（卸 A 删 B），而 opencode 自己的 `~/.config/opencode/skills`
+  永远漏删。老 manifest 没有 `skillInstalls` 时，`skillsDir` 只对 hermes 行可信，
+  其它行**宁可漏删也不猜**。
+- `--clean-global` 的 npx 缓存只删 `node_modules/vod-devkit` 这一份；一个 hash 目录里若
+  还有别的包，整目录 rmtree 会连带删掉用户其它缓存（删空才删目录）。
+- `uninstall` 里重复的 `elif target == "codex"` 分支（后者永不执行）删除；
+  `bin/vod-devkit` 对"继承到不一致的根"必须 stderr 告警（此前依赖 `setdefault` 静默用错根，
+  表现是"未知宿主 xxx（可选：）"这类无从解释的错）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S138 | 卸载只碰自己的落点 | 双宿主假 HOME：`uninstall --target opencode` 后 hermes 技能副本仍在、opencode 自己的被摘；hermes 专属目录只摘技能子目录（目录与别人的技能保留）；落点在当前 HOME **之外**一律拒绝删除并打印原因 |

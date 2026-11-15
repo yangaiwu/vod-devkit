@@ -1456,3 +1456,21 @@ README 已按"未做"标注）；不做 `modify`（改写命令）——改写�
 
 **没做**：把 `_RT` 内存镜像收敛成"每次现读"（重构级，见评审建议第 1 条）——那是另一个
 PR，且要先补"长驻进程里 runtime 改值"的用例。
+
+## D-uninstall-skill-dest-1：卸载按 skillInstalls 定位技能落点（2026-11-16）
+
+**问题（实测）**：`common.py` 写 manifest 时把**每一行**的 `skillsDir` 都填成
+`HERMES_SKILLS_DIR`（单值形态的遗留），而 `uninstall` 只读 `row["skillsDir"]`：
+- `uninstall --target opencode` 会去删 **hermes** 的技能副本（卸 A 删 B）；
+- opencode 自己的 `~/.config/opencode/skills` 只在 `skillInstalls[]` 里，卸载路径从不读它
+  （漏删），卸载后磁盘上留一份孤儿技能。
+
+**决定**：技能清理按 `manifest.skillInstalls` 里 `host == target` 的 dir 摘；老 manifest
+没有该键时，`skillsDir` **只对 hermes 行可信**（hermes 目录是本插件专属、可整目录删），
+其它宿主**跳过**——没有落点信息时宁可漏删，也不许猜着删别人的目录。
+
+**为什么不做"按目录内容反推宿主"**：那又是一次推断（同一目录可能被多个宿主共用），
+而卸载是破坏性动作，判断依据必须是 manifest 里的事实（`skillInstalls` 就是为此存在的）。
+
+**顺带**：`--clean-global` 的 npx 清理收窄到只删 `node_modules/vod-devkit`（同 hash 目录里的
+其它包不碰，删空才删目录）；删掉重复的 codex 分支；`bin` 对继承到的不一致根加 stderr 告警。

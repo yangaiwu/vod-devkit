@@ -389,3 +389,102 @@ def test_s127_all_skips_dsh_without_profile(monkeypatch, capsys):
     assert called == ["hermes"]
     assert "跳过 dsh" in capsys.readouterr().err
 
+
+
+# ── S138 uninstall 技能落点按 host 匹配（卸 A 不许删 B） ──────────
+#
+# 实测缺陷：manifest 每一行的 skillsDir 都被写成 hermes 技能目录（common.py 单值形态），
+# 而 uninstall 只认 row["skillsDir"] → `uninstall --target opencode` 去删 hermes 的副本，
+# opencode 自己的 ~/.config/opencode/skills 永远漏删。落点真源是 skillInstalls（按 host）。
+
+def _two_host_skills(tmp_path, monkeypatch):
+    hermes_dir = tmp_path / ".hermes" / "skills" / "devops" / "vod-devkit"
+    oc_dir = tmp_path / ".config" / "opencode" / "skills"
+    for d in (hermes_dir, oc_dir):
+        (d / "vod-core").mkdir(parents=True)
+        (d / "vod-core" / "SKILL.md").write_text("x", encoding="utf-8")
+    manifest = tmp_path / "install-manifest.json"
+    manifest.write_text(json.dumps({
+        "version": "0.5.9",
+        "skillHashes": {"vod-core/SKILL.md": "abc"},
+        "skillInstalls": [
+            {"host": "hermes", "dir": str(hermes_dir)},
+            {"host": "opencode", "dir": str(oc_dir)},
+        ],
+        "installs": [
+            # 历史形态：两行的 skillsDir 都是 hermes 目录
+            {"target": "hermes", "version": "0.5.9", "mcpConfig": None,
+             "skillsDir": str(hermes_dir)},
+            {"target": "opencode", "version": "0.5.9", "mcpConfig": None,
+             "skillsDir": str(hermes_dir)},
+        ],
+    }, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("VOD_DEVKIT_MANIFEST", str(manifest))
+    return hermes_dir, oc_dir, manifest
+
+
+def test_s138_uninstall_target_only_touches_that_hosts_skills(tmp_path, monkeypatch, capsys):
+    hermes_dir, oc_dir, _ = _two_host_skills(tmp_path, monkeypatch)
+    uninstall.cmd_uninstall(_A(target="opencode", clean_global=False))
+    assert (hermes_dir / "vod-core" / "SKILL.md").exists(), \
+        "卸 opencode 不许删 hermes 的技能副本（历史缺陷：卸 A 删 B）"
+    assert not (oc_dir / "vod-core").exists(), \
+        "opencode 自己的技能副本必须被摘（历史缺陷：漏删）"
+
+
+def test_s138_uninstall_cleans_its_own_skills_run_after(tmp_path, monkeypatch, capsys):
+    hermes_dir, oc_dir, _ = _two_host_skills(tmp_path, monkeypatch)
+    uninstall.cmd_uninstall(_A(target="opencode", clean_global=False))
+    uninstall.cmd_uninstall(_A(target="hermes", clean_global=False))
+    assert not (hermes_dir / "vod-core").exists(), "hermes 的技能副本应被摘（池里那份是我们拷的）"
+    assert hermes_dir.exists(), "目录本身保留——里面可能有用户/其它插件的技能"
+
+
+def test_s138_legacy_manifest_without_skill_installs_is_conservative(
+        tmp_path, monkeypatch, capsys):
+    """老 manifest 没有 skillInstalls：skillsDir 只有 hermes 行可信，其它行跳过。"""
+    hermes_dir = tmp_path / ".hermes" / "skills" / "devops" / "vod-devkit"
+    (hermes_dir / "vod-core").mkdir(parents=True)
+    (hermes_dir / "vod-core" / "SKILL.md").write_text("x", encoding="utf-8")
+    manifest = tmp_path / "install-manifest.json"
+    manifest.write_text(json.dumps({
+        "version": "0.5.9",
+        "skillHashes": {"vod-core/SKILL.md": "abc"},
+        "installs": [{"target": "opencode", "version": "0.4.0", "mcpConfig": None,
+                      "skillsDir": str(hermes_dir)}],
+    }, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("VOD_DEVKIT_MANIFEST", str(manifest))
+    uninstall.cmd_uninstall(_A(target="opencode", clean_global=False))
+    # 老 manifest 没有 skillInstalls：只能按 skillHashes 的技能名摘（有依据，不是猜），
+    # 目录本身与别的技能一律不动。
+    assert not (hermes_dir / "vod-core").exists()
+    assert hermes_dir.exists()
+    (hermes_dir / "someone-else").mkdir()
+    (hermes_dir / "someone-else" / "SKILL.md").write_text("x", encoding="utf-8")
+    assert (hermes_dir / "someone-else" / "SKILL.md").exists()
+
+
+def test_s138_refuses_to_delete_outside_home(tmp_path, monkeypatch, capsys):
+    """落点不在当前 HOME 之下 → 拒绝删除。
+
+    实锤（2026-11-16）：common.HERMES_SKILLS_DIR 是 import 期常量，同进程里
+    monkeypatch HOME 之后它仍指真实家目录，隔离用例因此删掉了真机的 vod-core。
+    这条守卫把"路径求值时机"的错变成一句 skip，而不是一次删真机文件。
+    """
+    outside = tmp_path.parent / f"outside-{tmp_path.name}" / "skills"
+    (outside / "vod-core").mkdir(parents=True)
+    (outside / "vod-core" / "SKILL.md").write_text("x", encoding="utf-8")
+    manifest = tmp_path / "install-manifest.json"
+    manifest.write_text(json.dumps({
+        "version": "0.5.9",
+        "skillHashes": {"vod-core/SKILL.md": "abc"},
+        "skillInstalls": [{"host": "opencode", "dir": str(outside)}],
+        "installs": [{"target": "opencode", "version": "0.5.9", "mcpConfig": None}],
+    }, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("VOD_DEVKIT_MANIFEST", str(manifest))
+    uninstall.cmd_uninstall(_A(target="opencode", clean_global=False))
+    assert (outside / "vod-core" / "SKILL.md").exists(), "HOME 之外的落点一律不碰"
+    assert "拒绝删除" in capsys.readouterr().out
