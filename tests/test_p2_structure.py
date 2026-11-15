@@ -11,6 +11,7 @@
      HTTP 出口、显式 key 常量、状态落盘）。
 """
 import ast
+import re
 from pathlib import Path
 
 from vod_mcp import net, runtime_state, tools
@@ -98,3 +99,38 @@ def test_patch_on_save_runtime_intercepts_state_writes(tmp_path, monkeypatch):
     runtime_state._runtime_update({"probe_key": 1})
     assert saved.get("probe_key") == 1
     assert not (tmp_path / "runtime.json").exists(), "被打桩后不应真的落盘"
+
+# 拆分脚本的切实风险：正则把**字符串里的普通词**也加上模块前缀。
+# 实锤（2026-11-15）：F8 拆分时 "origin/main" 被改成 "origin/cli.main"，
+# cmd_update 于是 `git rev-parse origin/cli.main` 永远取不到值 → 更新功能静默失效
+# （installer 用例当场红，但这类污染在别的字符串里可能不会立刻暴露）。
+ALIAS_TOKENS = ("cli", "common", "remote", "install", "doctor", "update", "uninstall",
+                "net", "rt", "core", "collect", "knowledge")
+
+
+def test_no_module_alias_leaked_into_ref_like_strings():
+    """只扫"像 git ref / 路径 / 命令"的字面量（含 '/'、无空格），避免误伤
+    f-string 里的真实调用表达式（那些片段里出现 core.search_products 是正常的）。"""
+    bad = []
+    paths = list((ROOT / "vod_mcp").rglob("*.py")) + list((ROOT / "vodkit_cli").rglob("*.py"))
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                continue
+            s = node.value
+            if " " in s or ("/" not in s and not s.startswith("-")):
+                continue
+            for alias in ALIAS_TOKENS:
+                if re.search(rf"(?<![\w.]){alias}\.(?!py\b)\w+", s):
+                    bad.append(f"{path.relative_to(ROOT)}: {s!r}")
+                    break
+    assert not bad, ("字符串字面量被模块别名污染（拆分正则误伤，命令/ref 会静默失效）：\n  "
+                     + "\n  ".join(bad[:10]))
+
+
+def test_update_uses_origin_main_ref():
+    """语义锁：cmd_update 比较的必须是 origin/main（上一条的具名实例）。"""
+    src = (ROOT / "vodkit_cli" / "update.py").read_text(encoding="utf-8")
+    assert '"origin/main"' in src, "cmd_update 的远端 ref 不是 origin/main"
+    assert "cli.main" not in src, "origin/main 被拆分正则污染成 cli.main"

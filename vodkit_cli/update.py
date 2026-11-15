@@ -6,7 +6,7 @@ from vodkit_cli import common
 
 
 def cmd_update(args=None):
-    """更新：git fetch 比较 origin/cli.main，落后则 ff 拉取并重烧 build-info。
+    """更新：git fetch 比较 origin/main，落后则 ff 拉取并重烧 build-info。
 
     --skip / --clear-skip（D-devtoolchain-7，对齐 devkit update-skip 裁剪版）：
     只维护「跳过某个版本提醒」的运行时状态，不动代码——所以放在 git 拉取之前返回。
@@ -28,7 +28,7 @@ def cmd_update(args=None):
     subprocess.run(["git", "fetch", "origin", "--tags"], cwd=common.ROOT, capture_output=True)
     local = subprocess.run(["git", "rev-parse", "HEAD"], cwd=common.ROOT,
                            capture_output=True, text=True).stdout.strip()
-    remote = subprocess.run(["git", "rev-parse", "origin/cli.main"], cwd=common.ROOT,
+    remote = subprocess.run(["git", "rev-parse", "origin/main"], cwd=common.ROOT,
                             capture_output=True, text=True).stdout.strip()
     if local == remote:
         print(f"已是最新（{local[:12]}）")
