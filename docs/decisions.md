@@ -1405,3 +1405,29 @@ MCP 工具改用户文件属于越界（与"卸载只摘自己条目"同一条�
 **没做**：不写代理配置文件、不引入 requests（零依赖红线）、不做引擎分区域/多端点探测
 （我们只有一个 base）。权限缝（宿主沙箱对 runtime.json 的读取门控）插件侧探测不到，
 README 标"未验证"，不假装拦。
+
+## D-key-guard-4：读 Key 拦截 hook（pre_tool_call，fail-open）（2026-11-16）
+
+**问题**：`runtime.json` 里是引擎 key 明文（载荷副本里安装器故意不种 key，但仓内/历史
+安装那份有），而排障时实测反复发生 `cat …/runtime.json`、`env | grep VOD_JAVA_API_KEY`。
+技能里"排障只引指纹"是教法，没有机制；一旦打印，key 就进了会话、日志与模型上下文。
+
+**决定**：`integrations/hermes/hooks/vod_guard.py` 注册到 Hermes 的 `pre_tool_call`
+（已实测该事件是**阻塞**事件：stdout `{"decision":"block"}` 即拦）。判定只做两件事：
+①命令含 `runtime.json` 且含读取类动词；②`env`/`printenv`/`set` 且点名 key 变量。
+其它一律放行。
+
+**fail-open 是铁律**：阻塞事件里脚本崩掉=所有工具调用都被拦，这是"最坏伤害半径"最大
+的一类事故（比漏拦一次严重得多）。所以解析失败、字段缺失、异常一律零输出；用例里
+专门有"坏 JSON → 零输出"的锁。可 `VOD_HOOK_READ_GUARD=0` 或
+`hermes hooks revoke` 关闭。
+
+**为什么不拦"未审批写"**：那层已有 MCP 的 `safety/policy.json` 与两段式（-32010/-32011）。
+再加一层会让"到底谁拦的"说不清，且写路径误拦会直接卡住业务（读路径漏拦只是泄密面）。
+一层一个职责，规则不重叠。
+
+**为什么文案必须带替代**：拦截而不给路 = 把排障逼进死胡同，用户会直接关掉 hook。
+所以 `auth status`（指纹）与 `env | cut -d= -f1 | grep '^VOD_'`（只看变量名）写进 block 文案。
+
+**没做**：codex / opencode 侧等价注册（这两个宿主的 hook 形态未与本仓对齐，没做等于没有，
+README 已按"未做"标注）；不做 `modify`（改写命令）——改写比拦截更难解释，且用户看不见。

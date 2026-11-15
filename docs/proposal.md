@@ -1299,3 +1299,26 @@ S3 运行时入口路径收进 `src/`；S4 运行期状态收进用户目录）�
 | # | 场景 | 断言 |
 |---|---|---|
 | S134 | 出站面只报告 | 代理含口令时输出无 `user`/`secret`；未设代理时说"直连"；引擎 200→ok、401→auth 且文案含"可达"、死端口→unreachable 且只 warn；空 apiBase 明说未配置 |
+
+
+## 读 Key 拦截 hook（S135，D-key-guard-4，2026-11-16）
+
+需求变更：`runtime.json` 里是引擎 key 明文，而排障路径（`cat …/runtime.json`、
+`env | grep VOD_JAVA_API_KEY`）实测反复发生——技能里写"只引指纹"靠模型自觉，没有机制。
+Hermes 的 shell hook 已确认支持 `pre_tool_call`（**阻塞事件**），本组把它接上。
+
+- 新脚本 `integrations/hermes/hooks/vod_guard.py`：stdin 收载荷，命中时 stdout 回
+  `{"decision":"block","reason":…}`，不命中零输出。
+- 判定窄：①命令含 `runtime.json` 且含读取类动词；②`env`/`printenv`/`set` 且点名
+  `VOD_*KEY`/`java_key`。非 shell 类工具、其它命令、空/坏载荷一律放行。
+- **fail-open 是铁律**：阻塞事件里脚本崩掉=所有工具调用被拦，伤害远大于漏拦一次；
+  用例专门锁"坏 JSON → 零输出"。
+- 拦截文案必须给替代（`vod-devkit auth status` 只出指纹；只看变量名用
+  `env | cut -d= -f1 | grep '^VOD_'`）与关闭开关（`VOD_HOOK_READ_GUARD=0`）。
+- 注册：`install --target hermes` 同时写 `hooks.pre_llm_call`（路由）与
+  `hooks.pre_tool_call`（拦截），两条幂等、互不连坐；`uninstall` 各摘各的。
+- codex / opencode 侧等价注册**未做**（机制形态未对齐，不假装已覆盖）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S135 | 读 Key 拦截 | `cat runtime.json`/管道读取/`env \| grep VOD_JAVA_API_KEY` 命中 block 且文案含替代与关闭开关；`env \| cut -d= -f1` 放行；非 shell 工具与空/坏载荷零输出（fail-open）；`VOD_HOOK_READ_GUARD=0` 放行；两条 hook 注册幂等、摘除互不连坐、别人的 hook 原样保留 |
