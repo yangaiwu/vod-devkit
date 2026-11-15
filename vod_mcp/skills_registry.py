@@ -63,8 +63,8 @@ def _skill_dirs() -> list:
 
 
 def _server_face() -> bool:
-    from vod_mcp import tools
-    return bool(tools._SERVER_FACE.get())
+    from vod_mcp import net
+    return bool(net._SERVER_FACE.get())
 
 
 def list_skills(params: dict) -> dict:

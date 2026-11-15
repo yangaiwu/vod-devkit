@@ -8,22 +8,25 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from vod_mcp import tools  # noqa: E402
+from vod_mcp.packs import collect as _collect
+from vod_mcp.packs import core as _core
+from vod_mcp import net as _net
+from vod_mcp import runtime_state as _rt
 
 
 def test_auth_status_fingerprint_not_plaintext(monkeypatch):
-    monkeypatch.setattr(tools, "probe_key", lambda: {"ok": None, "reason": "unreachable"})  # 隔网
-    out = tools.auth_status({}, client_info={"name": "t"})
+    monkeypatch.setattr(_net, "probe_key", lambda: {"ok": None, "reason": "unreachable"})  # 隔网
+    out = _core.auth_status({}, client_info={"name": "t"})
     fp = out["javaKey"]["fingerprint"]
-    assert fp is None or (len(fp) == 8 and fp != tools.JAVA_KEY), \
+    assert fp is None or (len(fp) == 8 and fp != _net.JAVA_KEY), \
         "key 只能以 8 位指纹出现，明文禁止（fingerprint 纪律）"
     assert "packs" in out
     assert "workflowKey" not in out, "方案 A：单上游，无 workflowKey"
 
 
 def test_auth_status_no_key_gives_guidance(monkeypatch):
-    monkeypatch.setattr(tools, "JAVA_KEY", "")
-    out = tools.auth_status({}, client_info={})
+    monkeypatch.setattr(_net, "JAVA_KEY", "")
+    out = _core.auth_status({}, client_info={})
     assert out["javaKey"]["configured"] is False
     assert [g["order"] for g in out["guidance"]] == [1, 2, 3], \
         "缺 key 时必须给三步引导（令牌/升级/宿主）"
@@ -31,7 +34,7 @@ def test_auth_status_no_key_gives_guidance(monkeypatch):
 
 
 def test_submit_voices_auto_token_then_retry(monkeypatch):
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": ["codearts"],
                                              "stale": False, "source": "meta"})
     """零字段令牌链：无 key → 取令牌 → 落 runtime → 重试成功（用户无感）。"""
@@ -50,7 +53,7 @@ def test_submit_voices_auto_token_then_retry(monkeypatch):
         if path.endswith("/external/voices"):
             if key == "anon-token-xyz":
                 return {"code": 200, "voiceIds": ["ext_vod-agent_t1"]}
-            raise tools.ToolError("鉴权失败：检查 key", code=-32012)
+            raise _net.ToolError("鉴权失败：检查 key", code=-32012)
         return {}
 
     saved = {}
@@ -58,10 +61,10 @@ def test_submit_voices_auto_token_then_retry(monkeypatch):
     def fake_save(update):
         saved.update(update)
 
-    monkeypatch.setattr(tools, "JAVA_KEY", "")
-    monkeypatch.setattr(tools, "_http", fake_http)
-    monkeypatch.setattr(tools, "_save_runtime", fake_save)
-    out = tools.submit_voices(
+    monkeypatch.setattr(_net, "JAVA_KEY", "")
+    monkeypatch.setattr(_net, "_http", fake_http)
+    monkeypatch.setattr(_rt, "_save_runtime", fake_save)
+    out = _collect.submit_voices(
         {"voices": [{"content": "补全响应有点慢，希望优化一下"}],
          "product": "codearts", "confirmed": True},
         client_info={"name": "t"})
@@ -70,22 +73,22 @@ def test_submit_voices_auto_token_then_retry(monkeypatch):
     assert state["token_issued"], "必须先取令牌"
     assert saved.get("java_key") == "anon-token-xyz"
     assert saved.get("token_tier") == "anonymous"
-    assert tools.JAVA_KEY == "anon-token-xyz", "令牌应回填运行时供后续复用"
+    assert _net.JAVA_KEY == "anon-token-xyz", "令牌应回填运行时供后续复用"
 
 
 def test_submit_voices_token_unreachable_gives_guidance(monkeypatch):
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": ["codearts"],
                                              "stale": True, "source": "snapshot"})
     """令牌端点不可用（引擎未上线）→ 结构化引导错误，不是死胡同。"""
-    monkeypatch.setattr(tools, "JAVA_KEY", "")
+    monkeypatch.setattr(_net, "JAVA_KEY", "")
 
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
-        raise tools.ToolError("上游返回 404: Not Found", code=404)  # 对齐真实 _http：HTTP 状态进 code
+        raise _net.ToolError("上游返回 404: Not Found", code=404)  # 对齐真实 _http：HTTP 状态进 code
 
-    monkeypatch.setattr(tools, "_http", fake_http)
-    with pytest.raises(tools.ToolError) as ei:
-        tools.submit_voices(
+    monkeypatch.setattr(_net, "_http", fake_http)
+    with pytest.raises(_net.ToolError) as ei:
+        _collect.submit_voices(
             {"voices": [{"content": "反馈内容足够长的一条意见"}],
              "product": "codearts", "confirmed": True},
             client_info={"name": "t"})
@@ -94,7 +97,7 @@ def test_submit_voices_token_unreachable_gives_guidance(monkeypatch):
 
 
 def test_voice_volume_preserved_across_calls(monkeypatch):
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": ["codearts"],
                                              "stale": False, "source": "meta"})
     """R1 声量保真：不同调用提交同款反馈 → 不同 voiceId，各占一行。
@@ -108,17 +111,17 @@ def test_voice_volume_preserved_across_calls(monkeypatch):
         if path.endswith("/external/voices"):
             # 囤积主路径：voiceId 由引擎按 per-token 命名空间算（server 侧职责），
             # 客户端锁的是“把完整 content 原样交给引擎”+ 404 回落
-            raise tools.ToolError("上游返回 404: not found", code=404)
+            raise _net.ToolError("上游返回 404: not found", code=404)
         if path.endswith("/external/voice/submit"):
             seen.append(body["voiceId"])
             return {"code": 200, "data": {"taskId": len(seen)}}
         return {}
 
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "_http", fake_http)
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    monkeypatch.setattr(_net, "_http", fake_http)
     voice = {"content": "补全响应有点慢，希望优化一下"}
     for _ in range(2):
-        out = tools.submit_voices({"voices": [voice], "product": "codearts",
+        out = _collect.submit_voices({"voices": [voice], "product": "codearts",
                                    "confirmed": True},
                                   client_info={"name": "mcp"})
         assert out["accepted"] == 1 and out["path"] == "legacy-fallback"
@@ -128,8 +131,8 @@ def test_voice_volume_preserved_across_calls(monkeypatch):
     def fake2(method, path, body=None, timeout=30, base=None, key=None):
         assert body["voices"][0]["title"] == voice["content"], "title=用户原文，禁止模板污染"
         return {"code": 200, "voiceIds": ["ext_vod-agent_x"]}
-    monkeypatch.setattr(tools, "_http", fake2)
-    tools.submit_voices({"voices": [voice], "product": "codearts", "confirmed": True},
+    monkeypatch.setattr(_net, "_http", fake2)
+    _collect.submit_voices({"voices": [voice], "product": "codearts", "confirmed": True},
                         client_info={"name": "mcp"})
 
 
@@ -141,11 +144,11 @@ def test_attribution_literal_match_resolves_catalog_id(monkeypatch):
             "nameAliases": {"CODEARTS": ["码道", "CodeArts", "软件开发生产线 CodeArts"],
                             "AISHELL": ["AIShell", "AI shell"]},
             "aliases": {"modelarts": "maas"}, "stale": False, "source": "meta"}
-    monkeypatch.setattr(tools, "_load_meta", lambda force=False: meta)
-    monkeypatch.setattr(tools, "_RT", {})  # 纯归因链：不受本机安装绑定干扰
+    monkeypatch.setattr(_net, "_load_meta", lambda force=False: meta)
+    monkeypatch.setattr(_rt, "_RT", {})  # 纯归因链：不受本机安装绑定干扰
 
     def run(text):
-        return tools._attribute_product([(0, {}, text)], {})
+        return _collect._attribute_product([(0, {}, text)], {})
 
     for text in ("码道导出转圈两分钟", "用 CodeArts 导出很慢",
                  "软件开发生产线 CodeArts 登录失败", "codearts 打不开"):
@@ -159,7 +162,7 @@ def test_attribution_literal_match_resolves_catalog_id(monkeypatch):
     # 名录不可达（快照/老引擎）：插件**不预置任何产品名/短码**（2026-11-13 纪律：
     # 支持的产品列表真源=引擎 meta 接口）→ 短码与俗称都归不了，一律 UNKNOWN→追问，
     # 绝不拿本地清单猜。
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": [], "catalog": [], "aliases": {},
                                              "nameAliases": {}, "stale": True,
                                              "source": "snapshot"})
@@ -180,21 +183,21 @@ def test_meta_catalog_cached_t7i(monkeypatch):
                                           "productCatalog": [{"id": 31, "name": "CodeArts"}]}}
         raise AssertionError("不应有其他调用")
 
-    monkeypatch.setattr(tools, "_RT", {})
-    monkeypatch.setattr(tools, "_http", fake_http)
-    monkeypatch.setattr(tools, "_save_runtime", lambda u: saved.update(u))
-    m1 = tools._load_meta(force=True)
+    monkeypatch.setattr(_rt, "_RT", {})
+    monkeypatch.setattr(_net, "_http", fake_http)
+    monkeypatch.setattr(_rt, "_save_runtime", lambda u: saved.update(u))
+    m1 = _net._load_meta(force=True)
     assert m1["catalog"] == [{"id": 31, "name": "CodeArts"}]
-    monkeypatch.setattr(tools, "_RT", saved)
-    m2 = tools._load_meta()
+    monkeypatch.setattr(_rt, "_RT", saved)
+    m2 = _net._load_meta()
     assert fetched["n"] == 1  # 缓存命中零二次请求
     assert m2["catalog"] == [{"id": 31, "name": "CodeArts"}]
     # 老引擎无 productCatalog 键 → catalog 空不崩
-    monkeypatch.setattr(tools, "_RT", {})
-    monkeypatch.setattr(tools, "_http",
+    monkeypatch.setattr(_rt, "_RT", {})
+    monkeypatch.setattr(_net, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         {"code": 200, "data": {"products": ["codearts"]}})
-    assert tools._load_meta(force=True)["catalog"] == []
+    assert _net._load_meta(force=True)["catalog"] == []
 
 
 def test_product_attribution_layers(monkeypatch):
@@ -204,23 +207,23 @@ def test_product_attribution_layers(monkeypatch):
     """
     meta = {"products": ["CodeArts"], "stale": False, "source": "meta",
             "catalog": [{"id": "1", "name": "CodeArts"}]}
-    monkeypatch.setattr(tools, "_load_meta", lambda force=False: meta)
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    monkeypatch.setattr(_net, "_load_meta", lambda force=False: meta)
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
     captured = {}
-    monkeypatch.setattr(tools, "_http",
+    monkeypatch.setattr(_net, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         captured.update(body=body) or
                         {"code": 201, "voiceIds": ["ext_vod-agent_t1"], "statuses": ["new"]})
-    monkeypatch.setattr(tools, "_RT", {})
+    monkeypatch.setattr(_rt, "_RT", {})
     monkeypatch.delenv("VOD_ALLOW_UNKNOWN_PRODUCT", raising=False)   # 关掉旧客户端兼容开关
     # ① 没有回答、没有线索、用户没说不知道 → 拒绝并要求追问
     import pytest as _pytest
-    with _pytest.raises(tools.ToolError) as ei:
-        tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
+    with _pytest.raises(_net.ToolError) as ei:
+        _collect.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
                              "confirmed": True}, client_info={"name": "t"})
     assert ei.value.code == -32010
     # ② 用户回答 → 按回答提交（source=user_answer）
-    out = tools.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
+    out = _collect.submit_voices({"voices": [{"content": "够长的一条反馈意见"}],
                                "product": "CodeArts", "confirmed": True},
                               client_info={"name": "t"})
     assert captured["body"].get("product") in ("1", "CodeArts")
@@ -237,25 +240,25 @@ def test_meta_fetch_and_cache(monkeypatch):
             return {"code": 200, "data": {"products": ["codearts", "aishell"]}}
         raise AssertionError("不应有其他调用")
 
-    monkeypatch.setattr(tools, "_RT", {})
-    monkeypatch.setattr(tools, "_http", fake_http)
-    monkeypatch.setattr(tools, "_save_runtime", lambda u: saved.update(u))
-    m1 = tools._load_meta(force=True)
+    monkeypatch.setattr(_rt, "_RT", {})
+    monkeypatch.setattr(_net, "_http", fake_http)
+    monkeypatch.setattr(_rt, "_save_runtime", lambda u: saved.update(u))
+    m1 = _net._load_meta(force=True)
     assert m1["source"] == "meta" and m1["products"] == ["codearts", "aishell"]
     assert saved["meta_cache"]["data"]["products"] == ["codearts", "aishell"]
     # 缓存命中（_RT 被写回语义由 fake 保存体现；此处直接验证不再打端点）
-    monkeypatch.setattr(tools, "_RT", saved)
-    m2 = tools._load_meta()
+    monkeypatch.setattr(_rt, "_RT", saved)
+    m2 = _net._load_meta()
     assert m2["source"] == "cache" and fetched["n"] == 1
 
 
 def test_meta_unreachable_falls_back_snapshot(monkeypatch):
     """meta 不可达：快照兜底+stale 标记（引导文案会带 [stale]）。"""
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
-        raise tools.ToolError("上游不可达", code=-32001)
-    monkeypatch.setattr(tools, "_RT", {})
-    monkeypatch.setattr(tools, "_http", fake_http)
-    m = tools._load_meta(force=True)
+        raise _net.ToolError("上游不可达", code=-32001)
+    monkeypatch.setattr(_rt, "_RT", {})
+    monkeypatch.setattr(_net, "_http", fake_http)
+    m = _net._load_meta(force=True)
     assert m["source"] == "snapshot" and m["stale"] is True
     # 快照不预置产品名（2026-11-13 纪律）：不可达=名录空，归因走追问而不是本地清单
     assert m["products"] == []
@@ -264,14 +267,14 @@ def test_meta_unreachable_falls_back_snapshot(monkeypatch):
 def test_hoarding_missing_voiceids_not_counted_success(monkeypatch):
     """回归锁（2026-11-06 codex 实锤）：引擎回执无 voiceIds 时不得兜底计成功
     ——旧行为 accepted=len(voices)、voiceId 填空串、账本记成功，宿主据此谎报已提交。"""
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": ["codearts"],
                                              "stale": False, "source": "meta"})
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "_http",
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    monkeypatch.setattr(_net, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         {"code": 200, "message": "已入库"})  # 回执缺 voiceIds
-    out = tools.submit_voices(
+    out = _collect.submit_voices(
         {"voices": [{"content": "体验不好的一条反馈"}],
          "product": "codearts", "confirmed": True},
         client_info={"name": "t"})
@@ -283,15 +286,15 @@ def test_hoarding_missing_voiceids_not_counted_success(monkeypatch):
 
 def test_hoarding_engine_rejected_passthrough(monkeypatch):
     """引擎侧 rejected（产品校验拒绝等）必须透出到工具回执，不得吞掉。"""
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": ["codearts"],
                                              "stale": False, "source": "meta"})
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "_http",
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    monkeypatch.setattr(_net, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         {"code": 200, "voiceIds": [],
                          "rejected": [{"reason": "产品未注册：NoSuchProduct"}]})
-    out = tools.submit_voices(
+    out = _collect.submit_voices(
         {"voices": [{"content": "一条会被拒的反馈"}],
          "product": "NoSuchProduct", "confirmed": True},
         client_info={"name": "t"})
@@ -304,21 +307,21 @@ def test_attribution_chain_evidence_over_binding(monkeypatch):
     meta = {"products": ["CodeArts", "Maas"], "stale": False, "source": "meta",
             "catalog": [{"id": "1", "name": "CodeArts"}, {"id": "5", "name": "Maas"}],
             "nameAliases": {}, "aliases": {}}
-    monkeypatch.setattr(tools, "_load_meta", lambda force=False: meta)
+    monkeypatch.setattr(_net, "_load_meta", lambda force=False: meta)
     captured = {}
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "_RT", {"product": "Maas"})
-    monkeypatch.setattr(tools, "_http",
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    monkeypatch.setattr(_rt, "_RT", {"product": "Maas"})
+    monkeypatch.setattr(_net, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         captured.update(body=body) or
                         {"code": 201, "voiceIds": ["ext_v1"], "statuses": ["new"]})
     # 原话唯一命中 CodeArts → 证据赢过安装先验 Maas
-    out = tools.submit_voices({"voices": [{"content": "CodeArts 导出失败"}],
+    out = _collect.submit_voices({"voices": [{"content": "CodeArts 导出失败"}],
                                "confirmed": True}, client_info={"name": "t"})
     assert captured["body"]["product"] == "1"
     assert out["productSource"] == "user_input"
     # 用户明确回答 → 回答赢过原话（"这条不是 CodeArts，是 Maas"）
-    out2 = tools.submit_voices({"voices": [{"content": "CodeArts 导出失败"}],
+    out2 = _collect.submit_voices({"voices": [{"content": "CodeArts 导出失败"}],
                                 "product": "Maas", "confirmed": True},
                                client_info={"name": "t"})
     assert captured["body"]["product"] == "5"
@@ -326,17 +329,17 @@ def test_attribution_chain_evidence_over_binding(monkeypatch):
 
 def test_attribution_accepts_explicit_answer_without_binding(monkeypatch):
     """无安装先验时，用户回答照样可提交（老口径"运行期传参一律不采信"已推翻）。"""
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": [], "stale": False,
                                              "source": "meta", "catalog": []})
     captured = {}
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "_RT", {})
-    monkeypatch.setattr(tools, "_http",
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    monkeypatch.setattr(_rt, "_RT", {})
+    monkeypatch.setattr(_net, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         captured.update(body=body) or
                         {"code": 201, "voiceIds": ["ext_v2"], "statuses": ["new"]})
-    out = tools.submit_voices({"voices": [{"content": "反馈四"}],
+    out = _collect.submit_voices({"voices": [{"content": "反馈四"}],
                                "product": "hermes", "confirmed": True},
                               client_info={"name": "t"})
     assert out["productSource"] == "user_answer"
@@ -344,15 +347,15 @@ def test_attribution_accepts_explicit_answer_without_binding(monkeypatch):
 
 def test_submit_echo_requires_verbatim_relay(monkeypatch):
     """方案 A 回归锁：回执必须携带 echo（原话回显），content 与提交原话逐字一致。"""
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": ["codearts"],
                                              "stale": False, "source": "meta"})
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "_http",
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    monkeypatch.setattr(_net, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         {"code": 201, "voiceIds": ["ext_vod-agent_e1"],
                          "statuses": ["new"]})
-    out = tools.submit_voices(
+    out = _collect.submit_voices(
         {"voices": [{"content": "产品体验不好"}],
          "product": "codearts", "confirmed": True},
         client_info={"name": "t"})
@@ -365,15 +368,15 @@ def test_submit_echo_requires_verbatim_relay(monkeypatch):
 
 def test_submit_echo_absent_when_nothing_accepted(monkeypatch):
     """整批被拒时 requiresUserEcho=false，无可回显内容。"""
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": ["codearts"],
                                              "stale": False, "source": "meta"})
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "_http",
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    monkeypatch.setattr(_net, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         {"code": 200, "voiceIds": [],
                          "rejected": [{"reason": "产品未注册"}]})
-    out = tools.submit_voices(
+    out = _collect.submit_voices(
         {"voices": [{"content": "x"}], "product": "NoSuchProduct",
          "confirmed": True},
         client_info={"name": "t"})
@@ -383,14 +386,14 @@ def test_submit_echo_absent_when_nothing_accepted(monkeypatch):
 
 def test_content_boundary_rejects_oversize(monkeypatch):
     """内容边界：超 2000 字的反馈逐条拒绝（契约 maxLength 落到代码）。"""
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": ["codearts"],
                                              "stale": False, "source": "meta"})
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "_http",
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    monkeypatch.setattr(_net, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         {"code": 201, "voiceIds": ["ext_vod-agent_t1"], "statuses": ["new"]})
-    out = tools.submit_voices(
+    out = _collect.submit_voices(
         {"voices": [{"content": "x" * 2001}, {"content": "正常长度的一条反馈"}],
          "product": "codearts", "confirmed": True},
         client_info={"name": "t"})
@@ -401,16 +404,15 @@ def test_content_boundary_rejects_oversize(monkeypatch):
 def test_ledger_and_list_submitted(monkeypatch, tmp_path):
     """层级①查询闭环：提交落账→list_submitted 读回（最新在前）；只动 submissions 键。"""
     rt_file = tmp_path / "runtime.json"
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": ["codearts"],
                                              "stale": False, "source": "meta"})
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "_http",
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    monkeypatch.setattr(_net, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         {"code": 200, "data": {"taskId": 5}})
     # 重定向 runtime 文件到 tmp（_save_runtime/_runtime_cfg 按模块常量路径）
-    import vod_mcp.tools as T
-    monkeypatch.setattr(T, "_runtime_cfg", lambda: (
+    monkeypatch.setattr(_rt, "_runtime_cfg", lambda: (
         json.loads(rt_file.read_text()) if rt_file.exists() else {}))
     def _fake_save(upd):
         cfg = json.loads(rt_file.read_text()) if rt_file.exists() else {}
@@ -418,15 +420,15 @@ def test_ledger_and_list_submitted(monkeypatch, tmp_path):
         rt_file.write_text(json.dumps(cfg))
         return None
 
-    monkeypatch.setattr(T, "_save_runtime", _fake_save)
-    T.submit_voices({"voices": [{"content": "第一条反馈内容足够长"},
+    monkeypatch.setattr(_rt, "_save_runtime", _fake_save)
+    _collect.submit_voices({"voices": [{"content": "第一条反馈内容足够长"},
                                  {"content": "第二条反馈内容足够长"}],
                      "product": "codearts", "confirmed": True},
                     client_info={"name": "t"})
-    T.submit_voices({"voices": [{"content": "第三条反馈内容足够长"}],
+    _collect.submit_voices({"voices": [{"content": "第三条反馈内容足够长"}],
                      "product": "codearts", "confirmed": True},
                     client_info={"name": "t"})
-    out = T.list_submitted({"limit": 2})
+    out = _collect.list_submitted({"limit": 2})
     assert out["total"] == 3
     assert [s["title"][:3] for s in out["submissions"]] == ["第三条", "第二条"], "最新在前"
     cfg = json.loads(rt_file.read_text())
@@ -435,17 +437,17 @@ def test_ledger_and_list_submitted(monkeypatch, tmp_path):
 
 def test_transport_guard_rejects_http_public(monkeypatch):
     """传输守卫：http 只许本机回环，公网 http 拒绝（-32014）。"""
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "JAVA_BASE", "http://vod-dev.topxtopx.com")
-    with pytest.raises(tools.ToolError) as ei:
-        tools._http("POST", "/x", {})
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    monkeypatch.setattr(_net, "JAVA_BASE", "http://vod-dev.topxtopx.com")
+    with pytest.raises(_net.ToolError) as ei:
+        _net._http("POST", "/x", {})
     assert ei.value.code == -32014 and "https" in str(ei.value)
     # 本机回环 http 允许（recorder/同机引擎场景）
-    monkeypatch.setattr(tools, "JAVA_BASE", "http://127.0.0.1:9")
+    monkeypatch.setattr(_net, "JAVA_BASE", "http://127.0.0.1:9")
     try:
-        tools._http("GET", "/health")
+        _net._http("GET", "/health")
         assert False, "不可达但应报 -32001 而非协议拒绝"
-    except tools.ToolError as e:
+    except _net.ToolError as e:
         assert e.code == -32001
 
 
@@ -455,21 +457,21 @@ def test_explicit_key_rejected_401_fails_fast(monkeypatch):
     """显式 key（安装注入）被引擎 401 拒 → fail fast：不取匿名令牌、不覆盖 runtime.json。
     静默降级匿名=配置错误被吞=归因错位（D-key-guard-1 回归锁）。"""
     monkeypatch.setenv("VOD_JAVA_API_KEY", "formal-key-abc")
-    monkeypatch.setattr(tools, "JAVA_KEY", "formal-key-abc")
-    monkeypatch.setattr(tools, "_RT", {})
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "JAVA_KEY", "formal-key-abc")
+    monkeypatch.setattr(_rt, "_RT", {})
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": [], "stale": True, "source": "snapshot"})
     fetched = []
-    monkeypatch.setattr(tools, "_fetch_anon_token", lambda: fetched.append(1) or "tok")
+    monkeypatch.setattr(_net, "_fetch_anon_token", lambda: fetched.append(1) or "tok")
 
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
-        raise tools.ToolError("鉴权失败", code=-32012)
+        raise _net.ToolError("鉴权失败", code=-32012)
 
-    monkeypatch.setattr(tools, "_http", fake_http)
+    monkeypatch.setattr(_net, "_http", fake_http)
     saved = []
-    monkeypatch.setattr(tools, "_save_runtime", lambda u: saved.append(u))
-    with pytest.raises(tools.ToolError) as ei:
-        tools.submit_voices(
+    monkeypatch.setattr(_rt, "_save_runtime", lambda u: saved.append(u))
+    with pytest.raises(_net.ToolError) as ei:
+        _collect.submit_voices(
             {"voices": [{"content": "希望优化导出速度"}], "product": "codearts",
              "confirmed": True}, client_info={"name": "t"})
     assert "指纹" in str(ei.value) and "被引擎拒绝" in str(ei.value), "报错须带指纹与处置指引"
@@ -480,9 +482,9 @@ def test_explicit_key_rejected_401_fails_fast(monkeypatch):
 def test_anon_token_expired_401_refetches(monkeypatch):
     """匿名令牌过期 401 → 重领链保持（与显式 key fail fast 分流互斥）。"""
     monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
-    monkeypatch.setattr(tools, "JAVA_KEY", "stale-anon-token")
-    monkeypatch.setattr(tools, "_RT", {"token_tier": "anonymous"})
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "JAVA_KEY", "stale-anon-token")
+    monkeypatch.setattr(_rt, "_RT", {"token_tier": "anonymous"})
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": [], "stale": True, "source": "snapshot"})
     calls = []
 
@@ -492,11 +494,11 @@ def test_anon_token_expired_401_refetches(monkeypatch):
             return {"token": "fresh-anon"}
         if key == "fresh-anon":
             return {"code": 200, "voiceIds": ["ext_vod-agent_t2"]}
-        raise tools.ToolError("鉴权失败", code=-32012)
+        raise _net.ToolError("鉴权失败", code=-32012)
 
-    monkeypatch.setattr(tools, "_http", fake_http)
-    monkeypatch.setattr(tools, "_save_runtime", lambda u: None)
-    out = tools.submit_voices(
+    monkeypatch.setattr(_net, "_http", fake_http)
+    monkeypatch.setattr(_rt, "_save_runtime", lambda u: None)
+    out = _collect.submit_voices(
         {"voices": [{"content": "希望优化导出速度"}], "product": "codearts",
          "confirmed": True}, client_info={"name": "t"})
     assert out["accepted"] == 1, "匿名令牌失效应自动重领并提交成功"
@@ -507,8 +509,8 @@ def test_save_runtime_write_after_verify_0600(tmp_path, monkeypatch):
     """S1 式写后验：写后文件必须 0600（chmod 效果验证，不是动作验证）。"""
     import os as _os
     target = tmp_path / "runtime.json"
-    monkeypatch.setattr(tools, "_runtime_path", lambda: target)
-    tools._save_runtime({"java_key": "k1"})
+    monkeypatch.setattr(_rt, "_runtime_path", lambda: target)
+    _rt._save_runtime({"java_key": "k1"})
     mode = _os.stat(target).st_mode & 0o777
     assert mode == 0o600, f"写后验必须把 runtime.json 收到 0600，实际 {oct(mode)}"
     cfg = json.loads(target.read_text())
@@ -518,31 +520,31 @@ def test_save_runtime_write_after_verify_0600(tmp_path, monkeypatch):
 def test_probe_key_three_verdicts(monkeypatch):
     """探针三态：200=有效 / 401=无效 / 网络错误=不判定（网络问题不是 key 问题）。"""
     monkeypatch.setenv("VOD_JAVA_API_KEY", "k-test")  # 显式 key 档（401=fail fast rejected）
-    monkeypatch.setattr(tools, "JAVA_KEY", "k-test")
+    monkeypatch.setattr(_net, "JAVA_KEY", "k-test")
 
     def ok_http(method, path, body=None, timeout=30, base=None, key=None):
         assert path.endswith("/external/meta") and key == "k-test"
         return {"products": []}
 
-    monkeypatch.setattr(tools, "_http", ok_http)
-    assert tools.probe_key() == {"ok": True, "reason": "verified", "fingerprint": tools._fingerprint("k-test")}
+    monkeypatch.setattr(_net, "_http", ok_http)
+    assert _net.probe_key() == {"ok": True, "reason": "verified", "fingerprint": _net._fingerprint("k-test")}
 
     def denied(method, path, body=None, timeout=30, base=None, key=None):
-        raise tools.ToolError("401", code=401)
+        raise _net.ToolError("401", code=401)
 
-    monkeypatch.setattr(tools, "_http", denied)
-    out = tools.probe_key()
+    monkeypatch.setattr(_net, "_http", denied)
+    out = _net.probe_key()
     assert out["ok"] is False and out["reason"] == "rejected"
 
     def dead(method, path, body=None, timeout=30, base=None, key=None):
-        raise tools.ToolError("timeout", code=-32015)
+        raise _net.ToolError("timeout", code=-32015)
 
-    monkeypatch.setattr(tools, "_http", dead)
-    out = tools.probe_key()
+    monkeypatch.setattr(_net, "_http", dead)
+    out = _net.probe_key()
     assert out["ok"] is None and out["reason"] == "unreachable", "不可达≠无效"
 
-    monkeypatch.setattr(tools, "JAVA_KEY", "")
-    out = tools.probe_key()
+    monkeypatch.setattr(_net, "JAVA_KEY", "")
+    out = _net.probe_key()
     assert out == {"ok": None, "reason": "no-key", "fingerprint": None}
 
 
@@ -550,18 +552,18 @@ def test_probe_key_expired_anonymous_token(monkeypatch):
     """匿名令牌 401 → expired-anonymous（非 rejected）：runtime 残留过期匿名
     令牌不得被误读为正式 key 失效；note 指明下次提交自动重领。"""
     monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
-    monkeypatch.setattr(tools, "JAVA_KEY", "anon-token-stale")
+    monkeypatch.setattr(_net, "JAVA_KEY", "anon-token-stale")
 
     def denied(method, path, body=None, timeout=30, base=None, key=None):
-        raise tools.ToolError("401", code=401)
+        raise _net.ToolError("401", code=401)
 
-    monkeypatch.setattr(tools, "_http", denied)
-    tier = str(tools._RT.get("token_tier") or "")
+    monkeypatch.setattr(_net, "_http", denied)
+    tier = str(_rt._RT.get("token_tier") or "")
     if tier != "anonymous":  # 仓内 runtime.json 若非匿名档则本用例前提不成立
-        monkeypatch.setattr(tools, "_RT", {**tools._RT, "token_tier": "anonymous"})
-    out = tools.probe_key()
+        monkeypatch.setattr(_rt, "_RT", {**_rt._RT, "token_tier": "anonymous"})
+    out = _net.probe_key()
     assert out["ok"] is False and out["reason"] == "expired-anonymous"
-    assert "重领" in out["note"] and tools._fingerprint("anon-token-stale") == out["fingerprint"]
+    assert "重领" in out["note"] and _net._fingerprint("anon-token-stale") == out["fingerprint"]
 
 
 def test_probe_key_device_mismatch_is_not_rejected(monkeypatch):
@@ -576,38 +578,38 @@ def test_probe_key_device_mismatch_is_not_rejected(monkeypatch):
     显式传参（服务面 auth_status 传请求头 key）与本地档同语义：按原文判。
     """
     monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
-    monkeypatch.setattr(tools, "JAVA_KEY", "anon-token-device-drift")
+    monkeypatch.setattr(_net, "JAVA_KEY", "anon-token-device-drift")
 
     def mismatch(method, path, body=None, timeout=30, base=None, key=None):
-        raise tools.ToolError(
+        raise _net.ToolError(
             "鉴权失败（https://vod-dev.topxtopx.com）："
             "令牌与请求设备不匹配（设备绑定校验失败），请在本设备重新申请令牌"
             "（POST /external/token）", code=-32012)
 
-    monkeypatch.setattr(tools, "_http", mismatch)
-    out = tools.probe_key("anon-token-device-drift")  # 显式传参（服务面场景）
+    monkeypatch.setattr(_net, "_http", mismatch)
+    out = _net.probe_key("anon-token-device-drift")  # 显式传参（服务面场景）
     assert out["ok"] is False and out["reason"] == "device-mismatch"
     assert "重新申请" in out["note"] or "不匹配" in out["note"]
     assert out["reason"] != "rejected", "设备漂移不是坏 key，不许误拦"
 
     # 对照：真坏 key（引擎原文「API Key 无效」）即使显式传参也必须 rejected
     def invalid(method, path, body=None, timeout=30, base=None, key=None):
-        raise tools.ToolError(
+        raise _net.ToolError(
             "鉴权失败（https://vod-dev.topxtopx.com）："
             "API Key 无效或已失效，可重新申请令牌（POST /external/token）"
             "或联系 VOD 运营升级正式 key", code=-32012)
 
-    monkeypatch.setattr(tools, "_http", invalid)
-    out = tools.probe_key("explicitly-bad-key")
+    monkeypatch.setattr(_net, "_http", invalid)
+    out = _net.probe_key("explicitly-bad-key")
     assert out["ok"] is False and out["reason"] == "rejected"
 
 
 def test_auth_status_no_key_material_anywhere(monkeypatch):
     """脱敏复查（D-key-guard-1③）：auth_status/账本全输出面 grep 不到 key 明文。"""
     secret = "super-secret-key-value-9f2e"  # secret-scan:allow 测试夹具
-    monkeypatch.setattr(tools, "JAVA_KEY", secret)
-    monkeypatch.setattr(tools, "probe_key", lambda: {"ok": None, "reason": "unreachable"})
-    out = json.dumps(tools.auth_status({}, client_info={"name": "t"}))
+    monkeypatch.setattr(_net, "JAVA_KEY", secret)
+    monkeypatch.setattr(_net, "probe_key", lambda: {"ok": None, "reason": "unreachable"})
+    out = json.dumps(_core.auth_status({}, client_info={"name": "t"}))
     assert secret not in out, "key 明文禁止出现在任何工具输出"
 
 
@@ -635,10 +637,10 @@ def test_device_header_on_all_external_requests(monkeypatch):
         seen["auth"] = req.headers.get("Authorization")
         return FakeResp()
 
-    monkeypatch.setattr(tools, "_install_nonce", lambda: "deadbeef")
+    monkeypatch.setattr(_rt, "_install_nonce", lambda: "deadbeef")
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    tools._http("GET", "/rest/developer/manager/hdvodmngservice/v1/external/meta", None)
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    _net._http("GET", "/rest/developer/manager/hdvodmngservice/v1/external/meta", None)
     assert seen["device"] == "deadbeef", "设备锚点 header 必须随所有 external 请求上送"
     assert seen["auth"] == "Bearer k"
 
@@ -648,7 +650,7 @@ def test_device_header_on_all_external_requests(monkeypatch):
 def test_anon_token_envelope_contract(monkeypatch):
     """S20 令牌端点信封契约（真源=ExternalTokenController ApiResponse）：
     data.token 必须被解析；此前顶层取值恒 None → 无 key 首提必 -32012。"""
-    assert tools._extract_anon_token(
+    assert _net._extract_anon_token(
         {"code": 200, "message": "令牌已签发",
          "data": {"token": "env-tok", "dailyLimit": 50, "tier": "anonymous"}}
     ) == "env-tok", "引擎真实信封形态必须解析出 token"
@@ -656,21 +658,21 @@ def test_anon_token_envelope_contract(monkeypatch):
 
 def test_anon_token_flat_payload_compat():
     """S21 顶层扁平形态兼容（历史/降级引擎返回 {"token":...} 不破坏）。"""
-    assert tools._extract_anon_token({"token": "flat-tok", "dailyLimit": 50}) == "flat-tok"
+    assert _net._extract_anon_token({"token": "flat-tok", "dailyLimit": 50}) == "flat-tok"
 
 
 def test_anon_token_missing_or_garbage_returns_none():
     """信封无 token / 非字典 / 空 data → None（走 -32012 结构化引导，不误用垃圾值）。"""
-    assert tools._extract_anon_token({"code": 200, "data": {"dailyLimit": 50}}) is None
-    assert tools._extract_anon_token({"code": 200, "data": "not-a-dict"}) is None
-    assert tools._extract_anon_token("garbage") is None
-    assert tools._extract_anon_token({"token": 123}) is None, "非字符串 token 不得通过"
+    assert _net._extract_anon_token({"code": 200, "data": {"dailyLimit": 50}}) is None
+    assert _net._extract_anon_token({"code": 200, "data": "not-a-dict"}) is None
+    assert _net._extract_anon_token("garbage") is None
+    assert _net._extract_anon_token({"token": 123}) is None, "非字符串 token 不得通过"
 
 
 def test_legacy_key_removed_falls_to_anon_chain_e2e(monkeypatch):
     """S22 key 移除语义（D-key-guard 配套）：runtime.json 无 java_key →
     首提走匿名链自动签发 → 令牌以 java_key 槽落盘 + token_tier=anonymous 标记。"""
-    monkeypatch.setattr(tools, "_load_meta",
+    monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": ["codearts"],
                                              "stale": False, "source": "meta"})
     calls = []
@@ -684,17 +686,17 @@ def test_legacy_key_removed_falls_to_anon_chain_e2e(monkeypatch):
         if path.endswith("/external/voices"):
             if not key:
                 # 真实时序：无 key 首提 401（对齐引擎 Filter 行为）→ 取令牌 → 重试
-                raise tools.ToolError("鉴权失败（401）", code=-32012)
+                raise _net.ToolError("鉴权失败（401）", code=-32012)
             assert key == "fresh-anon-tok", "取到令牌后重试必须携带新令牌"
             return {"code": 200, "data": {"accepted": 1,
                                           "voiceIds": ["ext_anonymous_t1"]}}
         return {}
 
     saved = {}
-    monkeypatch.setattr(tools, "JAVA_KEY", "")  # 模拟移除老平台 key 后的 runtime
-    monkeypatch.setattr(tools, "_http", fake_http)
-    monkeypatch.setattr(tools, "_save_runtime", lambda u: saved.update(u))
-    out = tools.submit_voices(
+    monkeypatch.setattr(_net, "JAVA_KEY", "")  # 模拟移除老平台 key 后的 runtime
+    monkeypatch.setattr(_net, "_http", fake_http)
+    monkeypatch.setattr(_rt, "_save_runtime", lambda u: saved.update(u))
+    out = _collect.submit_voices(
         {"voices": [{"content": "匿名链端到端验证反馈"}],
          "product": "codearts", "confirmed": True},
         client_info={"name": "t"})
@@ -705,11 +707,14 @@ def test_legacy_key_removed_falls_to_anon_chain_e2e(monkeypatch):
 
 def test_legacy_key_hint_contains_version_and_reinstall_command():
     """旧版残留凭据自愈提示（评审拍板项）：错误路径与 auth_status 检测位都带可操作指引。"""
-    from vod_mcp import tools as t
-    hint = t._legacy_key_hint()
+    from vod_mcp import net as _net
+    hint = _net._legacy_key_hint()
     assert "npx vod-devkit@latest install" in hint
     assert "当前 v" in hint  # 版本号在位
-    src = (t.__file__ and open(t.__file__, encoding="utf-8").read()) or ""
+    src = ""
+    for _rel in (("vod_mcp", "net.py"), ("vod_mcp", "packs", "collect.py"),
+                 ("vod_mcp", "packs", "core.py")):
+        src += (Path(_net.__file__).resolve().parent.parent.joinpath(*_rel)).read_text(encoding="utf-8")
     # 拆分后口径：两条提交失败路径统一走 _raise_explicit_key_rejected
     # （内部含 hint），它被囤积/legacy 两路径各调用一次 + auth_status 检测位。
     assert src.count("_raise_explicit_key_rejected(") >= 3  # 定义 + 两条失败路径调用

@@ -6,8 +6,10 @@
   ② 全大写缩写永不 caseless：`obs://bucket`、`/obs/bin`、`a@obs` 都不是产品提及
   ③ 按产品取值域：无产品/接口不可达=不过滤；有产品=白名单过滤并回执 invalidTags
 """
+from vod_mcp import net as _net
+from vod_mcp import runtime_state as _rt
+from vod_mcp.packs import collect as _collect
 from vod_mcp import attribution as A
-from vod_mcp import tools
 
 META = {
     "products": ["CodeArts", "Maas", "对象存储服务 OBS", "ModelArts"],
@@ -47,50 +49,50 @@ def test_brand_alias_is_a_local_list_not_derived():
 
 
 def test_allowed_tags_none_without_product(monkeypatch):
-    monkeypatch.setattr(tools, "_load_meta", lambda force=False: META)
-    assert tools._allowed_tags(None) == set()
+    monkeypatch.setattr(_net, "_load_meta", lambda force=False: META)
+    assert _collect._allowed_tags(None) == set()
 
 
 def test_allowed_tags_fetched_per_product_and_cached(monkeypatch):
-    monkeypatch.setattr(tools, "_load_meta", lambda force=False: META)
-    monkeypatch.setattr(tools, "_RT", {})
-    monkeypatch.setattr(tools, "_save_runtime", lambda d, replace=False: None)
+    monkeypatch.setattr(_net, "_load_meta", lambda force=False: META)
+    monkeypatch.setattr(_rt, "_RT", {})
+    monkeypatch.setattr(_rt, "_save_runtime", lambda d, replace=False: None)
     calls = []
 
     def fake_http(method, path, body=None, **kw):
         calls.append(path)
         return {"code": 200, "data": {"problemTypes": ["功能需求", "技术/业务咨询"]}}
-    monkeypatch.setattr(tools, "_http", fake_http)
-    assert tools._allowed_tags("5") == {"功能需求", "技术/业务咨询"}
+    monkeypatch.setattr(_net, "_http", fake_http)
+    assert _collect._allowed_tags("5") == {"功能需求", "技术/业务咨询"}
     assert "productId=5" in calls[0]
-    tools._allowed_tags("5")
+    _collect._allowed_tags("5")
     assert len(calls) == 1, "同产品第二次必须走缓存"
 
 
 def test_allowed_tags_failure_means_no_filter(monkeypatch):
-    monkeypatch.setattr(tools, "_load_meta", lambda force=False: META)
-    monkeypatch.setattr(tools, "_RT", {})
-    monkeypatch.setattr(tools, "_save_runtime", lambda d, replace=False: None)
+    monkeypatch.setattr(_net, "_load_meta", lambda force=False: META)
+    monkeypatch.setattr(_rt, "_RT", {})
+    monkeypatch.setattr(_rt, "_save_runtime", lambda d, replace=False: None)
 
     def boom(*a, **k):
         raise RuntimeError("down")
-    monkeypatch.setattr(tools, "_http", boom)
-    assert tools._allowed_tags("5") == set()
+    monkeypatch.setattr(_net, "_http", boom)
+    assert _collect._allowed_tags("5") == set()
 
 
 def test_submit_filters_tags_by_product_types(monkeypatch):
-    monkeypatch.setattr(tools, "_load_meta", lambda force=False: META)
-    monkeypatch.setattr(tools, "_RT", {})
-    monkeypatch.setattr(tools, "_save_runtime", lambda d, replace=False: None)
-    monkeypatch.setattr(tools, "JAVA_BASE", "http://stub")
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
+    monkeypatch.setattr(_net, "_load_meta", lambda force=False: META)
+    monkeypatch.setattr(_rt, "_RT", {})
+    monkeypatch.setattr(_rt, "_save_runtime", lambda d, replace=False: None)
+    monkeypatch.setattr(_net, "JAVA_BASE", "http://stub")
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
 
     def fake_http(method, path, body=None, **kw):
         if "meta" in path:
             return {"code": 200, "data": {"problemTypes": ["功能需求", "产品缺陷"]}}
         return {"code": 201, "voiceIds": ["VDPL202611120001"], "statuses": ["new"]}
-    monkeypatch.setattr(tools, "_http", fake_http)
-    out = tools.submit_voices({"voices": [{
+    monkeypatch.setattr(_net, "_http", fake_http)
+    out = _collect.submit_voices({"voices": [{
         "content": "CodeArts 导出失败",
         "tags": ["problem_type:产品缺陷", "problem_type:易用性"]}],
         "confirmed": True}, client_info={"name": "t"})

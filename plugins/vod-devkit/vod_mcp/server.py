@@ -15,7 +15,7 @@ from pathlib import Path
 # 其余所有资源路径一律走 vod_mcp/paths.py（含 VOD_DEVKIT_ROOT 覆盖）。
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from vod_mcp import guardrails, packs, tools  # noqa: E402
+from vod_mcp import guardrails, packs, runtime_state, tools  # noqa: E402
 
 _PROTOCOL_VERSION = "2025-06-18"
 _client_info = {}
@@ -106,13 +106,13 @@ def main():
 
     # 启动自诊（排障：写 /tmp，宿主过滤环境变量时可观察实际 env）
     try:
-        tools._ensure_first_boot()  # D-key-guard-3①：首启标记+构建机残留清理（preset 兜底）
+        runtime_state._ensure_first_boot()  # D-key-guard-3①：首启标记+构建机残留清理（preset 兜底）
     except Exception:
         pass
-    tools._log(f"started pid={os.getpid()} argv={sys.argv} "
-               f"VOD_PACKS={os.environ.get('VOD_PACKS')!r} "
-               f"distribution={tools._distribution()} "
-               f"cwd={os.getcwd()}")
+    runtime_state._log(f"started pid={os.getpid()} argv={sys.argv} "
+                       f"VOD_PACKS={os.environ.get('VOD_PACKS')!r} "
+                       f"distribution={runtime_state._distribution()} "
+                       f"cwd={os.getcwd()}")
     if args.transport == "remote":
         try:
             from vod_mcp import transport_remote

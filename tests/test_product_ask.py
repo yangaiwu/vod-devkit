@@ -11,7 +11,10 @@
 """
 import pytest
 
-from vod_mcp import tools
+from vod_mcp.packs import collect as _collect
+from vod_mcp.packs import core as _core
+from vod_mcp import net as _net
+from vod_mcp import runtime_state as _rt
 
 META = {
     "products": ["CodeArts", "Maas"],
@@ -24,24 +27,24 @@ META = {
 def eng(monkeypatch, tmp_path):
     """桩引擎：记录 body；关掉旧客户端开关（本文件测强制语义）。"""
     monkeypatch.delenv("VOD_ALLOW_UNKNOWN_PRODUCT", raising=False)
-    monkeypatch.setattr(tools, "_load_meta", lambda force=False: META)
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "JAVA_BASE", "http://stub")
-    monkeypatch.setattr(tools, "_RT", {})
-    monkeypatch.setattr(tools, "_SESSION_MEM", {})
-    monkeypatch.setattr(tools, "_runtime_path", lambda: tmp_path / "runtime.json")
+    monkeypatch.setattr(_net, "_load_meta", lambda force=False: META)
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    monkeypatch.setattr(_net, "JAVA_BASE", "http://stub")
+    monkeypatch.setattr(_rt, "_RT", {})
+    monkeypatch.setattr(_rt, "_SESSION_MEM", {})
+    monkeypatch.setattr(_rt, "_runtime_path", lambda: tmp_path / "runtime.json")
     sent = []
     def _fake(m, p, body=None, **k):
         if isinstance(body, dict) and "voices" in body:
             sent.append(body)          # 只记录真正的提交（meta 查询 body=None）
         return {"code": 201, "voiceIds": ["VDPL202611120001"], "statuses": ["new"]}
-    monkeypatch.setattr(tools, "_http", _fake)
+    monkeypatch.setattr(_net, "_http", _fake)
     return sent
 
 
 def _submit(**params):
     params.setdefault("confirmed", True)
-    return tools.submit_voices(params, client_info={"name": "codearts"})
+    return _collect.submit_voices(params, client_info={"name": "codearts"})
 
 
 def test_single_literal_product_submits_without_asking(eng):
@@ -52,7 +55,7 @@ def test_single_literal_product_submits_without_asking(eng):
 
 
 def test_no_product_is_refused_with_actionable_candidates(eng):
-    with pytest.raises(tools.ToolError) as ei:
+    with pytest.raises(_net.ToolError) as ei:
         _submit(voices=[{"content": "体验很差"}])
     assert ei.value.code == -32010
     assert "先问用户" in str(ei.value)
@@ -61,7 +64,7 @@ def test_no_product_is_refused_with_actionable_candidates(eng):
 
 def test_user_says_unknown_blocks_instead_of_guessing(eng):
     """用户说不知道 → 不猜宿主产品，也不提交；提示用户补产品。"""
-    with pytest.raises(tools.ToolError) as ei:
+    with pytest.raises(_net.ToolError) as ei:
         _submit(voices=[{"content": "体验很差"}], productNotSpecified=True)
     assert ei.value.code == -32010
     assert "不能提交" in str(ei.value)
@@ -70,15 +73,15 @@ def test_user_says_unknown_blocks_instead_of_guessing(eng):
 
 def test_no_product_is_never_submitted(eng, monkeypatch):
     """没有任何产品来源 → 只提示不提交（含此前"无映射放行"那条路，已删）。"""
-    monkeypatch.setitem(tools._RT, "host_product", "CodeArts")
-    with pytest.raises(tools.ToolError) as ei:
+    monkeypatch.setitem(_rt._RT, "host_product", "CodeArts")
+    with pytest.raises(_net.ToolError) as ei:
         _submit(voices=[{"content": "体验很差"}], productNotSpecified=True)
     assert ei.value.code == -32010
     assert not eng
 
 
 def test_multi_product_mention_asks_instead_of_guessing(eng):
-    with pytest.raises(tools.ToolError) as ei:
+    with pytest.raises(_net.ToolError) as ei:
         _submit(voices=[{"content": "从 CodeArts 导出到 Maas 打不开"}])
     assert ei.value.code == -32010
     assert not eng
@@ -86,7 +89,7 @@ def test_multi_product_mention_asks_instead_of_guessing(eng):
 
 def test_unmatched_answer_is_asked_not_guessed(eng):
     """用户说了名录里没有的产品（"智果"/打错）：不按原名提交，按名录给候选再问。"""
-    with pytest.raises(tools.ToolError) as ei:
+    with pytest.raises(_net.ToolError) as ei:
         _submit(voices=[{"content": "导出很慢"}], product="智果")
     assert ei.value.code == -32010
     assert "不在产品名录里" in str(ei.value)
@@ -94,9 +97,9 @@ def test_unmatched_answer_is_asked_not_guessed(eng):
 
 
 def test_unmatched_answer_does_not_pollute_memory(eng):
-    with pytest.raises(tools.ToolError):
+    with pytest.raises(_net.ToolError):
         _submit(voices=[{"content": "导出很慢"}], product="智果")
-    assert not (tools._SESSION_MEM.get("codearts|") or {}).get("product")
+    assert not (_rt._SESSION_MEM.get("codearts|") or {}).get("product")
 
 
 def test_session_memory_skips_second_question_and_answers_override(eng):
@@ -113,10 +116,10 @@ def test_session_memory_skips_second_question_and_answers_override(eng):
 
 def test_memory_expires_after_ttl(eng, monkeypatch):
     _submit(voices=[{"content": "CodeArts 导出失败"}], product="CodeArts")
-    mem = dict(tools._SESSION_MEM)
+    mem = dict(_rt._SESSION_MEM)
     for k, v in mem.items():
         v["at"] = 0                      # 手动过期
-    with pytest.raises(tools.ToolError):
+    with pytest.raises(_net.ToolError):
         _submit(voices=[{"content": "又一条没产品名的"}])
         # 注意：这里必须重新抛，不能靠记忆
 
@@ -130,14 +133,14 @@ def test_legacy_client_switch_marks_legacy_default(eng, monkeypatch):
 
 
 def test_search_products_returns_candidates_for_asking(eng):
-    r = tools.search_products({"query": "导出慢", "limit": 3})
+    r = _core.search_products({"query": "导出慢", "limit": 3})
     assert r["candidates"], "问用户前必须能给候选"
-    r2 = tools.search_products({"query": "CodeArts", "limit": 3})
+    r2 = _core.search_products({"query": "CodeArts", "limit": 3})
     assert r2["candidates"][0]["id"] == "1"
 
 
 def test_draft_stores_product_and_does_not_block(eng):
-    out = tools.draft_voices({"voices": [{"content": "体验很差"}]},
+    out = _collect.draft_voices({"voices": [{"content": "体验很差"}]},
                              client_info={"name": "codearts"})
     assert out["productSource"] == "unknown"      # 草稿不阻断，等 commit 前补齐
     assert out["productConfidence"] == "low"
@@ -145,10 +148,10 @@ def test_draft_stores_product_and_does_not_block(eng):
 
 
 def test_commit_requires_product(eng):
-    d = tools.draft_voices({"voices": [{"content": "体验很差"}]},
+    d = _collect.draft_voices({"voices": [{"content": "体验很差"}]},
                            client_info={"name": "codearts"})
-    with pytest.raises(tools.ToolError) as ei:
-        tools.commit_voices({"draftId": d["draftId"]}, client_info={"name": "codearts"})
+    with pytest.raises(_net.ToolError) as ei:
+        _collect.commit_voices({"draftId": d["draftId"]}, client_info={"name": "codearts"})
     assert ei.value.code == -32010
 
 
@@ -168,35 +171,35 @@ def test_product_beats_product_not_specified_when_both_sent(eng):
 def test_two_bad_answers_then_terminate(eng):
     """连续给名录外答案：第三次明确要求停止追问（不再无限重问）。"""
     for _ in range(2):
-        with pytest.raises(tools.ToolError):
+        with pytest.raises(_net.ToolError):
             _submit(voices=[{"content": "导出很慢"}], product="智果")
-    with pytest.raises(tools.ToolError) as ei:
+    with pytest.raises(_net.ToolError) as ei:
         _submit(voices=[{"content": "导出很慢"}], product="智果")
     assert "已追问 2 次" in str(ei.value) and "别再问了" in str(ei.value)
     assert not eng
 
 
 def test_counter_resets_after_successful_attribution(eng):
-    with pytest.raises(tools.ToolError):
+    with pytest.raises(_net.ToolError):
         _submit(voices=[{"content": "导出很慢"}], product="智果")
     _submit(voices=[{"content": "导出很慢"}], product="CodeArts")
-    with pytest.raises(tools.ToolError) as ei:
+    with pytest.raises(_net.ToolError) as ei:
         _submit(voices=[{"content": "又一条"}], product="智果")
     assert "已追问 2 次" not in str(ei.value), "成功归因后计数应清零"
 
 
 def test_memory_does_not_leak_across_clients(eng):
     """记忆按会话+身份隔离：换个宿主客户端就重新问。"""
-    tools.submit_voices({"voices": [{"content": "CodeArts 导出失败"}], "confirmed": True},
+    _collect.submit_voices({"voices": [{"content": "CodeArts 导出失败"}], "confirmed": True},
                         client_info={"name": "codearts"})
-    with pytest.raises(tools.ToolError):
-        tools.submit_voices({"voices": [{"content": "还是慢"}], "confirmed": True},
+    with pytest.raises(_net.ToolError):
+        _collect.submit_voices({"voices": [{"content": "还是慢"}], "confirmed": True},
                             client_info={"name": "other-host"})
 
 
 def test_user_gives_up_no_submission(eng):
     """用户明确放弃 → 不提交，也不猜。"""
-    with pytest.raises(tools.ToolError) as ei:
+    with pytest.raises(_net.ToolError) as ei:
         _submit(voices=[{"content": "体验很差"}], productNotSpecified=True)
     assert "不能提交" in str(ei.value)
     assert not eng

@@ -21,6 +21,7 @@ import urllib.error  # noqa: E402
 import urllib.request  # noqa: E402
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E402
 
+from vod_mcp import net as _net
 from vod_mcp import transport_remote as tr  # noqa: E402
 
 
@@ -57,8 +58,8 @@ def remote(monkeypatch):
     base = f"http://127.0.0.1:{engine.server_port}"
     monkeypatch.setenv("VOD_JAVA_API_BASE", base)
     from vod_mcp import tools
-    monkeypatch.setattr(tools, "JAVA_BASE", base)
-    monkeypatch.setattr(tools, "JAVA_KEY", "")
+    monkeypatch.setattr(_net, "JAVA_BASE", base)
+    monkeypatch.setattr(_net, "JAVA_KEY", "")
 
     runtime = tr.RemoteRuntime("127.0.0.1", 0)
     runtime.start()

@@ -103,7 +103,7 @@ def test_failed_entries_must_stay_pending():
 # ── ④ flush 接线（源码锁） ──
 
 def test_submit_voices_wires_flush():
-    src = (ROOT / "vod_mcp" / "tools.py").read_text(encoding="utf-8")
+    src = (ROOT / "vod_mcp" / "packs" / "collect.py").read_text(encoding="utf-8")
     assert 'result["pendingFlush"] = _flush_pending(product)' in src, "两条成功路径都要接 flush"
     assert src.count('result["pendingFlush"] = _flush_pending(product)') == 2, "囤积+legacy 回落两处"
     assert "绝不回滚主提交" in src or "绝不回滚" in (ROOT / "vod_mcp" / "pending.py").read_text(encoding="utf-8"), \
@@ -128,6 +128,6 @@ def test_canonical_content_without_lines_falls_back():
 
 
 def test_flush_wiring_uses_canonical_content():
-    src = (ROOT / "vod_mcp" / "tools.py").read_text(encoding="utf-8")
+    src = (ROOT / "vod_mcp" / "packs" / "collect.py").read_text(encoding="utf-8")
     assert "canonical_content(e)" in src, "flush 必须走权威拼接"
     assert '"corrected": corrected' in src, "纠正计数进 flush 诊断"

@@ -1,6 +1,8 @@
 """分发形态位（D-key-guard-3）测试：preset 形态下禁 key 随包/禁自更新/
 verify 本地降级/首启残留清理/账本出口/日志轮转。
 安装器级用例复用 test_installer 的 fake-home 隔离骨架；工具级用例直调 tools。"""
+from vod_mcp.packs import collect as _collect
+from vod_mcp import runtime_state as _rt
 import json
 import subprocess
 import sys
@@ -103,16 +105,14 @@ def _write_manifest_preset(repo: Path):
 
 def test_first_boot_cleans_build_machine_residual(tmp_path, monkeypatch):
     """①兜底：preset + 无 firstBootAt + 携带状态 → 自动清空重生成，保留装机配置。"""
-    from vod_mcp import tools
     rt = tmp_path / "runtime.json"
     rt.write_text(json.dumps({"product": "GTD", "java_base": "https://x",
                               "java_key": "build-machine-key",
                               "install_nonce": "deadbeef",
                               "submissions": [{"voiceId": "v1"}]}))
-    monkeypatch.setattr(tools, "_runtime_path", lambda: rt)
-    monkeypatch.setattr(tools, "_distribution",
-                        lambda: "preset") if hasattr(tools, "_distribution") else None
-    out = tools._ensure_first_boot(rt)
+    monkeypatch.setattr(_rt, "_runtime_path", lambda: rt)
+    monkeypatch.setattr(_rt, "_distribution", lambda: "preset")
+    out = _rt._ensure_first_boot(rt)
     assert out["action"] == "cleaned"
     assert sorted(out["removed"]) == ["install_nonce", "java_key", "submissions"]
     cfg = json.loads(rt.read_text())
@@ -123,55 +123,50 @@ def test_first_boot_cleans_build_machine_residual(tmp_path, monkeypatch):
 
 def test_first_boot_devkit_no_clean(tmp_path, monkeypatch):
     """devkit 形态首启只打标，不清理（自装自管场景无残留概念）。"""
-    from vod_mcp import tools
     rt = tmp_path / "runtime.json"
     rt.write_text(json.dumps({"java_key": "k", "product": "hermes"}))
-    monkeypatch.setattr(tools, "_runtime_path", lambda: rt)
-    monkeypatch.setattr(tools, "_distribution", lambda: "devkit")
-    out = tools._ensure_first_boot(rt)
+    monkeypatch.setattr(_rt, "_runtime_path", lambda: rt)
+    monkeypatch.setattr(_rt, "_distribution", lambda: "devkit")
+    out = _rt._ensure_first_boot(rt)
     assert out["action"] == "stamped"
     cfg = json.loads(rt.read_text())
     assert cfg["java_key"] == "k" and cfg["firstBootAt"]
 
 
 def test_first_boot_second_run_noop(tmp_path, monkeypatch):
-    from vod_mcp import tools
     rt = tmp_path / "runtime.json"
     rt.write_text(json.dumps({"java_key": "k", "firstBootAt": "2026-01-01T00:00:00"}))
-    monkeypatch.setattr(tools, "_runtime_path", lambda: rt)
-    monkeypatch.setattr(tools, "_distribution", lambda: "preset")
-    assert tools._ensure_first_boot(rt) == {"action": "none"}, "已标记首启不再触发"
+    monkeypatch.setattr(_rt, "_runtime_path", lambda: rt)
+    monkeypatch.setattr(_rt, "_distribution", lambda: "preset")
+    assert _rt._ensure_first_boot(rt) == {"action": "none"}, "已标记首启不再触发"
 
 
 def test_ledger_opt_out(tmp_path, monkeypatch):
     """④：local_ledger=false → 提交不落账本，vod_list_submitted 返回空。"""
-    from vod_mcp import tools
     rt = tmp_path / "runtime.json"
     rt.write_text(json.dumps({"local_ledger": False}))
-    monkeypatch.setattr(tools, "_runtime_path", lambda: rt)
-    tools._ledger_append([{"voiceId": "v1", "taskId": None, "title": "t",
+    monkeypatch.setattr(_rt, "_runtime_path", lambda: rt)
+    _rt._ledger_append([{"voiceId": "v1", "taskId": None, "title": "t",
                            "product": "GTD", "at": "now"}])
     assert json.loads(rt.read_text()).get("submissions") is None, "账本关闭不落盘"
-    out = tools.list_submitted({"limit": 10})
+    out = _collect.list_submitted({"limit": 10})
     assert out["total"] == 0
 
 
 def test_ledger_default_on(tmp_path, monkeypatch):
-    from vod_mcp import tools
     rt = tmp_path / "runtime.json"
     rt.write_text(json.dumps({}))
-    monkeypatch.setattr(tools, "_runtime_path", lambda: rt)
-    tools._ledger_append([{"voiceId": "v1", "taskId": None, "title": "t",
+    monkeypatch.setattr(_rt, "_runtime_path", lambda: rt)
+    _rt._ledger_append([{"voiceId": "v1", "taskId": None, "title": "t",
                            "product": "GTD", "at": "now"}])
     assert len(json.loads(rt.read_text())["submissions"]) == 1
 
 
 def test_log_rotation_cap(tmp_path):
     """⑤：日志超 1MB 截断轮转，保留尾部，新写入追加成功。"""
-    from vod_mcp import tools
     big = tmp_path / "vod_mcp_server.log"
     big.write_text("x" * (1024 * 1024 + 4096))
-    tools._log("new-line-after-rotation", path=str(big))
+    _rt._log("new-line-after-rotation", path=str(big))
     assert big.stat().st_size < 1024 * 1024 + 4096, "轮转后不得继续超限膨胀"
     assert "new-line-after-rotation" in big.read_text()
     assert (tmp_path / "vod_mcp_server.log.old").exists(), "旧日志轮转保留"
@@ -181,39 +176,36 @@ def test_clone_image_detection_warns(tmp_path, monkeypatch):
     """preset + firstBootAt 早于本机 uptime → 克隆告警（仅日志，不阻断）。
     uptime 源必须 monkeypatch（实锤教训：曾直接读真机 /proc/uptime，
     宿主 uptime>7 天时判据必假、测试必红——环境相关缺陷，与被测逻辑无关）。"""
-    from vod_mcp import tools
     import time as _t
     boot_age = 3600 * 24 * 7  # 首启发生在 7 天前
     cfg = {"firstBootAt": _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime(_t.time() - boot_age)),
            "product": "GTD"}
     warned = []
-    monkeypatch.setattr(tools, "_distribution", lambda: "preset")
-    monkeypatch.setattr(tools, "_warn", lambda m: warned.append(m))
-    monkeypatch.setattr(tools, "_uptime_seconds", lambda: 3600.0)  # 本机刚开机 1h
-    tools._warn_if_cloned(cfg, tmp_path / "runtime.json")
+    monkeypatch.setattr(_rt, "_distribution", lambda: "preset")
+    monkeypatch.setattr(_rt, "_warn", lambda m: warned.append(m))
+    monkeypatch.setattr(_rt, "_uptime_seconds", lambda: 3600.0)  # 本机刚开机 1h
+    _rt._warn_if_cloned(cfg, tmp_path / "runtime.json")
     assert any("克隆" in w for w in warned), "镜像克隆机必须告警"
-    assert tools._ensure_first_boot.__doc__  # 只告警不清理（firstBootAt 保留）
+    assert _rt._ensure_first_boot.__doc__  # 只告警不清理（firstBootAt 保留）
 
 
 def test_no_clone_warning_on_fresh_boot(tmp_path, monkeypatch):
-    from vod_mcp import tools
     import time as _t
     cfg = {"firstBootAt": _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime(_t.time() - 60))}
     warned = []
-    monkeypatch.setattr(tools, "_distribution", lambda: "preset")
-    monkeypatch.setattr(tools, "_warn", lambda m: warned.append(m))
-    monkeypatch.setattr(tools, "_uptime_seconds", lambda: 3600.0 * 24 * 365)  # 长寿机
-    tools._warn_if_cloned(cfg, tmp_path / "runtime.json")
+    monkeypatch.setattr(_rt, "_distribution", lambda: "preset")
+    monkeypatch.setattr(_rt, "_warn", lambda m: warned.append(m))
+    monkeypatch.setattr(_rt, "_uptime_seconds", lambda: 3600.0 * 24 * 365)  # 长寿机
+    _rt._warn_if_cloned(cfg, tmp_path / "runtime.json")
     assert not warned, "首启晚于 uptime（正常新装机）不得误报"
 
 
 def test_clone_detection_skips_on_bad_cfg(tmp_path, monkeypatch):
     """firstBootAt 缺失/格式坏 → 只跳过不崩溃（except 收窄后的行为锁：
     解析类异常吞掉并记日志，非解析异常必须如实上抛）。"""
-    from vod_mcp import tools
     warned = []
-    monkeypatch.setattr(tools, "_distribution", lambda: "preset")
-    monkeypatch.setattr(tools, "_warn", lambda m: warned.append(m))
-    tools._warn_if_cloned({}, tmp_path / "runtime.json")  # 缺 firstBootAt
-    tools._warn_if_cloned({"firstBootAt": "not-a-date"}, tmp_path / "runtime.json")
+    monkeypatch.setattr(_rt, "_distribution", lambda: "preset")
+    monkeypatch.setattr(_rt, "_warn", lambda m: warned.append(m))
+    _rt._warn_if_cloned({}, tmp_path / "runtime.json")  # 缺 firstBootAt
+    _rt._warn_if_cloned({"firstBootAt": "not-a-date"}, tmp_path / "runtime.json")
     assert not warned, "解析失败=检测跳过，不产生克隆告警"

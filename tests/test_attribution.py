@@ -4,8 +4,10 @@
 """
 import pytest
 
+from vod_mcp import net as _net
+from vod_mcp.packs import collect as _collect
+from vod_mcp import runtime_state as _rt
 from vod_mcp import attribution as attr
-from vod_mcp import tools
 
 META = {
     "products": ["CodeArts", "MaaS", "OBS", "AIShell"],
@@ -110,13 +112,13 @@ def test_s97_explicit_answer_is_user_answer_source(monkeypatch):
     老口径"自报一律不采信"随 D-product-ask-1 推翻；现在的防线是：只有问过用户才该填，
     回执用 productSource=user_answer + rawText 可追。
     """
-    monkeypatch.setattr(tools, "_load_meta", lambda force=False: META)
-    monkeypatch.setattr(tools, "_RT", {})
-    out = tools._attribute_product([(0, {}, "导出很慢")], {"product": "CodeArts"})
+    monkeypatch.setattr(_net, "_load_meta", lambda force=False: META)
+    monkeypatch.setattr(_rt, "_RT", {})
+    out = _collect._attribute_product([(0, {}, "导出很慢")], {"product": "CodeArts"})
     assert out["source"] == "user_answer"
     assert out["product"] == "31" and out["confidence"] == "high"
     # 名录外的回答不猜：返回 unmatched + 候选，交给调用方追问
-    bad = tools._attribute_product([(0, {}, "导出很慢")], {"product": "智果"})
+    bad = _collect._attribute_product([(0, {}, "导出很慢")], {"product": "智果"})
     assert bad["product"] is None and bad["unmatched_answer"] == "智果"
 
 def test_s98_snapshot_only_matches_short_codes_and_never_guesses():
@@ -132,10 +134,10 @@ def test_s98_snapshot_only_matches_short_codes_and_never_guesses():
 def test_s99_receipt_and_ledger_carry_source_and_evidence():
     res = _attribute("码道导出很慢")
     receipt = {}
-    tools._attach_attribution(receipt, {**res, "ignored": None})
+    _collect._attach_attribution(receipt, {**res, "ignored": None})
     assert receipt["productSource"] == "user_input"
     assert receipt["productEvidence"][0]["alias"] == "码道"
-    ledger = tools._merge_ledger({"stage": "committed"}, res)
+    ledger = _collect._merge_ledger({"stage": "committed"}, res)
     assert ledger["stage"] == "committed"
     assert ledger["productSource"] == "user_input"
     assert ledger["productEvidence"] == receipt["productEvidence"]
@@ -152,11 +154,11 @@ def test_s100_ambiguous_and_empty_never_write_memory():
 
 def test_s100_memory_overwrite_keeps_snapshot(monkeypatch):
     saved = {}
-    monkeypatch.setattr(tools, "_save_runtime", lambda d, replace=False: saved.update(d))
-    monkeypatch.setattr(tools, "_RT", {"attribution_memory": {
+    monkeypatch.setattr(_rt, "_save_runtime", lambda d, replace=False: saved.update(d))
+    monkeypatch.setattr(_rt, "_RT", {"attribution_memory": {
         "product": "31", "productName": "CodeArts", "alias": "码道", "at": 100}})
-    monkeypatch.setattr(tools, "_load_meta", lambda force=False: META)
-    tools._remember_attribution({"product": "43", "productName": "MaaS",
+    monkeypatch.setattr(_net, "_load_meta", lambda force=False: META)
+    _rt._remember_attribution({"product": "43", "productName": "MaaS",
                                  "source": "user_input",
                                  "evidence": [{"product": "MaaS", "alias": "MaaS",
                                                "snippet": "MaaS 部署失败"}]})
@@ -169,20 +171,20 @@ def test_s95_end_to_end_memory_flows_into_next_submission(monkeypatch):
     → 归因来源 memory（进程内同步，不靠重启读盘）。"""
     saved = {}
     rt = {}
-    monkeypatch.setattr(tools, "_load_meta", lambda force=False: META)
-    monkeypatch.setattr(tools, "_RT", rt)
-    monkeypatch.setattr(tools, "JAVA_KEY", "k")
-    monkeypatch.setattr(tools, "_save_runtime", lambda d, replace=False: (saved.update(d), rt.update(d)))
+    monkeypatch.setattr(_net, "_load_meta", lambda force=False: META)
+    monkeypatch.setattr(_rt, "_RT", rt)
+    monkeypatch.setattr(_net, "JAVA_KEY", "k")
+    monkeypatch.setattr(_rt, "_save_runtime", lambda d, replace=False: (saved.update(d), rt.update(d)))
     bodies = []
-    monkeypatch.setattr(tools, "_http",
+    monkeypatch.setattr(_net, "_http",
                         lambda m, p, body=None, timeout=30, base=None, key=None:
                         bodies.append(body) or
                         {"code": 201, "voiceIds": ["ext_1"], "statuses": ["new"]})
-    first = tools.submit_voices({"voices": [{"content": "码道导出转圈两分钟"}],
+    first = _collect.submit_voices({"voices": [{"content": "码道导出转圈两分钟"}],
                                  "confirmed": True}, client_info={"name": "t"})
     assert first["productSource"] == "user_input"
     assert rt["attribution_memory"]["product"] == "31"
-    second = tools.submit_voices({"voices": [{"content": "导出还是慢"}],
+    second = _collect.submit_voices({"voices": [{"content": "导出还是慢"}],
                                   "confirmed": True}, client_info={"name": "t"})
     assert second["productSource"] == "memory"
     assert bodies[-1]["product"] == "31"
