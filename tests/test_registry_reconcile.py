@@ -63,6 +63,15 @@ def test_published_but_missing_tag_is_drift():
     assert rep["status"] == "drift", rep
 
 
+def test_shallow_clone_missing_tag_is_not_drift():
+    """浅克隆看不到 tag ≠ 没打 tag（v0.5.8 CI 假红实锤：tag 已推、包已发）。"""
+    rep = rr.reconcile(_local("0.5.0"),
+                       {"vod-devkit": "0.5.0", "dsh-vod-devkit": "0.5.0"},
+                       {"v0.5.0": False}, shallow=True)
+    assert rep["status"] == "ok", rep
+    assert any("浅克隆" in f for f in rep["findings"])
+
+
 def test_offline_registry_is_unknown_not_green():
     rep = rr.reconcile(_local("0.5.0"), {"vod-devkit": None, "dsh-vod-devkit": None})
     assert rep["status"] == "unknown", rep

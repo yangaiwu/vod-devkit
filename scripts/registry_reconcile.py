@@ -58,7 +58,8 @@ def tag_exists(tag: str, root: Path = ROOT) -> bool:
         return False
 
 
-def reconcile(local: dict, registry: dict, tags: dict | None = None) -> dict:
+def reconcile(local: dict, registry: dict, tags: dict | None = None,
+              shallow: bool = False) -> dict:
     """纯计算：返回 {"status": ok|ahead|drift|unknown, "findings":[...]}。"""
     findings = []
     v_main, v_dsh = local.get("vod-devkit"), local.get("dsh-vod-devkit")
@@ -91,9 +92,15 @@ def reconcile(local: dict, registry: dict, tags: dict | None = None) -> dict:
         status = "ahead"
     tag = f"v{v_main}"
     if tags is not None and not tags.get(tag):
-        findings.append(f"缺 tag {tag}（{v_main} 未打 tag 或未推送）")
-        if status == "ok":
-            status = "drift"  # 已发布却没有 tag=对账链断了；开发中（ahead）只提示
+        if shallow:
+            # 浅克隆（actions/checkout 默认 fetch-depth=1）看不到 tag——
+            # 「看不到」≠「没打」，判红=CI 假红（v0.5.8 实锤：已发布且 tag 已推，
+            # CI 仍报缺 tag）。tag 对账交给本地/fetch-depth 0 的流水线。
+            findings.append(f"tag {tag} 不可见（浅克隆未取 tags）——tag 对账跳过，不判红")
+        else:
+            findings.append(f"缺 tag {tag}（{v_main} 未打 tag 或未推送）")
+            if status == "ok":
+                status = "drift"  # 已发布却没有 tag=对账链断了；开发中（ahead）只提示
     return {"status": status, "findings": findings}
 
 
@@ -109,6 +116,16 @@ def _cmp(a: str, b: str) -> int:
     return (t(a) > t(b)) - (t(a) < t(b))
 
 
+def is_shallow(root: Path = ROOT) -> bool:
+    """仓库是否为浅克隆（浅克隆里 tag 不可见，不能当「没打 tag」）。"""
+    try:
+        r = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=root,
+                           capture_output=True, text=True, timeout=30)
+        return r.stdout.strip() == "true"
+    except Exception:
+        return False
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--strict", action="store_true", help="仓内领先 registry 也判失败（发版检查用）")
@@ -118,7 +135,7 @@ def main(argv=None) -> int:
     registry = {p: npm_view(p, "version") for p in DEFAULT_PKGS}
     tags = None if args.no_tag_check else {f"v{local.get('vod-devkit')}":
                                            tag_exists(f"v{local.get('vod-devkit')}")}
-    rep = reconcile(local, registry, tags)
+    rep = reconcile(local, registry, tags, shallow=is_shallow())
     print(f"状态: {rep['status'].upper()}")
     for f in rep["findings"]:
         print(f"  - {f}")

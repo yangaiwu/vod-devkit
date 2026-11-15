@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 发版状态对账要读 tag（浅克隆看不到 tag → 曾把已发版判成 DRIFT）；
+          # 脚本侧另有浅克隆兜底，这里取全量历史让门禁权威。
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
