@@ -19,13 +19,32 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.mypy]
-# 作用域刻意收窄（D-devtoolchain-7）：只对新增的纯逻辑模块做类型门禁。
-# 存量 tools.py 是历史代码，全仓 mypy 会炸存量且无收益——新增模块必须过，
-# 存量随重构自然收敛（mypy 的 files 白名单就是这条纪律的落点）。
+# 作用域＝整包（D-devtoolchain-7 修订）：白名单的失败模式是静默——新增模块
+# 忘加白名单就永远不被检查，门禁看着绿实际没覆盖。改为“整包默认检查 + 存量
+# 显式豁免走下面的 overrides”：新模块不写任何配置也会被检，报错就修；
+# 存量（2026-11-15 实测 25 errors / 10 files）作为技术债显式列出，只许缩不许长。
+# tests/test_mypy_scope.py 锁住这两条性质（整包 + 豁免清单可解析且不漂移）。
 python_version = "3.12"
-files = ["vod_mcp/attribution.py"]
+files = ["vod_mcp"]
 check_untyped_defs = true
 no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 show_error_codes = true
+
+# 存量技术债清单（只许缩不许长；新增条目=一次显式决策，须同时改
+# tests/test_mypy_scope.py 的 EXPECTED_LEGACY 并写明原因）
+[[tool.mypy.overrides]]
+module = [
+  "vod_mcp.transport_remote",
+  "vod_mcp.tools",
+  "vod_mcp.payload",
+  "vod_mcp.skills_registry",
+  "vod_mcp.server",
+  "vod_mcp.policy",
+  "vod_mcp.host_adapters.codex",
+  "vod_mcp.diagnose",
+  "vod_mcp.detect_framework",
+  "vod_mcp.config_forms",
+]
+ignore_errors = true
