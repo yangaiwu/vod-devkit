@@ -1390,3 +1390,23 @@ key 变量、代码类看代码里是否点名 runtime.json；其余仍 fail-ope
 | # | 场景 | 断言 |
 |---|---|---|
 | S139 | 事务与覆盖面 | 4 进程各 25 次 `_ledger_append`（真实入口）→ 落盘 100 条；`read_file`/`execute_code`/`search_files` 点名 runtime.json 或 key 变量 → BLOCK，正常读文件/普通代码/普通搜索 → ALLOW |
+
+
+## 身份类值的读取口径（S140，D-state-read-1，2026-11-16）
+
+需求变更：`net.JAVA_KEY` / `net.JAVA_BASE` 此前是**模块导入期常量**，而 MCP server 是长驻
+进程。于是 `auth init --apply` 换 key、安装器改 apiBase、自动领取的匿名令牌写回 runtime.json
+之后，运行中的进程仍用启动那一刻的旧值——用户侧表现是"我明明配了/换了，还是 401 或打到
+旧环境"，而 `auth status` 报的档位也可能与出口实际用的一致但不自洽。
+
+- 改为**调用期现读**：env（平台注入）> `runtime.json` > 默认；文件缺失/损坏时回落进程内
+  镜像（`_RT`），不打断出口。
+- 保留模块属性 patch 面：`net.JAVA_KEY` / `net.JAVA_BASE` 走 PEP 562 模块级 `__getattr__`，
+  **显式 set 过的值优先**（既有用例与运维脚本都靠 `monkeypatch.setattr(net, "JAVA_KEY", …)`）；
+  模块内部一律调 `_java_key()` / `_java_base()`（模块内全局名查找不触发 `__getattr__`）。
+- 自动领取匿名令牌处不再写模块属性（写属性会让 `__getattr__` 永久失效、token 又被冻住），
+  统一走 `_runtime_update`（落盘 + 镜像）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S140 | 身份值热生效 | 改 runtime.json 的 java_key/java_base → `net.JAVA_KEY`/`JAVA_BASE` 立刻反映（无需重启）；env 高于 runtime；显式 set 过的模块属性优先；`token_tier=anonymous` 时 `_explicit_key()` 为 False；runtime 缺失时回落镜像 |

@@ -422,7 +422,10 @@
       "carrier": "tests/test_global_cmds.py"
     },
     "S139": {
-      "carrier": "tests/test_runtime_atomic.py"
+      "carrier": "docs/design.md"
+    },
+    "S140": {
+      "carrier": "docs/design.md"
     },
     "U1": {
       "carrier": "tests/test_skeleton.py"

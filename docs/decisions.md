@@ -1495,3 +1495,31 @@ PR，且要先补"长驻进程里 runtime 改值"的用例。
 一处，业务侧必须传 mutate 而不是先读后写。
 
 **门禁**：S139 用真实入口（`_ledger_append`）跑 4 子进程；旧代码上必红（实测 28/100）。
+
+## D-state-read-1：身份类值调用期现读（net.JAVA_KEY/JAVA_BASE）（2026-11-16）
+
+**问题**：`net.JAVA_KEY` / `net.JAVA_BASE` 是 import 期常量。MCP server 长驻，于是
+`auth init --apply` 换 key、安装器改 apiBase、自动领取匿名令牌写回 runtime.json 之后，
+运行中的进程仍用启动那一刻的旧值：用户"明明换了还是 401"、或提交打到旧环境；
+`auth status` 与出口读的是同一份旧快照，自洽地错，排查时无从下手。
+
+**决定**：改成调用期现读，优先级 env（平台注入）> runtime.json > `_RT` 镜像 > 默认。
+保 patch 面——`net.JAVA_KEY` 走 PEP 562 模块级 `__getattr__`，**显式 set 过的值优先**
+（既有用例与运维脚本都用 `monkeypatch.setattr(net, "JAVA_KEY", …)`）；模块内部一律调
+`_java_key()` / `_java_base()`，因为模块内的全局名查找不触发 `__getattr__`。
+
+**为什么保留 `_RT` 回落**：文件缺失/损坏时不能把出口打断（离线/首装）；且本进程刚写的
+值先进镜像。**文件优先**保证外部改动能立刻生效。
+
+**为什么不再写 `net.JAVA_KEY = token`**（自动领取令牌处）：一旦 set 过模块属性，
+`__getattr__` 就永久失效，那份 token 又被冻结——这正是本次要消灭的形态。改为
+`_runtime_update`（落盘 + 镜像）。
+
+**测试适配**（诚实记录代价）：`setattr(net, "JAVA_KEY", "…")` 仍可用于"强制给一把 key"，
+但**不能用来"清空"**（空串是 falsy，会走现读；要清空必须 `delenv` + 确保 runtime 无该键）。
+"模拟 runtime 里已有旧令牌"的用例必须写状态（`_runtime_update`），而不是 set 模块属性，
+否则回填新令牌后仍读到旧值。conftest 的 `_isolate_runtime` 同时清空 `_RT`——它是导入期
+从**真实** runtime.json 读出来的快照，不清会让隔离用例读到真机安装的 key。
+
+**代价**：每次出口调用读一次 runtime.json。提交/元数据是低频动作，实测无感；真有高频
+只读路径再加 mtime 缓存，不预先加。

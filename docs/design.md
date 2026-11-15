@@ -976,7 +976,29 @@ cache 内 .mcp.json 被改写成 `python3` 绝对路径 + `payloads/0.5.9/vod_mc
 
 用例承载：`tests/test_global_cmds.py`（S116-S123、S126-S128、S130-S131）、
 `tests/test_packs_configure.py`（S132-S133、S136）、`tests/test_doctor_egress.py`（S134）、
-`tests/test_key_guard_hook.py`（S135）、`tests/test_runtime_atomic.py`（S137）。
+`tests/test_key_guard_hook.py`（S135）、`tests/test_runtime_atomic.py`（S137、S139）、
+`tests/test_state_read.py`（S140）。
+
+## 状态读取口径：现读还是快照（D-state-read-1，2026-11-16）
+
+状态有两层，**用途不同、不许混**：
+
+| 层 | 是什么 | 谁读 |
+|---|---|---|
+| `_RT` 镜像 | 进程启动时读一次的文件快照 + 本进程写入后的增量 | 需要"本会话内一致"的判定（会话记忆、首启标记） |
+| 文件现读 | `runtime_state._runtime_cfg()` | 身份类值（java_key / java_base / token_tier）与账本对账 |
+
+身份类值必须现读：它们会被**别的进程**改（`auth init --apply`、安装器、CLI 卸载）。
+写成模块常量等于把"用户刚换的 key"冻在启动那一刻，表现为 401 或打到旧环境——而且
+`auth status` 与出口用的是同一份旧值，自洽地错，最难查。
+
+实现取 PEP 562 模块级 `__getattr__`：`net.JAVA_KEY` / `net.JAVA_BASE` 未被人显式 set 时
+每次现读（env > 文件 > 镜像 > 默认），被 set 过则用 set 的值——保住既有的 patch 面
+（`monkeypatch.setattr(net, "JAVA_KEY", …)` 仍生效）。模块**内部**必须调 `_java_key()`：
+模块内的全局名查找不触发 `__getattr__`，写成裸 `JAVA_KEY` 会 NameError 或读到旧值。
+
+**代价**：每次出口调用读一次 runtime.json（几十 KB、账本上限 200 条），提交/元数据都是低频，
+可接受；如果将来有高频只读路径，再加 mtime 缓存——不要在没测量的情况下先加。
 
 ## 会话内能力面开关（D-packs-configure-1，2026-11-16）
 
