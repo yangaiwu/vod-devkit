@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from vod_mcp import hosts as host_specs
+from vod_mcp import packs as packs_mod
 from vod_mcp.host_adapters import REGISTRY as HOST_ADAPTERS
 from vod_mcp.host_adapters import generic as generic_host
 from vodkit_cli import common, remote
@@ -32,6 +33,27 @@ def cmd_install(args):
         args.java_api_base = os.environ.get("VOD_JAVA_API_BASE") or DEFAULT_JAVA_BASE
     common.write_build_info(strict=False)
     target = args.target
+    if target == "all":
+        # 一步全量（对齐 devkit `--target all`）：只装探测到的专属宿主；
+        # 缺 CLI 的跳过并说明（不猜、不代装宿主）。generic 不参与 all——
+        # 它是"手给配置文件"的兜底，不是可探测的专属宿主。
+        found = detect_targets()
+        if not found:
+            print("未探测到可自动安装的宿主；--target all 无可装宿主"
+                  "（可 --target <agent> 显式指定）", file=sys.stderr)
+            sys.exit(2)
+        import argparse as _ap
+        for t in found:
+            ns = _ap.Namespace(**vars(args))
+            ns.target = t
+            print(f"== install --target {t}")
+            try:
+                cmd_install(ns)
+            except SystemExit as e:
+                if e.code:
+                    print(f"[vod-devkit] {t} 安装未完成（exit {e.code}），继续下一个",
+                          file=sys.stderr)
+        return
     if target == "auto":
         found = detect_targets()
         generic_found = generic_host.detect_known()
@@ -66,6 +88,13 @@ def cmd_install(args):
               file=sys.stderr)
         sys.exit(2)
     packs = args.packs or common.PRESETS.get(args.preset, "")
+    # 未知包 id 在安装口就拒（D-packs-config-1）：与运行期启动检查同一套解析，
+    # 免得"装的时候通过、跑起来报错"，也免得把拼写错写进九份宿主配置。
+    try:
+        packs_mod.parse_packs(packs)
+    except packs_mod.UnknownPack as e:
+        print(f"[vod-devkit] {e}", file=sys.stderr)
+        sys.exit(2)
     # 恢复门禁（D-codex-circuit-breaker-1，2026-11-06 负责人确认）：
     # 熔断标记存在（~/.codex/vod-collect-suspended.json）时，codex 装 collect
     # 被拒——恢复采集的前置=token 化上线并过回归，不是改回 packs 一个动作；

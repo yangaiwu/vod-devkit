@@ -1084,3 +1084,133 @@ fetch-depth=1 取不到 tag，对账脚本把「tag 不可见」判成「没打 
 `python3 scripts/verify_copies.py` 绿；`git status --porcelain` 对四目录为空；
 `npm pack --dry-run` 含四目录与 build-info；故意 `git add -f plugins/vod-devkit/vod_mcp`
 后门禁必须红（反向验证）。
+
+
+## 插件 MCP 清单形态（S111-S114，D-mcp-manifest-a3-1，2026-11-15）
+
+需求变更：codex 原生插件的 `.mcp.json` 补全规范字段（`$schema` + `type`），并把
+codex 适配器的改写失败改为按类型处置。**原计划的 `${PLUGIN_ROOT}` 形态未采用——实测不可用。**
+
+背景与实测（codex-cli 0.167.0，本机 app-server 真机探针，`mcpServerStatus/list` 触发 spawn）：
+1. 旧静态形态 `command: vod-devkit` + `args: [serve]` 把 CLI 名交给 PATH——机器上装着
+   旧版（实测 0.4.2）时宿主静默跑旧副本：配置和技能是新的，工具面却是旧的。
+2. 规范（agent-plugins.org §7.2.1 / §9.2）承诺：stdio server 默认 cwd = 插件根；
+   `args`/`env`/`cwd` 里 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}` 会展开。
+3. **实测结果（决定性）**：探针 server 把收到的 `sys.argv`/`cwd`/env 落盘——
+   args 里原样收到字面量 `${PLUGIN_ROOT}/vod_mcp/server.py`；`cwd` 是 `~/.codex`
+   而不是插件根；`PLUGIN_ROOT`/`PLUGIN_DATA` 也没注入环境；`VOD_PACKS` 正常传入。
+   再把插件包迁到 Agent Plugins 格式（根 `plugin.json` + `mcp.json` + `$schema`）重装，
+   该 MCP 条目在 0.167 下**根本没注册**（`codex mcp list` 为空，插件事务本身 installed/enabled）。
+   → 规范承诺在该二进制上未落地，A3 的静态形态今天会静默坏。
+
+硬规则（据此定稿）：
+- 静态清单**保留 CLI 形态**（`command: vod-devkit` + `args: ["serve"]`）：唯一实测能跑通的
+  入口；同时补 `$schema`（约定值）与 `type: stdio`，顶层只允许这两个字段。
+- 清单里**禁止出现任何 `${...}`**：0.167 不展开 → 宿主收到字面量，静默坏。
+- 运行时正确性由安装器改写承担（`codex plugin add` 后把缓存 .mcp.json 改写成
+  「绝对解释器 + 载荷副本」并**读回验证**）。这不是可选优化：静态形态本身无法
+  摆脱 PATH 上 CLI 的版本不确定性。
+- 改写失败分层：`bad-json`/`not-writable` → warn + 分类补救指引，安装继续；
+  读回与期望不一致（并发改写/半写状态）→ 安装失败。禁止一个 catch 全 exit 1。
+- `vod_mcp/server.py` 顶部加解释器 guard（`sys.version_info < (3, 10)` → 可读诊断 +
+  exit 2），把 PEP 604 语法 traceback 换成一句人话。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S111 | 静态清单形态 | `$schema` 命中约定值、顶层字段只有两个、`type=stdio`、`command/args` 为 CLI 形态（附实测理由）、清单里不出现 `${`、`env.VOD_PACKS` 显式存在、改写入口存在 |
+| S112 | 运行时形态 | 改写产物 = 绝对解释器 + 载荷路径、args 不含占位符、读回内容与落盘一致 |
+| S113 | 工具面不静默收缩 | `VOD_PACKS` 缺省（空值）= 全 packs（历史默认），显式 `core,collect` = 有意收窄；用例把 HOME 指到临时目录规避熔断标记（环境无关） |
+| S114 | 改写失败分类 | 正常改写读回绝对形态；`bad-json`/`not-writable` 抛分类错误且都有补救文案；读回不一致抛 RuntimeError（安装失败）；新增分类必须同时给补救指引 |
+| S115 | doctor 报实际形态 | doctor 对 codex 必须区分 payload（绝对解释器+载荷）/ cli（PATH 名）/ placeholder（未展开占位符）/ unreadable，并把后三种判为问题；形态判定与 doctor 报点都有用例兜（文档说"doctor 可查"就必须可查） |
+
+A3（`${PLUGIN_ROOT}` 静态形态）的当前处置：**搁置，不废弃**。前提是宿主支持保留变量
+展开（或迁移到 Agent Plugins 插件格式并被 0.167+ 正确注册）。复验方法写在此处，
+不是"以后有人再看"：① 探针插件 + `codex app-server` 的 `mcpServerStatus/list` 触发 spawn，
+落盘 `sys.argv`/`cwd`/env；② 看到 `${PLUGIN_ROOT}` 被替换成绝对路径且 `cwd` = 插件根
+→ 切回 A3，并按 S111 的红反推清单改动；③ 届时改写逻辑降级为"解释器版本兜底"（推荐而非必须），
+不要同时拆掉。
+
+验收口径（目标环境执行，工具不入库）：`python3 -m pytest tests/test_mcp_manifest_a3.py -q`
+全绿；装机后 `codex mcp get vod-devkit --json` 的 command 是本机 3.10+ 绝对路径且
+args 指向载荷；把 PATH 上的 python3 换成 3.9 再启动 → stderr 出现版本 guard 文案而非 traceback。
+
+
+## 全局命令与多宿主消费面（S116-S123，D-global-cmds-1，2026-11-15）
+
+需求变更：install-manifest 早就记了全部宿主（`installs[]`，D-installs-1），但消费方
+还是单宿主。本组把读路径统一成"整台机器一个视图"，并给能力包一个可解释的写入面。
+
+- `version`：CLI 版本 + 每个宿主已装版本（同版/≠CLI）+ 该宿主**实际生效**的 VOD_PACKS。
+- `packs status`：读每个宿主的真实配置回答"现在跑的是哪一套"（不是读 manifest 猜）。
+- `packs enable|disable|all [--apply]`：缺省 dry-run；`--apply` 只改受管条目的
+  `env.VOD_PACKS`，首改留 `.bak`，写后读回验证；`core` 强制包含；宿主配置不是可写
+  JSON 的（dsh 等）明确报"需重跑 install"，不假装改成功。
+- `install --target all`：只装探测到的专属宿主，缺 CLI 的跳过（generic 不参与）。
+- `uninstall --target <agent>`：只摘该行，其它安装行保留；`--clean-global` 逐条清
+  载荷残留与 npx 缓存里的旧副本——**在用载荷与不认得的目录一律不碰**。
+- `status|doctor --target <agent>`：从多行里选一行检查；缺省视图=最近一次安装（顶层
+  字段即最后一次写入），多行时打印安装行清单提示用 `--target`。
+- 未知包 id：安装口与 server 启动口都 `exit 2` 并列出可用 id（此前静默过滤——实测
+  `VOD_PACKS=core,bogus` 会静默变成 `('core',)`，属"配了不生效"）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S116 | 未知包 id 即报错 | `parse_packs("core,bogus")` 抛 UnknownPack 且列出可用 id；`kb` 别名仍映射 knowledge；server 子进程以该 env 启动 → exit 2 + stderr 文案 |
+| S117 | 前置与排障段 | README 有"装不上怎么办"四类（SDK 缺失/解释器不在 PATH/镜像滞后/插件缓存旧副本），每条给判据与修法，且不引用不存在的参数（`VOD_PYTHON` 存在，`--python` 不存在） |
+| S118 | version 全局视图 | 两行 manifest（同版 / 落后）分别输出"同版"与"≠ CLI"，并同时打印各自生效 packs |
+| S119 | packs status 读真实配置 | 从宿主配置文件读出 VOD_PACKS（不是从 manifest 推断） |
+| S120 | packs 写纪律 | 缺省 dry-run 不改字节；`--apply` 只改 env.VOD_PACKS、宿主其它键原样保留、首改落 .bak、读回验证；`core` 禁不掉；`all` 置全包 |
+| S121 | --target all | 只循环探测到的宿主（缺 CLI 跳过）；零宿主时 exit 2 并说明 |
+| S122 | uninstall 收窄与清残留 | `--target` 只摘该行且保留其它行与在用载荷；`--clean-global` 只删无 payload.json 的载荷与含 vod-devkit 的 npx 缓存目录，不认得的目录不碰 |
+| S123 | status/doctor --target | 选中行输出该行 JSON；未知 target 明确报"没有该宿主的安装记录"并列出已有 |
+
+验收口径（目标环境执行，工具不入库）：`python3 -m pytest tests/test_global_cmds.py -q`
+全绿；真机上 `version` 输出四行（本机实测 hermes/opencode/dsh/codex）；
+`packs disable knowledge`（不带 `--apply`）打印"未写盘"，文件 mtime 不变。
+
+
+## 凭据单入口与技能读取教法（S124-S125，2026-11-15）
+
+需求变更（两条，都是"把已有的东西收成可解释的入口"，不新增数据面）：
+
+**S124 凭据单入口**（D-auth-init-1）：换 key 此前只有"删 runtime.json 重装"一条路。
+- `auth status`：打印引擎地址 + 当前凭据**指纹**与档位；区分"显式 key"与
+  "匿名令牌（设备绑定领取）"——后者不是 key，混着说会让人以为配过 key。
+- `auth init --key <k> [--apply]`：写 runtime.json 的唯一入口。缺省 dry-run（只校验 +
+  显示指纹，明文永不打印，写后读回一致才算成功）；引擎可达且判拒 → 拒写 exit 2；
+  引擎不可达 → 告警后允许（网络问题不是 key 问题）；形态可疑（含空白/过短）拒写。
+- 优先级链（实现口径）：显式 key（`auth init` 写入）> 环境变量 `VOD_JAVA_API_KEY`
+  （平台/CI 注入）> 匿名令牌自动领取。禁令：不要把 key 写进宿主 MCP 配置的 `env`
+  （明文且随配置进 git）。
+
+**S125 技能读取教法**（D-skill-teaching-1）：对齐 devkit 的"动作优先"。
+- `vod_list_skills` 增字段：`skillRoot`（stdio 面）、每技能 `path`、`version`（有则给）、
+  `references`（有则给）、`readHint`（教法一句话）。
+- `initialize` 的 instructions 直接给技能树绝对路径与读法：先直读
+  `skillRoot/<name>/SKILL.md`（尝试本身即可达性检查，不做预判），被拒/失败才回落
+  `vod_retrieve_skill`，绝不反复请求。
+- 远程面继续不给服务器本机路径（既有纪律：未鉴权面不交出安装路径）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S124 | 凭据单入口 | 无 key 时 status 报匿名档；init 缺省 dry-run 不写盘且输出只含指纹不含明文；`--apply` 写入并读回一致、档位置 key；引擎判拒则 exit 2 且不落盘；引擎不可达告警后允许；含空白/过短拒写 |
+| S125 | 技能读取教法 | stdio 面的目录含 skillRoot/readHint/每技能 path；远程面三者都不给；initialize instructions 含"技能树/动作优先/绝不反复请求"，且远程文案仍写明不给本机路径 |
+
+验收口径（目标环境执行，工具不入库）：`python3 -m pytest tests/test_auth_and_skills.py -q`
+全绿；真机 `auth status` 能区分匿名令牌与显式 key（本机实测显示"匿名令牌：已缓存"）。
+
+## 范围守护：这只是声音采集插件（S126，2026-11-15 负责人明确）
+
+本仓的范围不因对标而扩张：huaweicloud-devkit 的**云操作面**（20+ 服务技能、KooCLI、
+OBS、sandbox/DevStation、open-mcp 网关、区域感知、服务目录）在本仓**无对象**——它服务
+"agent 操作云资源"，我们服务"把用户声音送进 VOD"。对标只借工程形态（分发/诊断/凭据/
+教法/门禁），不借业务面。
+
+可执行锁（不是口号）：
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S126 | 范围不漂移 | `ALL_PACKS` 恒为 `core,collect,knowledge`（新增包=范围变更，需先拍板）；工具面恒为 10 个且全部 `vod_` 前缀；工具名不得含 hcloud/koocli/obs_/sandbox/region/gateway/openapi 等云操作面词 |
+
+验收口径：`python3 -m pytest tests/test_global_cmds.py::test_s126_scope_is_voice_collection_not_cloud_ops -q`。
+

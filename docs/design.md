@@ -857,3 +857,133 @@ S109 → `tests/test_p2_structure.py::test_patch_on_net_http_intercepts_real_cal
 S110 → conftest / host_matrix / codex 适配器的兜底 sync。
 测试落点：`tests/test_copies_generated.py`、`tests/test_verify_copies.py`、
 `tests/test_registry_reconcile.py`。
+
+## 插件 MCP 清单形态与改写失败分类（D-mcp-manifest-a3-1，2026-11-15）
+
+三份东西各管一件事，别再混着说：
+
+| 层 | 文件 | 谁写它 | 它保证什么 |
+|---|---|---|---|
+| 静态清单（发布物） | `plugins/vod-devkit/.mcp.json` | 我们，随 npm 发 | 规范字段齐全（`$schema`/`type`）；入口是实测可用的 CLI 形态 |
+| 装机缓存清单 | `~/.codex/plugins/cache/<mp>/vod-devkit/<ver>/.mcp.json` | codex `plugin add` 复制，随后被安装器改写 | 绝对解释器 + 载荷副本（唯一能保证版本正确的形态） |
+| server 入口 | `vod_mcp/server.py` | 我们 | 解释器 < 3.10 时可读诊断，不是 traceback |
+
+实测（codex-cli 0.167.0，2026-11-15；探针插件把收到的 argv/cwd/env 落盘，
+用 `codex app-server` 的 `mcpServerStatus/list` 触发真实 spawn）：
+
+| 规范承诺 | 0.167 实测 | 后果 |
+|---|---|---|
+| `args` 里 `${PLUGIN_ROOT}` 展开 | 原样收到字面量 `${PLUGIN_ROOT}/vod_mcp/server.py` | 启动失败（文件不存在），或更差：误命中别处的同名路径 |
+| stdio cwd 默认 = 插件根 | `cwd` = `~/.codex` | 相对路径 args 全部失效（与 0.166 的旧结论一致） |
+| 注入 `PLUGIN_ROOT`/`PLUGIN_DATA` 环境变量 | 两者均未注入（`null`） | 无法在 server 内自查插件根 |
+| `VOD_PACKS` 等自定义 env 透传 | 正常传入 | 可用 |
+| 插件包迁到 Agent Plugins 格式（根 `plugin.json` + `mcp.json`） | 插件 installed/enabled，但 MCP 条目**没注册**（`codex mcp list` 空） | 该格式在当前二进制上还不能承载 MCP |
+
+结论：`${PLUGIN_ROOT}` 静态形态（A3）**搁置**，理由不是偏好而是实测。清单保持 CLI 形态，
+并禁止出现任何 `${...}`（未展开=静默坏）。运行时正确性由安装器改写承担。
+
+失败分层（安装器处置，不是"catch 全部 exit 1"）：
+
+| 类别 | 触发 | 处置 | 为什么 |
+|---|---|---|---|
+| `bad-json` | 缓存清单非法 JSON / 缺 `mcpServers.vod-devkit` | warn + 补救文案，安装继续 | 插件已装进宿主，静态 CLI 形态仍可跑 |
+| `not-writable` | 读/写抛 OSError（只读挂载、权限） | warn + 补救文案（含"把 command 指向 3.10+ 解释器"） | 内网/沙箱不该被卡死 |
+| 读回不一致 | 写完再解析，字段与期望不符 | 安装失败（exit 2） | 半写状态留给宿主=坏配置，比装不上更糟 |
+
+对既有结论的影响：
+- 「入口不依赖 PATH」这条铁律在 codex 上**做不到**（静态形态只能走 CLI），所以它降级为
+  「运行时形态必须被安装器改写为绝对路径」——改写从"优化"升格为**必需**，不能拆。
+- 「插件副本零提交」不受影响：`.mcp.json` 是手写发布物，不在生成物清单里。
+- 熔断标记仍在 `~/.codex/` 下：用例必须把 HOME 指到临时目录，否则真机装了熔断时
+  S113 会假红（S109 同款环境无关纪律）。
+
+残余风险（写清楚，不掩）：
+- marketplace 直装（不经我们的安装器）仍是 CLI 形态 → PATH 上的版本不确定，
+  可能是旧副本。这是当前宿主的限制，不是我们能靠清单解决的；已在 README 标注
+  「用 install --target codex 装」，并且 **doctor 直接报实际形态**（payload / cli /
+  placeholder / unreadable，后三种判问题，S115 兜着）。
+- 解释器 < 3.10 → server 顶部 guard 报版本并退出（响失败），宿主侧只看到启动失败。
+
+实测记录（本机端到端，2026-11-15）：`install --target codex` 到临时 HOME →
+cache 内 .mcp.json 被改写成 `python3` 绝对路径 + `payloads/0.5.9/vod_mcp/server.py`
+→ `doctor` 打印「codex 插件 MCP 形态：载荷（…）」并 `doctor: OK`；把该文件手改回
+`vod-devkit serve` → `doctor` 判 FAIL「插件 MCP 仍是 CLI 形态…重跑 install」。
+
+复验方法（A3 解禁的条件，写死在文档里）：探针插件 + `codex app-server` 的
+`mcpServerStatus/list` 落盘 argv/cwd/env；若 `${PLUGIN_ROOT}` 被展开且 cwd = 插件根，
+切回 A3，改写逻辑届时降级为"解释器版本兜底"（推荐而非必须），不要同时拆掉。
+
+用例承载：`tests/test_mcp_manifest_a3.py`（S111-S114）；
+需求侧见 `docs/proposal.md`「插件 MCP 清单形态」一节。
+
+## 全局命令：读路径与写纪律（D-global-cmds-1，2026-11-15）
+
+一个视图，两个来源：
+
+| 来源 | 用途 | 为什么不是另一个 |
+|---|---|---|
+| `install-manifest.json` 的 `installs[]` | "我装过哪些宿主、装的是哪个版本、用了哪个载荷" | 这是**我们写过的**记录，回答安装意图 |
+| 宿主真实配置文件 | "现在实际生效的 packs/入口是什么" | 宿主可能被手工改过、被别的安装动作覆盖；只读 manifest 会把"以为的"当成"实际的" |
+
+`version` 把两者并排打：已装版本来自 manifest，生效 packs 来自宿主配置。两者不一致
+本身就是诊断信息（例如人在配置里改了 VOD_PACKS，manifest 还停在安装值）。
+
+宿主配置定位（不写九张表）：递归找"哪个对象里有 `vod-devkit` 且该值像 server 条目
+（有 command/args）"，再取它的 `env` 或 `environment`；hermes 那种"独立 mcp json 顶层
+就是条目"单独判一次。写死九个路径的写法在下一个宿主形态上必然再漏一次——递归定位
+把"新宿主"退化成"配置里有没有这条目"。
+
+写纪律（`packs enable|disable|all`）：
+- 缺省 dry-run，`--apply` 才写：多宿主批量改配置属于"一次影响九台宿主"，必须两步。
+- 只改 `env.VOD_PACKS`：其它 env（`VOD_JAVA_API_BASE` 等）、宿主其它 server、用户自有键
+  原样保留；首改落 `.bak`。
+- 写后读回：与 codex 改写同一条纪律——写成功 ≠ 落盘就是我们要的；不一致抛错。
+- `core` 强制包含：禁 core 等于关掉元数据/安全面，跟 devkit 同口径。
+- 不可写 JSON 的宿主（dsh 的 cordis.patch.yml、codex-desktop 的 marketplace）**明确报
+  "需重跑 install"**，不打印成功。
+
+卸载语义（`uninstall --target` / `--clean-global`）：
+- `--target` 只摘该行；其它行、与其它行共用的载荷、`skillInstalls` 里属于别的宿主
+  的原生副本都不动。
+- `--clean-global` 只清两类认得的残留：①无 `payload.json` 的载荷目录（`payload.residue`）；
+  ②`~/.npm/_npx/*/node_modules/vod-devkit` 的 npx 缓存目录。在用载荷与不认得的目录绝不碰，
+  逐条打印删了什么。
+
+未知包 id 的两个入口（S116）：安装口（`install` 在写任何宿主配置之前）与运行口
+（server 启动、`initialize` 之前）共用 `packs.parse_packs`，都 exit 2 并列可用 id。
+静默过滤的反例是实测的：`VOD_PACKS=core,bogus` 曾静默变成 `('core',)`——操作者以为
+关掉/打开了某个包，实际两头都不是。
+
+已知边界（诚实标注）：
+- `version` 报"已装版本"来自 manifest 记录，不启动宿主、不探活；版本漂移的**真实**
+  运行时形态由 `doctor` 回答（它会读 codex 插件缓存的实际 command/args）。
+- dsh 的 packs 目前改不了（写在 profile patch 里），`packs` 会明说而不是静默跳过。
+
+用例承载：`tests/test_global_cmds.py`（S116-S123）。
+
+## 凭据单入口与技能读取教法（D-auth-init-1 / D-skill-teaching-1，2026-11-15）
+
+**凭据为什么必须只有一个写入口**：key 是设备绑定 + 引擎签发，不是配置项。多入口
+（手改 runtime.json / 写宿主 env / 重装）会产生"到底哪一把在生效"不可回答的状态。
+`auth init` 把写收成一条路径，其余全是读：
+
+| 动作 | 入口 | 可解释性 |
+|---|---|---|
+| 显式配 key | `auth init --key … --apply` | 只显示指纹；写后读回一致才算成功 |
+| 查看当前 | `auth status` | 引擎地址 + 指纹 + 档位（显式 key / 匿名令牌） |
+| 自动领匿名令牌 | 首提时插件自领（无 key） | 设备绑定；不是 key，档位标 anonymous |
+
+拒绝规则（宁可不写也不留坏状态）：形态可疑（含空白/长度 < 8）拒写；引擎可达且判拒
+（401/-32012）拒写；引擎不可达**告警后允许**（网络问题不等于 key 问题，离线装机要能走）。
+明文 key 永不出现在输出、日志、文档示例里——示例一律用 `<引擎签发的 key>`。
+
+**技能教法的取舍**：devkit 的做法是"先直读、被拒回落、绝不反复请求"。我们照搬这条，
+原因是它把"能不能读"当成运行时探测而不是预判（预设"宿主一定能/一定不能读工作目录外"
+两类都错过：openCode 有门控但可预授权，codex 沙箱基本不受限）。代价是第一次可能被拒一次
+——可接受，因为回落路径（`vod_retrieve_skill`）不需要文件权限。
+
+远程面不给 `skillRoot`：未鉴权面把服务器安装路径交出去等于免费侦察面。这条在
+`remote_app.REMOTE_INSTRUCTIONS` 与 `skills_registry._server_face()` 两处同时实现，
+不是只写在文档里。
+
+用例承载：`tests/test_auth_and_skills.py`（S124-S125）。

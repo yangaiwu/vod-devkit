@@ -11,11 +11,22 @@ from vod_mcp import hosts as host_specs
 from vodkit_cli import common, remote
 
 
-def cmd_status(_args):
+def cmd_status(args=None):
+    target = (getattr(args, "target", "") or "") if args else ""
     p = common.manifest_path()
     if not p.exists():
         print("未安装（无 install-manifest）")
         sys.exit(1)
+    if target:
+        mf = json.loads(p.read_text(encoding="utf-8"))
+        rows = mf.get("installs") or ([mf] if mf.get("target") else [])
+        hit = next((r for r in rows if r.get("target") == target), None)
+        if hit is None:
+            print(f"没有该宿主的安装记录：{target}"
+                  f"（现有：{', '.join(r.get('target','?') for r in rows) or '无'}）")
+            sys.exit(1)
+        print(json.dumps(hit, ensure_ascii=False, indent=2))
+        return
     # golden 稳定性：apiBase 含安装期动态值（本地验证实例端口），归一化后输出
     text = p.read_text(encoding="utf-8")
     text = re.sub(r'"apiBase": "http://127\.0\.0\.1:\d+"',
@@ -117,13 +128,29 @@ def cmd_detect(args):
     print("摘要：" + detect_framework.summary_line(info))
 
 
-def cmd_doctor(_args):
+def cmd_doctor(args=None):
+    target = (getattr(args, "target", "") or "") if args else ""
     problems = []
     p = common.manifest_path()
     if not p.exists():
         problems.append("无 install-manifest.json（未 install？）")
     else:
         mf = json.loads(p.read_text(encoding="utf-8"))
+        rows = mf.get("installs") or ([mf] if mf.get("target") else [])
+        if rows:
+            row_names = ", ".join(r.get("target", "?") for r in rows)
+            if target:
+                hit = next((r for r in rows if r.get("target") == target), None)
+                if hit is None:
+                    problems.append(f"没有该宿主的安装记录：{target}（现有：{row_names}）")
+                else:
+                    # --target：把该行的字段覆盖到视图上，检查按这一行走
+                    mf = {**mf, **{k: v for k, v in hit.items() if v is not None}}
+                    print(f"[doctor] 检查安装行：{target}")
+            elif len(rows) > 1:
+                # 缺省视图=最近一次安装（顶层字段即最后一次写入）；多行只在末尾列出，
+                # 要看单个宿主用 --target（避免在多宿主上把"某一行的问题"说成全局）
+                print(f"[doctor] 安装行: {row_names}（--target <agent> 选择单个）")
         # dsh patch 块自愈（S58/A 止血，2026-11-06 真机实锤）：dsh 运行时
         # 序列化会冲掉 profile patch 里的 vod 块（配置树不含手工块）——
         # doctor 检测缺失/打平后按 manifest 的 product/apiBase 重建嵌套块
@@ -207,6 +234,29 @@ def cmd_doctor(_args):
         if rp_dst.exists() and rp_src.exists() and rp_dst.read_text(encoding="utf-8") != \
                 rp_src.read_text(encoding="utf-8"):
             problems.append(f"路由插件副本落后于仓内：{rp_dst}（重跑 install --target hermes）")
+        # codex 插件 MCP 形态（D-mcp-manifest-a3-1）：静态清单只能是 CLI 形态
+        # （codex 0.167 实测不展开 ${PLUGIN_ROOT}、cwd 也不是插件根），运行时正确性
+        # 全靠安装器改写。所以 doctor 必须回答"现在实际跑的是哪一种"，不留猜测空间。
+        if mf.get("target") == "codex":
+            from vod_mcp.host_adapters import codex as _codex
+            mp = _codex.locate_plugin_mcp(None)
+            if mp is None:
+                problems.append("未定位到 codex 插件 .mcp.json（插件未装上/缓存被清）"
+                                "——重跑 install --target codex")
+            else:
+                kind, srv = _codex.plugin_mcp_form(mp)
+                if kind == "payload":
+                    print(f"[doctor] codex 插件 MCP 形态：载荷（{srv['command']} + "
+                          f"{srv.get('args')}）")
+                elif kind == "cli":
+                    problems.append(f"插件 MCP 仍是 CLI 形态（{mp}）：跑的是 PATH 上那份 CLI，"
+                                    "版本可能不是本插件——重跑 install --target codex")
+                elif kind == "placeholder":
+                    problems.append(f"插件 MCP 含未展开占位符（{mp}）：宿主收到字面量，起不来"
+                                    "——重跑 install --target codex")
+                else:
+                    problems.append(f"插件 .mcp.json 读不出 mcpServers.vod-devkit（{mp}）"
+                                    "——重跑 install --target codex")
         # CodeArts Agent 冒烟：官方 CLI 在就 list 一次（实测通道=codearts_cli.json 的 mcp 段）
         if mf.get("target") == "codeartsdoer" and shutil.which("codearts"):
             r = subprocess.run(["codearts", "mcp", "list"], capture_output=True,

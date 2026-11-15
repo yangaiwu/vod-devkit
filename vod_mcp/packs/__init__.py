@@ -27,14 +27,38 @@ BREAKER_MARKERS = (
 
 
 def enabled_packs() -> tuple:
-    raw = os.environ.get("VOD_PACKS", "").strip()
+    return _resolve(os.environ.get("VOD_PACKS", "").strip())
+
+
+class UnknownPack(ValueError):
+    """VOD_PACKS 里出现未知包 id。
+
+    对齐 devkit 口径：**启动即报错**，不静默过滤。静默过滤=操作者以为关掉的还开着、
+    以为打开的其实没装——"看起来配了没生效"是比崩溃更难查的一类故障。
+    """
+
+
+def parse_packs(raw: str) -> tuple:
+    """解析 VOD_PACKS 字面值（逗号分隔，kb=knowledge 旧称）。未知 id 抛 UnknownPack。"""
     if not raw:
         return ALL_PACKS
-    # kb=knowledge 旧称别名（历史文档/用户习惯；深审 P0-2 配套：安装口
-    # 旧值不因运行口改名而静默失效）
-    packs = tuple(p.strip() for p in raw.split(","))
-    packs = tuple("knowledge" if p == "kb" else p for p in packs)
-    packs = tuple(p for p in packs if p in ALL_PACKS)
+    ids = []
+    for part in raw.split(","):
+        p = part.strip()
+        if not p:
+            continue
+        ids.append("knowledge" if p == "kb" else p)
+    unknown = [p for p in ids if p not in ALL_PACKS]
+    if unknown:
+        raise UnknownPack(
+            f"VOD_PACKS 含未知包 id: {','.join(unknown)}；可用: {','.join(ALL_PACKS)}")
+    return tuple(ids) or ALL_PACKS
+
+
+def _resolve(raw: str) -> tuple:
+    if not raw:
+        return ALL_PACKS
+    packs = parse_packs(raw)
     if "core" not in packs:
         packs = ("core",) + packs
     if "collect" in packs and any(os.path.isfile(m) for m in BREAKER_MARKERS):

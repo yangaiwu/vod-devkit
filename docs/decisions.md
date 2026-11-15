@@ -41,6 +41,9 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
       业务窗口急则白名单灰度（邀请制，不算完全公开，不阻塞验证）
 - [ ] **遥测（2026-11-03 拍板：维持不做）**：未来若做，opt-in 默认关+
       明确告知+最小字段，不采集敏感内容；当前链条不依赖它
+      **重议触发器（2026-11-15 补，负责人要求）**：出现"只能靠用户上报才能定位"的
+      线上问题（装机侧工具面/版本漂移类），且 install-manifest 对账无法回答时才重开；
+      否则视为单向门——不加触发器，未来加遥测会把今天的承诺变成负债
 
 - [ ] VOD-KBQ（R0 网关+KB 查询端点）：文档已评审待定 → 代码增量未写（引擎侧）
 - [ ] VOD-VOI（Java /external/voices）：文档已出 → E3 查重语义待实测修正 → 代码未写
@@ -1155,3 +1158,115 @@ host_matrix 9 PASS；pack_verify 166 文件 OK（含 vodkit_cli）；dsh 47；�
 漏一次就是又一次 tarball≠tag。零提交后这个矛盾不存在，做旧事也不可能。
 
 **代价**：仓内直接跑安装/测试前需要一次 sync（已内置到各入口，毫秒级 copytree）。
+
+## D-mcp-manifest-a3-1：插件 MCP 清单补规范字段，A3 静态形态按实测搁置（B1/C3，2026-11-15）
+
+**背景**：对账 huaweicloud-devkit 后提出三个决策点（A：`.mcp.json` 形态；B：遥测；
+C：新宿主 officeace/openclaw）。负责人拍板 A3/B1/C3；A3 落地前实测推翻了它的静态形态，
+按实测改口径（下面如实记录，不粉饰）。
+
+**A：实测先于偏好**
+- 采纳的部分：`$schema`（agent-plugins.org 1.0.0，规范必填）+ `type: stdio` 补进清单；
+  改写失败分类型处置；server.py 加解释器版本 guard。
+- 推翻了的部分：A3 的 `command: python3` + `args: ["${PLUGIN_ROOT}/vod_mcp/server.py"]`。
+  codex-cli 0.167.0 真机探针（探针插件落盘 argv/cwd/env，`codex app-server` 的
+  `mcpServerStatus/list` 触发 spawn）实测：**args 收到字面量 `${PLUGIN_ROOT}`、
+  cwd = `~/.codex` 而非插件根、`PLUGIN_ROOT`/`PLUGIN_DATA` 未注入**；把插件包迁到
+  Agent Plugins 格式后该 MCP 条目**根本没注册**。规范承诺在该二进制上未落地。
+- 因此清单保持 CLI 形态（`vod-devkit serve`）——唯一实测能跑通的入口；运行时正确性
+  改由**安装器改写 + 读回验证**承担（改写从"优化"升格为必需），并让 `doctor` 直接报
+  实际形态（payload / cli / placeholder / unreadable，后三种判问题，S115 兜着），
+  不让"现在到底跑的是哪份"靠猜。
+- 为什么不选 A1（npx）：把网络与 Node 塞进宿主启动路径，镜像滞后=ETARGET，npx 缓存
+  又是新的版本漂移面；且它并不能解决"宿主最终跑哪份"的问题。
+- A3 的收益按层说（保留下来待解禁）：
+  - 走安装器 → 运行时无变化（改写已给绝对解释器 + 载荷）；
+  - 不走安装器（marketplace 直装）→ 今天是"PATH 找 CLI，版本不确定"；A3 落地后
+    才是"插件根锚定载荷 + 解释器不够就响失败"。
+  - 解禁条件与复验方法写在 docs/design.md 同名节，不是留白。
+
+**B1（采纳，与既有决策一致）**：零遥测。2026-11-03 已拍板"维持不做"，本次不是新决策。
+按负责人要求补**重议触发器**（见上方待办条），避免单向门把承诺变负债。
+
+**C3（采纳）**：officeace / openclaw **没有可安装的宿主**——没有安装包、没有 CLI、
+没有配置落点，也没有宿主规格。不是"排期"或"等使用者"的问题，是不存在对象；
+不设量化触发器（没有安装面可统计）。将来出现可安装形态再按同一套 integrations
+宿主规格 + 适配器 + 用例补，不做提前适配（无消费者的适配层）。
+覆盖现状：任意 MCP 宿主今天可走 `install --target generic --mcp-config <file>`。
+
+## D-global-cmds-1：全局命令与多宿主消费面（2026-11-15，负责人要求"全部优化"）
+
+**背景**：install-manifest 早就按宿主记多行（`installs[]`，D-installs-1），但消费命令
+（status/doctor/update）只读顶层、uninstall 没有 --target。结果是"账本多宿主、视图单宿主"，
+而 huaweicloud-devkit 的三条全局命令（version / packs status / uninstall --clean-global）
+恰好都建立在这个视图上。
+
+**决定**：
+- 新增 `version`：manifest 的已装版本 + 宿主配置里**实际生效**的 packs 并排打。
+- 新增 `packs status|enable|disable|all`：读宿主真实配置；写默认 dry-run，`--apply` 才落盘，
+  只改受管条目 `env.VOD_PACKS`（首改 .bak、写后读回、core 强制、不可写 JSON 的宿主明说
+  "需重跑 install"）。
+- `install --target all`：只装探测到的专属宿主；generic 不参与（它是手填配置的兜底）。
+- `uninstall --target` / `--clean-global`：按行摘+保留在用载荷；残留只清认得的（无
+  payload.json 的载荷、含 vod-devkit 的 npx 缓存）。
+- `status|doctor --target`：多行里选一行。
+- 未知包 id：安装口与启动口都 exit 2（此前静默过滤，实测 `core,bogus` → `('core',)`）。
+
+**为什么"读宿主配置"而不只读 manifest**：manifest 是我们写过的意图，宿主配置是现状。
+宿主可能被手工改、被别的安装覆盖；只读 manifest 会把"以为的"报成"实际的"，而版本/能力面
+漂移正是要发现的东西。
+
+**为什么 dry-run 默认**：packs 写入会一次影响九台宿主配置。改配置这个动作的风险不对称：
+少改一次只是没生效（可重跑），多改一次可能把别的宿主的键改坏（用户要自己修）。所以默认
+只报将改什么，`--apply` 是显式动作。
+
+**没做的（本轮边界，非遗漏）**：
+- `packs_configure`（stdio 会话内开关 + 真推 tools/list_changed）：需要运行期工具面变更，
+  与远程面无状态语义冲突，另行评估。
+- `auth init` 向导与会话内 auth_switch、PreToolUse 真拦截：见 README/设计里的后续项，
+  未在本轮落地，不许在文档里写成"已有"。
+
+**代价**：多一套读路径（宿主配置解析）。用递归定位而不是九张硬编码表，新增宿主时
+只需配置里存在该条目即可被识别。
+
+## D-auth-init-1：凭据单入口（auth status / auth init）（2026-11-15）
+
+**问题**：换 key 的唯一现实路径是"删 runtime.json 重装"。运维解释不了，也没有任何
+命令能回答"这台机器现在用的是哪把钥匙、是哪一档"。
+
+**决定**：
+- `auth init --key <k> [--apply]` 是写 runtime.json 的唯一入口；缺省 dry-run。
+- `auth status` 打印引擎地址 + 指纹 + 档位，并**区分显式 key 与匿名令牌**（后者是设备
+  绑定领取的 token，不是 key；混称会让人以为配过 key——本机实测就出现过这种困惑）。
+- 拒写规则：形态可疑（空白/过短）、引擎可达且判拒（401/-32012）；引擎不可达只告警
+  （离线装机必须能走，网络问题不是 key 问题）。
+- 明文 key 不进输出/日志/文档示例；回显一律指纹。
+- 优先级链写进文档：显式 key（auth init）> env `VOD_JAVA_API_KEY` > 匿名自动领取；
+  禁令：不要把 key 写进宿主 MCP 配置 env（明文且随配置进 git）。
+
+**没做**：会话内 `auth_init` / `auth_switch`（内存态切账号）——需要 MCP 工具面新增写入口，
+与"远程面不代签身份"的既有边界要一起评审；本轮不硬塞，文档与 README 都不写成"已有"。
+
+## D-skill-teaching-1：技能读取教法=动作优先（2026-11-15）
+
+**决定**：`initialize` 的 instructions 直接给技能树绝对路径与读法（先直读 SKILL.md，
+被拒/失败才回落 `vod_retrieve_skill`，绝不反复请求）；`vod_list_skills` 增
+`skillRoot`/每技能 `path`/`version`/`references`/`readHint`。
+
+**为什么**：把"能不能读"当运行时探测，而不是在文档里预判某个宿主能读/不能读——两类
+预判都会错（openCode 有门控但可预授权；codex 沙箱基本不受限）。代价是第一次可能被拒一次，
+可接受：回落路径不需要文件权限。
+
+**边界**：远程面不给 `skillRoot`/`path`（未鉴权面不交安装路径）。实现点在
+`skills_registry._server_face()`，不是只写在文案里。
+
+## D-scope-guard-1：范围锁——云操作面不做，且用用例锁住（2026-11-15 负责人明确）
+
+**决定**：本仓范围=用户声音采集（MCP server + 技能 + 声明式护栏）。对标 huaweicloud-devkit
+只借工程形态，不借业务面：云服务技能/KooCLI/OBS/sandbox/open-mcp 网关/区域感知/服务目录
+一律不做（无对象，且会把"窄面、单写面、零 DB"的形态撑坏）。
+
+**为什么写成用例**：口头范围最容易在"顺手加个工具"里漂掉。S126 把三条硬边界做成断言：
+包集合恒定、工具数恒定、工具名不得含云操作面词。要改这三条，必须改用例并在需求文档
+留决策——这就把"范围变更"从默认动作变成显式动作。
+

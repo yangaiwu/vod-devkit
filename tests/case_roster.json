@@ -340,6 +340,54 @@
     "S110": {
       "carrier": "docs/design.md"
     },
+    "S111": {
+      "carrier": "docs/design.md"
+    },
+    "S112": {
+      "carrier": "docs/design.md"
+    },
+    "S113": {
+      "carrier": "docs/design.md"
+    },
+    "S114": {
+      "carrier": "docs/design.md"
+    },
+    "S115": {
+      "carrier": "docs/design.md"
+    },
+    "S116": {
+      "carrier": "docs/design.md"
+    },
+    "S117": {
+      "carrier": "docs/design.md"
+    },
+    "S118": {
+      "carrier": "docs/design.md"
+    },
+    "S119": {
+      "carrier": "docs/design.md"
+    },
+    "S120": {
+      "carrier": "docs/design.md"
+    },
+    "S121": {
+      "carrier": "docs/design.md"
+    },
+    "S122": {
+      "carrier": "docs/design.md"
+    },
+    "S123": {
+      "carrier": "docs/design.md"
+    },
+    "S124": {
+      "carrier": "docs/design.md"
+    },
+    "S125": {
+      "carrier": "docs/design.md"
+    },
+    "S126": {
+      "carrier": "tests/test_global_cmds.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

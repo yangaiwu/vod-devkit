@@ -3,7 +3,7 @@ import argparse
 import os
 import sys
 
-from vodkit_cli import common, doctor, install, uninstall, update
+from vodkit_cli import auth_cmd, common, doctor, install, packs_cmd, uninstall, update
 
 
 def main():
@@ -19,7 +19,8 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("install")
     sp.add_argument("--target", default="auto",
-                    help="hermes|opencode|codeartsdoer|codeartswork|codex|codex-desktop|dsh|workbuddy|atomcode|generic|auto（默认探测）")
+                    help="hermes|opencode|codeartsdoer|codeartswork|codex|codex-desktop|dsh|workbuddy|atomcode|generic|all|auto"
+                         "（all=所有探测到的宿主，缺 CLI 的跳过；默认探测）")
     sp.add_argument("--preset", default="collect", choices=list(common.PRESETS),
                     help="collect=对外默认（采集者）；full=内部全量")
     sp.add_argument("--api-base", default="http://127.0.0.1:8000")
@@ -52,12 +53,21 @@ def main():
                      ("verify", doctor.cmd_verify), ("update", update.cmd_update),
                      ("uninstall", uninstall.cmd_uninstall),
                      ("explain", doctor.cmd_explain),
-                     ("detect", doctor.cmd_detect)):
+                     ("detect", doctor.cmd_detect),
+                     ("version", packs_cmd.cmd_version)):
         s = sub.add_parser(name)
         if name == "explain":
             s.add_argument("text", nargs="+", help="错误文案或错误码（-32010 等）")
         if name == "detect":
             s.add_argument("--path", default="", help="要识别的项目目录（默认当前目录）")
+        if name in ("status", "doctor", "uninstall"):
+            # 多宿主账本（installs[]）里挑一个宿主看/摘；缺省=全部行
+            s.add_argument("--target", default="",
+                           help="只看该宿主的安装行（缺省=全部）")
+        if name == "uninstall":
+            s.add_argument("--clean-global", action="store_true",
+                           dest="clean_global",
+                           help="一并清载荷残留与 npx 缓存里的旧副本（逐条打印，只删认得的）")
         if name == "update":
             s.add_argument("--skip", action="store_true",
                            help="跳过当前 registry latest 的提醒（只压这一个版本，"
@@ -65,6 +75,22 @@ def main():
             s.add_argument("--clear-skip", action="store_true",
                            help="撤销版本跳过设置，恢复正常提醒")
         s.set_defaults(fn=fn)
+    sp_packs = sub.add_parser("packs", help="能力包启用面：status | enable | disable | all")
+    sp_packs.add_argument("packs_action", nargs="?", default="status",
+                          choices=["status", "enable", "disable", "all"])
+    sp_packs.add_argument("ids", nargs="?", default="",
+                          help="enable/disable 的包 id（逗号分隔，如 core,collect）")
+    sp_packs.add_argument("--target", default="", help="只作用于该宿主（缺省=全部）")
+    sp_packs.add_argument("--apply", action="store_true",
+                          help="真正写盘（缺省只报告将改什么；core 强制包含）")
+    sp_packs.set_defaults(fn=packs_cmd.cmd_packs)
+    sp_auth = sub.add_parser("auth", help="凭据：status | init（写 runtime.json 的唯一入口）")
+    sp_auth.add_argument("auth_action", nargs="?", default="status",
+                         choices=["status", "init"])
+    sp_auth.add_argument("--key", default="", help="引擎签发的 key（也可用 env VOD_JAVA_API_KEY）")
+    sp_auth.add_argument("--apply", action="store_true",
+                         help="真正写盘（缺省只校验并显示指纹）")
+    sp_auth.set_defaults(fn=auth_cmd.cmd_auth)
     sub.add_parser("build-info").set_defaults(fn=lambda a: common.write_build_info(strict=False))
 
     def _serve(a):

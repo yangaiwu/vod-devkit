@@ -15,7 +15,19 @@ from pathlib import Path
 # 其余所有资源路径一律走 vod_mcp/paths.py（含 VOD_DEVKIT_ROOT 覆盖）。
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from vod_mcp import guardrails, packs, runtime_state, tools  # noqa: E402
+# 解释器版本 guard 必须在 import vod_mcp 之前：本模块与下游（tools/guardrails）
+# 的注解用了 PEP 604（`dict | None`），在 3.9 上会在 def 求值时抛 TypeError
+# traceback——那是"响失败"但不可读。一行 guard 把残余风险变成可读诊断。
+if sys.version_info < (3, 10):
+    sys.stderr.write(
+        "[vod-devkit] MCP server 需要 Python >= 3.10（当前 %d.%d）。\n"
+        "  插件 .mcp.json 的 command 若走 PATH 上的 python3，请指向 3.10+ 解释器"
+        "（如 /usr/bin/python3.12），\n"
+        "  或重跑安装器由它用本机 3.10+ 解释器重写该文件。\n"
+        % sys.version_info[:2])
+    sys.exit(2)
+
+from vod_mcp import guardrails, packs, runtime_state, skills_registry, tools  # noqa: E402
 
 _PROTOCOL_VERSION = "2025-06-18"
 _client_info = {}
@@ -50,6 +62,13 @@ def handle(message: dict, client_info: dict | None = None) -> dict | None:
                 "禁止改写、概括、增删字词。product 归因：原话唯一命中可直接用；"
                 "未命中或多产品歧义时必须问用户一次\"这条是哪个产品的反馈\"，"
                 "回答填 product；用户说不知道就告知他缺产品不能提交，不要猜。不许不填直接提交。"
+                # 技能读取教法（对齐 devkit 的"动作优先"）：树路径在 initialize 就给，
+                # 让 agent 不必先调目录工具；先直读、被拒再回落、不反复请求。
+                " 技能树：" + str(skills_registry.SKILLS_ROOT)
+                + "（本机路径）。读法=动作优先：先直接读 "
+                  "skillRoot/<技能名>/SKILL.md（尝试本身即可达性检查，不做预判）；"
+                  "被拒或读取失败才用 vod_retrieve_skill 取全文（无需文件权限），"
+                  "绝不反复请求。"
             ),
             "serverInfo": {
                 "name": "vod-devkit",
@@ -103,6 +122,14 @@ def main():
     ap.add_argument("--port", type=int, default=9528, help="remote 端口（默认 9528）")
     ap.add_argument("--host", default="127.0.0.1", help="remote 绑定地址（默认回环）")
     args, _unknown = ap.parse_known_args()
+
+    # VOD_PACKS 未知 id 启动即报错（D-packs-config-1，对齐 devkit 口径）：
+    # 静默过滤会让"配了"和"生效"分叉，排障时没人能看出是拼写错还是没装。
+    try:
+        packs.enabled_packs()
+    except packs.UnknownPack as e:
+        print(f"[vod-devkit] {e}", file=sys.stderr)
+        sys.exit(2)
 
     # 启动自诊（排障：写 /tmp，宿主过滤环境变量时可观察实际 env）
     try:

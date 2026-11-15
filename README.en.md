@@ -48,6 +48,22 @@ npx -y vod-devkit@latest status   # install-manifest: version / source / host / 
 evidence and no memory); when given it is validated against the catalog and a
 typo exits 2.
 
+### Global commands (whole-machine view)
+
+```bash
+vod-devkit version                              # CLI version + per-host installed version + effective packs
+vod-devkit packs status                         # read each host's real config (not the manifest) for VOD_PACKS
+vod-devkit packs enable collect                 # dry-run: shows what would change
+vod-devkit packs enable collect --apply          # write: managed entry env only, .bak on first change
+vod-devkit install --target all                 # install to every detected host (hosts without CLI are skipped)
+vod-devkit uninstall --target codex             # remove just this host row
+vod-devkit uninstall --target codex --clean-global   # also purge payload residue and stale npx cache
+```
+
+The multi-host ledger lives in `install-manifest.json` → `installs[]` (deduped by target).
+`--target` defaults to all rows. An unknown id in `VOD_PACKS` makes **both** install and server
+startup exit 2 (never silently filtered — that produced "configured but not in effect").
+
 ## Per-host install
 
 `install` takes `--target`; `doctor` / `status` / `verify` / `update` /
@@ -84,8 +100,13 @@ npx -y vod-devkit@latest uninstall      # removes the native plugin, keeps confi
 ```
 
 Uses the codex native plugin path (`codex plugin marketplace add` + `plugin add`),
-with `.mcp.json` running `vod-devkit serve` over stdio. If the collection circuit
-breaker is tripped, install refuses the collect pack until `--ack-suspension`.
+with `.mcp.json` in the Agent Plugins field shape (`$schema` + `type: stdio`) running
+`vod-devkit serve`. The installer then rewrites the cached copy to an absolute
+interpreter plus payload path and reads it back — **that rewrite is where runtime
+correctness comes from**: codex 0.167 does not expand `${PLUGIN_ROOT}` and does not
+use the plugin root as cwd, so always install via `install --target codex` rather than
+adding the marketplace entry by hand. If the collection circuit breaker is tripped,
+install refuses the collect pack until `--ack-suspension`.
 
 ### CodeArts Agent (codeartsdoer)
 

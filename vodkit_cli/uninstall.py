@@ -133,29 +133,79 @@ def _cleanup_install_row(row: dict, skill_hashes: dict | None = None) -> None:
                 print("removed vod-devkit config block:", patch_path)
 
 
-def cmd_uninstall(_args):
+def _clean_global(rows: list) -> None:
+    """清外部残留（对齐 devkit `--clean-global`）：载荷残留 + npx 缓存里的旧副本。
+
+    纪律：只删"认得的东西"，逐条打印；在用载荷、仓内源码、宿主配置一律不碰。
+    """
+    from vod_mcp import payload as _payload
+    in_use = {r.get("payloadDir") for r in rows if r.get("payloadDir")}
+    for res in _payload.residue():
+        if str(res) in in_use:
+            continue
+        shutil.rmtree(res, ignore_errors=True)
+        print("removed payload residue:", res)
+    root = Path.home() / ".vod-devkit"
+    if root.is_dir() and not any(root.iterdir()):
+        root.rmdir()
+        print("removed empty:", root)
+    npx = Path.home() / ".npm" / "_npx"
+    if npx.is_dir():
+        for d in npx.iterdir():
+            pkg = d / "node_modules" / "vod-devkit"
+            if pkg.is_dir():
+                shutil.rmtree(d, ignore_errors=True)
+                print("removed npx cache:", d)
+
+
+def cmd_uninstall(args=None):
+    target = (getattr(args, "target", "") or "") if args else ""
+    clean_global = bool(getattr(args, "clean_global", False)) if args else False
     p = common.manifest_path()
     if not p.exists():
         print("未安装")
         return
     mf = json.loads(p.read_text(encoding="utf-8"))
-    rows = mf.get("installs") or [mf]   # 老 manifest（无 installs[]）退化为单条
+    all_rows = mf.get("installs") or [mf]   # 老 manifest（无 installs[]）退化为单条
+    rows = [r for r in all_rows if not target or r.get("target") == target]
+    if not rows:
+        print(f"没有该宿主的安装记录：{target}"
+              f"（现有：{', '.join(r.get('target','?') for r in all_rows)}）")
+        return
     for row in rows:
         _cleanup_install_row(row, mf.get("skillHashes"))
-    # 载荷清理（D-payload-1）：所有安装记录共用的副本，逐目录去重后删，再删 marker
-    from vod_mcp import payload as _payload
+    # 载荷清理（D-payload-1）：逐目录去重后删——但别删还被保留行引用的载荷
+    keep = {r.get("payloadDir") for r in all_rows if r not in rows and r.get("payloadDir")}
     seen = set()
     for row in rows:
         pd = row.get("payloadDir")
-        if not pd or pd in seen:
+        if not pd or pd in seen or pd in keep:
             continue
         seen.add(pd)
         if Path(pd).is_dir():
             shutil.rmtree(pd, ignore_errors=True)
             print("removed payload:", pd)
-    try:
-        _payload.marker_path().unlink(missing_ok=True)
-    except Exception:
-        pass
-    p.unlink()
-    print("removed:", p)
+    remaining = [r for r in all_rows if r not in rows]
+    if remaining:
+        mf["installs"] = remaining
+        mf["target"] = remaining[-1].get("target")
+        mf.pop("payloadDir", None)
+        if not any(r.get("payloadDir") for r in remaining):
+            from vod_mcp import payload as _payload
+            try:
+                _payload.marker_path().unlink(missing_ok=True)
+            except Exception:
+                pass
+        p.write_text(json.dumps(mf, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"removed install row(s): {', '.join(r.get('target','?') for r in rows)}"
+              f"（保留 {', '.join(r.get('target','?') for r in remaining)}）")
+    else:
+        from vod_mcp import payload as _payload
+        try:
+            _payload.marker_path().unlink(missing_ok=True)
+        except Exception:
+            pass
+        p.unlink()
+        print("removed:", p)
+    if clean_global:
+        _clean_global(rows)
