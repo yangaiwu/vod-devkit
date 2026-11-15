@@ -13,6 +13,13 @@ diff -r -x runtime.json -x __pycache__ -x '*.log' vod_mcp plugins/vod-devkit/vod
   && diff -r -x __pycache__ contract plugins/vod-devkit/contract \
   && diff -r -x __pycache__ safety plugins/vod-devkit/safety \
   || { echo "[pre-push] FAIL: 双副本漂移——先跑 scripts/sync_plugin.py 再提交"; exit 1; }
+echo "[pre-push] dsh 壳测试（归因对账/回执守卫/UI 全局）..."
+if command -v node >/dev/null 2>&1 && [ -d dsh/node_modules ]; then
+  ( cd dsh && node --test test/*.test.mjs >/tmp/prepush-dsh.log 2>&1 ) \
+    || { echo "[pre-push] FAIL: dsh 测试未过（见 /tmp/prepush-dsh.log）"; exit 1; }
+else
+  echo "[pre-push] SKIP: 缺 node 或 dsh/node_modules（npm install 后覆盖）"
+fi
 echo "[pre-push] secret/high-risk scan..."
 "$PY" scripts/secret_scan.py || { echo "[pre-push] FAIL: 凭据/高危扫描未过，禁止推送"; exit 1; }
 echo "[pre-push] OK"

@@ -46,6 +46,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
+    "test": "node --test test/*.test.mjs",
     "build-client": "esbuild src/client.jsx --jsx=automatic --format=cjs --minify --outfile=/tmp/client-cjs.js && python3 scripts/wrap_client.py"
   }
 }

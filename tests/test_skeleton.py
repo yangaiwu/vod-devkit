@@ -29,6 +29,21 @@ def test_contract_covers_pack_tools():
         assert tool in contract["tools"]
 
 
+def test_every_contract_tool_belongs_to_a_pack():
+    """反方向（F4 的真缺口）：契约里声明了、但不属于任何 pack 的工具会静默消失。
+
+    上面的用例只查"pack 里的工具都在契约里"；反向没有门禁——新加一个工具、忘了
+    同时进 PACK_TOOLS，tools/list 永远不会广播它，调用方连"它存在"都看不到，
+    而且没有任何报错（这类静默缺失正是本仓最贵的一类故障）。
+    """
+    declared = set(tools.load_contract()["tools"])
+    in_packs = {t for group in packs.PACK_TOOLS.values() for t in group}
+    orphans = declared - in_packs
+    assert not orphans, (
+        f"工具已进契约但没归属任何 pack（tools/list 永不广播）：{sorted(orphans)}"
+        "——请在 vod_mcp/packs.py 的 PACK_TOOLS 里归属，或从契约删除")
+
+
 def test_submit_description_frontloads_consent():
     """确认纪律必须话术前置——MCP-only 宿主不加载技能，工具 description 是唯一约束源。
 

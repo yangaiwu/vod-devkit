@@ -1,0 +1,107 @@
+{
+  "meta": {
+    "products": [
+      "CodeArts",
+      "MaaS",
+      "OBS",
+      "DataArts",
+      "AgentArts"
+    ],
+    "catalog": [
+      {
+        "id": "43",
+        "name": "MaaS"
+      },
+      {
+        "id": "7",
+        "name": "CodeArts"
+      },
+      {
+        "id": "12",
+        "name": "对象存储服务 OBS"
+      },
+      {
+        "id": "9",
+        "name": "DataArts Studio"
+      },
+      {
+        "id": "21",
+        "name": "AgentArts"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "text": "CodeArts 的导出按钮点不动，报错",
+      "expect": {
+        "product": "7",
+        "productName": "CodeArts",
+        "source": "user_input"
+      }
+    },
+    {
+      "text": "maas 的模型调用太慢",
+      "expect": {
+        "product": "43",
+        "productName": "MaaS",
+        "source": "user_input"
+      }
+    },
+    {
+      "text": "用 MaaS 跑推理时超时",
+      "expect": {
+        "product": "43",
+        "productName": "MaaS",
+        "source": "user_input"
+      }
+    },
+    {
+      "text": "obs://bucket/objects 上传失败",
+      "expect": {
+        "product": null,
+        "productName": null,
+        "source": "unknown"
+      }
+    },
+    {
+      "text": "把文件放到 OBS 上总是失败",
+      "expect": {
+        "product": "OBS",
+        "productName": "OBS",
+        "source": "user_input"
+      }
+    },
+    {
+      "text": "码道里提交不了",
+      "expect": {
+        "product": "7",
+        "productName": "CodeArts",
+        "source": "user_input"
+      }
+    },
+    {
+      "text": "DataArts 和 CodeArts 都试过了，都卡",
+      "expect": {
+        "product": null,
+        "productName": null,
+        "source": "unknown"
+      }
+    },
+    {
+      "text": "这个功能不太好用",
+      "expect": {
+        "product": null,
+        "productName": null,
+        "source": "unknown"
+      }
+    },
+    {
+      "text": "AgentsArts 复制粘贴慢",
+      "expect": {
+        "product": null,
+        "productName": null,
+        "source": "unknown"
+      }
+    }
+  ]
+}

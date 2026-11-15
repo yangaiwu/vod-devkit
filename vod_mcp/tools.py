@@ -13,6 +13,7 @@ import contextvars
 import json
 import os
 import stat
+import threading
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -88,6 +89,32 @@ _RT = _runtime_cfg()
 JAVA_BASE = os.environ.get("VOD_JAVA_API_BASE") or _RT.get("java_base") or DEFAULT_JAVA_BASE
 JAVA_KEY = os.environ.get("VOD_JAVA_API_KEY", "") or _RT.get("java_key", "")   # ExternalApiKeyFilter Bearer
 
+# ── 运行期状态写入口（单一实现）─────────────────────────────────────────
+# 两个真实缺陷的收敛点：
+#  ① 并发：远程面 on_call_tool 走 asyncio.to_thread，多客户端同时提交时
+#     "读文件→改→写文件" 会互相覆盖账本/记忆/草稿（stdio 面单线程，故从未暴露）。
+#  ② 内存镜像：_RT 是 import 期快照，历史上靠手工 `_RT[k] = v` 逐点同步，
+#     漏一处就是"同会话读不到新值"（install_nonce 漏同步曾导致全新安装首提必 401）。
+# 纪律：落盘 + 镜像在同一把锁内一次完成；禁止再写裸 `_RT[...] = ...`。
+_RT_LOCK = threading.RLock()
+
+
+def _runtime_update(update: dict, replace: bool = False) -> None:
+    """原子更新运行期状态：落盘 → 镜像（同锁内）。
+
+    replace=False 时按单参调用 _save_runtime：测试桩普遍是 `lambda u: ...`
+    （历史签名），多传一个默认值会把所有桩打红——签名兼容性属于接口契约。
+    """
+    with _RT_LOCK:
+        if replace:
+            _save_runtime(update, replace=True)
+        else:
+            _save_runtime(update)
+        if replace:
+            _RT.clear()
+        _RT.update(update)
+
+
 _META_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/meta"
 _META_TTL = 24 * 3600
 # 快照兜底（引擎 meta 端点未上线/不可达时用；stale 语义见 _load_meta）
@@ -124,7 +151,7 @@ def _load_meta(force: bool = False) -> dict:
         out = _http("GET", _META_PATH, None, base=JAVA_BASE, key=_eff_key(), timeout=10)
         data = out.get("data") or {}
         if isinstance(data.get("products"), list) and data["products"]:
-            _save_runtime({"meta_cache": {"fetchedAt": int(now), "data": data}})
+            _runtime_update({"meta_cache": {"fetchedAt": int(now), "data": data}})
             return {"products": data["products"],
                     "catalog": data.get("productCatalog") or [],
                     "dictVersion": data.get("dictVersion"),
@@ -206,14 +233,6 @@ def _http(method: str, path: str, body: dict | None = None,
         raise ToolError(f"上游不可达（{base}）: {e.reason}", code=-32001) from e
 
 
-# 引擎 submit 校验白名单（ExternalVoiceServiceImpl.VALID_PRODUCTS 实测：
-# CODEARTS/AGENTARTS/OFFICECLAW/DATAARTS/MAAS/OBS + 别名归一 MODELARTS→MAAS）
-_PRODUCT_MAP = {
-    "agentarts": "AgentArts", "codearts": "CodeArts", "dataarts": "DataArts",
-    "maas": "MaaS", "obs": "OBS", "officeclaw": "OfficeClaw",
-    "modelarts": "MaaS",  # 引擎别名归一实测
-}
-
 
 _SESSION_TTL = 30 * 60          # 会话内滑动记忆（D-product-ask-1）
 _SESSION_MEM: dict = {}         # 进程=一次宿主会话：重启即清，跨会话不继承
@@ -243,11 +262,12 @@ def _memory_get(client_info) -> dict:
 
 def _memory_put(client_info, **fields) -> None:
     import time as _t
-    key = _session_key(client_info)
-    cur = _memory_get(client_info)
-    cur.update(fields)
-    cur["at"] = int(_t.time())      # 滑动过期
-    _SESSION_MEM[key] = cur
+    with _RT_LOCK:      # get→update→set 持锁：远程面并发请求不互相丢字段
+        key = _session_key(client_info)
+        cur = _memory_get(client_info)
+        cur.update(fields)
+        cur["at"] = int(_t.time())      # 滑动过期
+        _SESSION_MEM[key] = cur
 
 
 def search_products(params: dict) -> dict:
@@ -461,15 +481,14 @@ def _remember_attribution(result: dict, client_info: dict | None = None) -> None
     mem = _attrib.remember_if_evidenced(result)
     if not mem:
         return
-    prev = _RT.get("attribution_memory") or {}
-    if prev and prev.get("product"):
-        hist = list(_RT.get("attribution_history") or [])
-        hist.append({**prev, "replacedAt": mem["at"]})
-        hist = hist[-_ATTR_HISTORY_CAP:]
-        _save_runtime({"attribution_history": hist})
-        _RT["attribution_history"] = hist  # 进程内同步：否则同会话读不到新记忆
-    _save_runtime({"attribution_memory": mem})
-    _RT["attribution_memory"] = mem
+    with _RT_LOCK:
+        prev = _RT.get("attribution_memory") or {}
+        if prev and prev.get("product"):
+            hist = list(_RT.get("attribution_history") or [])
+            hist.append({**prev, "replacedAt": mem["at"]})
+            hist = hist[-_ATTR_HISTORY_CAP:]
+            _runtime_update({"attribution_history": hist})
+        _runtime_update({"attribution_memory": mem})
 
 
 _SUBMIT_HOARDING = "/rest/developer/manager/hdvodmngservice/v1/external/voices"
@@ -498,11 +517,10 @@ def _install_nonce() -> str:
         # 新 nonce（设备 C）再 401——全新安装首次提交必失败冒给用户（存量安装
         # runtime.json 已有 nonce 不受影响）。同步后领令牌/提交同设备，401→领令牌
         # →重试全程进程内无感。
-        _RT["install_nonce"] = n
         try:
-            _save_runtime({"install_nonce": n})
+            _runtime_update({"install_nonce": n})
         except Exception:
-            pass
+            _RT["install_nonce"] = n   # 落盘失败也要在进程内保持一致
     return str(n)
 
 
@@ -615,8 +633,7 @@ def _allowed_tags(product_id=None) -> set:
         types = [str(t) for t in (data.get("problemTypes") or []) if str(t).strip()]
         by[pid] = types
         cache = {"at": int(now), "by": by}
-        _save_runtime({"ptype_cache": cache})
-        _RT["ptype_cache"] = cache      # 同进程后续调用要能命中，否则每次提交都外呼
+        _runtime_update({"ptype_cache": cache})
         return set(types)
     except Exception:
         # 任何取不到（网络/超时/引擎异常）= 不知道值域 → 不过滤，绝不阻断提交
@@ -945,9 +962,6 @@ def probe_key(key: str | None = None, timeout: int = 8) -> dict:
         return {"ok": None, "reason": "unreachable", "fingerprint": fp}
 
 
-_META_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/meta"
-
-
 def _key_state() -> dict:
     return {"configured": bool(JAVA_KEY), "fingerprint": _fingerprint(JAVA_KEY),
             "base": JAVA_BASE,
@@ -999,12 +1013,13 @@ def _ledger_append(entries: list) -> None:
     vod_list_submitted 随之不可用——留痕是可选项不是义务。"""
     if not entries:
         return
-    fresh = _runtime_cfg()
-    if fresh.get("local_ledger") is False:
-        return
-    ledger = (fresh.get(_LEDGER_KEY) or [])[-_LEDGER_CAP:]
-    ledger.extend(entries)
-    _save_runtime({_LEDGER_KEY: ledger[-_LEDGER_CAP:]})
+    with _RT_LOCK:   # 读改写整段持锁：远程面并发提交不再互相覆盖账本
+        fresh = _runtime_cfg()
+        if fresh.get("local_ledger") is False:
+            return
+        ledger = (fresh.get(_LEDGER_KEY) or [])[-_LEDGER_CAP:]
+        ledger.extend(entries)
+        _save_runtime({_LEDGER_KEY: ledger[-_LEDGER_CAP:]})
 
 
 def list_submitted(params: dict, client_info: dict | None = None) -> dict:
@@ -1101,15 +1116,18 @@ def _warn_if_cloned(cfg: dict, p: Path) -> None:
 
 
 def _save_runtime(update: dict, replace: bool = False) -> None:
-    p = _runtime_path()
-    cfg = {}
-    if p.exists() and not replace:
-        try:
-            cfg = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            cfg = {}
-    cfg.update(update)
-    p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    """低层落盘（唯一写文件处）。整段读改写必须持 _RT_LOCK——锁可重入，
+    上层 _runtime_update/_ledger_append/draft 复合操作嵌套调用安全。"""
+    with _RT_LOCK:
+        p = _runtime_path()
+        cfg = {}
+        if p.exists() and not replace:
+            try:
+                cfg = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                cfg = {}
+        cfg.update(update)
+        p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     # S1 式写后验（借 huaweicloud-devkit ensurePrivateMode 模式）：写完 chmod 0600
     # 并 stat 回验——不假设 chmod 按文档工作（WSL/drvfs 会静默忽略 chmod），
     # 验的是效果不是动作；runtime.json 含 java_key 明文，权限失效必须告警
@@ -1171,9 +1189,6 @@ def _fetch_anon_token() -> str | None:
 
 def devkit_info(params: dict, client_info: dict | None = None) -> dict:
     return provenance.info_payload(client_info)
-
-
-# 工具名 → 处理器（是否接收 client_info）
 
 
 # ---- 两段式提交（D-token-approval-2 极简形态：插件本地 draft→commit，引擎零改动）----
@@ -1255,22 +1270,24 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
     payload_sha = hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
-    store = _drafts_load()
-    store[draft_id] = {
-        "payload": payload, "payloadSha256": payload_sha, "tokenHash": _sha256(token),
-        # D-resume-commit-1：token 明文随草稿落盘（runtime.json 0600，与 java_key
-        # 同级保护）。token 的威胁模型是"防载荷改写"而非"同意凭证"——落盘不放大
-        # 风险，换断回合可续：agent 回合中断后凭 draftId 即可恢复提交（此前
-        # approvalToken 只存在于 draft 响应文本，回合断即丢失，只能重开草稿）
-        "token": token,
-        "product": product, "productSource": attr.get("source"),
-        "productEvidence": attr.get("evidence") or [],
-        "createdAt": _time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "expiresAt": _time.time() + _DRAFT_TTL,
-    }
-    while len(store) > _DRAFT_CAP:  # 环形：最旧先淘汰
-        store.pop(next(iter(store)))
-    _save_runtime({_DRAFT_KEY: store})
+    with _RT_LOCK:   # 读改写整段持锁：并发 draft 不互相丢草稿
+        store = _drafts_load()
+        store[draft_id] = {
+            "payload": payload, "payloadSha256": payload_sha,
+            "tokenHash": _sha256(token),
+            # D-resume-commit-1：token 明文随草稿落盘（runtime.json 0600，与 java_key
+            # 同级保护）。token 的威胁模型是"防载荷改写"而非"同意凭证"——落盘不放大
+            # 风险，换断回合可续：agent 回合中断后凭 draftId 即可恢复提交（此前
+            # approvalToken 只存在于 draft 响应文本，回合断即丢失，只能重开草稿）
+            "token": token,
+            "product": product, "productSource": attr.get("source"),
+            "productEvidence": attr.get("evidence") or [],
+            "createdAt": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "expiresAt": _time.time() + _DRAFT_TTL,
+        }
+        while len(store) > _DRAFT_CAP:  # 环形：最旧先淘汰
+            store.pop(next(iter(store)))
+        _save_runtime({_DRAFT_KEY: store})
 
     out = {
         "draftId": draft_id,
@@ -1311,8 +1328,10 @@ def commit_voices(params: dict, client_info: dict | None = None) -> dict:
         raise ToolError("载荷校验不符（payloadSha256 与 draft 签发值不一致，禁止改写已确认内容）",
                         code=-32011)
     # 单次消费：先摘除再提交——提交中途崩溃也不会二次提交（宁可丢一单重走流程）
-    store.pop(draft_id)
-    _save_runtime({_DRAFT_KEY: store})
+    # 整段持锁：并发 commit 同一 draftId 时只有一方能消费成功
+    with _RT_LOCK:
+        store.pop(draft_id)
+        _save_runtime({_DRAFT_KEY: store})
 
     out = submit_voices(dict(draft["payload"]), client_info,
                         ledger_extra={"stage": "committed", "draftId": draft_id})
