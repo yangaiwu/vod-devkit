@@ -359,7 +359,7 @@ hermes hooks test pre_llm_call --payload-file payload.json
   `✗ not allowlisted` 就是"等你点同意"，不是装坏了
 - 老版本装过插件形态（`~/.hermes/plugins/vod-feedback-router`）的机器，本次 install 会
   自动清理并摘掉 `plugins.enabled` 里的旧名字——否则插件与 hook 双份注入
-- 细节（线协议、判据、验证到哪一步、未做的 `pre_tool_call` 拦截）见
+- 细节（线协议、判据、验证到哪一步、两条 hook 的边界）见
   [docs/hooks.md](docs/hooks.md)
 
 ## 能力包与技能披露
@@ -388,7 +388,10 @@ hermes hooks test pre_llm_call --payload-file payload.json
 
 诚实残留（写清楚，不掩）：
 
-- 钩子只"提醒"，不拦工具调用；`pre_tool_call` 拦截（读 `runtime.json`/`env` 导出）**未做**。
+- 钩子分两条：`pre_llm_call` 只"提醒"（不拦）；`pre_tool_call`（hermes）会**真正阻断**
+  "读 `runtime.json`"与"`env` 导出点名 key"两类动作，并给替代命令（`auth status` 只出指纹）。
+  脚本任何异常都 fail-open（阻塞事件里崩溃会拦掉所有工具调用）；可 `VOD_HOOK_READ_GUARD=0`
+  关闭。**codex/opencode 侧的等价注册未做**——那两个宿主上仍只有技能教法。
 - 宿主对 `runtime.json` 的读取门控（沙箱规则 / allow 列表）**未验证**：插件侧探测不到宿主的
   权限策略，因此不声称"已拦"。降低暴露面的做法是 `runtime.json` 不种 key（安装器故意不把
   `java_key` 写进载荷副本，运行期走匿名令牌）+ `auth status` 只输出指纹。

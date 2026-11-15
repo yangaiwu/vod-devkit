@@ -33,6 +33,12 @@ LEGACY_PLUGIN = "vod-feedback-router"   # 旧形态（插件包），只用于�
 HOOK_MARK = "vod_router.py"             # 我们这条 shell hook 的识别标志（幂等/摘除共用）
 EVENT = "pre_llm_call"
 HOOK_TIMEOUT = 10
+# 安全面第二条：pre_tool_call（Hermes 把它当**阻塞事件**，stdout 回
+# {"decision":"block"} 或 exit 2 即拦截）。只拦"把 key 读进对话"的动作，
+# 其余一律放行——详见 integrations/hermes/hooks/vod_guard.py。
+GUARD_EVENT = "pre_tool_call"
+GUARD_MARK = "vod_guard.py"
+GUARD_TIMEOUT = 5
 
 
 def _profile_config() -> Path:
@@ -48,23 +54,25 @@ def _hook_command() -> str:
     return f"{shlex.quote(sys.executable)} {shlex.quote(str(_hook_script()))}"
 
 
-def upsert_llm_hook(text: str, command: str, timeout: int = HOOK_TIMEOUT) -> tuple:
-    """把 pre_llm_call shell hook 写进 config.yaml **文本**，返回 (new_text, state)。
+def upsert_hook(text: str, event: str, command: str, timeout: int, mark: str) -> tuple:
+    """把一个 shell hook 写进 config.yaml **文本**的指定事件，返回 (new_text, state)。
 
     为什么手改 YAML 文本而不 load/dump：运行时零第三方依赖（无 pyyaml），而
     round-trip dump 会把用户的注释、锚点、顺序全洗掉——那是拿用户的整份配置
     换我们的方便。所以只做"最小结构插入"，并且**形态不认识就抛错**（调用方
     打印可粘贴片段，绝不猜着改）。
 
-    state: unchanged（已有本条）/ added（插进已有 pre_llm_call）/ created（新建 hooks 段）
+    mark 是"这条 hook 属于我们"的识别标志（脚本名），幂等与摘除共用同一条判据。
+
+    state: unchanged（已有本条）/ added（插进已有事件段）/ created（新建 hooks 段）
     """
-    if command in text and HOOK_MARK in text:
+    if command in text and mark in text:
         return (text, "unchanged")
     lines = text.splitlines()
     entries = [f'- command: "{command}"', f'  timeout: {timeout}']
 
     def _is_ours(line: str) -> bool:
-        return HOOK_MARK in line and "command" in line
+        return mark in line and "command" in line
 
     idx_hooks = next((i for i, ln in enumerate(lines) if ln.rstrip() == "hooks:"), None)
     if idx_hooks is None:
@@ -74,7 +82,7 @@ def upsert_llm_hook(text: str, command: str, timeout: int = HOOK_TIMEOUT) -> tup
         out = list(lines)
         if out and out[-1].strip():
             out.append("")
-        out += ["hooks:", f"  {EVENT}:", "    " + entries[0], "    " + entries[1]]
+        out += ["hooks:", f"  {event}:", "    " + entries[0], "    " + entries[1]]
         return ("\n".join(out) + "\n", "created")
 
     if any(_is_ours(ln) for ln in lines):
@@ -87,10 +95,10 @@ def upsert_llm_hook(text: str, command: str, timeout: int = HOOK_TIMEOUT) -> tup
             end_hooks = j
             break
     idx_event = next((i for i in range(idx_hooks + 1, end_hooks)
-                      if lines[i].strip() == f"{EVENT}:"), None)
+                      if lines[i].strip() == f"{event}:"), None)
     if idx_event is None:
         insert_at = idx_hooks + 1
-        new_lines = [f"  {EVENT}:", "    " + entries[0], "    " + entries[1]]
+        new_lines = [f"  {event}:", "    " + entries[0], "    " + entries[1]]
         state = "added"
     else:
         # 插到该事件列表末尾：下一个缩进 <= 2 的非空行，或 hooks 段结束
@@ -110,10 +118,20 @@ def upsert_llm_hook(text: str, command: str, timeout: int = HOOK_TIMEOUT) -> tup
     return ("\n".join(out) + "\n", state)
 
 
-def remove_llm_hook(text: str) -> tuple:
-    """从 config.yaml 文本里摘掉我们这条 hook 项（幂等）。返回 (new_text, removed?)。
+def upsert_llm_hook(text: str, command: str, timeout: int = HOOK_TIMEOUT) -> tuple:
+    """预采集路由（pre_llm_call）——薄壳，保留历史签名给已有用例。"""
+    return upsert_hook(text, EVENT, command, timeout, HOOK_MARK)
 
-    只删含 HOOK_MARK 的 `- command:` 行及其紧随的 `timeout:` 行；其余条目（别人的
+
+def upsert_guard_hook(text: str, command: str, timeout: int = GUARD_TIMEOUT) -> tuple:
+    """读 Key 拦截（pre_tool_call，阻塞事件）——薄壳。"""
+    return upsert_hook(text, GUARD_EVENT, command, timeout, GUARD_MARK)
+
+
+def remove_hook(text: str, mark: str) -> tuple:
+    """从 config.yaml 文本里摘掉含 mark 的 hook 项（幂等）。返回 (new_text, removed?)。
+
+    只删含 mark 的 `- command:` 行及其紧随的 `timeout:` 行；其余条目（别人的
     hook、用户的注释、事件段本身若是空的也留着）一律不动——空事件段无害，删别人的
     配置才是有害的。
     """
@@ -121,7 +139,7 @@ def remove_llm_hook(text: str) -> tuple:
     out, removed, i = [], False, 0
     while i < len(lines):
         ln = lines[i]
-        if "- command:" in ln and HOOK_MARK in ln:
+        if "- command:" in ln and mark in ln:
             removed = True
             i += 1
             if i < len(lines) and lines[i].strip().startswith("timeout:"):
@@ -130,6 +148,59 @@ def remove_llm_hook(text: str) -> tuple:
         out.append(ln)
         i += 1
     return ("\n".join(out) + ("\n" if text.endswith("\n") else ""), removed)
+
+
+def remove_llm_hook(text: str) -> tuple:
+    return remove_hook(text, HOOK_MARK)
+
+
+def remove_guard_hook(text: str) -> tuple:
+    return remove_hook(text, GUARD_MARK)
+
+
+def _guard_command() -> str:
+    import shlex
+    return f"{shlex.quote(sys.executable)} {shlex.quote(str(paths.guard_script()))}"
+
+
+def _register_hooks(cfg_path: Path) -> None:
+    """装两条 shell hook（同一套脚本机制，各自事件注册）。
+
+    - `pre_llm_call`：预采集意图路由（注入采集纪律），非阻塞；
+    - `pre_tool_call`：只拦"读 runtime.json / 导出 VOD_*KEY"的动作，Hermes 的**阻塞**事件。
+
+    两条都幂等；config.yaml 形态不认识时只打可粘贴片段，绝不猜着重写用户配置。
+    单条失败不阻塞另一条（hook 与 MCP 配置是两条独立链）。
+    """
+    try:
+        text = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
+    except OSError as e:
+        print(f"[vod-devkit] warn: 读不到 {cfg_path}（{e}），两条 hook 均未注册",
+              file=sys.stderr)
+        return
+    plans = (
+        ("预采集 hook", EVENT, _hook_command(), HOOK_TIMEOUT, upsert_llm_hook),
+        ("读 Key 拦截 hook", GUARD_EVENT, _guard_command(), GUARD_TIMEOUT, upsert_guard_hook),
+    )
+    for label, event, cmd, timeout, upsert in plans:
+        try:
+            new_text, state = upsert(text, cmd)
+        except RuntimeError as e:
+            print(f"[vod-devkit] warn: {label}未注册（{e}）。请手动把下面两行加进 "
+                  f"{cfg_path} 的 hooks.{event}：\n"
+                  f"    - command: \"{cmd}\"\n    timeout: {timeout}", file=sys.stderr)
+            continue
+        if state != "unchanged":
+            try:
+                cfg_path.parent.mkdir(parents=True, exist_ok=True)
+                cfg_path.write_text(new_text, encoding="utf-8")
+            except OSError as e:
+                print(f"[vod-devkit] warn: {label}写入失败（{e}）", file=sys.stderr)
+                continue
+        text = new_text
+        verb = {"created": "已新建 hooks 段", "added": f"已加入 hooks.{event}",
+                "unchanged": "已存在"}[state]
+        print(f"已注册{label}（{cfg_path}，{verb}；首次使用 hermes 会弹一次同意）")
 
 
 def remove_legacy_plugin() -> str:
@@ -188,23 +259,9 @@ def install(args, packs: str) -> Path:
     # D-hook-unify-1：预采集路由走 config.yaml 的 hooks.pre_llm_call（shell hook）。
     # 不再装 Python 插件：同一个"stdin JSON → stdout context"脚本可被任何宿主
     # 用各自的机制注册，宿主进程内不需要 import 我们的代码。
-    cfg_path = _profile_config()
-    try:
-        text = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
-        new_text, state = upsert_llm_hook(text, _hook_command())
-    except RuntimeError as e:
-        print(f"[vod-devkit] warn: 预采集 hook 未注册（{e}）。请手动把下面两行加进 "
-              f"{cfg_path} 的 hooks.{EVENT}：\n"
-              f"    - command: \"{_hook_command()}\"\n    timeout: {HOOK_TIMEOUT}",
-              file=sys.stderr)
-    else:
-        if state != "unchanged":
-            cfg_path.parent.mkdir(parents=True, exist_ok=True)
-            cfg_path.write_text(new_text, encoding="utf-8")
-        verb = {"created": "已新建 hooks 段",
-                "added": "已加入 hooks.pre_llm_call",
-                "unchanged": "已存在"}[state]
-        print(f"已注册预采集 hook（{cfg_path}，{verb}；首次使用 hermes 会弹一次同意）")
+    # D-key-guard-4：同一套脚本机制再注册一条 hooks.pre_tool_call（阻塞事件），
+    # 只拦"读 runtime.json / 导出 VOD_*KEY"的动作——机制化技能里的"只引指纹"。
+    _register_hooks(_profile_config())
     legacy = remove_legacy_plugin()
     if legacy:
         print(f"已清理旧插件形态（避免与新 hook 双份注入）：{legacy}")

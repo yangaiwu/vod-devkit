@@ -45,9 +45,12 @@ def _remove_managed_mcp_entry(target: str, path: Path) -> None:
         if cfg.exists():
             text = cfg.read_text(encoding="utf-8")
             new_text, removed = _hermes.remove_llm_hook(text)
-            if removed:
-                cfg.write_text(new_text, encoding="utf-8")
-                print("removed vod-devkit pre_llm_call hook:", cfg)
+            new_text2, removed2 = _hermes.remove_guard_hook(new_text)
+            if removed or removed2:
+                cfg.write_text(new_text2, encoding="utf-8")
+                print("removed vod-devkit hooks:", cfg,
+                      "(pre_llm_call)" if removed else "",
+                      "(pre_tool_call)" if removed2 else "")
         # 旧插件形态（老装机）一并摘
         legacy = _hermes.remove_legacy_plugin()
         if legacy:

@@ -107,16 +107,21 @@ RUNTIME_JSON = DIST_ROOT / "vod_mcp" / "runtime.json"
 BUILD_INFO = DIST_ROOT / "build-info.json"
 
 
-def hook_script() -> Path:
-    """预采集 hook 脚本的真实路径。
+def hook_script(name: str = "vod_router.py") -> Path:
+    """宿主侧 hook 脚本的真实路径（默认预采集路由 vod_router.py；安全面 vod_guard.py）。
 
-    仓内：`integrations/hermes/hooks/vod_router.py`（宿主侧资产，随载荷物化到 <payload>/hooks）；
-    载荷/插件副本：`<root>/hooks/vod_router.py`。
+    仓内：`integrations/hermes/hooks/<name>`（宿主侧资产，随载荷物化到 <payload>/hooks）；
+    载荷/插件副本：`<root>/hooks/<name>`。
     """
-    repo_local = DIST_ROOT / "integrations" / "hermes" / "hooks" / "vod_router.py"
+    repo_local = DIST_ROOT / "integrations" / "hermes" / "hooks" / name
     if repo_local.is_file():
         return repo_local
-    return HOOKS / "vod_router.py"
+    return HOOKS / name
+
+
+def guard_script() -> Path:
+    """读 Key 拦截 hook（pre_tool_call）的路径。"""
+    return hook_script("vod_guard.py")
 
 
 def describe() -> dict:

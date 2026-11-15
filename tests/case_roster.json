@@ -407,7 +407,10 @@
       "carrier": "docs/design.md"
     },
     "S134": {
-      "carrier": "tests/test_doctor_egress.py"
+      "carrier": "docs/design.md"
+    },
+    "S135": {
+      "carrier": "docs/design.md"
     },
     "U1": {
       "carrier": "tests/test_skeleton.py"

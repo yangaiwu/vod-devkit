@@ -1,8 +1,14 @@
 # 钩子（hook）规则模型
 
-本仓只有一个宿主钩子：**预采集路由**（`hooks/vod_router.py`）。它回答一个具体问题——
-"这一轮用户的话，该不该进入采集流程"，而不做安全拦截（安全拦截在 MCP 护栏与两段式里，
-见 docs/safety-model.md）。
+本仓有两条宿主钩子，同一套脚本形态、各自事件注册：
+
+1. **预采集路由**（`hooks/vod_router.py`，`pre_llm_call`）：回答"这一轮用户的话，该不该
+   进入采集流程"，不阻塞任何动作。
+2. **读 Key 拦截**（`hooks/vod_guard.py`，`pre_tool_call`，D-key-guard-4）：只拦"把引擎 key
+   读进对话"的动作（`cat runtime.json`、`env` 导出点名 key 变量），其余一律放行；脚本
+   任何异常都 **fail-open**（阻塞事件里崩溃=所有工具调用被拦，伤害远大于漏拦一次）。
+
+两条都不做业务拦截（业务护栏在 MCP 的 `safety/policy.json` 与两段式里，见 docs/safety-model.md）。
 
 ## 为什么是"宿主无关脚本"，不是宿主插件
 
@@ -48,9 +54,20 @@ stdout: {"context":"要追加到本轮用户消息的文本"}    命中
 - 回滚：`uninstall --target hermes` 摘 hook 条目（只摘含 `vod_router.py` 的那条）与旧插件，
   其它事件与别人的 hook 一律不动。
 
+## 读 Key 拦截（`pre_tool_call`，已落地，本机实测口径）
+
+| 维度 | 取值 |
+|---|---|
+| 触发条件 | ①命令含 `runtime.json` 且含读取类动词（cat/head/tail/grep/jq/python…）；②`env`/`printenv`/`set` 且点名 `VOD_*KEY`/`java_key` |
+| 动作 | stdout `{"decision":"block","reason":…}`（Hermes 的阻塞方言） |
+| 放行 | 其它工具、其它命令、空/坏载荷、脚本异常 —— **fail-open** |
+| 关闭 | env `VOD_HOOK_READ_GUARD=0`，或 `hermes hooks revoke <command>` |
+| 替代路径 | 想看凭据档位 → `vod-devkit auth status`（只出指纹）；只想确认变量名 → `env \| cut -d= -f1 \| grep '^VOD_'` |
+
+为什么只做这两类：它们是**已经实测发生过**的泄漏路径（技能里的"排障只引指纹"被反复违反）。
+「未审批写」已有 MCP 护栏与两段式，不在这里重复一层——两层规则会让"到底谁拦的"说不清。
+
 ## 尚未做的（诚实标注，不假装）
 
-- `pre_tool_call` 拦截（读 `runtime.json`、`env` 导出、未审批写）：机制已确认存在
-  （shell hook 支持 `block`/`fail_closed`，`exit 2` 也能拦），但规则表与 host 覆盖还没做。
-- codex / opencode 侧的等价注册：未探。
+- codex / opencode 侧的等价注册：未探（这两个宿主的 hook 机制形态与本仓未对齐，没做就等于没有）。
 - 远程面：钩子只在客户端本地生效，远程面不提供（无对象）。

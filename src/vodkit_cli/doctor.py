@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from vod_mcp import hosts as host_specs
+from vod_mcp import paths as paths_mod
 from vodkit_cli import common, remote
 
 
@@ -289,9 +290,16 @@ def cmd_doctor(args=None):
             if _hermes.HOOK_MARK not in text:
                 problems.append(f"预采集 hook 未注册（{cfg} 的 hooks.pre_llm_call）"
                                 "——重跑 install --target hermes")
+            if _hermes.GUARD_MARK not in text:
+                problems.append(f"读 Key 拦截 hook 未注册（{cfg} 的 hooks.pre_tool_call）"
+                                "——重跑 install --target hermes（技能里的"
+                                "「只引指纹」靠它兜住 cat runtime.json）")
             if not _hermes._hook_script().exists():
                 problems.append(f"hook 脚本缺失：{_hermes._hook_script()}"
                                 "（载荷不含 hooks/ 的旧版本？重跑 install）")
+            if not paths_mod.guard_script().exists():
+                problems.append(f"读 Key 拦截脚本缺失：{paths_mod.guard_script()}"
+                                "——重跑 install（或升级载荷）")
             if (Path.home() / ".hermes" / "plugins" / _hermes.LEGACY_PLUGIN).exists():
                 problems.append("旧插件形态仍在（~/.hermes/plugins/vod-feedback-router）"
                                 "= 与 hook 双份注入——重跑 install --target hermes 清理")
