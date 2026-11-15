@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const indexSrc = readFileSync(join(ROOT, 'lib', 'index.js'), 'utf8');
-const skillSrc = readFileSync(join(ROOT, '..', 'skills', 'vod-feedback-collect', 'SKILL.md'), 'utf8');
+const skillSrc = readFileSync(join(ROOT, '..', 'src', 'skills', 'vod-feedback-collect', 'SKILL.md'), 'utf8');
 
 test('uiGlobals: product 恒注入（安装时配置权威）', async () => {
   const { uiGlobals } = await import(join(ROOT, 'lib', 'index.js'));

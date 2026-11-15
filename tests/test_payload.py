@@ -52,7 +52,7 @@ def test_verify_reports_tampering(home):
 
 def test_prune_only_removes_owned_stale_entries(home):
     dest = payload.stage(quiet=True)
-    (dest / "skills" / "vod-retired").mkdir(parents=True)
+    (dest / "src" / "skills" / "vod-retired").mkdir(parents=True)
     (dest / "user-notes.txt").write_text("keep me", encoding="utf-8")
     from vod_mcp import payload as p2
     removed = p2.prune_stale(dest, set(p2.OWNED) | {"user-notes.txt"})

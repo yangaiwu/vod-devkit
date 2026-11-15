@@ -101,9 +101,12 @@ def stage(version: str | None = None, quiet: bool = False) -> Path:
     dest = payload_dir(version)
     dest.mkdir(parents=True, exist_ok=True)
 
-    sources = {"vod_mcp": ROOT / "vod_mcp", "contract": ROOT / "contract",
-               "safety": ROOT / "safety", "skills": ROOT / "skills",
-               "hooks": ROOT / "hooks"}
+    from vod_mcp import paths as _paths
+    sources = {"vod_mcp": ROOT / "vod_mcp",
+               "contract": _paths.ASSETS / "contract",
+               "safety": _paths.ASSETS / "safety",
+               "skills": _paths.ASSETS / "skills",
+               "hooks": _paths.ASSETS / "hooks"}
     for name, src in sources.items():
         if not src.is_dir():
             continue  # hooks 可缺（历史版本载荷）

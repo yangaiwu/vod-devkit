@@ -31,9 +31,9 @@ ROOT = Path(__file__).resolve().parent.parent
 # “ROOT = vod_mcp 的父目录”对仓根/载荷/插件副本三种形态都成立。
 PAIRS: tuple[tuple[str, str], ...] = (
     ("vod_mcp", "plugins/vod-devkit/vod_mcp"),
-    ("skills", "plugins/vod-devkit/skills"),
-    ("contract", "plugins/vod-devkit/contract"),
-    ("safety", "plugins/vod-devkit/safety"),
+    ("src/skills", "plugins/vod-devkit/skills"),
+    ("src/contract", "plugins/vod-devkit/contract"),
+    ("src/safety", "plugins/vod-devkit/safety"),
 )
 # 运行期状态与构建缓存不属于副本内容：runtime.json 只活在根侧（含 key 与账本），
 # 插件副本永远不该有它。verify_copies.py 直接复用这份清单（含忽略规则也只有一处）。

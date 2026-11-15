@@ -9,7 +9,7 @@
 """
 from pathlib import Path
 
-SKILL = Path(__file__).resolve().parent.parent / "skills" / "vod-feedback-collect" / "SKILL.md"
+SKILL = Path(__file__).resolve().parent.parent / "src" / "skills" / "vod-feedback-collect" / "SKILL.md"
 
 VISIBLE_BUDGET = 57      # Hermes 索引实测可见前缀
 DESC_MAX = 400           # Anthropic 指南上限量级
@@ -46,7 +46,7 @@ def test_m1c_description_triggers_aligned_with_router_table():
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "vod_router_m1c",
-        Path(__file__).resolve().parent.parent / "hooks" / "vod_router.py")
+        Path(__file__).resolve().parent.parent / "src" / "hooks" / "vod_router.py")
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

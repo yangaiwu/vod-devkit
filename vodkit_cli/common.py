@@ -7,6 +7,8 @@ import json
 import os
 import subprocess
 import sys
+
+from vod_mcp import paths
 from pathlib import Path
 
 from vod_mcp import hosts as host_specs
@@ -129,7 +131,7 @@ def _skill_hashes() -> dict:
     ——拷贝件与安装产物漂移可检（vendor 规则漂移实锤的针对性防线）。"""
     import hashlib
     out = {}
-    for entry in sorted((ROOT / "skills").iterdir()):
+    for entry in sorted((paths.ASSETS / "skills").iterdir()):
         if entry.is_dir():
             for f in sorted(entry.rglob("*")):
                 if f.is_file():

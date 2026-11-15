@@ -27,7 +27,7 @@ def _bootstrap_repo(base: Path) -> Path:
     (base / "vod_mcp").mkdir(parents=True)
     (base / "vod_mcp" / "__init__.py").write_text('__version__ = "9.9.9"\n', encoding="utf-8")
     (base / "vod_mcp" / "server.py").write_text("print('hi')\n", encoding="utf-8")
-    for rel in ("skills/core", "contract", "safety"):
+    for rel in ("src/skills/core", "src/contract", "src/safety"):
         (base / rel).mkdir(parents=True, exist_ok=True)
         (base / rel / "f.txt").write_text("x\n", encoding="utf-8")
     (base / "vod_mcp" / "runtime.json").write_text('{"java_key": "secret"}\n', encoding="utf-8")

@@ -82,10 +82,10 @@ plugins/vod-devkit/            ← 唯一"宿主发布物"：清单 + 钩子 + �
   skills/ contract/ safety/     发布树（生成物，零提交）
   vod_mcp/ build-info.json      运行时副本（生成物，零提交）
 
-src/                           ← 真源（可导入的 Python 包）
-  vod_mcp/                       运行时（server/tools/guardrails/adapters/packs）
-  vodkit_cli/                    安装器 CLI
-  skills/                        技能源（生成器拷进插件包）
+src/                           ← 真源（S2 后：资产已在此；S3 再把两个包搬进来）
+  skills/ contract/ safety/ hooks/  共享资产（发布/载荷布局仍是根级平铺，见 paths.ASSETS）
+  vod_mcp/                       运行时（S3 迁入）
+  vodkit_cli/                    安装器 CLI（S3 迁入）
 
 integrations/<host>/host.json  ← 宿主规格（探测/落点/技能目录），不写死在代码里
 npm/cli.js  bin/vod-devkit     ← 薄壳：只找解释器、透传参数
@@ -112,8 +112,8 @@ package.json pyproject.toml
 
 | 阶段 | 动作 | 触及点 | 风险 | 验收 |
 |---|---|---|---|---|
-| S1（本次） | 落结构契约 + 根目录预算门禁 + README 对齐 | 文档 + 1 条用例 | 零（不改运行路径） | `test_s129_*` 绿；README 结构节与本文一致 |
-| S2 | `contract/ safety/ skills/ hooks/` → `src/`；插件包内发布树改为唯一生成物 | `paths.py`（单点）、`sync_plugin.PAIRS`、`payload.OWNED/COPY`、`package.json files`、`pyproject`、约 10 处测试路径 | 中（路径是公共契约） | 全量 pytest + host_matrix 9 PASS + 装机后 doctor 仍报"载荷形态" |
+| S1（已完成） | 落结构契约 + 根目录预算门禁 + README 对齐 | 文档 + 1 条用例 | 零（不改运行路径） | `test_s129_*` 绿；README 结构节与本文一致 |
+| S2（已完成 2026-11-15） | `contract/ safety/ skills/ hooks/` → `src/`；**发布布局不变** | `paths.py` 增 `ASSETS`（仓内=src/，载荷/插件副本=根）、`sync_plugin.PAIRS`、`payload.sources`、`rules_provenance` 与 `registry_reconcile` 的路径解析、`package.json files`、约 16 处测试路径 | 中（路径是公共契约） | 全量 pytest 全绿；临时 HOME 装机实测载荷仍是 `skills/contract/safety/hooks` 平铺（50 文件）；hook 仍注册；doctor OK |
 | S3 | `vod_mcp/ vodkit_cli/` → `src/`，`bin/` 与 `npm/` 只做 `sys.path` 注入 | `bin/vod-devkit`、`npm/cli.js`、`server_entry()`、载荷入口、CI | 高（装机入口路径变了） | 干净检出装 9 宿主 + `version` 输出一致 + 老装机 `doctor` 不误报 |
 | S4 | 运行期状态收进 `~/.vod-devkit/state/`（状态跟机器不跟副本） | `paths.RUNTIME_JSON`、迁移一次、doctor 提示 | 中（语义变更，需负责人拍板） | key/账本升版不重置；旧副本自动迁移 |
 

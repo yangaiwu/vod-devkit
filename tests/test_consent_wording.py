@@ -14,7 +14,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SKILL = (ROOT / "skills" / "vod-feedback-collect" / "SKILL.md").read_text(encoding="utf-8")
+SKILL = (ROOT / "src" / "skills" / "vod-feedback-collect" / "SKILL.md").read_text(encoding="utf-8")
 
 SENT1 = "收到，你对产品体验不满意"
 SENT2 = "要把这条反馈提交给产品团队吗？"
@@ -50,7 +50,7 @@ def test_no_second_example_set_sneaks_in():
 
 
 def test_router_and_instructions_do_not_regress_to_install_binding():
-    router = (ROOT / "hooks" / "vod_router.py").read_text(encoding="utf-8")
+    router = (ROOT / "src" / "hooks" / "vod_router.py").read_text(encoding="utf-8")
     server = (ROOT / "vod_mcp" / "server.py").read_text(encoding="utf-8")
     for name, text in (("router.py", router), ("server.py", server)):
         assert "归因由安装绑定决定" not in text and "安装绑定完成" not in text, (

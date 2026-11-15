@@ -48,7 +48,7 @@ def test_files_whitelist_covers_all_skills():
     （本用例锁的是：files 必须声明 skills/ 整目录，防止逐目录枚举再漏）。"""
     pkg = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     files = {f.rstrip("/") for f in pkg.get("files", [])}
-    assert any(f == "skills/" or f == "skills" for f in files), (
+    assert any(f == "src/skills/" or f == "src/skills" for f in files), (
         "files 缺 skills/ 整目录声明——新技能目录将不进包")
 
 

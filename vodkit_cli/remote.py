@@ -3,13 +3,13 @@ import json
 import os
 import sys
 
-from vodkit_cli import common
+from vod_mcp import paths
 
 
 def _expected_remote_tools() -> set:
     """远程面应当暴露的工具集 = 契约全集 - REMOTE_WITHHELD（写面本机工具不进远程）。"""
     from vod_mcp import packs as _packs
-    contract = json.loads((common.ROOT / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
+    contract = json.loads((paths.ASSETS / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
     return set(contract["tools"]) - set(_packs.REMOTE_WITHHELD)
 
 
