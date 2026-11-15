@@ -28,53 +28,137 @@ def skills_dir(args):
     return Path(_spec()["skillsDir"])
 
 
-PLUGIN_NAME = "vod-feedback-router"
+LEGACY_PLUGIN = "vod-feedback-router"   # 旧形态（插件包），只用于清理
+HOOK_MARK = "vod_router.py"             # 我们这条 shell hook 的识别标志（幂等/摘除共用）
+EVENT = "pre_llm_call"
+HOOK_TIMEOUT = 10
 
 
-def _enabled_plugins() -> list:
-    """读 hermes 配置里的 plugins.enabled（CLI 输出是 "- name" 行）。
+def _profile_config() -> Path:
+    return Path(_spec()["profileConfig"])
 
-    无 CLI 直接返回空：裸 subprocess 会抛 FileNotFoundError 打崩整个 install
-    （CI/无宿主机器上实测）——缺 CLI 是"降级"不是"失败"。
+
+def _hook_script() -> Path:
+    return ROOT / "hooks" / "vod_router.py"
+
+
+def _hook_command() -> str:
+    import shlex
+    return f"{shlex.quote(sys.executable)} {shlex.quote(str(_hook_script()))}"
+
+
+def upsert_llm_hook(text: str, command: str, timeout: int = HOOK_TIMEOUT) -> tuple:
+    """把 pre_llm_call shell hook 写进 config.yaml **文本**，返回 (new_text, state)。
+
+    为什么手改 YAML 文本而不 load/dump：运行时零第三方依赖（无 pyyaml），而
+    round-trip dump 会把用户的注释、锚点、顺序全洗掉——那是拿用户的整份配置
+    换我们的方便。所以只做"最小结构插入"，并且**形态不认识就抛错**（调用方
+    打印可粘贴片段，绝不猜着改）。
+
+    state: unchanged（已有本条）/ added（插进已有 pre_llm_call）/ created（新建 hooks 段）
     """
-    if not shutil.which("hermes"):
-        return []
-    r = subprocess.run(["hermes", "config", "get", "plugins.enabled"],
-                       capture_output=True, text=True, timeout=60)
-    if r.returncode != 0:
-        return []
-    out = []
-    for line in (r.stdout or "").splitlines():
-        line = line.strip()
-        if line.startswith("- "):
-            out.append(line[2:].strip())
-        elif line.startswith("-"):
-            out.append(line[1:].strip())
-    return [x for x in out if x]
+    if command in text and HOOK_MARK in text:
+        return (text, "unchanged")
+    lines = text.splitlines()
+    entries = [f'- command: "{command}"', f'  timeout: {timeout}']
+
+    def _is_ours(line: str) -> bool:
+        return HOOK_MARK in line and "command" in line
+
+    idx_hooks = next((i for i, ln in enumerate(lines) if ln.rstrip() == "hooks:"), None)
+    if idx_hooks is None:
+        if any(ln.startswith("hooks:") for ln in lines):
+            raise RuntimeError("config.yaml 的 hooks 段不是块形态（hooks: 后有值），"
+                              "拒绝自动插入")
+        out = list(lines)
+        if out and out[-1].strip():
+            out.append("")
+        out += ["hooks:", f"  {EVENT}:", "    " + entries[0], "    " + entries[1]]
+        return ("\n".join(out) + "\n", "created")
+
+    if any(_is_ours(ln) for ln in lines):
+        return (text, "unchanged")
+
+    # hooks 段结束位置：下一个缩进为 0 的非空行
+    end_hooks = len(lines)
+    for j in range(idx_hooks + 1, len(lines)):
+        if lines[j].strip() and not lines[j][0].isspace():
+            end_hooks = j
+            break
+    idx_event = next((i for i in range(idx_hooks + 1, end_hooks)
+                      if lines[i].strip() == f"{EVENT}:"), None)
+    if idx_event is None:
+        insert_at = idx_hooks + 1
+        new_lines = [f"  {EVENT}:", "    " + entries[0], "    " + entries[1]]
+        state = "added"
+    else:
+        # 插到该事件列表末尾：下一个缩进 <= 2 的非空行，或 hooks 段结束
+        insert_at = idx_event + 1
+        for j in range(idx_event + 1, end_hooks):
+            ln = lines[j]
+            if not ln.strip():
+                continue
+            indent = len(ln) - len(ln.lstrip())
+            if indent <= 2:
+                insert_at = j
+                break
+            insert_at = j + 1
+        new_lines = ["    " + entries[0], "    " + entries[1]]
+        state = "added"
+    out = lines[:insert_at] + new_lines + lines[insert_at:]
+    return ("\n".join(out) + "\n", state)
 
 
-def enable_plugin(name: str = PLUGIN_NAME) -> str:
-    """把路由插件加进 plugins.enabled（幂等）。返回 created / unchanged / skipped。
+def remove_llm_hook(text: str) -> tuple:
+    """从 config.yaml 文本里摘掉我们这条 hook 项（幂等）。返回 (new_text, removed?)。
 
-    只追加一个名字：读现有名单 → 追加 → `hermes config set plugins.enabled '[...]'`。
-    不整文件改 config.yaml（用户可能手改过格式/注释），失败只提示不动。
+    只删含 HOOK_MARK 的 `- command:` 行及其紧随的 `timeout:` 行；其余条目（别人的
+    hook、用户的注释、事件段本身若是空的也留着）一律不动——空事件段无害，删别人的
+    配置才是有害的。
     """
-    import json as _json
-    if not shutil.which("hermes"):
-        print("提示：未找到 hermes CLI，路由插件需手动在 plugins.enabled 中加入 "
-              f"{name} 后生效")
-        return "skipped"
-    cur = _enabled_plugins()
-    if name in cur:
-        return "unchanged"
-    merged = cur + [name]
-    r = subprocess.run(["hermes", "config", "set", "plugins.enabled",
-                        _json.dumps(merged)], capture_output=True, text=True, timeout=60)
-    if r.returncode != 0:
-        print("提示：自动启用路由插件失败（" + (r.stderr or r.stdout).strip()[:120]
-              + "）；请手动把 " + name + " 加入 plugins.enabled")
-        return "skipped"
-    return "created"
+    lines = text.splitlines()
+    out, removed, i = [], False, 0
+    while i < len(lines):
+        ln = lines[i]
+        if "- command:" in ln and HOOK_MARK in ln:
+            removed = True
+            i += 1
+            if i < len(lines) and lines[i].strip().startswith("timeout:"):
+                i += 1
+            continue
+        out.append(ln)
+        i += 1
+    return ("\n".join(out) + ("\n" if text.endswith("\n") else ""), removed)
+
+
+def remove_legacy_plugin() -> str:
+    """摘旧插件形态（幂等）：删目录 + 从 plugins.enabled 去名。
+
+    为什么必须做：老装机里插件与新的 shell hook 会**同时生效**，每轮注入两段
+    指令（模型看到重复要求，行为不可预测）。迁移必须单向收敛到 hook。
+    """
+    removed = []
+    d = Path.home() / ".hermes" / "plugins" / LEGACY_PLUGIN
+    if d.exists():
+        shutil.rmtree(d, ignore_errors=True)
+        removed.append(f"目录 {d}")
+    if shutil.which("hermes"):
+        r = subprocess.run(["hermes", "config", "get", "plugins.enabled"],
+                           capture_output=True, text=True, timeout=60)
+        names = []
+        for line in (r.stdout or "").splitlines():
+            line = line.strip()
+            if line.startswith("- "):
+                names.append(line[2:].strip())
+            elif line.startswith("-"):
+                names.append(line[1:].strip())
+        if LEGACY_PLUGIN in names:
+            keep = [n for n in names if n and n != LEGACY_PLUGIN]
+            rr = subprocess.run(["hermes", "config", "set", "plugins.enabled",
+                                 json.dumps(keep)], capture_output=True, text=True, timeout=60)
+            if rr.returncode == 0:
+                removed.append("plugins.enabled 条目")
+    return "；".join(removed)
 
 
 def install(args, packs: str) -> Path:
@@ -100,18 +184,29 @@ def install(args, packs: str) -> Path:
         print(f"提示：未找到 hermes CLI（PATH），已写出配置片段：{conf}\n"
               "      将其并入 ~/.hermes/config.yaml 的 mcp_servers 后重启会话生效",
               file=sys.stderr)
-    # D-hook-1：强制评估路由插件（pre_llm_call 确定性意图路由，业界 forced-eval 模式）
-    plug_src = ROOT / "hermes-plugin" / "vod-feedback-router"
-    plug_dst = Path.home() / ".hermes" / "plugins" / PLUGIN_NAME
-    if plug_src.is_dir():
-        if plug_dst.exists():
-            shutil.rmtree(plug_dst)
-        shutil.copytree(plug_src, plug_dst)
-        state = enable_plugin()
-        verb = {"created": "已自动加入 plugins.enabled",
-                "unchanged": "已在 plugins.enabled 中",
-                "skipped": "未自动启用（见上方提示）"}[state]
-        print(f"已安装 {PLUGIN_NAME} 路由插件（~/.hermes/plugins/，{verb}；重启会话生效）")
+    # D-hook-unify-1：预采集路由走 config.yaml 的 hooks.pre_llm_call（shell hook）。
+    # 不再装 Python 插件：同一个"stdin JSON → stdout context"脚本可被任何宿主
+    # 用各自的机制注册，宿主进程内不需要 import 我们的代码。
+    cfg_path = _profile_config()
+    try:
+        text = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
+        new_text, state = upsert_llm_hook(text, _hook_command())
+    except RuntimeError as e:
+        print(f"[vod-devkit] warn: 预采集 hook 未注册（{e}）。请手动把下面两行加进 "
+              f"{cfg_path} 的 hooks.{EVENT}：\n"
+              f"    - command: \"{_hook_command()}\"\n    timeout: {HOOK_TIMEOUT}",
+              file=sys.stderr)
+    else:
+        if state != "unchanged":
+            cfg_path.parent.mkdir(parents=True, exist_ok=True)
+            cfg_path.write_text(new_text, encoding="utf-8")
+        verb = {"created": "已新建 hooks 段",
+                "added": "已加入 hooks.pre_llm_call",
+                "unchanged": "已存在"}[state]
+        print(f"已注册预采集 hook（{cfg_path}，{verb}；首次使用 hermes 会弹一次同意）")
+    legacy = remove_legacy_plugin()
+    if legacy:
+        print(f"已清理旧插件形态（避免与新 hook 双份注入）：{legacy}")
     if r is None:
         pass  # 无 CLI：上面已经给过指引
     elif r.returncode == 0:

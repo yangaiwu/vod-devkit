@@ -959,7 +959,13 @@ cache 内 .mcp.json 被改写成 `python3` 绝对路径 + `payloads/0.5.9/vod_mc
   运行时形态由 `doctor` 回答（它会读 codex 插件缓存的实际 command/args）。
 - dsh 的 packs 目前改不了（写在 profile patch 里），`packs` 会明说而不是静默跳过。
 
-用例承载：`tests/test_global_cmds.py`（S116-S123）。
+探测与交互（S127）：判据是"宿主 CLI 在 PATH 或配置目录存在"，规则在
+`integrations/<host>/host.json` 的 `detect` 段（`hosts.raw()` 归一成 detectCLI/detectPath），
+不在代码里写宿主清单。**只有 stdin+stdout 都是终端才问**——CI/重定向下"多选"退化成
+"报错列选项"，因为猜错宿主的代价是写坏别人的配置。多选与 `--target all` 共用同一个
+安装循环（`_install_many`）：缺落点（dsh 无 `--profile`）跳过并说明，单宿主失败不阻塞其它。
+
+用例承载：`tests/test_global_cmds.py`（S116-S123、S126-S127）。
 
 ## 凭据单入口与技能读取教法（D-auth-init-1 / D-skill-teaching-1，2026-11-15）
 

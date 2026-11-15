@@ -50,7 +50,7 @@ def test_no_second_example_set_sneaks_in():
 
 
 def test_router_and_instructions_do_not_regress_to_install_binding():
-    router = (ROOT / "hermes-plugin" / "vod-feedback-router" / "router.py").read_text(encoding="utf-8")
+    router = (ROOT / "hooks" / "vod_router.py").read_text(encoding="utf-8")
     server = (ROOT / "vod_mcp" / "server.py").read_text(encoding="utf-8")
     for name, text in (("router.py", router), ("server.py", server)):
         assert "归因由安装绑定决定" not in text and "安装绑定完成" not in text, (

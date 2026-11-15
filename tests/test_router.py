@@ -12,7 +12,7 @@ from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
     "vod_router",
-    Path(__file__).resolve().parent.parent / "hermes-plugin" / "vod-feedback-router" / "router.py")
+    Path(__file__).resolve().parent.parent / "hooks" / "vod_router.py")
 assert _SPEC is not None and _SPEC.loader is not None, "router.py 缺失"
 router = importlib.util.module_from_spec(_SPEC)
 sys.modules["vod_router"] = router
@@ -75,15 +75,25 @@ def test_r7_regex_assembled_from_trigger_table():
         assert router._COMPLAINT_RE.search(f"测试{w}场景"), w
 
 
-def test_r8_register_wires_pre_llm_call():
-    """R8：register 契约——注册到 pre_llm_call，回调透传 user_message。"""
-    registered = {}
+def test_r8_shell_hook_wire_protocol(monkeypatch, capsys):
+    """R8：shell hook 线协议（D-hook-unify-1）——stdin JSON → stdout {"context"}。
 
-    class FakeCtx:
-        def register_hook(self, event, cb):
-            registered[event] = cb
+    旧形态是 hermes 插件（ctx.register_hook）；统一架构后脚本由宿主当子进程拉起，
+    契约只剩 stdin/stdout 这一层，所以这里测的是**进程边界**而不是 import 边界。
+    """
+    import io
+    import json as _json
+    payload = {"hook_event_name": "pre_llm_call",
+               "extra": {"user_message": "这个产品体验很差"}}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(_json.dumps(payload)))
+    assert router.main() == 0
+    out = capsys.readouterr().out
+    assert out and _json.loads(out)["context"] == router.DIRECTIVE
 
-    router.register(FakeCtx())
-    assert list(registered) == ["pre_llm_call"]
-    assert registered["pre_llm_call"]("体验不好") == router.route("体验不好")
-    assert registered["pre_llm_call"]("普通消息") is None
+    monkeypatch.setattr(sys, "stdin", io.StringIO(_json.dumps(
+        {"hook_event_name": "pre_llm_call", "extra": {"user_message": "帮我看下日志"}})))
+    assert router.main() == 0
+    assert capsys.readouterr().out == "", "未命中必须零输出（零注入零噪音）"
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO("not-json"))
+    assert router.main() == 0, "坏载荷不许打断宿主这一轮"

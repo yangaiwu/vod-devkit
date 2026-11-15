@@ -1,4 +1,5 @@
 """install 子命令：探测 → 门禁 → 载荷固化 → 宿主写入 → 技能拷贝 → manifest。"""
+import argparse
 import datetime
 import json
 import os
@@ -11,6 +12,71 @@ from vod_mcp import packs as packs_mod
 from vod_mcp.host_adapters import REGISTRY as HOST_ADAPTERS
 from vod_mcp.host_adapters import generic as generic_host
 from vodkit_cli import common, remote
+
+# 可显式指定（含 generic）的目标清单：交互输入按它校验，不随 HOST_ADAPTERS 的
+# 运行期替换而变（测试与"适配器被裁剪"场景都不该让提示变成骗人的选项）
+KNOWN_TARGETS = tuple(sorted(HOST_ADAPTERS)) + ("generic",)
+
+
+def _is_tty() -> bool:
+    """交互判定：stdin 与 stdout 都是终端才问（重定向/CI 一律不猜）。"""
+    try:
+        return bool(sys.stdin.isatty() and sys.stdout.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
+def _ask(prompt: str) -> str:
+    print(prompt, end="", flush=True)
+    return sys.stdin.readline().strip()
+
+
+def _interactive_choose(found: list) -> list | None:
+    """检测到多个时的多选（对齐 devkit）。返回选中 targets；取消/无输入返回 None。
+
+    输入约定固定（可测）：编号逗号分隔，或 all；回车=取消。非法输入不猜，重问一次。
+    """
+    for i, t in enumerate(found, 1):
+        print(f"  {i}) {t}")
+    for attempt in range(2):
+        raw = _ask("选择要安装的宿主（编号逗号分隔 / all / 回车取消）：")
+        if not raw:
+            return None
+        if raw.lower() == "all":
+            return list(found)
+        picked: list[str] = []
+        for part in raw.replace("，", ",").split(","):
+            part = part.strip()
+            if not part.isdigit() or not (1 <= int(part) <= len(found)):
+                picked = []
+                break
+            picked.append(found[int(part) - 1])
+        if picked:
+            return list(dict.fromkeys(picked))
+        print("输入不合法（示例：1 或 1,3 或 all）", file=sys.stderr)
+    return None
+
+
+def _install_many(targets: list, args) -> None:
+    """对多个宿主逐个安装（--target all 与交互多选共用这一条实现）。
+
+    缺落点的宿主跳过并说清（dsh 需 --profile），单个失败不阻塞其它——
+    但每条失败都打出来，不静默吞。
+    """
+    for t in targets:
+        if t == "dsh" and not (getattr(args, "dsh_profile", "") or "").strip():
+            print("[vod-devkit] 跳过 dsh：需 --profile <name>"
+                  "（--target dsh --profile web ...）", file=sys.stderr)
+            continue
+        ns = argparse.Namespace(**vars(args))
+        ns.target = t
+        print(f"== install --target {t}")
+        try:
+            cmd_install(ns)
+        except SystemExit as e:
+            if e.code:
+                print(f"[vod-devkit] {t} 安装未完成（exit {e.code}），继续下一个",
+                      file=sys.stderr)
 
 
 def detect_targets() -> list:
@@ -42,23 +108,17 @@ def cmd_install(args):
             print("未探测到可自动安装的宿主；--target all 无可装宿主"
                   "（可 --target <agent> 显式指定）", file=sys.stderr)
             sys.exit(2)
-        import argparse as _ap
-        for t in found:
-            ns = _ap.Namespace(**vars(args))
-            ns.target = t
-            print(f"== install --target {t}")
-            try:
-                cmd_install(ns)
-            except SystemExit as e:
-                if e.code:
-                    print(f"[vod-devkit] {t} 安装未完成（exit {e.code}），继续下一个",
-                          file=sys.stderr)
+        only = getattr(args, "_only", None) or None
+        if only:
+            found = [t for t in found if t in only]
+        _install_many(found, args)
         return
     if target == "auto":
         found = detect_targets()
         generic_found = generic_host.detect_known()
         if len(found) == 1:
             target = found[0]
+            print(f"探测到宿主: {target}")
         elif not found and len(generic_found) == 1:
             # A 层兜底：没有专属模块但有已知通用 MCP 宿主 → 走通用写入
             #（探到唯一一个才自动写，多个/零个都要人选定，不许猜）
@@ -69,15 +129,38 @@ def cmd_install(args):
                   f"（{args.mcp_config}）")
         elif not found:
             known = "、".join(h["label"] + "（" + h["config"] + "）" for h in generic_found)
-            print("未探测到可自动安装的宿主；用 --target hermes|opencode|codeartsdoer|codeartswork|codex|codex-desktop|dsh|workbuddy|atomcode 显式指定"
-                  + (f"，或通用写入：--target generic --mcp-config <配置>（探测到 {known}）"
-                     if generic_found else ""), file=sys.stderr)
-            sys.exit(2)
+            hint = ("未探测到可自动安装的宿主；用 --target "
+                    "hermes|opencode|codeartsdoer|codeartswork|codex|codex-desktop|"
+                    "dsh|workbuddy|atomcode 显式指定"
+                    + (f"，或通用写入：--target generic --mcp-config <配置>（探测到 {known}）"
+                       if generic_found else ""))
+            picked_name: str | None = None
+            if _is_tty():
+                # 交互终端：给一次机会（输入 target 名），非交互一律报错不猜
+                print(hint)
+                ans = _ask("输入 target 名（如 hermes；回车取消）：").strip().lower()
+                if ans in KNOWN_TARGETS:
+                    picked_name = ans
+            if not picked_name:
+                print(hint, file=sys.stderr)
+                sys.exit(2)
+            target = picked_name
+            print(f"探测到宿主: {target}")
         else:
-            print(f"探测到多个宿主: {found + [h['id'] for h in generic_found]}；"
-                  "请 --target 显式指定其一", file=sys.stderr)
-            sys.exit(2)
-        print(f"探测到宿主: {target}")
+            print("探测到多个宿主: " + ", ".join(found + [h["id"] for h in generic_found]))
+            picked_list = _interactive_choose(found) if _is_tty() else None
+            if not picked_list:
+                print("非交互环境不猜：请用 --target <agent> 或 --target all 显式指定",
+                      file=sys.stderr)
+                sys.exit(2)
+            if len(picked_list) == 1:
+                target = picked_list[0]
+                print(f"探测到宿主: {target}")
+            else:
+                # 多选 = 对选中的那几个跑同一套 all 循环（语义只有一处实现）
+                print(f"探测到宿主: {', '.join(picked_list)}")
+                _install_many(picked_list, args)
+                return
     adapter = HOST_ADAPTERS.get(target)
     if adapter is None:
         g = [(h["id"], h["config"]) for h in generic_host.detect_known()]

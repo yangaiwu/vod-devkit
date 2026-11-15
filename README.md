@@ -48,6 +48,15 @@
 npx -y vod-devkit@latest install --target auto
 ```
 
+省略 `--target` 时安装器会自动扫描机器上的宿主（判据=宿主 CLI 在 PATH 或配置目录存在，
+数据在 `integrations/<host>/host.json`，不硬编码）：
+
+- 扫到 **1 个** → 直接装到它；
+- 扫到 **多个** → 交互终端列出编号让你多选（`1` / `1,3` / `all`，回车取消）；
+  非交互（CI/重定向）**不猜**，报错并提示 `--target <agent>` 或 `--target all`；
+- 扫到 **0 个** → 交互终端问一次 target 名；非交互报错并列出支持列表；
+- 一步全量：`install --target all`（`dsh` 缺 `--profile` 时跳过并说明，不算失败）。
+
 装完**重启会话**才生效（宿主在启动时读取 MCP 配置）。随后自检：
 
 ```bash
@@ -173,14 +182,25 @@ npx -y vod-devkit@latest install --target codex-desktop
 
 ```bash
 npx -y vod-devkit@latest install --target workbuddy
+# 重启会话后：验证 / 更新 / 卸载
+npx -y vod-devkit@latest doctor
+npx -y vod-devkit@latest status
+npx -y vod-devkit@latest install --target workbuddy      # 更新=幂等重装（不动其它键）
+npx -y vod-devkit@latest uninstall
 ```
 
 - 落点：`~/.workbuddy/mcp.json` 的 `mcpServers.vod-devkit`；技能装到 `~/.workbuddy/skills`
+- 坑：WorkBuddy 只在 Windows/macOS 有客户端；Linux 上装它等于预置配置，宿主那边不读
 
 ### AtomCode（atomcode）
 
 ```bash
 npx -y vod-devkit@latest install --target atomcode
+# 重启会话后：验证 / 更新 / 卸载
+npx -y vod-devkit@latest doctor
+npx -y vod-devkit@latest status
+npx -y vod-devkit@latest install --target atomcode      # 更新=幂等重装
+npx -y vod-devkit@latest uninstall
 ```
 
 - 配置根可由 `ATOMCODE_HOME` 覆盖（默认 `~/.atomcode`），落点 `mcp.json` 的
@@ -191,7 +211,10 @@ npx -y vod-devkit@latest install --target atomcode
 
 ```bash
 npx -y vod-devkit@latest install --target dsh --profile <profile名>
+# 重启 dsh 后：验证 / 更新 / 卸载
 npx -y vod-devkit@latest doctor
+npx -y vod-devkit@latest status
+npx -y vod-devkit@latest install --target dsh --profile <profile名>   # 更新
 npx -y vod-devkit@latest uninstall
 ```
 
@@ -315,9 +338,67 @@ install-manifest 名册对账（doctor 逐落点）+ 声明计数对账（对外
 
 本文档不放用例数/工具数——手写计数必然漂移；数字一律现场测量。
 
+## 预采集钩子（hermes）
+
+hermes 侧装一个**宿主无关的钩子脚本** `hooks/vod_router.py`，由 `~/.hermes/config.yaml` 的
+`hooks.pre_llm_call` 注册：每轮对用户消息做确定性意图判定（关键词，模型不参与），命中就
+往本轮用户消息追加一段采集指令，未命中零注入。
+
+```bash
+# 装完即可核对注册与真拉起（hermes 自带测试面，不需要开会话）
+hermes hooks list
+hermes hooks test pre_llm_call --payload-file payload.json
+```
+
+- 首次真实使用 hermes 会弹一次同意（consent 按 `(event, command)` 记）；`hooks list` 里
+  `✗ not allowlisted` 就是"等你点同意"，不是装坏了
+- 老版本装过插件形态（`~/.hermes/plugins/vod-feedback-router`）的机器，本次 install 会
+  自动清理并摘掉 `plugins.enabled` 里的旧名字——否则插件与 hook 双份注入
+- 细节（线协议、判据、验证到哪一步、未做的 `pre_tool_call` 拦截）见
+  [docs/hooks.md](docs/hooks.md)
+
+## 能力包与技能披露
+
+- `VOD_PACKS` 三层：环境变量（持久，重启生效）；会话内开关 **未做**（远程面无状态，
+  不做；stdio 面待评估）；CLI `packs enable/disable/all --apply`（直接改写各宿主配置里的
+  `VOD_PACKS`，缺省 dry-run，`core` 强制包含）
+- 未知包 id：安装口与 server 启动口都 `exit 2` 并列出可用 id——不静默过滤（"配了没生效"最难查）
+- 技能读取：stdio 面 `vod_list_skills` 给 `skillRoot` 与每技能 `path`，教法是**动作优先**
+  （先直读 `<skillRoot>/<name>/SKILL.md`，被拒/失败才回落 `vod_retrieve_skill`，绝不反复请求）；
+  远程面不给服务器本机路径，规则文本走 `vod_retrieve_skill`
+
+## 安全模型
+
+三层，顺序就是从便宜到贵：
+
+1. **技能教**：`vod-feedback-collect` 规定先承接、再征得同意、原话逐字、不猜产品。
+2. **钩子提醒**：pre_llm_call 命中采集意图时注入指令（防止模型把抱怨当排障问题去复现）。
+3. **运行期护栏**：`safety/policy.json` 的声明式规则 + 两段式草稿/令牌
+   （`-32010` 未确认、`-32011` 载荷不符、`-32012` 无凭据、`-32013` 过期、`-32014` 单次消费）
+   + 护栏 deny 直连数据库意图。
+
+诚实残留（写清楚，不掩）：
+
+- 钩子只"提醒"，不拦工具调用；`pre_tool_call` 拦截（读 `runtime.json`/`env` 导出）**未做**。
+- 远程面**不内置鉴权**：默认只绑回环，对外必须自建 TLS 反代与身份校验；插件不代签身份。
+- 不允许把 key 写进宿主 MCP 配置的 `env`（明文且随配置进 git）——用 `auth init`。
+
+## 目录结构（摘要）
+
+```
+src/            运行时与安装器源码（真源）           plugins/   宿主发布物（清单+生成副本）
+integrations/   宿主规格（探测/落点）               scripts/   生成器与门禁（成对）
+hooks/          宿主无关钩子脚本                    tests/     pytest（含结构/范围/花名册门禁）
+docs/           架构/设计/需求/决策/安全/钩子       dsh/ npm/ bin/   薄壳与独立包
+```
+
+根目录条目受**预算**约束（`tests/test_structure_guards.py::test_s129_*`）：新增顶层目录/文件
+必须先改 [docs/architecture.md](docs/architecture.md)（结构契约与迁移分阶）。
+
 ## 文档
 
-- 需求 / 设计：[docs/proposal.md](docs/proposal.md) · [docs/design.md](docs/design.md)
+- 结构契约：[docs/architecture.md](docs/architecture.md) ｜ 需求 / 设计：[docs/proposal.md](docs/proposal.md) · [docs/design.md](docs/design.md)
+- 钩子规则：[docs/hooks.md](docs/hooks.md) ｜ 安全边界：[docs/safety-model.md](docs/safety-model.md)
 - 一页纸：[docs/scheme-overview.md](docs/scheme-overview.md) ｜ 安全边界：[docs/safety-model.md](docs/safety-model.md)
 - 决策台账：[docs/decisions.md](docs/decisions.md) ｜ 规则真源：[docs/rules-provenance.json](docs/rules-provenance.json)
 - 手动配置与排障：[QUICKSTART.md](QUICKSTART.md) ｜ 分宿主细节：[INSTALL.md](INSTALL.md)

@@ -46,8 +46,7 @@ def test_m1c_description_triggers_aligned_with_router_table():
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "vod_router_m1c",
-        Path(__file__).resolve().parent.parent / "hermes-plugin"
-        / "vod-feedback-router" / "router.py")
+        Path(__file__).resolve().parent.parent / "hooks" / "vod_router.py")
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

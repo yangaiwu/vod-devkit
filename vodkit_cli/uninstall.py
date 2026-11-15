@@ -38,8 +38,26 @@ def _remove_managed_mcp_entry(target: str, path: Path) -> None:
         return
     cli: str | None = None
     args: list[str] = []
-    if target == "hermes" and shutil.which("hermes"):
-        cli, args = "hermes", ["mcp", "remove", "vod-devkit"]
+    if target == "hermes":
+        # 先摘 config.yaml 的预采集 hook（shell hook 形态，D-hook-unify-1）
+        from vod_mcp.host_adapters import hermes as _hermes
+        cfg = Path(_hermes._profile_config())
+        if cfg.exists():
+            text = cfg.read_text(encoding="utf-8")
+            new_text, removed = _hermes.remove_llm_hook(text)
+            if removed:
+                cfg.write_text(new_text, encoding="utf-8")
+                print("removed vod-devkit pre_llm_call hook:", cfg)
+        # 旧插件形态（老装机）一并摘
+        legacy = _hermes.remove_legacy_plugin()
+        if legacy:
+            print("removed legacy plugin:", legacy)
+        if shutil.which("hermes"):
+            cli, args = "hermes", ["mcp", "remove", "vod-devkit"]
+        else:
+            cli, args = None, []
+    elif target == "codex" and shutil.which("codex"):
+        cli, args = "codex", ["mcp", "remove", "vod-devkit"]
     elif target == "codex" and shutil.which("codex"):
         cli, args = "codex", ["mcp", "remove", "vod-devkit"]
     if cli:

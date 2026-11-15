@@ -1270,3 +1270,44 @@ C：新宿主 officeace/openclaw）。负责人拍板 A3/B1/C3；A3 落地前实
 包集合恒定、工具数恒定、工具名不得含云操作面词。要改这三条，必须改用例并在需求文档
 留决策——这就把"范围变更"从默认动作变成显式动作。
 
+## D-hook-unify-1：宿主钩子统一为"宿主无关脚本 + 宿主机制注册"（2026-11-15）
+
+**问题**：预采集路由此前做成 hermes 插件包（`hermes-plugin/vod-feedback-router/`，走
+`plugins.enabled` + 宿主进程内 import）。它带来三个成本：根目录多一个宿主特例、
+只能适配有插件 API 的宿主、与宿主同进程（崩溃面共享）。对标 devkit 后确认：它们的
+hermes 集成是 `config.yaml` 里的 shell hook，不是插件包。
+
+**决定**：
+- 资产：`hooks/vod_router.py`（单文件，stdlib），契约=stdin JSON → stdout `{"context": …}`；
+  随载荷分发，任何宿主可注册。
+- 注册：hermes 适配器写 `config.yaml` 的 `hooks.pre_llm_call`（外科式文本插入，形态不认识
+  就抛错并给可粘贴片段；幂等按 `vod_router.py` 标记识别）。
+- 迁移：install 时删旧插件目录 + 从 `plugins.enabled` 去名（否则双份注入）。
+- uninstall 只摘含标记的那条 hook，别人的条目与其它事件不动。
+- doctor：从"插件副本 hash 比对"改为"hook 是否注册 + 脚本是否存在 + 旧插件是否残留"。
+
+**验证到哪一步（诚实）**：注册（config.yaml 条目）、`hermes hooks list` 识别、
+`hermes hooks test pre_llm_call` 真拉起子进程并 `parsed (Hermes wire shape): {"context": …}`
+三步实测通过；**真实会话注入未验**（需首次 consent 同意，`hooks list` 显示
+`✗ not allowlisted`）。细节见 docs/hooks.md。
+
+**没做**：`pre_tool_call` 拦截（读 runtime.json/env 导出）、codex/opencode 等价注册——机制已确认，
+规则表与宿主覆盖另评（不在本轮硬塞）。
+
+## D-structure-1：目录结构契约与根预算（2026-11-15 负责人要求通读对标）
+
+**做法**：通读 devkit v2（adfd826）的实际目录（不是 README 的印象），抽出四条纪律
+（一个插件包 / 源与生成物分离 / 共享资产单一落点 / 门禁脚本化），落成
+`docs/architecture.md` 的结构契约 + `tests/test_structure_guards.py::test_s129_*` 的机械门禁。
+
+**为什么用"根预算"而不是"目录规范文档"**：规范文档没人执行就会漂。S129 断言
+`git ls-files` 的顶层条目必须落在预算表内——新增顶层目录/文件必须先改契约文档再改用例，
+把"结构变更"从默认动作变成显式动作（同 S126 范围锁的做法）。
+
+**分阶（不一次动完）**：S1 契约+预算+README（本次）；S2 共享资产收进 `src/`；
+S3 运行时入口路径收进 `src/`；S4 运行期状态收进用户目录。顺序不能反：先让"资产有唯一落点"，
+再改"谁在跑"，出问题才能二分定位。
+
+**代价**：S2/S3 会触及 `paths.py`、`sync_plugin`、`payload`、`package.json files`、`pyproject`
+与约十处测试路径，必须每阶独立可回滚。
+

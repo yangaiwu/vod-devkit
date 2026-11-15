@@ -59,10 +59,10 @@ def test_prune_only_removes_owned_stale_entries(home):
     assert "skills" not in removed          # 源里有 skills，不能整目录删
     assert (dest / "user-notes.txt").exists()
     # 顶层 owned 但源里没有的目录会被清（模拟退役的技能树）
-    (dest / "hermes-plugin").mkdir(exist_ok=True)
+    (dest / "hooks").mkdir(exist_ok=True)
     removed = p2.prune_stale(dest, {"vod_mcp", "contract", "safety", "skills",
                                     "user-notes.txt"})
-    assert "hermes-plugin" in removed
+    assert "hooks" in removed
 
 
 def test_server_entry_points_into_payload(home):

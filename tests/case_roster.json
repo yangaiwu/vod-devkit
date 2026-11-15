@@ -386,7 +386,13 @@
       "carrier": "docs/design.md"
     },
     "S126": {
-      "carrier": "tests/test_global_cmds.py"
+      "carrier": "docs/design.md"
+    },
+    "S127": {
+      "carrier": "docs/design.md"
+    },
+    "S129": {
+      "carrier": "tests/test_structure_guards.py"
     },
     "U1": {
       "carrier": "tests/test_skeleton.py"

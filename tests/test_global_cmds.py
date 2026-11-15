@@ -224,3 +224,86 @@ def test_s126_scope_is_voice_collection_not_cloud_ops():
     banned = ("hcloud", "koocli", "obs_", "sandbox", "region", "gateway", "openapi")
     hit = [n for n in names if any(b in n for b in banned)]
     assert not hit, f"云操作面工具不得进入本仓：{hit}"
+
+# ── S127 自动扫描后的交互选择（对齐 devkit 的 0/1/N 体验）──────
+
+import io as _io
+from vodkit_cli import install as _install
+
+
+def _fake_tty(monkeypatch, text: str):
+    monkeypatch.setattr(_install, "_is_tty", lambda: True)
+    monkeypatch.setattr("sys.stdin", _io.StringIO(text))
+
+
+def test_s127_multiselect_picks_indices(monkeypatch, capsys):
+    called = []
+    orig = _install.cmd_install
+    monkeypatch.setattr(_install, "detect_targets",
+                        lambda: ["hermes", "opencode", "atomcode"])
+    monkeypatch.setattr(_install, "cmd_install", lambda a: called.append(a.target))
+    monkeypatch.setattr(_install.common, "write_build_info", lambda strict=False: None)
+    _fake_tty(monkeypatch, "1,3\n")
+    orig(_A(target="auto", java_api_base="http://x", packs="", preset="collect"))
+    assert called == ["hermes", "atomcode"]
+
+
+def test_s127_invalid_then_valid_reprompts(monkeypatch, capsys):
+    orig = _install.cmd_install
+    monkeypatch.setattr(_install, "detect_targets", lambda: ["hermes", "opencode"])
+    monkeypatch.setattr(_install, "HOST_ADAPTERS", {})   # 选择完成即到此为止
+    monkeypatch.setattr(_install.common, "write_build_info", lambda strict=False: None)
+    _fake_tty(monkeypatch, "9\n2\n")
+    with pytest.raises(SystemExit):
+        orig(_A(target="auto", java_api_base="http://x", packs="", preset="collect"))
+    out = capsys.readouterr().out
+    assert "探测到宿主: opencode" in out, "非法输入重问一次，第二次生效"
+
+
+def test_s127_cancel_exits_without_installing(monkeypatch, capsys):
+    called = []
+    orig = _install.cmd_install
+    monkeypatch.setattr(_install, "detect_targets", lambda: ["hermes", "opencode"])
+    monkeypatch.setattr(_install, "cmd_install", lambda a: called.append(a.target))
+    monkeypatch.setattr(_install.common, "write_build_info", lambda strict=False: None)
+    _fake_tty(monkeypatch, "\n")
+    with pytest.raises(SystemExit) as e:
+        orig(_A(target="auto", java_api_base="http://x", packs="", preset="collect"))
+    assert e.value.code == 2 and not called
+
+
+def test_s127_non_tty_never_guesses(monkeypatch, capsys):
+    orig = _install.cmd_install
+    monkeypatch.setattr(_install, "detect_targets", lambda: ["hermes", "opencode"])
+    monkeypatch.setattr(_install, "_is_tty", lambda: False)
+    monkeypatch.setattr(_install.common, "write_build_info", lambda strict=False: None)
+    with pytest.raises(SystemExit) as e:
+        orig(_A(target="auto", java_api_base="http://x", packs="", preset="collect"))
+    assert e.value.code == 2
+    assert "非交互环境不猜" in capsys.readouterr().err
+
+
+def test_s127_zero_detected_asks_for_target_name(monkeypatch, capsys):
+    orig = _install.cmd_install
+    monkeypatch.setattr(_install, "detect_targets", lambda: [])
+    from vod_mcp.host_adapters import generic as _g
+    monkeypatch.setattr(_g, "detect_known", lambda: [])
+    monkeypatch.setattr(_install, "HOST_ADAPTERS", {})   # 只验选择：适配器缺=到此为止
+    monkeypatch.setattr(_install.common, "write_build_info", lambda strict=False: None)
+    _fake_tty(monkeypatch, "hermes\n")
+    with pytest.raises(SystemExit):
+        orig(_A(target="auto", java_api_base="http://x", packs="", preset="collect"))
+    assert "探测到宿主: hermes" in capsys.readouterr().out
+
+
+def test_s127_all_skips_dsh_without_profile(monkeypatch, capsys):
+    called = []
+    orig = _install.cmd_install
+    monkeypatch.setattr(_install, "detect_targets", lambda: ["dsh", "hermes"])
+    monkeypatch.setattr(_install, "cmd_install", lambda a: called.append(a.target))
+    monkeypatch.setattr(_install.common, "write_build_info", lambda strict=False: None)
+    orig(_A(target="all", java_api_base="http://x", packs="", preset="collect",
+            dsh_profile=""))
+    assert called == ["hermes"]
+    assert "跳过 dsh" in capsys.readouterr().err
+

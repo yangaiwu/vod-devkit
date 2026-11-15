@@ -22,7 +22,7 @@ def test_classify_maps_known_failures_to_layers():
         "载荷目录缺失：/x/payloads/0.5.3（MCP 入口指向它，宿主起不来）": "载荷",
         "MCP 配置文件缺失": "配置",
         "技能文件缺失（codeartsdoer）：vod-core/SKILL.md": "技能",
-        "路由插件副本落后于仓内：/x/router.py": "插件",
+        "预采集 hook 未注册（/x/config.yaml 的 hooks.pre_llm_call）": "配置",
         "远程 MCP 端点不可达：https://x": "网络",
         "key 无效（指纹 abc，引擎 401 拒绝）": "网络",
         "无 install-manifest.json（未 install？）": "环境",

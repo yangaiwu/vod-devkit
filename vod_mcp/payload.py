@@ -35,7 +35,7 @@ def payload_home() -> Path:
     return Path(os.environ.get("VOD_PAYLOAD_HOME") or (Path.home() / ".vod-devkit"))
 
 # 我们拥有的顶层条目（prune 只在这个集合内动手，绝不碰用户文件）
-OWNED = ("vod_mcp", "contract", "safety", "skills", "hermes-plugin",
+OWNED = ("vod_mcp", "contract", "safety", "skills", "hooks",
          "build-info.json", "payload.json", "package.json")
 
 SKIP_DIRS = {"__pycache__"}
@@ -103,10 +103,10 @@ def stage(version: str | None = None, quiet: bool = False) -> Path:
 
     sources = {"vod_mcp": ROOT / "vod_mcp", "contract": ROOT / "contract",
                "safety": ROOT / "safety", "skills": ROOT / "skills",
-               "hermes-plugin": ROOT / "hermes-plugin"}
+               "hooks": ROOT / "hooks"}
     for name, src in sources.items():
         if not src.is_dir():
-            continue  # hermes-plugin 可缺（非 hermes 宿主）
+            continue  # hooks 可缺（历史版本载荷）
         target = dest / name
         target.mkdir(parents=True, exist_ok=True)
         for f in _iter_files(src):

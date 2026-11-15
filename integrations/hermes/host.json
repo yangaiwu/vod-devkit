@@ -10,11 +10,14 @@
   "mcpConfigFile": {
     "default": "~/.hermes/mcp/vod-devkit.json"
   },
+  "profileConfig": {
+    "default": "~/.hermes/config.yaml"
+  },
   "skillsDir": {
     "default": "~/.hermes/skills/devops/vod-devkit"
   },
   "managedPaths": [
     "~/.hermes/plugins/vod-feedback-router"
   ],
-  "notes": "配置通过官方 hermes mcp add 写入；这里同时落一份独立 json 便于 doctor 与迁移"
+  "notes": "MCP 条目经 hermes mcp add 写入 config.yaml；预采集路由走 config.yaml 的 hooks.pre_llm_call（shell hook，子进程隔离），不再装 Python 插件；managedPaths 只剩旧插件形态的清理对象"
 }
