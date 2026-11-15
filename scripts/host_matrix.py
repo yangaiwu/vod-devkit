@@ -28,12 +28,21 @@ import tempfile
 from pathlib import Path as _Path
 
 # 入口显式设根（D-structure-1 S3）：脚本不再依赖"从哪跑"，包在 src/
+# 注意：**不在 import 期写 os.environ**——本文件会被 tests/test_host_matrix.py 当模块加载，
+# import 期 setenv 会把外层仓的根泄漏进整场 pytest，让"造临时仓再跑安装器"的用例
+# 打到真实仓（实测 2026-11-16：test_host_matrix + test_installer 同跑 16 条 FileNotFound）。
 _DIST = _Path(__file__).resolve().parent.parent
 _SRC = _DIST / "src" if (_DIST / "src" / "vod_mcp").is_dir() else _DIST
-os.environ.setdefault("VOD_DEVKIT_SRC_ROOT", str(_SRC))
-os.environ.setdefault("VOD_DEVKIT_DIST_ROOT", str(_DIST))
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
+
+
+def _pin_roots() -> None:
+    """进程入口处显式钉两个根（main() 调；import 不调）。"""
+    os.environ.setdefault("VOD_DEVKIT_SRC_ROOT", str(_SRC))
+    os.environ.setdefault("VOD_DEVKIT_DIST_ROOT", str(_DIST))
+
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -91,6 +100,59 @@ def _seed(home: Path, host: str) -> None:
         p.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _isolated_env(host: str, home: Path) -> dict:
+    """隔离 HOME 的运行 env：**每个宿主自己的"家"都要一起搬**。
+
+    只用 $HOME 不够——各宿主 CLI 有自己的家目录变量，认它们不认 $HOME：
+    · hermes → HERMES_HOME（实测 2026-11-16：`HOME=/tmp/x hermes profile list` 照样列出
+      真实 profile；矩阵因此把真实 ~/.hermes/config.yaml 改成了
+      `<scratch>/home/.vod-devkit/payloads/…` + 桩地址 127.0.0.1:9/stub，scratch 一清就永久掉线）；
+    · codex → CODEX_HOME（libc 的 home，不是 $HOME，实测 0.4.2 旧缓存）；
+    · dsh → DSH_HOME。
+    新增宿主时先确认它用哪个变量，别假设 $HOME 生效。
+    """
+    env = os.environ.copy()
+    env.update({
+        "HOME": str(home),
+        # codex CLI 用 CODEX_HOME 解析自己的家目录（libc 的 home 而不是 $HOME）——
+        # 不设它，隔离矩阵里的 codex 会写到真实 ~/.codex（本轮实锤：0.4.2 旧缓存）。
+        **({"CODEX_HOME": str(home / ".codex")} if host in ("codex", "codex-desktop") else {}),
+        **({"DSH_HOME": str(home / ".dsh")} if host == "dsh" else {}),
+        # hermes CLI 认 HERMES_HOME（不认 HOME）：不搬它，隔离 HOME 里装 hermes 等于
+        # 直接改真机配置（2026-11-16 实锤，见 docstring）
+        **({"HERMES_HOME": str(home / ".hermes")} if host == "hermes" else {}),
+        "VOD_DEVKIT_MANIFEST": str(home / "install-manifest.json"),
+        "VOD_JAVA_API_BASE": "http://127.0.0.1:9/stub",
+        "VOD_PACKS": "core",
+        # 矩阵在真实仓里跑：不许把仓内 build-info 重烧成当前 HEAD（否则结构门禁
+        # "根/包内 build-info 一致"会在下一次提交时假红）
+        "VOD_DEVKIT_NO_BUILD_INFO": "1",
+    })
+    # 真实 profile / 宿主身份不能带进隔离矩阵（否则 CLI 仍按真实 profile 解析）
+    for k in ("HERMES_PROFILE", "HERMES_CONFIG"):
+        env.pop(k, None)
+    env.pop("VOD_JAVA_API_KEY", None)
+    if host == "hermes":
+        # 光搬 HERMES_HOME 还不够：hermes CLI 在一个**空的** HERMES_HOME 下会尝试
+        # 自举依赖（实测一次 install 卡到 300s 超时，全量矩阵因此整轮 FAIL）。
+        # 这里放一个"立刻失败"的 shim 挡住 CLI 段：适配器本来就是 best-effort
+        # （rc!=0 → 打印提示并继续），矩阵要验的是安装器写出的条目 + 载荷自证。
+        env["PATH"] = _sandbox_host_cli(home, "hermes") + os.pathsep + env.get("PATH", "")
+    return env
+
+
+def _sandbox_host_cli(home: Path, name: str) -> str:
+    """在隔离 HOME 里造一个同名 shim 目录（CLI 立刻失败，不碰真机、也不挂住）。"""
+    d = home / "bin"
+    d.mkdir(parents=True, exist_ok=True)
+    shim = d / name
+    if not shim.exists():
+        shim.write_text("#!/bin/sh\necho 'matrix: host CLI disabled in sandbox' >&2\nexit 1\n",
+                        encoding="utf-8")
+        shim.chmod(0o755)
+    return str(d)
+
+
 def _run_install(env, host, extra=()):
     r = subprocess.run([sys.executable, str(BIN), "install", "--target", host, *extra],
                        capture_output=True, text=True, env=env, timeout=300)
@@ -98,18 +160,31 @@ def _run_install(env, host, extra=()):
 
 
 def _probe(entry: dict, expect_version: str) -> tuple:
-    """按宿主配置真拉起 server：initialize → tools/list → vod_devkit_info。"""
+    """按宿主配置真拉起 server：initialize → tools/list → vod_devkit_info。
+
+    失败必须**带上命令/入口路径**：巡检对 8 个宿主同时报"server 无响应"时，
+    看不出是载荷目录没了还是 command 写错（2026-11-16 实锤：8 条 DRIFT 全同一句话，
+    真正的原因是 payloads/0.5.9 被测试删了）。也包一层兜底 try：巡检崩掉不如报挂。
+    """
     cmd = entry.get("command")
     args = entry.get("args") or []
     if isinstance(cmd, list):  # codearts 形态：command 是数组
         cmd, args = cmd[0], cmd[1:]
     if not cmd:
         return False, "配置里没有启动命令"
+    argv = [str(cmd), *[str(a) for a in args]]
+    tail = "（argv=" + " ".join(argv[:2]) + (" …" if len(argv) > 2 else "") + "）"
+    gone = [a for a in argv[1:] if a.endswith(".py") and not os.path.exists(a)]
+    if gone:
+        return False, f"入口文件不存在：{gone[0]}{tail}"
     env = os.environ.copy()
     env.update({k: str(v) for k, v in (entry.get("env") or entry.get("environment") or {}).items()})
-    proc = subprocess.Popen([cmd, *[str(a) for a in args]], stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                            env=env, text=True)
+    try:
+        proc = subprocess.Popen(argv, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                env=env, text=True)
+    except OSError as e:
+        return False, f"起不来（{e.__class__.__name__}: {e}）{tail}"
     assert proc.stdin is not None and proc.stdout is not None
 
     def rpc(msg):
@@ -142,7 +217,7 @@ def _probe(entry: dict, expect_version: str) -> tuple:
             return False, f"工具面缺 vod_submit_voices（{len(names)} 个工具）"
         return True, f"{len(names)} 工具，版本 {ver}"
     except Exception as e:  # noqa: BLE001
-        return False, f"{e.__class__.__name__}: {e}"
+        return False, f"{e.__class__.__name__}: {e}{tail}"
     finally:
         try:
             proc.stdin.close()
@@ -158,21 +233,7 @@ def run_host(host: str, home: Path, expect_version: str, verbose=False) -> tuple
     _seed(home, host)
     if host in ("codex", "codex-desktop"):
         (home / ".codex").mkdir(parents=True, exist_ok=True)  # CODEX_HOME 必须已存在
-    env = os.environ.copy()
-    env.update({
-        "HOME": str(home),
-        # codex CLI 用 CODEX_HOME 解析自己的家目录（libc 的 home 而不是 $HOME）——
-        # 不设它，隔离矩阵里的 codex 会写到真实 ~/.codex（本轮实锤：0.4.2 旧缓存）。
-        **({"CODEX_HOME": str(home / ".codex")} if host in ("codex", "codex-desktop") else {}),
-        **({"DSH_HOME": str(home / ".dsh")} if host == "dsh" else {}),
-        "VOD_DEVKIT_MANIFEST": str(home / "install-manifest.json"),
-        "VOD_JAVA_API_BASE": "http://127.0.0.1:9/stub",
-        "VOD_PACKS": "core",
-        # 矩阵在真实仓里跑：不许把仓内 build-info 重烧成当前 HEAD（否则结构门禁
-        # "根/包内 build-info 一致"会在下一次提交时假红）
-        "VOD_DEVKIT_NO_BUILD_INFO": "1",
-    })
-    env.pop("VOD_JAVA_API_KEY", None)
+    env = _isolated_env(host, home)
     extra = ["--profile", spec["profile"]] if spec.get("profile") else []
     r = _run_install(env, host, extra)
     if r.returncode != 0:
@@ -256,14 +317,122 @@ def run_host(host: str, home: Path, expect_version: str, verbose=False) -> tuple
     return ("PASS", msg) if ok else ("FAIL", msg)
 
 
-def audit_host(host: str, expect_version: str) -> tuple:
+def _parse_hermes_entry(text: str) -> dict | None:
+    """从 hermes 的 config.yaml 里取 mcp_servers.vod-devkit（零依赖窄解析）。
+
+    为什么不 import yaml：这个脚本是 CI 门禁，PyYAML 不在依赖里——缺包时假红/假绿
+    都比报错难查。只认 `hermes config set` 写出来的块形态；解析不出返回 None，
+    由调用方报 DRIFT（宁可报挂，不许静默跳过）。
+    """
+    lines = text.splitlines()
+    sec = next((i for i, ln in enumerate(lines) if ln.rstrip() == "mcp_servers:"), None)
+    if sec is None:
+        return None
+    entry: dict = {}
+    base = None          # vod-devkit 键的缩进
+    kind = None          # 当前子块：command / args / env
+    for ln in lines[sec + 1:]:
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        indent = len(ln) - len(ln.lstrip())
+        if indent == 0:
+            break                                   # 回到顶层键，段结束
+        stripped = ln.strip()
+        if base is None:
+            if stripped == "vod-devkit:":
+                base = indent
+            continue
+        if indent <= base and stripped != "vod-devkit:":
+            break                                   # 下一个 server
+        child = base + 2
+        if indent == child:
+            key, _, val = stripped.partition(":")
+            key, val = key.strip(), val.strip()
+            kind = key
+            if val:
+                entry[key] = val.strip("'\"")
+            elif key == "args":
+                entry["args"] = []
+            elif key == "env":
+                entry["env"] = {}
+        elif indent > child:
+            if kind == "args" and stripped.startswith("- "):
+                entry.setdefault("args", []).append(stripped[2:].strip().strip("'\""))
+            elif kind == "env" and ":" in stripped:
+                k, _, v = stripped.partition(":")
+                entry.setdefault("env", {})[k.strip()] = v.strip().strip("'\"")
+    return entry or None
+
+
+def _hermes_effective_entry(home: Path) -> tuple[dict | None, str]:
+    """hermes 实际生效的 MCP 条目 + 一句判据说明（找不出就返回原因）。"""
+    p = home / ".hermes" / "config.yaml"
+    if not p.exists():
+        return None, f"缺 {p}（hermes 的生效入口）"
+    try:
+        entry = _parse_hermes_entry(p.read_text(encoding="utf-8", errors="replace"))
+    except OSError as e:
+        return None, f"读不出 {p}: {e}"
+    if not entry:
+        return None, f"{p} 的 mcp_servers 里没有 vod-devkit（生效入口无条目）"
+    if entry.get("enabled") in ("false", False):
+        return None, f"{p} 的 mcp_servers.vod-devkit 是 enabled: false"
+    return entry, f"生效入口 {p}"
+
+
+def _codex_enabled_marketplaces(home: Path) -> list:
+    """codex config.toml 里 vod-devkit 的启用市场（[plugins."vod-devkit@<mkt>"]）。"""
+    cfg = home / ".codex" / "config.toml"
+    if not cfg.exists():
+        return []
+    try:
+        import tomllib
+        data = tomllib.loads(cfg.read_text(encoding="utf-8", errors="replace"))
+        plugins = data.get("plugins") or {}
+        out = [k.split("@", 1)[1] for k, v in plugins.items()
+               if "@" in k and k.split("@", 1)[0] == "vod-devkit"
+               and not (isinstance(v, dict) and v.get("enabled") is False)]
+        return out
+    except Exception:                                  # noqa: BLE001 3.10 无 tomllib
+        import re as _re
+        return _re.findall(r'\[plugins\."vod-devkit@([^"]+)"\]', cfg.read_text(
+            encoding="utf-8", errors="replace"))
+
+
+def _codex_effective_mcp(home: Path) -> tuple:
+    """codex 实际会用的那份 .mcp.json → (市场名, 路径 | None, 是否靠猜)。
+
+    "猜"=config.toml 没有声明启用市场、marketplace.json 也没 name，只能按"存在的那份"判；
+    报文里必须标出来，否则事后审计会以为那个市场名是宿主说的。
+    """
+    markets = _codex_enabled_marketplaces(home)
+    if not markets:
+        mp = home / ".agents" / "plugins" / "marketplace.json"
+        if mp.exists():
+            try:
+                markets = [json.loads(mp.read_text(encoding="utf-8")).get("name") or "personal"]
+            except json.JSONDecodeError:
+                markets = []
+    cache = home / ".codex" / "plugins" / "cache"
+    for mkt in markets or ["personal"]:
+        hits = sorted(cache.glob(f"{mkt}/vod-devkit/*/.mcp.json"))
+        if hits:
+            return mkt, hits[-1], False
+    # 配置里没启用任何市场：退回"存在的那份"（能让巡检报 DRIFT 而不是 NOT_INSTALLED）
+    found = sorted(cache.glob("*/*/*/.mcp.json")) if cache.exists() else []
+    if found:
+        return found[-1].parts[-4], found[-1], True
+    return (markets[0] if markets else None), None, False
+
+
+def audit_host(host: str, expect_version: str, home: Path | None = None) -> tuple:
     """只读巡检**真实机器**上的安装（不写任何文件）：条目在不在、入口存不存在、
     自证版本是否等于构建版本。返回 PASS / DRIFT / NOT_INSTALLED。
 
     动机（2026-11-12 实锤）：矩阵全绿不代表这台机器的安装是新的——巡检当场发现
     opencode 指向仓内路径而非载荷、codex 停在 0.5.3、dsh 壳还钉着 0.4.4。
     """
-    home = Path.home()
+    home = Path.home() if home is None else home
     spec = EXPECT[host]
     conf = home / spec["config"] if spec.get("config") else None
     entry = None
@@ -282,17 +451,30 @@ def audit_host(host: str, expect_version: str) -> tuple:
                 return "DRIFT", "插件目录缺 .mcp.json"
             entry = (json.loads(mcp.read_text(encoding="utf-8")).get("mcpServers") or {}
                      ).get("vod-devkit")
+        elif host == "hermes":
+            # 生效入口是 config.yaml 的 mcp_servers.vod-devkit；mcp/vod-devkit.json
+            # 只是备片（写它不代表宿主会读它——2026-11-16 实锤：备片能跑通，
+            # 而 config.yaml 指向已清理的 scratch 路径，巡检却报 PASS）
+            entry, why = _hermes_effective_entry(home)
+            if entry is None:
+                return "DRIFT", why
+            ok, msg = _probe(entry, expect_version)
+            return ("PASS" if ok else "DRIFT"), f"{msg}（{why}）"
         else:
-            entry = data if host == "hermes" else _dig(data, spec["entry"])
+            entry = _dig(data, spec["entry"])
             if spec["entry"] and not entry:
                 return "DRIFT", f"缺条目 {'.'.join(str(x) for x in spec['entry'] if x)}"
     if host == "codex":
-        cache = home / ".codex" / "plugins" / "cache"
-        found = sorted(cache.glob("*/*/*/.mcp.json")) if cache.exists() else []
-        if not found:
-            return "NOT_INSTALLED", "codex 插件缓存里没有 .mcp.json"
-        entry = (json.loads(found[-1].read_text(encoding="utf-8")).get("mcpServers") or {}
+        # 不能"排序取最后一份"：personal(0.5.4) 与 vod-local(0.5.9) 并存时排序会选中
+        # 后者并报 PASS，而 codex 实际按 config.toml 里 enabled 的那个市场跑（实锤 0.5.4）
+        mkt, mcp, guessed = _codex_effective_mcp(home)
+        if mcp is None:
+            return "NOT_INSTALLED", f"codex 插件缓存里没有 .mcp.json（市场 {mkt or '未声明'}）"
+        entry = (json.loads(mcp.read_text(encoding="utf-8")).get("mcpServers") or {}
                  ).get("vod-devkit")
+        ok, msg = _probe(entry or {}, expect_version)
+        note = f"codex 生效市场 {mkt}" + ("，未在 config.toml 声明、按存在的那份判" if guessed else "")
+        return ("PASS" if ok else "DRIFT"), f"{msg}（{note}）"
     if host == "dsh":
         patches = sorted((home / ".dsh" / "profiles").glob("*/cordis.patch.yml"))
         hit = [p for p in patches
@@ -309,6 +491,7 @@ def audit_host(host: str, expect_version: str) -> tuple:
 
 
 def main():
+    _pin_roots()
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", action="append", default=[])
     ap.add_argument("--keep", action="store_true", help="保留隔离 HOME（排查用）")

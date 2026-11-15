@@ -45,9 +45,78 @@ def _isolate_runtime(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_machine_writes(monkeypatch):
+    """S143 修复：切断所有可能把写操作导到真机的**继承**入口。
+
+    为什么不是"把 manifest 一律指到 tmp"（第一版这么写，19 条用例立刻红）：装机器用例
+    （tests/test_installer.py 的 `env` fixture）**在克隆仓里跑 bin/vod-devkit**，账本本来就
+    应该落在那个克隆仓根，断言读的也是 `<clone>/install-manifest.json`。真正让它写到
+    真机的是两件事，都出在"继承"上：
+      · 外层进程带着 VOD_DEVKIT_DIST_ROOT（实测：test_host_matrix 的 import 期 setenv
+        泄漏）→ 子进程把 DIST_ROOT 解析成真仓 → 账本写到真仓根；
+      · 外层带着 VOD_PAYLOAD_HOME/VOD_JAVA_API_KEY → 载荷根/凭据直接指真机。
+    所以这里**只 pop 继承值、不强行改值**：宿主的落点由各自的 HOME/根派生（本仓已按
+    env > 文件 > 物理位置分层），pop 之后子进程自然落在自己的克隆/假 HOME 里。
+    兜底由 S143 的 session 前后快照负责：真有谁漏隔离，跑完就对不上（exit 1）。
+    """
+    for k in ("VOD_DEVKIT_MANIFEST", "VOD_PAYLOAD_HOME", "VOD_DEVKIT_SRC_ROOT",
+              "VOD_DEVKIT_DIST_ROOT", "VOD_JAVA_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _legacy_product_switch(monkeypatch):
     """D-product-ask-1 前写的老用例默认走兼容开关；专项用例把它 delenv 掉验证强制。"""
     monkeypatch.setenv("VOD_ALLOW_UNKNOWN_PRODUCT", "1")
     # 会话记忆是进程内全局（D-product-ask-1），跨用例会串——每个用例清空
     from vod_mcp import runtime_state as _rt
     _rt._SESSION_MEM.clear()
+
+
+# ── S143：整套测试不许写真机（门禁） ────────────────────────────────────
+#
+# 实锤（2026-11-16）：某个 install 用例没被 env 隔离，把**真实仓根** install-manifest.json
+# 的 installs[].payloadDir 写成了 pytest 临时目录；随后 uninstall 用例按这份账本把
+# ~/.vod-devkit/payloads/0.5.9 整个删掉 —— 九个宿主的入口全部指向不存在的路径
+# （MCP 报 "lost its stdio subprocess"），而 pytest 自己只看到 19 条 FileNotFoundError。
+# 隔离 runtime 只覆盖了 runtime.json，没覆盖"落在仓根/用户根"的另外两个写点：
+# VOD_DEVKIT_MANIFEST（账本）与 VOD_PAYLOAD_HOME（载荷根）。
+#
+# 这条门禁在**整套**层面比前后快照：不管哪个用例漏了隔离，跑完就对不上。
+def _machine_state() -> dict:
+    import hashlib
+    import os as _os
+
+    def _md5(pth):
+        try:
+            return hashlib.md5(pth.read_bytes()).hexdigest()
+        except OSError:
+            return None
+
+    home = Path(_os.path.expanduser("~"))
+    payloads = home / ".vod-devkit" / "payloads"
+    return {
+        "manifest": _md5(Path(__file__).resolve().parent.parent / "install-manifest.json"),
+        "payloads": sorted(p.name for p in payloads.iterdir()) if payloads.is_dir() else [],
+        "hermes_config": _md5(home / ".hermes" / "config.yaml"),
+    }
+
+
+def pytest_sessionstart(session):
+    session.config._machine_before = _machine_state()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    before = getattr(session.config, "_machine_before", None)
+    if before is None:
+        return
+    after = _machine_state()
+    drift = [k for k in before if before[k] != after[k]]
+    if not drift:
+        return
+    print("\n[S143] 测试写到了真机（隔离缺失）："
+          + "；".join(f"{k}: {before[k]!r} → {after[k]!r}" for k in drift)
+          + "\n  修法：tests/conftest.py 的 _isolate_machine_writes（VOD_DEVKIT_MANIFEST / "
+            "VOD_PAYLOAD_HOME 必须指向 tmp）", file=sys.stderr)
+    session.exitstatus = 1

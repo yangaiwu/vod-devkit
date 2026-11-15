@@ -1410,3 +1410,72 @@ key 变量、代码类看代码里是否点名 runtime.json；其余仍 fail-ope
 | # | 场景 | 断言 |
 |---|---|---|
 | S140 | 身份值热生效 | 改 runtime.json 的 java_key/java_base → `net.JAVA_KEY`/`JAVA_BASE` 立刻反映（无需重启）；env 高于 runtime；显式 set 过的模块属性优先；`token_tier=anonymous` 时 `_explicit_key()` 为 False；runtime 缺失时回落镜像 |
+
+
+## 隔离矩阵与巡检判据（S141-S142，D-matrix-isolation-1 / D-audit-effective-1，2026-11-16，第三轮评审）
+
+需求变更（两条都是真机实测出来的）：`scripts/host_matrix.py` 是 CI 门禁，却在**改操作者的
+真实配置**；`--audit` 是"这台装得对不对"的唯一只读判据，却在**报假绿**。
+
+**S141-a 隔离 HOME 必须搬每个宿主自己的家**：矩阵只设了 `$HOME`，而 hermes CLI 认
+`HERMES_HOME`（不认 `$HOME`）。实测：一次全量矩阵跑完，真机 `~/.hermes/config.yaml` 的
+`mcp_servers.vod-devkit` 被改成 `<scratch>/vod-matrix-XXXX/home/.vod-devkit/payloads/…` +
+桩地址 `http://127.0.0.1:9/stub`；scratch 一清，hermes 的 vod 工具就永久掉线
+（会话里报 `lost its stdio subprocess`）。修法=矩阵 env 按宿主搬自己的家
+（`HERMES_HOME` / `CODEX_HOME` / `DSH_HOME`），并 pop 掉继承来的 `HERMES_PROFILE` /
+`HERMES_CONFIG`。
+
+**S141-c 沙箱里的宿主 CLI 必须立刻失败，不能等它自举**：只搬 `HERMES_HOME` 会换来第二个
+问题——hermes CLI 在空家里会尝试自举依赖，实测一次 `install --target hermes` 卡到 300s
+超时（那一轮全量矩阵因此 FAIL）。修法=矩阵给 hermes 的 PATH 最前面放一个同名 shim
+（`exit 1` + 明确 stderr），适配器本来就是 best-effort（rc≠0 打印提示后继续），矩阵断言
+落在"安装器写出的条目 + 按该条目拉起 server 自证"。**已知覆盖降级**：矩阵不验 CLI 注册段，
+真机生效入口由 S142 的巡检负责——两件事分开管，不互相冒充。全量矩阵耗时从 300s+ 回到 ~7s。
+
+**S141-b 硬证据形态**：矩阵前后对真实 `~/.hermes/config.yaml` 取 md5，必须一致。
+
+**S142-a 巡检读"生效入口"**：hermes 的生效入口是 `config.yaml` 的
+`mcp_servers.vod-devkit`，`~/.hermes/mcp/vod-devkit.json` 只是备片；旧判据读备片，
+于是"备片能跑通、生效入口指向已删路径"时报 PASS。改为读 `config.yaml`（零依赖窄解析，
+不做完整 YAML），解析不出直接 DRIFT（宁可报挂，不许静默跳过）。
+
+**S142-b codex 按启用的市场判**：codex 同时存在 `personal(0.5.4)` 与 `vod-local(0.5.9)` 两份
+缓存，`config.toml` 里启用的是 personal；旧判据按目录名排序取最后一份 → 报 0.5.9 PASS，
+而 codex 实际拉起 0.5.4（server 日志 argv 实锤）。改为按 `[plugins."vod-devkit@<mkt>"]`
+的 enabled 选市场，报文里带市场名（可审计"它到底判的是哪一份"）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S141 | 隔离矩阵不碰真机 | hermes 的隔离 env 含 `HERMES_HOME` 且落在隔离 HOME 内、不继承外层值；全量矩阵前后真实 `~/.hermes/config.yaml` md5 不变 |
+| S142 | 巡检判据 | 备片可跑通但 `config.yaml` 指向死路径 → DRIFT 且报文点明 `config.yaml`；codex 两份市场并存且 config.toml 启用 personal → 报文点明 personal（不得按排序取 vod-local 报假绿） |
+
+
+## 测试隔离：不写真机（S143，D-test-isolation-1，2026-11-16）
+
+现象（本机实测）：`python3 -m pytest tests/` 跑完，九个宿主的 MCP 全部 `lost its stdio
+subprocess`；巡检 1 PASS / 8 DRIFT（清一色"server 无响应"）；`~/.vod-devkit/payloads/`
+里 0.5.9 整个消失，而所有宿主入口都指向它。
+
+根因是**两处继承**而不是两处默认值：
+1. `scripts/host_matrix.py` 在 import 期 `os.environ.setdefault(VOD_DEVKIT_SRC_ROOT/DIST_ROOT)`。
+   被 `tests/test_host_matrix.py` 当模块加载后，这两个值留在 pytest 进程里，所有装机子进程
+   把 `DIST_ROOT` 解析成**真仓** → 账本写到真仓根（`installs[].payloadDir` 变成 pytest tmp）。
+2. 随后 `uninstall` 用例按那份账本把真机载荷目录删掉（`~/.vod-devkit/payloads/0.5.9`），
+   于是所有宿主入口指向不存在的路径；pytest 自己只看到一串 `FileNotFoundError`，
+   与真正的伤害没有任何一条报错对得上。
+
+**修法（两条，别只做一条）**：
+- `host_matrix.py` 不在 import 期写 env（改成 `_pin_roots()`，只由 `main()` 调）。
+- `tests/conftest.py` 新增 `_isolate_machine_writes`：pop 掉继承来的
+  `VOD_DEVKIT_MANIFEST` / `VOD_PAYLOAD_HOME` / `VOD_DEVKIT_{SRC,DIST}_ROOT` / `VOD_JAVA_API_KEY`。
+  **不做**"把 manifest 一律指到 tmp"——装机器用例在克隆仓里跑 `bin/vod-devkit`，账本本来就该
+  落在克隆仓根（第一版这么改，19 条用例立刻红：它们读 `<clone>/install-manifest.json`）。
+
+**门禁（S143）**：`tests/conftest.py` 的 session 前后快照——真仓根 `install-manifest.json`、
+`~/.vod-devkit/payloads/` 目录清单、`~/.hermes/config.yaml` md5。任一漂移 → 打
+`[S143] 测试写到了真机（隔离缺失）` 并 `exit 1`。探针验证过：临时写一个
+`~/.vod-devkit/payloads/9.9.9-gate-probe` 目录 → `rc=1` + 该行输出；删掉探针后恢复绿。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S143 | 整套测试不写真机 | 全量跑完，真仓根账本 md5、`~/.vod-devkit/payloads` 清单、`~/.hermes/config.yaml` md5 三者不变；故意写真机 → session 门禁 `exit 1` 并指名漂移项 |

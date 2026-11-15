@@ -1523,3 +1523,71 @@ PR，且要先补"长驻进程里 runtime 改值"的用例。
 
 **代价**：每次出口调用读一次 runtime.json。提交/元数据是低频动作，实测无感；真有高频
 只读路径再加 mtime 缓存，不预先加。
+
+## D-matrix-isolation-1：矩阵的隔离要搬"宿主自己的家"（2026-11-16）
+
+**问题**：`scripts/host_matrix.py` 在一次性 HOME 里跑九个宿主，但只搬了 `$HOME`。
+hermes CLI 的家是 `HERMES_HOME`（不认 `$HOME`：`HOME=/tmp/x hermes profile list` 照样列出
+真实 profile），于是"隔离安装"直接改写操作者真实的 `~/.hermes/config.yaml`——把
+`mcp_servers.vod-devkit` 写成 scratch 载荷路径 + 桩地址 `127.0.0.1:9/stub`，scratch 一清，
+真机 hermes 的 vod 工具永久掉线（"lost its stdio subprocess"）。codex 侧同理（`CODEX_HOME`，
+此前已踩过一次 0.4.2 旧缓存）。
+
+**决定**：矩阵 env 由 `_isolated_env(host, home)` 单点生成，按宿主搬自己的家
+（hermes→`HERMES_HOME`，codex/codex-desktop→`CODEX_HOME`，dsh→`DSH_HOME`），并 pop 掉
+继承来的 `HERMES_PROFILE` / `HERMES_CONFIG`。新增宿主前先确认它用哪个变量，别假设 `$HOME` 生效。
+
+**已知降级（必须写在用例 docstring 里）**：空 `HERMES_HOME` 下 hermes CLI 会尝试自举依赖，
+实测一次 install 卡到 300s 超时（整轮矩阵 FAIL）。所以沙箱里给 hermes 的 PATH 最前放一个
+同名 shim（`exit 1` + 明确 stderr），适配器 best-effort 继续；矩阵断言落在"安装器写出的
+条目 + 按条目拉起 server 自证"。真机生效入口由 D-audit-effective-1 的巡检负责——两件事
+分开管，不互相冒充。修完后全量矩阵 9/9 PASS、耗时 ~7s（此前 300s+ 全挂在自举上）。
+
+**硬证据**：矩阵前后真实 `~/.hermes/config.yaml` md5 一致（实测 6b229195… 两次相同），
+`--host hermes` 仍报 PASS（9 工具 / 0.5.9）。
+
+## D-audit-effective-1：巡检判"宿主实际生效的入口"，不判 manifest/排序（2026-11-16）
+
+**问题**（两条假绿，同批实锤）：
+1. hermes：巡检读 `~/.hermes/mcp/vod-devkit.json`（备片）。备片能跑通、而 `config.yaml`
+   的生效条目指向已清理的 scratch 路径，巡检照报 PASS 8 工具。
+2. codex：巡检 `glob(cache/*/*/*/.mcp.json)` 后排序取最后一份。`personal(0.5.4)` 与
+   `vod-local(0.5.9)` 并存时永远选中 vod-local 报 0.5.9 PASS，而 codex 按 `config.toml`
+   里 `enabled = true` 的 personal 跑 0.5.4（`/tmp/vod_mcp_server.log` 的 argv 实锤）。
+
+**决定**：巡检一律判**生效入口**。
+- hermes：读 `config.yaml` 的 `mcp_servers.vod-devkit`（零依赖窄解析；不 import yaml——
+  它是 CI 门禁，PyYAML 不在依赖里，缺包时假红/假绿更难查）。解析不出 → DRIFT。
+- codex：按 `[plugins."vod-devkit@<mkt>"]` 的 `enabled` 选市场（多个取第一个；一个都没有
+  才回落 `~/.agents/plugins/marketplace.json` 的 name），报文里带市场名，便于事后审计
+  "它判的是哪一份"。
+
+**纪律**：判据指向"宿主真的会读/会拉起的那一份"，而不是"我们写下去的那一份"；
+manifest 是记账，不是生效事实。
+
+## D-test-isolation-1：测试隔离要切断"继承"，门的判据要落到真机快照（2026-11-16）
+
+**问题**：`pytest` 跑到一半把九个宿主的 MCP 全弄挂（`lost its stdio subprocess`），
+而测试自己只报 `FileNotFoundError`。链路：`scripts/host_matrix.py` 在 **import 期**
+`setdefault` 了两个根 → 被 `tests/test_host_matrix.py` 当模块加载后泄漏进整场 pytest →
+装机子进程把 `DIST_ROOT` 解析成真仓 → 账本写进真仓根、`payloadDir` 变成 pytest tmp →
+后面的 uninstall 用例按账本删掉 `~/.vod-devkit/payloads/0.5.9` → 所有宿主入口失效。
+
+**决定**：
+1. 入口脚本**不在 import 期写 env**（`_pin_roots()` 只由 `main()` 调）。这是本仓已有的纪律
+   （`bin/vod-devkit` 同样注释过），只是 `host_matrix.py` 漏了；漏一次就是"测试把真机配置
+   改成沙箱路径"。
+2. conftest 的 autouse fixture **只 pop 继承值**（`VOD_DEVKIT_MANIFEST` / `VOD_PAYLOAD_HOME` /
+   `VOD_DEVKIT_{SRC,DIST}_ROOT` / `VOD_JAVA_API_KEY`），不强行改值。理由：装机用例在**克隆仓**
+   里跑入口，账本应落在克隆仓根；强行指 tmp 会把 19 条正确用例打红（实测）。宿主的落点由
+   各自 HOME/根派生，pop 完自然隔离。
+3. 门禁用 **session 前后快照**而不是单条用例：受保护对象是真机三处
+   （仓根账本 / 载荷根清单 / hermes config.yaml），不管哪个用例漏隔离，跑完就对不上。
+   单条用例只能证明"我这条不写"，证明不了"整套不写"。
+
+**代价**：每次 pytest 多三次 md5/目录列举（毫秒级）；真机本就该在测试期间保持不变，
+这条门禁不引入任何生产依赖。
+
+**验证**：改后全量 621 passed / 2 failed（`test_update_ff_pull_and_reburn`、
+`test_update_refuses_when_tracked_conflict` 在 origin/main 的干净 worktree 上也红，
+属既存问题，与本轮无关）；跑前后 manifest md5、payloads 清单、hermes config md5 三项一致。

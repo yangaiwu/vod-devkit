@@ -440,6 +440,12 @@ vod-devkit detect --path .        # 只读识别项目语言/框架/构建（不
 python3 scripts/host_matrix.py    # 9 宿主安装矩阵：装→断言→拉起 server→卸→验干净
 ```
 
+矩阵 PASS 的**含义边界**（2026-11-16 收窄，别读成"宿主装得上"）：沙箱里的宿主 CLI 一律用
+`exit 1` 的 shim 挡住（空 `HERMES_HOME` 下 hermes CLI 会自举依赖、实测卡到 300s），所以矩阵
+验的是"安装器写出的条目 + 按该条目拉起 server 自证"，**不验 CLI 注册段**；真机生效入口用
+`python3 scripts/host_matrix.py --audit` 判（它读 config.yaml 的生效条目与 codex 的启用市场，
+报文里带判据来源）。
+
 `doctor` 的失败按层分组，不再平铺一列 `FAIL`；`explain` 与它共用同一张规则表
 （`vod_mcp/diagnose.py`），所以"报告里出现的层/原因"和"解释出来的动作"永远一致。
 
