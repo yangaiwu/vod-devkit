@@ -1166,8 +1166,33 @@ args 指向载荷；把 PATH 上的 python3 换成 3.9 再启动 → stderr 出�
 | S123 | status/doctor --target | 选中行输出该行 JSON；未知 target 明确报"没有该宿主的安装记录"并列出已有 |
 
 验收口径（目标环境执行，工具不入库）：`python3 -m pytest tests/test_global_cmds.py -q`
-全绿；真机上 `version` 输出四行（本机实测 hermes/opencode/dsh/codex）；
+全绿；真机上 `version` 逐行列出 installs[] 的每个宿主 + 每个装了壳的 dsh profile
+（本机实测 8 行账本宿主 + `dsh(headless)`/`dsh(web)`）；
 `packs disable knowledge`（不带 `--apply`）打印"未写盘"，文件 mtime 不变。
+
+
+## 全局视图覆盖账本外宿主（S130-S131，D-dsh-global-view-1，2026-11-16）
+
+需求变更：`version` / `packs status` 的行数 = `installs[]` 条数。dsh 由
+`dsh-vod-devkit` 的 profile 依赖承载、安装器不写账本行，于是全局视图里**连一行都没有**，
+也没有 `[missing]` 提示（那个提示只给"账本有行、配置没条目"的宿主）——用户会读成
+"这台机器没装 dsh"。本组补只读探测，**不改安装/卸载语义**。
+
+- `version`：遍历 `~/.dsh/profiles/*/package.json`，只列**声明了** `dsh-vod-devkit`
+  （dependencies 或 `dsh.profile.bundles`）的 profile，输出 `dsh(<profile>)` 行：
+  已装版本（取 `node_modules/dsh-vod-devkit/package.json` 的实际版本）+ 同版/≠CLI 判定
+  + 重装命令（`install --target dsh --profile <p>`）。
+- 声明了但 `node_modules` 里没有该包 → 报「已装版本未知」，**不回落到 spec**（`file:…tgz`
+  或范围号是意图，不是现状）。
+- `packs status`：dsh 行标 `[n/a]` 并说明"壳不走 MCP env、能力面由包内固定、改 pack
+  需重装"；`packs enable|disable|all --target dsh` 打印"跳过 + 重装命令"，
+  **不写 profile、不留 .bak、不打印成功**。
+- `--target dsh` / `--target dsh(<profile>)` 都可选中；只读，命令前后 profile 字节不变。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S130 | version 覆盖账本外宿主 | 假 HOME 造 profile：输出现 `dsh(web)` 行、已装版本取自 node_modules、≠CLI 时给出 `--profile web` 重装命令；node_modules 缺失时报「已装版本未知」；未声明该包的 profile 不出现；命令前后 profile 字节不变（只读） |
+| S131 | packs 对 dsh 不可写 | `packs status --target dsh` 出行且带 `[n/a]`+「需重装」；`packs enable … --target dsh --apply` 打印「跳过」与重装命令，profile 字节不变且**不生成 .bak**（不假装改过） |
 
 
 ## 凭据单入口与技能读取教法（S124-S125，2026-11-15）

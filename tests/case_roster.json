@@ -394,6 +394,12 @@
     "S129": {
       "carrier": "tests/test_structure_guards.py"
     },
+    "S130": {
+      "carrier": "docs/design.md"
+    },
+    "S131": {
+      "carrier": "docs/design.md"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

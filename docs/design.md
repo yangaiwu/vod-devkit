@@ -959,13 +959,22 @@ cache 内 .mcp.json 被改写成 `python3` 绝对路径 + `payloads/0.5.9/vod_mc
   运行时形态由 `doctor` 回答（它会读 codex 插件缓存的实际 command/args）。
 - dsh 的 packs 目前改不了（写在 profile patch 里），`packs` 会明说而不是静默跳过。
 
+账本外宿主（S130-S131，D-dsh-global-view-1）：`version` / `packs status` 的行数等于
+`installs[]` 条数，而 dsh 由 `dsh-vod-devkit` 的 profile 依赖承载、安装器不写账本行——
+全局视图里它原来连一行都没有，连 `[missing]` 都不给（那个提示只服务"账本有行、配置
+没条目"）。补法是**只读探测** `~/.dsh/profiles/*/package.json`：只列声明了
+`dsh-vod-devkit` 的 profile，版本取 `node_modules/dsh-vod-devkit/package.json` 的实际
+版本（取不到报「已装版本未知」，不回落到 `file:…tgz` 之类的 spec——那是意图不是现状），
+`packs` 面对它一律 `[n/a]` + "需重装"。**不把 dsh 塞进 installs[]**：那会改写
+`uninstall` 语义（按行删壳依赖），是另一件事。
+
 探测与交互（S127）：判据是"宿主 CLI 在 PATH 或配置目录存在"，规则在
 `integrations/<host>/host.json` 的 `detect` 段（`hosts.raw()` 归一成 detectCLI/detectPath），
 不在代码里写宿主清单。**只有 stdin+stdout 都是终端才问**——CI/重定向下"多选"退化成
 "报错列选项"，因为猜错宿主的代价是写坏别人的配置。多选与 `--target all` 共用同一个
 安装循环（`_install_many`）：缺落点（dsh 无 `--profile`）跳过并说明，单宿主失败不阻塞其它。
 
-用例承载：`tests/test_global_cmds.py`（S116-S123、S126-S127）。
+用例承载：`tests/test_global_cmds.py`（S116-S123、S126-S128、S130-S131）。
 
 ## 凭据单入口与技能读取教法（D-auth-init-1 / D-skill-teaching-1，2026-11-15）
 

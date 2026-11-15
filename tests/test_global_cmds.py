@@ -202,6 +202,85 @@ def test_s123_status_unknown_target_exits(tmp_path, monkeypatch, capsys):
     assert "没有该宿主的安装记录" in capsys.readouterr().out
 
 
+# ── S130/S131 dsh：不进 installs[] 的宿主，全局视图补只读探测行 ─────
+#
+# dsh 由 dsh-vod-devkit 的 profile 依赖承载、不写 install-manifest，所以
+# version/packs 的账本视图里原来连一行都没有（也没有 [missing] 提示），
+# 读起来像"没装 dsh"。补法是只读探测 profile，不是把 dsh 塞进 installs[]
+# （塞进去会改写 uninstall 语义：按行删壳依赖）。
+
+def _dsh_profile(tmp_path, monkeypatch, profile="web", installed="0.5.5",
+                 with_pkg=True, declared="0.5.9"):
+    home = tmp_path
+    pdir = home / ".dsh" / "profiles" / profile
+    pdir.mkdir(parents=True)
+    (pdir / "package.json").write_text(json.dumps({
+        "name": f"dsh-profile-{profile}", "private": True,
+        "dependencies": {"dsh-vod-devkit": declared},
+        "dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-base", "dsh-vod-devkit"]}},
+    }, ensure_ascii=False), encoding="utf-8")
+    if with_pkg:
+        nm = pdir / "node_modules" / "dsh-vod-devkit"
+        nm.mkdir(parents=True)
+        (nm / "package.json").write_text(json.dumps({"version": installed}),
+                                        encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    return pdir / "package.json"
+
+
+def test_s130_version_has_a_row_for_dsh(tmp_path, monkeypatch, capsys):
+    _env(tmp_path, monkeypatch)
+    pkg = _dsh_profile(tmp_path, monkeypatch, profile="web", installed="0.5.5")
+    before = pkg.read_bytes()
+    packs_cmd.cmd_version(_A())
+    out = capsys.readouterr().out
+    assert "dsh(web)" in out, "账本外的宿主必须在全局视图里有一行"
+    assert "已装 0.5.5" in out
+    assert "≠ CLI" in out and "--profile web" in out, "要给出重装命令，不是只报版本号"
+    assert pkg.read_bytes() == before, "version 是只读命令，不许动 profile"
+
+
+def test_s130_version_says_unknown_when_node_modules_missing(tmp_path, monkeypatch, capsys):
+    """声明了但没装下来：不能把 spec 当已装版本报（那是意图不是现状）。"""
+    _env(tmp_path, monkeypatch)
+    _dsh_profile(tmp_path, monkeypatch, declared="file:/x/dsh-vod-devkit-0.5.9.tgz",
+                 with_pkg=False)
+    packs_cmd.cmd_version(_A())
+    out = capsys.readouterr().out
+    assert "dsh(web)" in out and "已装版本未知" in out
+
+
+def test_s130_profiles_without_the_package_are_ignored(tmp_path, monkeypatch, capsys):
+    _env(tmp_path, monkeypatch)
+    pdir = tmp_path / ".dsh" / "profiles" / "plain"
+    pdir.mkdir(parents=True)
+    (pdir / "package.json").write_text(json.dumps({"name": "dsh-profile-plain"}),
+                                       encoding="utf-8")
+    packs_cmd.cmd_version(_A())
+    assert "dsh(plain)" not in capsys.readouterr().out
+
+
+def test_s131_packs_status_reports_dsh_without_pretending_its_writable(
+        tmp_path, monkeypatch, capsys):
+    _env(tmp_path, monkeypatch)
+    _dsh_profile(tmp_path, monkeypatch)
+    packs_cmd.cmd_packs(_A(packs_action="status", target="dsh", apply=False))
+    out = capsys.readouterr().out
+    assert "dsh(web)" in out and "[n/a]" in out
+    assert "需重装" in out
+
+
+def test_s131_packs_write_skips_dsh_and_touches_nothing(tmp_path, monkeypatch, capsys):
+    _env(tmp_path, monkeypatch)
+    pkg = _dsh_profile(tmp_path, monkeypatch)
+    before = pkg.read_bytes()
+    packs_cmd.cmd_packs(_A(packs_action="enable", ids="knowledge", target="dsh", apply=True))
+    out = capsys.readouterr().out
+    assert "跳过" in out and "install --target dsh --profile web" in out
+    assert pkg.read_bytes() == before, "dsh 落点不可写 JSON：既不许改，也不许假装改过"
+    assert not (pkg.parent / "package.json.bak").exists()
+
+
 # ── S126 范围守护：这仍是声音采集插件 ──────────────────────
 
 def test_s126_scope_is_voice_collection_not_cloud_ops():

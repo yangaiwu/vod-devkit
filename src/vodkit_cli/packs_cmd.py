@@ -38,6 +38,75 @@ def _current_version() -> str:
     return __version__
 
 
+# ── dsh：不进 installs[] 的宿主（只读探测） ─────────────────
+#
+# dsh 由 `dsh-vod-devkit` 的 profile 依赖承载（install --target dsh 只装壳包，
+# 不写 install-manifest 行——D-installs-1 的账本只登记 MCP 宿主）。结果是
+# `version` / `packs status` 里连一行都没有、也没有 [missing] 提示，读起来像
+# "这台机器没装 dsh"。补法是只读探测 profile，**不是**把 dsh 塞进 installs[]
+# （塞进去会改写安装/卸载语义：uninstall 会按行去删壳依赖）。
+
+def _dsh_rows() -> list:
+    """读 ~/.dsh/profiles/*/package.json，返回声明了 dsh-vod-devkit 的 profile。
+
+    只读：不写 profile、不碰 node_modules。版本取**实际装下来的那份**
+    （node_modules/dsh-vod-devkit/package.json）；取不到才回落声明的 spec
+    ——spec 是意图（可能是 `file:…tgz` 或范围号），实际跑的是装下来的版本。
+    """
+    base = Path.home() / ".dsh" / "profiles"
+    if not base.is_dir():
+        return []
+    out = []
+    for pj in sorted(base.glob("*/package.json")):
+        try:
+            data = json.loads(pj.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        dep = (data.get("dependencies") or {}).get("dsh-vod-devkit")
+        bundles = ((data.get("dsh") or {}).get("profile") or {}).get("bundles") or []
+        if not dep and "dsh-vod-devkit" not in bundles:
+            continue
+        inst = None
+        try:
+            inst = json.loads((pj.parent / "node_modules" / "dsh-vod-devkit"
+                               / "package.json").read_text(encoding="utf-8")).get("version")
+        except (OSError, json.JSONDecodeError):
+            pass
+        out.append({"profile": pj.parent.name, "declared": dep or "(bundles 引用)",
+                    "installed": inst, "config": str(pj)})
+    return out
+
+
+def _dsh_name(row: dict) -> str:
+    return f"dsh({row['profile']})"
+
+
+def _dsh_version_line(row: dict, cur: str) -> None:
+    name = _dsh_name(row)
+    inst = row["installed"] or row["declared"]
+    if row["installed"] is None:
+        verdict = "已装版本未知（node_modules 无该包，先 dsh plugin add dsh-vod-devkit）"
+    elif inst == cur:
+        verdict = "同版"
+    else:
+        verdict = (f"≠ CLI（{inst} → {cur}，重跑 install --target dsh "
+                   f"--profile {row['profile']}）")
+    print(f"  {name:14s} 已装 {inst:8s} {verdict}")
+    print(f"  {'':14s} 生效 packs: —   [n/a] 壳内固定（不走 MCP env）；{row['config']}")
+
+
+def _dsh_packs_note(row: dict) -> str:
+    return (f"dsh 壳不走 MCP env，能力面由包内固定；改 pack 需重装："
+            f"install --target dsh --profile {row['profile']}（{row['config']}）")
+
+
+def _dsh_filter(rows: list, target: str) -> list:
+    """--target 只有 dsh（整族）有意义；给具体 dsh(web) 也接受，便于复制输出。"""
+    if not target or target == "dsh":
+        return rows
+    return [r for r in rows if target == _dsh_name(r)]
+
+
 # ── 宿主配置定位与受管条目 ────────────────────────────────
 
 def _config_path(row: dict) -> Path | None:
@@ -136,6 +205,9 @@ def cmd_version(_args):
         eff_s = ",".join(eff) if eff else "—"
         print(f"  {target:14s} 已装 {inst:8s} {verdict}")
         print(f"  {'':14s} 生效 packs: {eff_s}   [{state}] {note}")
+    # dsh 不在账本里（profile 依赖承载）→ 单独只读探测，别让全局视图漏掉它
+    for drow in _dsh_rows():
+        _dsh_version_line(drow, cur)
 
 
 # ── packs ────────────────────────────────────────────
@@ -180,7 +252,8 @@ def cmd_packs(args):
     action = getattr(args, "packs_action", "status")
     target = getattr(args, "target", "") or ""
     rows = _filter(_rows(), target)
-    if not rows:
+    dsh = _dsh_filter(_dsh_rows(), target)
+    if not rows and not dsh:
         print("未安装（无 install-manifest）" if not _rows() else f"没有该宿主的安装记录：{target}")
         return
     if action == "status":
@@ -188,6 +261,13 @@ def cmd_packs(args):
             state, eff, note = _read_effective(row)
             eff_s = ",".join(eff) if eff else "—"
             print(f"{row.get('target'):14s} 生效 packs: {eff_s}   [{state}] {note}")
+        for drow in dsh:
+            print(f"{_dsh_name(drow):14s} 生效 packs: —   [n/a] {_dsh_packs_note(drow)}")
+        return
+    # enable/disable/all：dsh 不可写（壳内固定），明确说出路，不打印"已改"
+    for drow in dsh:
+        print(f"{_dsh_name(drow):14s} 跳过：{_dsh_packs_note(drow)}")
+    if not rows:
         return
     # enable/disable/all
     if action == "all":

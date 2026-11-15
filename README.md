@@ -91,6 +91,11 @@ npx -y vod-devkit@latest auth init --key <k> --apply     # 写 runtime.json（�
 `core` 强制包含）。`VOD_PACKS` 里出现未知包 id 时**安装口与 server 启动口都会报错退出**
 ——不静默过滤，免得"配了没生效"。
 
+dsh 不在账本里（它是 `dsh-vod-devkit` 的 profile 依赖，安装器不写行），所以 `version` /
+`packs status` 会额外**只读探测** `~/.dsh/profiles/*/package.json`，为每个装了壳的 profile
+打一行 `dsh(<profile>)`：版本取 `node_modules` 里实际装的那份，漂移时直接给出
+`install --target dsh --profile <p>`；`packs` 对它是 `[n/a]`（壳不走 MCP env，改面要重装）。
+
 ## 按宿主安装
 
 五个宿主的装法一致（`install` 带 `--target`），差异在配置落点与注意点。
