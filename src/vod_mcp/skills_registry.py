@@ -76,7 +76,7 @@ def list_skills(params: dict) -> dict:
     （尝试本身即可达性检查），读不到才回落 vod_retrieve_skill，绝不反复请求。
     """
     from vod_mcp import packs
-    enabled = set(packs.enabled_packs())
+    enabled = set(packs.effective_packs())
     items = []
     for d in _skill_dirs():
         text = (d / "SKILL.md").read_text(encoding="utf-8")
@@ -122,7 +122,7 @@ def retrieve_skill(params: dict) -> dict:
         known = [p.name for p in _skill_dirs()]
         raise SkillError(f"未知技能 {name!r}；可用：{'、'.join(known)}", -32602)
     pack = SKILL_PACK.get(name, "core")
-    enabled = set(packs.enabled_packs())
+    enabled = set(packs.effective_packs())
     if pack not in enabled:
         raise SkillError(
             f"技能 {name} 属于 {pack} pack，当前安装未启用（VOD_PACKS="
