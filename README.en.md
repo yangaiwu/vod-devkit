@@ -84,8 +84,13 @@ npx -y vod-devkit@latest uninstall      # removes the native plugin, keeps confi
 ```
 
 Uses the codex native plugin path (`codex plugin marketplace add` + `plugin add`),
-with `.mcp.json` running `vod-devkit serve` over stdio. If the collection circuit
-breaker is tripped, install refuses the collect pack until `--ack-suspension`.
+with `.mcp.json` in the Agent Plugins field shape (`$schema` + `type: stdio`) running
+`vod-devkit serve`. The installer then rewrites the cached copy to an absolute
+interpreter plus payload path and reads it back — **that rewrite is where runtime
+correctness comes from**: codex 0.167 does not expand `${PLUGIN_ROOT}` and does not
+use the plugin root as cwd, so always install via `install --target codex` rather than
+adding the marketplace entry by hand. If the collection circuit breaker is tripped,
+install refuses the collect pack until `--ack-suspension`.
 
 ### CodeArts Agent (codeartsdoer)
 

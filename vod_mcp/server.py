@@ -15,6 +15,18 @@ from pathlib import Path
 # 其余所有资源路径一律走 vod_mcp/paths.py（含 VOD_DEVKIT_ROOT 覆盖）。
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# 解释器版本 guard 必须在 import vod_mcp 之前：本模块与下游（tools/guardrails）
+# 的注解用了 PEP 604（`dict | None`），在 3.9 上会在 def 求值时抛 TypeError
+# traceback——那是"响失败"但不可读。一行 guard 把残余风险变成可读诊断。
+if sys.version_info < (3, 10):
+    sys.stderr.write(
+        "[vod-devkit] MCP server 需要 Python >= 3.10（当前 %d.%d）。\n"
+        "  插件 .mcp.json 的 command 若走 PATH 上的 python3，请指向 3.10+ 解释器"
+        "（如 /usr/bin/python3.12），\n"
+        "  或重跑安装器由它用本机 3.10+ 解释器重写该文件。\n"
+        % sys.version_info[:2])
+    sys.exit(2)
+
 from vod_mcp import guardrails, packs, runtime_state, tools  # noqa: E402
 
 _PROTOCOL_VERSION = "2025-06-18"

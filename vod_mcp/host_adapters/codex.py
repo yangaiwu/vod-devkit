@@ -100,6 +100,126 @@ def strip_agents_vod_block(text: str) -> str:
     return "\n".join(out).rstrip()
 
 
+def locate_plugin_mcp(mp_name: str | None = "vod-local"):
+    """定位 codex 插件缓存里的 .mcp.json（最近写入的那份）。找不到返回 None。
+
+    mp_name=None 时扫所有 marketplace（doctor 用：装机实例的 marketplace 名可能是
+    `personal`/`vod-local` 等，按名找会漏）。
+    """
+    import glob as _glob
+    mkt = mp_name or "*"
+    hits = sorted(
+        _glob.glob(str(Path.home() / ".codex" / "plugins" / "cache"
+                       / mkt / "vod-devkit" / "*" / ".mcp.json")),
+        key=lambda p: Path(p).stat().st_mtime, reverse=True)
+    return Path(hits[0]) if hits else None
+
+
+def plugin_mcp_form(mcp_path) -> tuple:
+    """判定装机清单的**实际生效形态**，给 doctor 报，别让人猜。
+
+    三类（顺序即优先级）：
+        ("payload", srv)    —— command 是绝对路径：版本正确（我们改写成功）
+        ("placeholder", srv)—— args 含未展开的 ${...}：宿主收到字面量，起不来
+        ("cli", srv)        —— command 是裸 CLI 名：跑的是 PATH 上那份，版本不确定
+        ("unreadable", None)—— 读不出 mcpServers.vod-devkit
+    """
+    p = Path(mcp_path)
+    try:
+        srv = json.loads(p.read_text(encoding="utf-8"))["mcpServers"]["vod-devkit"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return ("unreadable", None)
+    args = srv.get("args") or []
+    if any("${" in str(a) for a in args):
+        return ("placeholder", srv)
+    cmd = str(srv.get("command") or "")
+    if "/" in cmd or "\\" in cmd:
+        return ("payload", srv)
+    return ("cli", srv)
+
+
+class PluginMcpRewriteError(RuntimeError):
+    """插件 .mcp.json 改写失败，按 kind 分类（安装器据此决定 warn 还是 fail）。
+
+    kind:
+      bad-json     —— 缓存内文件不是合法 JSON / 缺 mcpServers.vod-devkit（上游格式变更或人工改过）
+      not-writable —— 读写抛 OSError（只读挂载 / 权限）
+    这两类都**不该**把整个安装判死：插件自带的静态形态（`python3` +
+    `${PLUGIN_ROOT}/vod_mcp/server.py`）本身就能跑，只是解释器版本靠 PATH。
+    """
+
+    REMEDY = {
+        "bad-json":
+            "缓存内 .mcp.json 结构不符（codex 换了 Agent Plugins 解析形态，或该文件被改过）。"
+            "静态形态仍可运行；要改成载荷形态请删插件缓存重装，或改走 "
+            "`vod-devkit install --target generic --mcp-config <file>` 手写条目。",
+        "not-writable":
+            "插件缓存目录不可写（只读挂载/权限）。静态形态仍可运行；若机器上 PATH 的 "
+            "python3 < 3.10，请把该文件 command 指向 3.10+ 解释器绝对路径（安装器无法代写）。",
+    }
+
+    def __init__(self, kind: str, detail: str):
+        super().__init__(f"{kind}: {detail}")
+        self.kind = kind
+        self.detail = detail
+
+
+def rewrite_plugin_mcp(mcp_path, python: str = "", entry: str = "", env: dict | None = None) -> dict:
+    """把插件自带 .mcp.json 改写成「绝对解释器 + 载荷副本」，并**读回验证**。
+
+    为什么必须读回（2026-11-12 矩阵实锤的后续）：写成功 ≠ 落盘就是我们要的
+    形态——并发改写（宿主升级、另一次安装）会把它改回去，而宿主只会静默跑
+    改回去的那份。所以写完再解析一次，逐字段比对。
+
+    失败语义分三层，安装器按层处置：
+      - PluginMcpRewriteError（bad-json / not-writable）→ warn + 分类补救指引，安装继续
+      - RuntimeError（读回与期望不一致）→ 安装失败（半写状态不能留给宿主）
+      - 正常 → 返回读回的 server 条目
+    """
+    python = python or sys.executable
+    entry = entry or server_entry()
+    want_env = dict(env or {})
+    path = Path(mcp_path)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise PluginMcpRewriteError("not-writable", f"{path}: {e}") from e
+    try:
+        mj = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise PluginMcpRewriteError("bad-json", f"{path}: {e.msg}") from e
+    servers = mj.get("mcpServers") if isinstance(mj, dict) else None
+    if not isinstance(servers, dict):
+        raise PluginMcpRewriteError("bad-json", f"{path} 缺 mcpServers 对象")
+    srv = servers.get("vod-devkit")
+    if not isinstance(srv, dict):
+        raise PluginMcpRewriteError("bad-json", f"{path} 缺 mcpServers.vod-devkit")
+    srv["command"] = python
+    srv["args"] = [entry]
+    merged = dict(srv.get("env") or {})
+    merged.update(want_env)
+    srv["env"] = merged
+    try:
+        path.write_text(json.dumps(mj, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8")
+    except OSError as e:
+        raise PluginMcpRewriteError("not-writable", f"{path}: {e}") from e
+    try:
+        back = json.loads(path.read_text(encoding="utf-8"))
+        got = back["mcpServers"]["vod-devkit"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
+        raise RuntimeError(f"改写后读回失败（{path}）：{e}") from e
+    if got.get("command") != python or got.get("args") != [entry]:
+        raise RuntimeError(
+            f"改写后验证不通过（{path}）：期望 {(python, [entry])}，"
+            f"读回 {(got.get('command'), got.get('args'))}——可能有并发改写该文件")
+    got_env = got.get("env") or {}
+    missing = {k: v for k, v in want_env.items() if got_env.get(k) != v}
+    if missing:
+        raise RuntimeError(f"改写后验证不通过（{path}）：env 未落全 {missing}")
+    return got
+
+
 def install(args, packs: str) -> Path:
     """Codex（D-codex-agents-1 终态）：原生插件路径——
     codex plugin marketplace add <仓>/plugins + plugin add vod-devkit@vod-local，
@@ -186,35 +306,29 @@ def install(args, packs: str) -> Path:
     print("已安装 codex 原生插件 vod-devkit（skills + MCP，重启 Codex 会话生效）")
     # P1-5（深审 2026-11-06）：插件自带的 .mcp.json 硬编码 env.VOD_PACKS=
     # core,collect——--packs 对 codex 半失效（运行期仍注册 collect 工具）。
-    # plugin add 后把缓存内 .mcp.json 的 packs 对齐本次安装值。
-    import glob as _glob
-    mcp_jsons = sorted(
-        _glob.glob(str(Path.home() / ".codex" / "plugins" / "cache"
-                       / mp_name / "vod-devkit" / "*" / ".mcp.json")),
-        key=lambda p: Path(p).stat().st_mtime, reverse=True)
-    if mcp_jsons:
+    # plugin add 后把缓存内 .mcp.json 改写成「绝对解释器 + 载荷副本」并做
+    # 读回验证（静态形态是 `python3` + ${PLUGIN_ROOT}，解释器版本靠 PATH；
+    # 改写解决的是解释器选择，载荷锚定已由 ${PLUGIN_ROOT} 解决）。
+    mcp_path = locate_plugin_mcp(mp_name)
+    if mcp_path is not None:
         try:
-            mj = json.loads(Path(mcp_jsons[0]).read_text(encoding="utf-8"))
-            srv = mj.get("mcpServers", {}).get("vod-devkit")
-            if srv is not None:
-                # 关键修正（2026-11-12 矩阵实锤）：插件自带的 .mcp.json 写的是
-                # command="vod-devkit" + args=["serve"] —— 依赖 PATH 上那个全局包。
-                # 机器上装着旧版（实测 0.4.2）时，codex 会静默跑旧副本：配置、
-                # 技能都是新的，工具面却是旧的。改成绝对解释器 + 载荷副本，与其它
-                # 宿主同一条铁律（入口不依赖 PATH / npx 缓存）。
-                srv["command"] = sys.executable
-                srv["args"] = [server_entry()]
-                merged = dict(srv.get("env") or {})
-                merged.update(server_env(args, packs))
-                srv["env"] = merged
-                Path(mcp_jsons[0]).write_text(
-                    json.dumps(mj, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8")
-                print(f"已对齐插件 MCP packs：{mcp_jsons[0]}（VOD_PACKS={packs}）")
-        except Exception as e:
-            print(f"[vod-devkit] warn: 插件 .mcp.json packs 对齐失败（{e}）——"
-                  "运行期熔断门禁仍会兜底", file=sys.stderr)
-        return Path(mcp_jsons[0])
+            rewrite_plugin_mcp(mcp_path, python=sys.executable,
+                               entry=server_entry(), env=server_env(args, packs))
+        except PluginMcpRewriteError as e:
+            # 分类处置：改不了缓存文件不等于装不上（静态形态本身能跑），
+            # 但必须说清是哪一类 + 怎么补救，不笼统 catch 后 exit 1。
+            print(f"[vod-devkit] warn({e.kind}): 插件 MCP 未改写成载荷形态：{e.detail}",
+                  file=sys.stderr)
+            print(f"[vod-devkit] 补救：{PluginMcpRewriteError.REMEDY.get(e.kind, '见 INSTALL.md')}",
+                  file=sys.stderr)
+        except RuntimeError as e:
+            # 读回与期望不一致 = 留了半写状态给宿主，这类必须让安装失败
+            print(f"[vod-devkit] 安装失败：{e}", file=sys.stderr)
+            sys.exit(2)
+        else:
+            print(f"已对齐插件 MCP（解释器 + 载荷副本 + packs）：{mcp_path}"
+                  f"（VOD_PACKS={packs}）")
+        return mcp_path
     # 深审 P0-3：绝不再返回 ~/.codex/config.toml——它是用户整份 codex 配置，
     # uninstall 对 mcpConfig 是删除语义，指向它=卸载删光用户配置（破坏性）
     print("[vod-devkit] warn: 未定位到插件 .mcp.json（uninstall 将跳过 MCP 清理，"

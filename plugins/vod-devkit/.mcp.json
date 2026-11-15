@@ -1,6 +1,8 @@
 {
+  "$schema": "agent-plugins.org/schemas/1.0.0/mcp.schema.json",
   "mcpServers": {
     "vod-devkit": {
+      "type": "stdio",
       "command": "vod-devkit",
       "args": ["serve"],
       "env": { "VOD_PACKS": "core,collect" }

@@ -207,6 +207,29 @@ def cmd_doctor(_args):
         if rp_dst.exists() and rp_src.exists() and rp_dst.read_text(encoding="utf-8") != \
                 rp_src.read_text(encoding="utf-8"):
             problems.append(f"路由插件副本落后于仓内：{rp_dst}（重跑 install --target hermes）")
+        # codex 插件 MCP 形态（D-mcp-manifest-a3-1）：静态清单只能是 CLI 形态
+        # （codex 0.167 实测不展开 ${PLUGIN_ROOT}、cwd 也不是插件根），运行时正确性
+        # 全靠安装器改写。所以 doctor 必须回答"现在实际跑的是哪一种"，不留猜测空间。
+        if mf.get("target") == "codex":
+            from vod_mcp.host_adapters import codex as _codex
+            mp = _codex.locate_plugin_mcp(None)
+            if mp is None:
+                problems.append("未定位到 codex 插件 .mcp.json（插件未装上/缓存被清）"
+                                "——重跑 install --target codex")
+            else:
+                kind, srv = _codex.plugin_mcp_form(mp)
+                if kind == "payload":
+                    print(f"[doctor] codex 插件 MCP 形态：载荷（{srv['command']} + "
+                          f"{srv.get('args')}）")
+                elif kind == "cli":
+                    problems.append(f"插件 MCP 仍是 CLI 形态（{mp}）：跑的是 PATH 上那份 CLI，"
+                                    "版本可能不是本插件——重跑 install --target codex")
+                elif kind == "placeholder":
+                    problems.append(f"插件 MCP 含未展开占位符（{mp}）：宿主收到字面量，起不来"
+                                    "——重跑 install --target codex")
+                else:
+                    problems.append(f"插件 .mcp.json 读不出 mcpServers.vod-devkit（{mp}）"
+                                    "——重跑 install --target codex")
         # CodeArts Agent 冒烟：官方 CLI 在就 list 一次（实测通道=codearts_cli.json 的 mcp 段）
         if mf.get("target") == "codeartsdoer" and shutil.which("codearts"):
             r = subprocess.run(["codearts", "mcp", "list"], capture_output=True,

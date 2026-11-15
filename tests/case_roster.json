@@ -340,6 +340,21 @@
     "S110": {
       "carrier": "docs/design.md"
     },
+    "S111": {
+      "carrier": "docs/design.md"
+    },
+    "S112": {
+      "carrier": "docs/design.md"
+    },
+    "S113": {
+      "carrier": "docs/design.md"
+    },
+    "S114": {
+      "carrier": "docs/design.md"
+    },
+    "S115": {
+      "carrier": "docs/design.md"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

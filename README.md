@@ -84,7 +84,10 @@ npx -y vod-devkit@latest uninstall        # 摘原生插件，不删你的 confi
 ```
 
 - 形态：走 codex 原生插件（`codex plugin marketplace add` + `plugin add`），技能随插件
-  渐进加载；`.mcp.json` 用 `vod-devkit serve` 拉起 stdio
+  渐进加载；`.mcp.json` 是 Agent Plugins 规范字段（`$schema` + `type: stdio`），入口为
+  `vod-devkit serve`。安装器随后会把缓存里那份改写成「绝对解释器 + 载荷副本」并读回验证
+  ——**这是运行时正确性的来源**：codex 0.167 实测不展开 `${PLUGIN_ROOT}`、cwd 也不是
+  插件根，静态清单只能走 CLI，所以请用 `install --target codex` 装，别绕过安装器直装
 - 采集熔断：未确认提交累计触发后 install 会拒绝装 collect，恢复需
   `--ack-suspension`（审计日志落在 `~/.codex/`）
 

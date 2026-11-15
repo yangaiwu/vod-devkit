@@ -41,6 +41,9 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
       业务窗口急则白名单灰度（邀请制，不算完全公开，不阻塞验证）
 - [ ] **遥测（2026-11-03 拍板：维持不做）**：未来若做，opt-in 默认关+
       明确告知+最小字段，不采集敏感内容；当前链条不依赖它
+      **重议触发器（2026-11-15 补，负责人要求）**：出现"只能靠用户上报才能定位"的
+      线上问题（装机侧工具面/版本漂移类），且 install-manifest 对账无法回答时才重开；
+      否则视为单向门——不加触发器，未来加遥测会把今天的承诺变成负债
 
 - [ ] VOD-KBQ（R0 网关+KB 查询端点）：文档已评审待定 → 代码增量未写（引擎侧）
 - [ ] VOD-VOI（Java /external/voices）：文档已出 → E3 查重语义待实测修正 → 代码未写
@@ -1155,3 +1158,38 @@ host_matrix 9 PASS；pack_verify 166 文件 OK（含 vodkit_cli）；dsh 47；�
 漏一次就是又一次 tarball≠tag。零提交后这个矛盾不存在，做旧事也不可能。
 
 **代价**：仓内直接跑安装/测试前需要一次 sync（已内置到各入口，毫秒级 copytree）。
+
+## D-mcp-manifest-a3-1：插件 MCP 清单补规范字段，A3 静态形态按实测搁置（B1/C3，2026-11-15）
+
+**背景**：对账 huaweicloud-devkit 后提出三个决策点（A：`.mcp.json` 形态；B：遥测；
+C：新宿主 officeace/openclaw）。负责人拍板 A3/B1/C3；A3 落地前实测推翻了它的静态形态，
+按实测改口径（下面如实记录，不粉饰）。
+
+**A：实测先于偏好**
+- 采纳的部分：`$schema`（agent-plugins.org 1.0.0，规范必填）+ `type: stdio` 补进清单；
+  改写失败分类型处置；server.py 加解释器版本 guard。
+- 推翻了的部分：A3 的 `command: python3` + `args: ["${PLUGIN_ROOT}/vod_mcp/server.py"]`。
+  codex-cli 0.167.0 真机探针（探针插件落盘 argv/cwd/env，`codex app-server` 的
+  `mcpServerStatus/list` 触发 spawn）实测：**args 收到字面量 `${PLUGIN_ROOT}`、
+  cwd = `~/.codex` 而非插件根、`PLUGIN_ROOT`/`PLUGIN_DATA` 未注入**；把插件包迁到
+  Agent Plugins 格式后该 MCP 条目**根本没注册**。规范承诺在该二进制上未落地。
+- 因此清单保持 CLI 形态（`vod-devkit serve`）——唯一实测能跑通的入口；运行时正确性
+  改由**安装器改写 + 读回验证**承担（改写从"优化"升格为必需），并让 `doctor` 直接报
+  实际形态（payload / cli / placeholder / unreadable，后三种判问题，S115 兜着），
+  不让"现在到底跑的是哪份"靠猜。
+- 为什么不选 A1（npx）：把网络与 Node 塞进宿主启动路径，镜像滞后=ETARGET，npx 缓存
+  又是新的版本漂移面；且它并不能解决"宿主最终跑哪份"的问题。
+- A3 的收益按层说（保留下来待解禁）：
+  - 走安装器 → 运行时无变化（改写已给绝对解释器 + 载荷）；
+  - 不走安装器（marketplace 直装）→ 今天是"PATH 找 CLI，版本不确定"；A3 落地后
+    才是"插件根锚定载荷 + 解释器不够就响失败"。
+  - 解禁条件与复验方法写在 docs/design.md 同名节，不是留白。
+
+**B1（采纳，与既有决策一致）**：零遥测。2026-11-03 已拍板"维持不做"，本次不是新决策。
+按负责人要求补**重议触发器**（见上方待办条），避免单向门把承诺变负债。
+
+**C3（采纳）**：officeace / openclaw **没有可安装的宿主**——没有安装包、没有 CLI、
+没有配置落点，也没有宿主规格。不是"排期"或"等使用者"的问题，是不存在对象；
+不设量化触发器（没有安装面可统计）。将来出现可安装形态再按同一套 integrations
+宿主规格 + 适配器 + 用例补，不做提前适配（无消费者的适配层）。
+覆盖现状：任意 MCP 宿主今天可走 `install --target generic --mcp-config <file>`。

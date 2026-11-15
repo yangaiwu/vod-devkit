@@ -857,3 +857,61 @@ S109 → `tests/test_p2_structure.py::test_patch_on_net_http_intercepts_real_cal
 S110 → conftest / host_matrix / codex 适配器的兜底 sync。
 测试落点：`tests/test_copies_generated.py`、`tests/test_verify_copies.py`、
 `tests/test_registry_reconcile.py`。
+
+## 插件 MCP 清单形态与改写失败分类（D-mcp-manifest-a3-1，2026-11-15）
+
+三份东西各管一件事，别再混着说：
+
+| 层 | 文件 | 谁写它 | 它保证什么 |
+|---|---|---|---|
+| 静态清单（发布物） | `plugins/vod-devkit/.mcp.json` | 我们，随 npm 发 | 规范字段齐全（`$schema`/`type`）；入口是实测可用的 CLI 形态 |
+| 装机缓存清单 | `~/.codex/plugins/cache/<mp>/vod-devkit/<ver>/.mcp.json` | codex `plugin add` 复制，随后被安装器改写 | 绝对解释器 + 载荷副本（唯一能保证版本正确的形态） |
+| server 入口 | `vod_mcp/server.py` | 我们 | 解释器 < 3.10 时可读诊断，不是 traceback |
+
+实测（codex-cli 0.167.0，2026-11-15；探针插件把收到的 argv/cwd/env 落盘，
+用 `codex app-server` 的 `mcpServerStatus/list` 触发真实 spawn）：
+
+| 规范承诺 | 0.167 实测 | 后果 |
+|---|---|---|
+| `args` 里 `${PLUGIN_ROOT}` 展开 | 原样收到字面量 `${PLUGIN_ROOT}/vod_mcp/server.py` | 启动失败（文件不存在），或更差：误命中别处的同名路径 |
+| stdio cwd 默认 = 插件根 | `cwd` = `~/.codex` | 相对路径 args 全部失效（与 0.166 的旧结论一致） |
+| 注入 `PLUGIN_ROOT`/`PLUGIN_DATA` 环境变量 | 两者均未注入（`null`） | 无法在 server 内自查插件根 |
+| `VOD_PACKS` 等自定义 env 透传 | 正常传入 | 可用 |
+| 插件包迁到 Agent Plugins 格式（根 `plugin.json` + `mcp.json`） | 插件 installed/enabled，但 MCP 条目**没注册**（`codex mcp list` 空） | 该格式在当前二进制上还不能承载 MCP |
+
+结论：`${PLUGIN_ROOT}` 静态形态（A3）**搁置**，理由不是偏好而是实测。清单保持 CLI 形态，
+并禁止出现任何 `${...}`（未展开=静默坏）。运行时正确性由安装器改写承担。
+
+失败分层（安装器处置，不是"catch 全部 exit 1"）：
+
+| 类别 | 触发 | 处置 | 为什么 |
+|---|---|---|---|
+| `bad-json` | 缓存清单非法 JSON / 缺 `mcpServers.vod-devkit` | warn + 补救文案，安装继续 | 插件已装进宿主，静态 CLI 形态仍可跑 |
+| `not-writable` | 读/写抛 OSError（只读挂载、权限） | warn + 补救文案（含"把 command 指向 3.10+ 解释器"） | 内网/沙箱不该被卡死 |
+| 读回不一致 | 写完再解析，字段与期望不符 | 安装失败（exit 2） | 半写状态留给宿主=坏配置，比装不上更糟 |
+
+对既有结论的影响：
+- 「入口不依赖 PATH」这条铁律在 codex 上**做不到**（静态形态只能走 CLI），所以它降级为
+  「运行时形态必须被安装器改写为绝对路径」——改写从"优化"升格为**必需**，不能拆。
+- 「插件副本零提交」不受影响：`.mcp.json` 是手写发布物，不在生成物清单里。
+- 熔断标记仍在 `~/.codex/` 下：用例必须把 HOME 指到临时目录，否则真机装了熔断时
+  S113 会假红（S109 同款环境无关纪律）。
+
+残余风险（写清楚，不掩）：
+- marketplace 直装（不经我们的安装器）仍是 CLI 形态 → PATH 上的版本不确定，
+  可能是旧副本。这是当前宿主的限制，不是我们能靠清单解决的；已在 README 标注
+  「用 install --target codex 装」，并且 **doctor 直接报实际形态**（payload / cli /
+  placeholder / unreadable，后三种判问题，S115 兜着）。
+- 解释器 < 3.10 → server 顶部 guard 报版本并退出（响失败），宿主侧只看到启动失败。
+
+实测记录（本机端到端，2026-11-15）：`install --target codex` 到临时 HOME →
+cache 内 .mcp.json 被改写成 `python3` 绝对路径 + `payloads/0.5.9/vod_mcp/server.py`
+→ `doctor` 打印「codex 插件 MCP 形态：载荷（…）」并 `doctor: OK`；把该文件手改回
+`vod-devkit serve` → `doctor` 判 FAIL「插件 MCP 仍是 CLI 形态…重跑 install」。
+
+复验方法（A3 解禁的条件，写死在文档里）：探针插件 + `codex app-server` 的
+`mcpServerStatus/list` 落盘 argv/cwd/env；若 `${PLUGIN_ROOT}` 被展开且 cwd = 插件根，
+切回 A3，改写逻辑届时降级为"解释器版本兜底"（推荐而非必须），不要同时拆掉。
+
+用例承载：`tests/test_mcp_manifest_a3.py`（S111-S114）；
+需求侧见 `docs/proposal.md`「插件 MCP 清单形态」一节。

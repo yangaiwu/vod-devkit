@@ -1084,3 +1084,52 @@ fetch-depth=1 取不到 tag，对账脚本把「tag 不可见」判成「没打 
 `python3 scripts/verify_copies.py` 绿；`git status --porcelain` 对四目录为空；
 `npm pack --dry-run` 含四目录与 build-info；故意 `git add -f plugins/vod-devkit/vod_mcp`
 后门禁必须红（反向验证）。
+
+
+## 插件 MCP 清单形态（S111-S114，D-mcp-manifest-a3-1，2026-11-15）
+
+需求变更：codex 原生插件的 `.mcp.json` 补全规范字段（`$schema` + `type`），并把
+codex 适配器的改写失败改为按类型处置。**原计划的 `${PLUGIN_ROOT}` 形态未采用——实测不可用。**
+
+背景与实测（codex-cli 0.167.0，本机 app-server 真机探针，`mcpServerStatus/list` 触发 spawn）：
+1. 旧静态形态 `command: vod-devkit` + `args: [serve]` 把 CLI 名交给 PATH——机器上装着
+   旧版（实测 0.4.2）时宿主静默跑旧副本：配置和技能是新的，工具面却是旧的。
+2. 规范（agent-plugins.org §7.2.1 / §9.2）承诺：stdio server 默认 cwd = 插件根；
+   `args`/`env`/`cwd` 里 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}` 会展开。
+3. **实测结果（决定性）**：探针 server 把收到的 `sys.argv`/`cwd`/env 落盘——
+   args 里原样收到字面量 `${PLUGIN_ROOT}/vod_mcp/server.py`；`cwd` 是 `~/.codex`
+   而不是插件根；`PLUGIN_ROOT`/`PLUGIN_DATA` 也没注入环境；`VOD_PACKS` 正常传入。
+   再把插件包迁到 Agent Plugins 格式（根 `plugin.json` + `mcp.json` + `$schema`）重装，
+   该 MCP 条目在 0.167 下**根本没注册**（`codex mcp list` 为空，插件事务本身 installed/enabled）。
+   → 规范承诺在该二进制上未落地，A3 的静态形态今天会静默坏。
+
+硬规则（据此定稿）：
+- 静态清单**保留 CLI 形态**（`command: vod-devkit` + `args: ["serve"]`）：唯一实测能跑通的
+  入口；同时补 `$schema`（约定值）与 `type: stdio`，顶层只允许这两个字段。
+- 清单里**禁止出现任何 `${...}`**：0.167 不展开 → 宿主收到字面量，静默坏。
+- 运行时正确性由安装器改写承担（`codex plugin add` 后把缓存 .mcp.json 改写成
+  「绝对解释器 + 载荷副本」并**读回验证**）。这不是可选优化：静态形态本身无法
+  摆脱 PATH 上 CLI 的版本不确定性。
+- 改写失败分层：`bad-json`/`not-writable` → warn + 分类补救指引，安装继续；
+  读回与期望不一致（并发改写/半写状态）→ 安装失败。禁止一个 catch 全 exit 1。
+- `vod_mcp/server.py` 顶部加解释器 guard（`sys.version_info < (3, 10)` → 可读诊断 +
+  exit 2），把 PEP 604 语法 traceback 换成一句人话。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S111 | 静态清单形态 | `$schema` 命中约定值、顶层字段只有两个、`type=stdio`、`command/args` 为 CLI 形态（附实测理由）、清单里不出现 `${`、`env.VOD_PACKS` 显式存在、改写入口存在 |
+| S112 | 运行时形态 | 改写产物 = 绝对解释器 + 载荷路径、args 不含占位符、读回内容与落盘一致 |
+| S113 | 工具面不静默收缩 | `VOD_PACKS` 缺省（空值）= 全 packs（历史默认），显式 `core,collect` = 有意收窄；用例把 HOME 指到临时目录规避熔断标记（环境无关） |
+| S114 | 改写失败分类 | 正常改写读回绝对形态；`bad-json`/`not-writable` 抛分类错误且都有补救文案；读回不一致抛 RuntimeError（安装失败）；新增分类必须同时给补救指引 |
+| S115 | doctor 报实际形态 | doctor 对 codex 必须区分 payload（绝对解释器+载荷）/ cli（PATH 名）/ placeholder（未展开占位符）/ unreadable，并把后三种判为问题；形态判定与 doctor 报点都有用例兜（文档说"doctor 可查"就必须可查） |
+
+A3（`${PLUGIN_ROOT}` 静态形态）的当前处置：**搁置，不废弃**。前提是宿主支持保留变量
+展开（或迁移到 Agent Plugins 插件格式并被 0.167+ 正确注册）。复验方法写在此处，
+不是"以后有人再看"：① 探针插件 + `codex app-server` 的 `mcpServerStatus/list` 触发 spawn，
+落盘 `sys.argv`/`cwd`/env；② 看到 `${PLUGIN_ROOT}` 被替换成绝对路径且 `cwd` = 插件根
+→ 切回 A3，并按 S111 的红反推清单改动；③ 届时改写逻辑降级为"解释器版本兜底"（推荐而非必须），
+不要同时拆掉。
+
+验收口径（目标环境执行，工具不入库）：`python3 -m pytest tests/test_mcp_manifest_a3.py -q`
+全绿；装机后 `codex mcp get vod-devkit --json` 的 command 是本机 3.10+ 绝对路径且
+args 指向载荷；把 PATH 上的 python3 换成 3.9 再启动 → stderr 出现版本 guard 文案而非 traceback。
