@@ -35,7 +35,8 @@ if __name__ == "__main__":
     for _name, _want in (("VOD_DEVKIT_SRC_ROOT", _SRC), ("VOD_DEVKIT_DIST_ROOT", _DIST)):
         _got = os.environ.get(_name)
         if _got and Path(_got).resolve() != _want.resolve():
-            print(f"[vod-devkit] warn: 继承的 {_name}={_got} 不是本入口所在的仓"
+            why = "" if Path(_got).is_dir() else "（该路径不存在）"
+            print(f"[vod-devkit] warn: 继承的 {_name}={_got}{why} 不是本入口所在的仓"
                   f"（{_want}）——若命令行为异常，先 unset 它", file=sys.stderr)
     os.environ.setdefault("VOD_DEVKIT_SRC_ROOT", str(_SRC))
     os.environ.setdefault("VOD_DEVKIT_DIST_ROOT", str(_DIST))

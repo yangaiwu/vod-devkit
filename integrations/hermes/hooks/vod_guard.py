@@ -23,12 +23,17 @@ import os
 import re
 import sys
 
-TOOL_NAMES = {"terminal", "shell", "bash", "run_command", "execute_code",
-              "computer_use", "process"}
+# shell 类：命令字符串里判判读动词
+SHELL_TOOLS = {"terminal", "shell", "bash", "run_command", "computer_use", "process"}
+# 文件/代码类：模型读 runtime.json 的常规路径恰好是这几个（不是 shell）
+FILE_TOOLS = {"read_file", "read_files"}
+SEARCH_TOOLS = {"search_files", "search"}
+CODE_TOOLS = {"execute_code"}
 
 _READ_VERBS = re.compile(
     r"(?:^|[\s|;&(`])(cat|head|tail|less|more|strings|xxd|base64|od|hexdump|"
-    r"grep|rg|awk|sed|jq|sqlite3|python3?|perl|ruby)\b")
+    r"grep|rg|awk|sed|jq|sqlite3|python3?|perl|ruby|open|read_text|read_bytes|"
+    r"json\.load|json\.loads)\b")
 _READ_FILE = re.compile(r"runtime\.json")
 _ENV_DUMP = re.compile(r"(?:^|[\s|;&(`])(env|printenv|set)\b")
 _KEY_NAMES = re.compile(r"(VOD_JAVA_API_KEY|VOD_[A-Z_]*KEY|java_key|JAVA_API_KEY)")
@@ -63,15 +68,37 @@ def _strings(node) -> list:
 
 
 def verdict(payload: dict) -> str | None:
-    """返回 block 文案；放行返回 None。纯函数，用例直接测它。"""
+    """返回 block 文案；放行返回 None。纯函数，用例直接测它。
+
+    覆盖三条真实读取路径（评审实测：只拦 shell 等于没拦）：
+    - shell 类：命令里出现 runtime.json + 读动词；
+    - read_file / search_files：参数里点名 runtime.json（或搜 key 名）；
+    - execute_code：代码里点名 runtime.json（open/read_text/json.load 都算）。
+    其余工具与命令一律放行（fail-open）。
+    """
     if not isinstance(payload, dict):
         return None
     tool = str(payload.get("tool_name") or "").strip().lower()
-    if tool and tool not in TOOL_NAMES:
+    known = SHELL_TOOLS | FILE_TOOLS | SEARCH_TOOLS | CODE_TOOLS
+    if tool and tool not in known:
         return None
     blobs = _strings(payload.get("args") if "args" in payload else payload)
     text = "\n".join(blobs)
     if not text.strip():
+        return None
+    if tool in FILE_TOOLS or tool in SEARCH_TOOLS:
+        # read_file(path=…runtime.json) / search_files(pattern=java_key, path=…)
+        if _READ_FILE.search(text):
+            return _BLOCK_RUNTIME
+        if tool in SEARCH_TOOLS and _KEY_NAMES.search(text):
+            return _BLOCK_ENV
+        return None
+    if tool in CODE_TOOLS:
+        # 代码里点名 runtime.json：读它没有别的正当用途（存在性判断也不是排障必需）
+        if _READ_FILE.search(text):
+            return _BLOCK_RUNTIME
+        if _ENV_DUMP.search(text) and _KEY_NAMES.search(text):
+            return _BLOCK_ENV
         return None
     if _READ_FILE.search(text) and _READ_VERBS.search(text):
         return _BLOCK_RUNTIME

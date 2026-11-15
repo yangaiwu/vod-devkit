@@ -71,9 +71,12 @@ def test_s135_unrelated_commands_pass():
 
 
 def test_s135_other_tools_are_never_blocked():
-    """只对能执行 shell 的工具生效：MCP 工具自己走 auth_status，不该被误伤。"""
-    assert guard.verdict(_payload("read_file",
-                                  path="/x/runtime.json")) is None
+    """非读取类工具不拦：MCP 工具自己走 auth_status，不该被误伤。
+
+    注意 read_file 现在**在**覆盖范围里（见 S135 文件/代码工具那条）——这里举
+    写文件与插件自有工具，才是真正的"不相关工具"。
+    """
+    assert guard.verdict(_payload("write_file", path="/x/a.txt")) is None
     assert guard.verdict({"tool_name": "vod_auth_status", "args": {}}) is None
 
 
@@ -148,3 +151,18 @@ def test_s135_other_peoples_hooks_are_untouched():
     text, _ = hermes.upsert_guard_hook(text, GUARD_CMD)
     after, _ = hermes.remove_guard_hook(text)
     assert "/their/script.sh" in after and "vod_guard.py" not in after
+
+def test_s135_file_and_code_tools_are_covered():
+    """只拦 shell 等于没拦：模型读 runtime.json 的常规路径是 read_file / execute_code。
+
+    评审实测（2026-11-16）：read_file(path=…/runtime.json)、execute_code(open(...).read())
+    与 search_files(pattern=java_key) 当时全部放行——白名单外一律 allow。
+    """
+    assert guard.verdict(_payload("read_file", path="/x/payloads/0.5.9/vod_mcp/runtime.json"))
+    assert guard.verdict(_payload("execute_code",
+                                 code="print(open('/x/vod_mcp/runtime.json').read())"))
+    assert guard.verdict(_payload("search_files", pattern="java_key", path="/x/.vod-devkit"))
+    # 正常读取一律放行（fail-open 的边界）
+    assert guard.verdict(_payload("read_file", path="/root/vod-devkit/README.md")) is None
+    assert guard.verdict(_payload("execute_code", code="print(1 + 1)")) is None
+    assert guard.verdict(_payload("search_files", pattern="def main", path="/x/src")) is None

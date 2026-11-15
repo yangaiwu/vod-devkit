@@ -38,6 +38,15 @@ def _stub(monkeypatch, meta=None, captured=None, saved=None, http=None):
     monkeypatch.setattr(_rt, "_save_runtime",
                         lambda d, replace=False: saved.update(d))
 
+    def _fake_atomic(mutate):
+        """事务桩：草稿/账本现在走 _runtime_atomic（读整键→改→写整键必须同锁内）。"""
+        cfg = {}
+        if mutate(cfg) is not False:
+            saved.update(cfg)
+        return cfg
+
+    monkeypatch.setattr(_rt, "_runtime_atomic", _fake_atomic)
+
     def fake_http(m, p, body=None, timeout=30, base=None, key=None):
         if "productId=" in str(p):
             pid = str(p).split("productId=")[-1].split("&")[0]

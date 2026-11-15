@@ -421,6 +421,9 @@
     "S138": {
       "carrier": "tests/test_global_cmds.py"
     },
+    "S139": {
+      "carrier": "tests/test_runtime_atomic.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },
