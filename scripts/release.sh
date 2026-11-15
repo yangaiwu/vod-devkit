@@ -66,13 +66,8 @@ fi
 # sync 重跑一遍，若产生未提交变更=提交前忘了同步，拒绝发版（sync 结果应单独
 # 提交）。build-info 每次重写时间戳，不参与本检查（随发版提交再生）。
 python3 scripts/sync_plugin.py
-# 四目录全覆盖（v0.5.8 实锤：只查 vod_mcp/skills 时，contract 的版本落点
-# 被 sync 写到插件副本却无人提交 → 工作区残留、tarball 内容 ≠ tag）。
-if ! git diff --quiet -- plugins/vod-devkit/vod_mcp plugins/vod-devkit/skills \
-      plugins/vod-devkit/contract plugins/vod-devkit/safety; then
-  echo "FAIL: 双副本漂移——sync 产生了未提交变更。请先提交 sync 结果（git add plugins/vod-devkit/{vod_mcp,skills,contract,safety}）再发版" >&2
-  exit 1
-fi
+"$PY" scripts/verify_copies.py || {
+  echo "FAIL: 双副本漂移（内容不一致或同步结果未提交）——发版起点必须零漂移" >&2; exit 1; }
 
 if [ "$DRY" = "--dry-run" ]; then echo "[dry-run] 止步于此（质量门已过）"; exit 0; fi
 
@@ -150,6 +145,10 @@ git add package.json pyproject.toml vod_mcp/__init__.py contract/tools.schema.js
         tests/golden \
         skills hermes-plugin docs/decisions.md build-info.json
 git commit -qm "release: v$BUMP"
+# 提交之后再验一次（tag/push 之前）：这是唯一能抓住「sync 了但提交清单漏项」的位置。
+# v0.5.8 实锤——清单漏 plugins/vod-devkit/contract，工作区 diff 全绿而提交树是旧版。
+"$PY" scripts/verify_copies.py || {
+  echo "FAIL: 发版提交漏带插件副本改动（tarball 会与 tag 不一致）——修正提交清单后重跑" >&2; exit 1; }
 git tag "v$BUMP"
 git push origin main --tags || { echo "FAIL: GitCode 推送失败（pre-push 门禁或网络），发版未完成"; exit 1; }
 echo "已推送 GitCode"

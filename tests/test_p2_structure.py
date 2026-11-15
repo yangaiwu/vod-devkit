@@ -60,24 +60,32 @@ def test_packs_use_module_attribute_access_not_symbol_imports():
 
 
 def test_patch_on_net_http_intercepts_real_call_chain():
-    """打桩 net._http → probe_key / auth_status 必须走假实现（而不是真发请求）。"""
+    """打桩 net._http → probe_key / auth_status 必须走假实现（而不是真发请求）。
+
+    显式钉住 JAVA_KEY：auth_status 只有「有 key」时才走主动探针分支，而 key
+    来自环境/runtime.json——CI（无 runtime.json、无 env）与开发机状态不同，
+    旧写法在 CI 上直接 KeyError: 'keyCheck'（v0.5.8 实锤假红）。
+    """
     seen = []
 
     def fake(method, path, body=None, **kw):
         seen.append((method, path))
         return {"data": {"products": ["CodeArts"], "productCatalog": [{"id": 7, "name": "CodeArts"}]}}
 
-    orig = net._http
+    orig_http, orig_key = net._http, net.JAVA_KEY
     net._http = fake
+    net.JAVA_KEY = "k-test"
     try:
         out = net.probe_key("k-test")
         assert out["ok"] is True, out
         assert seen and seen[0][0] == "GET", seen
         seen.clear()
         res = core.auth_status({})
-        assert res["keyCheck"]["ok"] is True or res.get("javaKey") is not None
+        assert res["keyCheck"]["ok"] is True, res
+        assert seen, "auth_status 的探针没命中假 _http（patch 面失效）"
     finally:
-        net._http = orig
+        net._http = orig_http
+        net.JAVA_KEY = orig_key
 
 
 def test_patch_on_java_key_is_seen_by_eff_key():

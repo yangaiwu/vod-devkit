@@ -7,12 +7,8 @@ echo "[pre-push] lint..."
 "$PY" -m pyflakes vod_mcp tests || { echo "[pre-push] FAIL: lint 未过，禁止推送"; exit 1; }
 echo "[pre-push] pytest..."
 "$PY" -m pytest tests/ -q || { echo "[pre-push] FAIL: 测试未过，禁止推送"; exit 1; }
-echo "[pre-push] 双副本一致性..."
-diff -r -x runtime.json -x __pycache__ -x '*.log' vod_mcp plugins/vod-devkit/vod_mcp \
-  && diff -r -x __pycache__ skills plugins/vod-devkit/skills \
-  && diff -r -x __pycache__ contract plugins/vod-devkit/contract \
-  && diff -r -x __pycache__ safety plugins/vod-devkit/safety \
-  || { echo "[pre-push] FAIL: 双副本漂移——先跑 scripts/sync_plugin.py 再提交"; exit 1; }
+echo "[pre-push] 双副本一致性（内容 + 是否已提交）..."
+"$PY" scripts/verify_copies.py || { echo "[pre-push] FAIL: 双副本漂移——先跑 scripts/sync_plugin.py 并把副本一起提交"; exit 1; }
 echo "[pre-push] dsh 壳测试（归因对账/回执守卫/UI 全局）..."
 if command -v node >/dev/null 2>&1 && [ -d dsh/node_modules ]; then
   ( cd dsh && node --test test/*.test.mjs >/tmp/prepush-dsh.log 2>&1 ) \
