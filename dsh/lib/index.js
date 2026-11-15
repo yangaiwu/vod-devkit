@@ -3,7 +3,7 @@
  *
  * 形态纪律（与 vod-devkit MCP 侧一致）：
  * - 插件=引擎的客户端，只走 HTTPS，不 import 任何引擎模块
- * - 纯采集形态：submit / 本地账本查询 / 自述，共 3 工具
+ * - 纯采集形态：submit / 本地账本查询 / 自述 / 技能披露×2 / 版本检查，共 6 工具
  * - 写操作默认走 dsh 审批通道（tools/pre-execute → kind:'ask'）
  * - voiceId = f(source, content, 调用级nonce)：同调用幂等、跨调用保声量
  * - key 缺失/401 → 自动 POST /external/token 零字段令牌 → 落本地 → 重试一次
@@ -24,7 +24,13 @@ const DATA_DIR = join(PKG_DIR, 'data');
 // 运行时状态路径可用 VOD_DSH_RUNTIME 覆盖（测试隔离/企业数据驻留用；
 // 2026-11-11 实锤：dsh/test 直写仓内 dsh/data/runtime.json，本地账本被测试
 // 灌到 128 条——测试必须能指到 tmp，不能再共用真实账本）
+// 运行时状态默认写在包目录 data/ 下（历史形态，存量账本不迁移）。
+// 但包目录在只读安装形态（全局共享 node_modules / pnpm store / 容器只读挂载）下
+// 不可写——落盘失败=本地账本与归因记忆全丢，且只有提交时才会发现。
+// 修法：写入失败一次性回退到 <dsh home>/data/ 并告警；VOD_DSH_RUNTIME 仍最高优先。
 const RUNTIME = process.env.VOD_DSH_RUNTIME || join(DATA_DIR, 'runtime.json');
+const FALLBACK_RUNTIME = join(homedir(), '.dsh', 'data', 'vod-devkit-runtime.json');
+let runtimePath = RUNTIME;   // 运行期可变：写入失败后切到 fallback
 const API_PREFIX = '/rest/developer/manager/hdvodmngservice/v1';
 const HOARD_PATH = `${API_PREFIX}/external/voices`; // V16 囤积端点（批量/不触发 LLM/结构化回执）
 const SUBMIT_PATH = `${API_PREFIX}/external/voice/submit`; // 旧单条端点：仅 404 回落使用 // V16 已切换：主路径 HOARD_PATH（囤积），本路径仅 404 回落（见 docs/decisions.md D-dsh-4）
@@ -52,7 +58,11 @@ function readCfg(v, fallback) {
 
 // ── 本地账本：每次文件读改写，只动目标键（防内存合并回写陈旧配置） ──
 function loadRuntime() {
-    try { return JSON.parse(readFileSync(RUNTIME, 'utf8')); } catch { return {}; }
+    try { return JSON.parse(readFileSync(runtimePath, 'utf8')); } catch { return {}; }
+}
+function _writeRuntime(target, next) {
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, JSON.stringify(next, null, 2));
 }
 function saveRuntime(patch) {
     const rt = loadRuntime();
@@ -60,8 +70,15 @@ function saveRuntime(patch) {
     if (Array.isArray(next.submissions) && next.submissions.length > LEDGER_CAP) {
         next.submissions = next.submissions.slice(-LEDGER_CAP);
     }
-    mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(RUNTIME, JSON.stringify(next, null, 2));
+    try {
+        _writeRuntime(runtimePath, next);
+    } catch (err) {
+        if (runtimePath === FALLBACK_RUNTIME) throw err;   // 两处都不可写=真故障，不静默
+        console.warn(`[dsh-vod-devkit] 包目录不可写（${runtimePath}：${String(err).slice(0, 80)}）`
+            + `——运行时状态改落 ${FALLBACK_RUNTIME}（本地账本换位置，跨版本不互通）`);
+        _writeRuntime(FALLBACK_RUNTIME, next);
+        runtimePath = FALLBACK_RUNTIME;
+    }
 }
 function ledgerAppend(entries) {
     const rt = loadRuntime();
@@ -162,6 +179,42 @@ async function loadMeta(cfg, signal) {
     return _metaCache?.data || emptyMeta();
 }
 
+// 品牌俗称表（与 vod_mcp/attribution.py BRAND_ALIASES 同一份口径）：
+// 只放**无法从登记名规则派生**且用户口语高频的品牌名（码道=CodeArts 中文品牌）。
+const BRAND_ALIASES = {
+    CodeArts: ['码道', '华为云码道'],
+};
+
+const LATIN_RUN = /[A-Za-z][A-Za-z0-9 ._-]*[A-Za-z0-9]|[A-Za-z]/g;
+const isAscii = (s) => [...String(s)].every((c) => c.charCodeAt(0) < 128);
+
+// 从单个登记名派生可用写法（与 Python _derive_aliases 逐条同源）：
+// 原名 / 去空格 / 拉丁核心段（≥3）/ 非全大写混写名的 lower·capitalize 变体。
+// 全大写缩写（OBS/CCE）不生成小写变体——否则 obs://bucket、/obs/bin 会被误命中（S93 铁律）。
+function deriveAliases(name) {
+    const raw = String(name || '').trim();
+    if (!raw) return [];
+    const out = [raw];
+    const compact = raw.replace(/\s+/g, '');
+    if (compact && compact !== raw) out.push(compact);
+    const runs = (raw.match(LATIN_RUN) || []).map((r) => r.trim()).filter((r) => r.length >= 3);
+    if (runs.length) {
+        out.push(...runs);
+        if (raw.includes(' ')) {
+            const head = (runs[0].split(/\s+/)[0] || runs[0]);
+            if (head.length >= 3) out.push(head);
+        }
+    }
+    for (const run of runs) {
+        if (run.length <= 8 && isAscii(run) && run !== run.toUpperCase()) {
+            for (const v of [run.toLowerCase(), run.charAt(0).toUpperCase() + run.slice(1).toLowerCase()]) {
+                if (v !== run) out.push(v);
+            }
+        }
+    }
+    return [...new Set(out.filter(Boolean))];
+}
+
 export function buildAliasIndex(meta = {}) {
     const products = (meta.products || []).map(String).filter(Boolean);
     const catalog = meta.catalog || [];
@@ -170,12 +223,13 @@ export function buildAliasIndex(meta = {}) {
         const name = String(it?.name || '').trim();
         if (name) idByLower.set(name.toLowerCase(), it.id != null ? String(it.id) : null);
     }
-    const canon = new Map(); // lower(name) -> {label,id,aliases:Set,brand}
+    const canon = new Map(); // lower(name) -> {label,id,aliases:Set,brand,derived:Set}
     const slot = (nm, brand) => {
         const key = String(nm).trim().toLowerCase();
         let cur = canon.get(key);
         if (!cur) {
-            cur = { label: String(nm).trim(), id: null, aliases: new Set(), brand: !!brand };
+            cur = { label: String(nm).trim(), id: null, aliases: new Set(),
+                    brand: !!brand, derived: new Set() };
             canon.set(key, cur);
         } else if (brand && !cur.brand) {
             cur.label = String(nm).trim();
@@ -186,6 +240,19 @@ export function buildAliasIndex(meta = {}) {
     };
     products.forEach((p) => slot(p, true));          // 展示名优先成标签
     catalog.forEach((it) => { if (it?.name) slot(it.name, false); });
+    // 规则派生（对齐 Python：每条登记名派生多种写法，派生的允许大小写不敏感）
+    for (const s of canon.values()) {
+        for (const d of deriveAliases(s.label)) {
+            s.aliases.add(d);
+            if (d !== s.label) s.derived.add(d);
+        }
+    }
+    // 品牌俗称：目标产品不在本次名录（引擎换库）就不落地，宁可丢俗称也不错归
+    for (const [target, words] of Object.entries(BRAND_ALIASES)) {
+        const s = canon.get(target.toLowerCase());
+        if (!s) continue;
+        for (const w of words) if (w) s.aliases.add(String(w).trim());
+    }
     for (const [key, list] of Object.entries(meta.nameAliases || {})) {
         const aliases = (list || []).map(String).filter(Boolean);
         let target = canon.get(String(key).toLowerCase());
@@ -230,7 +297,9 @@ export function buildAliasIndex(meta = {}) {
             const key = `${s.label.toLowerCase()}\u0000${alias}`; // 大小写敏感：留住 MaaS/Maas
             if (!alias || seen.has(key)) continue;
             seen.add(key);
-            entries.push({ product: s.label, id: s.id, alias });
+            // caseless：派生写法才允许大小写不敏感；全大写缩写永不（对齐 Python）
+            const caseless = s.derived.has(alias) && alias !== alias.toUpperCase();
+            entries.push({ product: s.label, id: s.id, alias, caseless });
         }
     }
     entries.sort((a, b) => b.alias.length - a.alias.length);
@@ -257,7 +326,7 @@ export function matchProducts(text, index) {
             let i = 0;
             while ((i = t.indexOf(alias, i)) >= 0) { spans.push([i, i + alias.length]); i += 1; }
         } else {
-            const exact = alias.length < ATTR_SHORT_ALIAS;
+            const exact = !e.caseless && alias.length < ATTR_SHORT_ALIAS;
             const hay = exact ? t : t.toLowerCase();
             const needle = exact ? alias : alias.toLowerCase();
             let i = 0;
@@ -270,7 +339,14 @@ export function matchProducts(text, index) {
                     if (ATTR_BOUNDARY.test(n)) afterOk = false;
                     else if (n === '.' && j + 1 < hay.length && /[A-Za-z0-9]/.test(hay[j + 1])) afterOk = false;
                 }
-                if (beforeOk && afterOk) spans.push([i, j]);
+                if (beforeOk && afterOk) {
+                    // URL/路径上下文不是产品提及：obs://bucket、/obs/bin、a@obs（对齐 Python）
+                    const prev = i > 0 ? hay[i - 1] : '';
+                    const nxt = j < hay.length ? hay[j] : '';
+                    const prevBad = ['/', '\\', '.', '@'].includes(prev);
+                    const nxtBad = [':', '/', '\\'].includes(nxt);
+                    if (!prevBad && !nxtBad) spans.push([i, j]);
+                }
                 i += 1;
             }
         }
