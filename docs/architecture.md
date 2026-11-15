@@ -45,7 +45,7 @@ openclaw.plugin.json
 4. **门禁脚本化**：`validate-package.mjs`（结构校验）、`structure.test.ts`（结构用例）、
    jscpd/markdownlint 都挂在 `npm run validate` / CI 上，结构靠机器守，不靠人自觉。
 
-## 二、我们现在的结构（实测，2026-11-15）
+## 二、迁移前的结构（实测快照，S3-A 之前；现状见第三节与第七章）
 
 根目录（排除 `.git`/`.github`）**42 个条目**——比对方多 16 个，且混了运行时状态与产物：
 
@@ -134,7 +134,7 @@ S2/S3 的顺序不能反：先让"共享资产有唯一落点"，再动"运行�
 | devkit | 我们 | 说明 |
 |---|---|---|
 | `src/` → `dist/` | `src/`（真源）→ `payloads/<ver>/`（运行时副本） | 都不入库；都保证"跑的是构建出来的那份" |
-| `skills/`（包内，由 src/packs 生成） | `plugins/vod-devkit/skills/`（由 `src/skills/` 生成） | 生成器唯一入口 + 零提交 |
+| `skills/`（包内，由 src/packs 生成） | `plugins/vod-devkit/skills/`（由 `assets/skills/` 生成） | 生成器唯一入口 + 零提交 |
 | `validate-package.mjs` + `structure.test.ts` | `scripts/verify_copies.py` + `tests/test_structure_guards.py` | 校验器/结构用例 |
 | `REPORT-*.md` 堆根（他们也有噪声） | 不放根：报告进 `docs/reports/`（阶段 2 起） | 不复制这条噪声 |
 

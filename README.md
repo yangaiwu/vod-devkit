@@ -389,7 +389,7 @@ hermes hooks test pre_llm_call --payload-file payload.json
 src/            运行时与安装器源码（真源）           plugins/   宿主发布物（清单+生成副本）
 integrations/   宿主规格（探测/落点）               scripts/   生成器与门禁（成对）
 hooks/          宿主无关钩子脚本                    tests/     pytest（含结构/范围/花名册门禁）
-docs/           架构/设计/需求/决策/安全/钩子       dsh/ npm/ bin/   薄壳与独立包
+docs/           架构/设计/需求/决策/安全/钩子    packages/dsh/ npm/ bin/  独立包与薄壳
 ```
 
 根目录条目受**预算**约束（`tests/test_structure_guards.py::test_s129_*`）：新增顶层目录/文件

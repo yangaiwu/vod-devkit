@@ -251,7 +251,7 @@ dsh 宿主不识 MCP，只认自家 cordis 插件协议——故以独立薄壳�
 结构：
 - dsh/package.json：peerDeps=cordis/dsh-tools/schemastery（均 npm 公网），
   `dsh.bundle.patch` 指向 cordis.patch.yml
-- dsh/lib/index.js：cordis 插件入口（name/inject=['tools']/Config/apply），
+- packages/dsh/lib/index.js：cordis 插件入口（name/inject=['tools']/Config/apply），
   注册 3 工具：vod_submit_voices / vod_list_submitted / vod_devkit_info
 - dsh/cordis.patch.yml：bundle 激活声明（insert 条目）
 - 审批：ctx.on('tools/pre-execute') 对 submit 返回 kind:'ask'（dsh 原生
@@ -376,7 +376,7 @@ normalizeLoose 后不设白名单（未注册落 UNKNOWN 档+productRegistered
 
 | 用例 | 承载 |
 |---|---|
-| S64 透传正例 | tools.py `_followup_fields`（单源）+ tests/test_followup.py 透传/两段式两例 + dsh/test/followup.test.mjs 行为级 |
+| S64 透传正例 | tools.py `_followup_fields`（单源）+ tests/test_followup.py 透传/两段式两例 + packages/dsh/test/followup.test.mjs 行为级 |
 | S65 键集合零漂移 | 拒答词集兜底（_FOLLOWUP_DECLINES）+ test_followup 键集合断言（{title,content}）+ 超 2000 截断例 |
 | S66 话术固定化 | 固定问句逐字锁（contract description 恰 1 次）+ SKILL 双副本 + dsh 壳描述；desc 预算门禁（≤1500）复验 |
 | S67-S70 触发判定块 | SKILL 三层判定块逐字锁（test_followup_skill_judgment_block_locked）+ 契约跳过句（test_followup_skip_clause_in_contract）；dsh 壳 desc 预算 1495/1500 无余量不塞跳过句——dsh 宿主由原生技能层（判定块全量）承载 |
@@ -449,7 +449,7 @@ exit 1 附可照抄的手动修复格式。manifest 增 dshProfile 键（golden 
   103 个截到均值 232 字符——openai/codex#24299，被截断即对模型不可见）
   ②description 总长 ≤1500（现状 contract 665/dsh 组合 ~1285，防无界
   增长挤占宿主预算）③双载体同测（contract JSON=python 单一事实源 +
-  dsh/lib/index.js 组合串提取）④归因口径漂移锁（禁旧宽容口径句回流）。
+  packages/dsh/lib/index.js 组合串提取）④归因口径漂移锁（禁旧宽容口径句回流）。
   随 pre-push 门禁自动生效
 
 ## 七、分发形态实现（D-key-guard-3，2026-11-05）
@@ -678,11 +678,11 @@ test/remote-mcp-server.test.ts 是参照物），只在我们有身份/写面的
 | initialize 副作用 | 预热 user hash（3s 超时）+ 上报 agent/telemetry | 本仓无 telemetry/hash 子系统 | 不适用（不是"没做"，是没有对应对象） |
 | dsh 壳 | 不走 MCP | 同 | 范围外（它有自己的工具面，不经 MCP 传输） |
 
-dsh 壳归因同步（2026-11-11，负责人要求「能力一致」）：`dsh/lib/index.js` 落同一
+dsh 壳归因同步（2026-11-11，负责人要求「能力一致」）：`packages/dsh/lib/index.js` 落同一
 优先级链（字面证据 > 记忆 30 分钟 > config product 先验 > UNKNOWN），索引/匹配/
 歧义/误命中判定例与 Python 侧逐条对齐（含线上 meta 的 catalog≠展示名两颗雷），
 账本与回执同带 productSource/productEvidence；硬编码 PRODUCT_MAP 删除（改名录
-驱动）；工具面本就无 product 入参。用例见 dsh/test/attribution.test.mjs（7 例，
+驱动）；工具面本就无 product 入参。用例见 packages/dsh/test/attribution.test.mjs（7 例，
 含行为级 stub fetch：无证据走先验、中文别名压过先验、歧义不带 product）。
 
 ## 归因：运行期字面解析（D-attrib-B，2026-11-11 负责人拍板 A/A/A/A）
