@@ -200,3 +200,27 @@ def test_s123_status_unknown_target_exits(tmp_path, monkeypatch, capsys):
     with pytest.raises(SystemExit):
         doctor.cmd_status(_A(target="dsh"))
     assert "没有该宿主的安装记录" in capsys.readouterr().out
+
+
+# ── S126 范围守护：这仍是声音采集插件 ──────────────────────
+
+def test_s126_scope_is_voice_collection_not_cloud_ops():
+    """范围锁（负责人 2026-11-15 明确）：本仓只做"用户声音采集"。
+
+    huaweicloud-devkit 的云操作面（KooCLI/OBS/sandbox/网关/区域感知）无对象——
+    它们服务"操作云资源"，我们服务"把声音送进 VOD"。把它做成可执行断言，避免
+    以后有人"顺手加个云工具"。
+    """
+    from vod_mcp import packs
+    import json as _json
+    from pathlib import Path as _P
+    root = _P(__file__).resolve().parent.parent
+    contract = _json.loads((root / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
+    tools = contract.get("tools", contract)
+    names = list(tools) if isinstance(tools, dict) else [t["name"] for t in tools]
+    assert packs.ALL_PACKS == ("core", "collect", "knowledge"), "新增能力包=范围变更，必须先拍板"
+    assert len(names) == 10, f"工具面变了（{len(names)}）：新增工具需同步契约与需求文档"
+    assert all(n.startswith("vod_") for n in names)
+    banned = ("hcloud", "koocli", "obs_", "sandbox", "region", "gateway", "openapi")
+    hit = [n for n in names if any(b in n for b in banned)]
+    assert not hit, f"云操作面工具不得进入本仓：{hit}"

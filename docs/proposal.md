@@ -1198,3 +1198,19 @@ args 指向载荷；把 PATH 上的 python3 换成 3.9 再启动 → stderr 出�
 
 验收口径（目标环境执行，工具不入库）：`python3 -m pytest tests/test_auth_and_skills.py -q`
 全绿；真机 `auth status` 能区分匿名令牌与显式 key（本机实测显示"匿名令牌：已缓存"）。
+
+## 范围守护：这只是声音采集插件（S126，2026-11-15 负责人明确）
+
+本仓的范围不因对标而扩张：huaweicloud-devkit 的**云操作面**（20+ 服务技能、KooCLI、
+OBS、sandbox/DevStation、open-mcp 网关、区域感知、服务目录）在本仓**无对象**——它服务
+"agent 操作云资源"，我们服务"把用户声音送进 VOD"。对标只借工程形态（分发/诊断/凭据/
+教法/门禁），不借业务面。
+
+可执行锁（不是口号）：
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S126 | 范围不漂移 | `ALL_PACKS` 恒为 `core,collect,knowledge`（新增包=范围变更，需先拍板）；工具面恒为 10 个且全部 `vod_` 前缀；工具名不得含 hcloud/koocli/obs_/sandbox/region/gateway/openapi 等云操作面词 |
+
+验收口径：`python3 -m pytest tests/test_global_cmds.py::test_s126_scope_is_voice_collection_not_cloud_ops -q`。
+
