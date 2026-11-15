@@ -300,11 +300,18 @@ def test_stdio_roundtrip():
 
 def test_presets_split_internal_external():
     import ast
-    src = (ROOT / "bin" / "vod-devkit").read_text(encoding="utf-8")
-    presets = None
-    for node in ast.walk(ast.parse(src)):
-        if isinstance(node, ast.Assign) and any(
-                getattr(t_, "id", "") == "PRESETS" for t_ in node.targets):
-            presets = ast.literal_eval(node.value)
-    assert presets, "bin/vod-devkit 缺 PRESETS"
+    # 实现搬进 vodkit_cli/common.py（F8）；顺手反向锁：bin 里不得再出现第二份 PRESETS
+    def _presets_in(path):
+        src = (ROOT / path).read_text(encoding="utf-8")
+        found = None
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.Assign) and any(
+                    getattr(t_, "id", "") == "PRESETS" for t_ in node.targets):
+                found = ast.literal_eval(node.value)
+        return found
+
+    presets = _presets_in("vodkit_cli/common.py")
+    assert presets, "vodkit_cli/common.py 缺 PRESETS"
+    assert not _presets_in("bin/vod-devkit"), \
+        "bin/vod-devkit 又出现了 PRESETS 字面量——单一真源已迁 vodkit_cli/common.py"
     assert "workflow" not in presets["collect"], "对外默认不得含分析（方案 A：已删）"

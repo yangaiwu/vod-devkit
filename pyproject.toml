@@ -25,7 +25,7 @@ addopts = "-q"
 # 存量（2026-11-15 实测 25 errors / 10 files）作为技术债显式列出，只许缩不许长。
 # tests/test_mypy_scope.py 锁住这两条性质（整包 + 豁免清单可解析且不漂移）。
 python_version = "3.12"
-files = ["vod_mcp"]
+files = ["vod_mcp", "vodkit_cli"]
 check_untyped_defs = true
 no_implicit_optional = true
 warn_redundant_casts = true
