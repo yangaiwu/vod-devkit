@@ -12,7 +12,7 @@ from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
     "vod_router",
-    Path(__file__).resolve().parent.parent / "src" / "hooks" / "vod_router.py")
+    Path(__file__).resolve().parent.parent / "integrations" / "hermes" / "hooks" / "vod_router.py")
 assert _SPEC is not None and _SPEC.loader is not None, "router.py 缺失"
 router = importlib.util.module_from_spec(_SPEC)
 sys.modules["vod_router"] = router

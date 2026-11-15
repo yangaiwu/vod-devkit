@@ -78,18 +78,23 @@ plugins/vod-devkit/            ← 唯一"宿主发布物"：清单 + 钩子 + �
   plugin.json                    Agent Plugins 清单（$schema）
   .codex-plugin/plugin.json     codex 兼容清单
   .mcp.json                     MCP 入口（CLI 形态，见 D-mcp-manifest-a3-1）
-  hooks/vod_router.py           宿主无关钩子（hermes hooks.pre_llm_call 注册它）
+  hooks/vod_router.py           宿主无关钩子（由 integrations/hermes/hooks/ 同步）
   skills/ contract/ safety/     发布树（生成物，零提交）
   vod_mcp/ build-info.json      运行时副本（生成物，零提交）
 
-src/                           ← 真源（S2 后：资产已在此；S3 再把两个包搬进来）
-  skills/ contract/ safety/ hooks/  共享资产（发布/载荷布局仍是根级平铺，见 paths.ASSETS）
-  vod_mcp/                       运行时（S3 迁入）
-  vodkit_cli/                    安装器 CLI（S3 迁入）
+src/                           ← 唯一的可导入 Python 包根（S3 起，标准 src-layout）
+  vod_mcp/                       运行时（MCP server、适配器、packs）
+  vodkit_cli/                    安装器 CLI
 
-integrations/<host>/host.json  ← 宿主规格（探测/落点/技能目录），不写死在代码里
-npm/cli.js  bin/vod-devkit     ← 薄壳：只找解释器、透传参数
-dsh/                           ← dsh 壳（独立 npm 包，保持独立）
+assets/                        ← 项目级资产（不进 wheel；随 npm 载荷/插件副本分发）
+  skills/ contract/ safety/      共享资产（发布/载荷布局仍是根级平铺，见 paths.ASSETS）
+
+integrations/hermes/           ← 宿主规格 + 宿主侧 hook 脚本（hooks/vod_router.py）
+  host.json
+  hooks/vod_router.py           真源；载荷物化为 <payload>/hooks/vod_router.py
+
+packages/dsh/                  ← dsh 壳（独立 npm 包）
+npm/cli.js  bin/vod-devkit     ← 薄壳：找解释器 + 显式设两个根 + 透传参数
 scripts/                       ← 生成器与校验器成对（sync_plugin ↔ verify_copies，case_roster 等）
 tests/                         ← pytest（含结构/范围/用例花名册门禁）
 docs/                          ← architecture(本文件) / design / proposal / decisions /
@@ -99,7 +104,7 @@ docs/                          ← architecture(本文件) / design / proposal /
 根目录保留的条目（这就是"预算"，见门禁 S129）：
 
 ```
-src/ plugins/ integrations/ scripts/ tests/ docs/ dsh/ npm/ bin/
+src/ assets/ packages/ plugins/ integrations/ scripts/ tests/ docs/ npm/ bin/
 README.md README.en.md INSTALL.md QUICKSTART.md RELEASING.md CHANGELOG.md
 CONTRIBUTING.md SECURITY.md SUPPORT.md CODE_OF_CONDUCT.md NOTICE OWNERS LICENSE.txt
 package.json pyproject.toml
@@ -114,7 +119,7 @@ package.json pyproject.toml
 |---|---|---|---|---|
 | S1（已完成） | 落结构契约 + 根目录预算门禁 + README 对齐 | 文档 + 1 条用例 | 零（不改运行路径） | `test_s129_*` 绿；README 结构节与本文一致 |
 | S2（已完成 2026-11-15） | `contract/ safety/ skills/ hooks/` → `src/`；**发布布局不变** | `paths.py` 增 `ASSETS`（仓内=src/，载荷/插件副本=根）、`sync_plugin.PAIRS`、`payload.sources`、`rules_provenance` 与 `registry_reconcile` 的路径解析、`package.json files`、约 16 处测试路径 | 中（路径是公共契约） | 全量 pytest 全绿；临时 HOME 装机实测载荷仍是 `skills/contract/safety/hooks` 平铺（50 文件）；hook 仍注册；doctor OK |
-| S3 | `vod_mcp/ vodkit_cli/` → `src/`，`bin/` 与 `npm/` 只做 `sys.path` 注入 | `bin/vod-devkit`、`npm/cli.js`、`server_entry()`、载荷入口、CI | 高（装机入口路径变了） | 干净检出装 9 宿主 + `version` 输出一致 + 老装机 `doctor` 不误报 |
+| S3（已完成 2026-11-15） | `vod_mcp/ vodkit_cli/` → `src/`，资产 → `assets/`，hook → `integrations/hermes/hooks/`，`dsh/` → `packages/dsh/` | `bin/vod-devkit`、`npm/cli.js`、`server_entry()`、载荷入口、CI、约 45 处测试路径 | 高（装机入口路径变了） | 全量 pytest 绿（54 文件）；`host_matrix` 9 宿主 8 PASS/1 已修；载荷仍平铺 `vod_mcp/skills/contract/safety/hooks` |
 | S4 | 运行期状态收进 `~/.vod-devkit/state/`（状态跟机器不跟副本） | `paths.RUNTIME_JSON`、迁移一次、doctor 提示 | 中（语义变更，需负责人拍板） | key/账本升版不重置；旧副本自动迁移 |
 
 S2/S3 的顺序不能反：先让"共享资产有唯一落点"，再动"运行时入口路径"——否则一次改动
@@ -143,3 +148,53 @@ S2/S3 的顺序不能反：先让"共享资产有唯一落点"，再动"运行�
 | README 缺"每宿主四件套/钩子/能力包/安全模型/结构" | 本次补齐（见 README 对应节） |
 | 生成物与源混在根上 | S2 |
 | 运行期状态在仓根（`install-manifest.json`） | 已 gitignore；S4 迁到用户目录 |
+## 七、S3 落地：两个根 + 标准 src-layout（2026-11-15 实测）
+
+### 7.1 两根取值表（唯一权威）
+
+| 形态 | `SRC_ROOT` | `DIST_ROOT` | `ASSETS` | 说明 |
+|---|---|---|---|---|
+| 仓内直跑 | `<repo>/src` | `<repo>` | `<repo>/assets` | pytest、`scripts/*`、`bin/vod-devkit` |
+| 载荷副本 `~/.vod-devkit/payloads/<v>/` | 载荷根 | 载荷根 | 载荷根（平铺） | 代码与资产都在载荷内，两根同指 |
+| 插件副本 `plugins/vod-devkit/` | 插件包根 | 插件包根 | 插件包根（平铺） | 必须与 `.mcp.json` 的 `args` 路径对齐 |
+
+**入口显式设根**（`paths.py` 只读不猜）：`bin/vod-devkit`、`npm/cli.js`、`server.main()`、
+`tests/conftest.py`（仅 `sys.path`）、`scripts/host_matrix.py` 各自设
+`VOD_DEVKIT_SRC_ROOT` / `VOD_DEVKIT_DIST_ROOT`；都不可知时 `paths._derive()` 按物理位置
+推断一次，旧布局命中给 `DeprecationWarning`。
+
+### 7.2 旧布局回落（只保留一个版本）
+
+`paths.LEGACY_ALLOWED_UNTIL = "0.7.0"`：检测到"包在仓根"（S3 之前的检出）时告警并回落到
+单根；版本 ≥ 0.7.0 直接 `RuntimeError`。`tests/test_p2_structure.py` 锁住"该分支只存在于
+允许区间"。
+
+### 7.3 生成物与打包边界
+
+- **插件副本** `plugins/vod-devkit/` 拒绝内嵌 `src/`：`vod_mcp/` 直接平铺，由
+  `scripts/sync_plugin.py`（`PAIRS` + `EXTRA_PAIRS`）生成，`verify_copies.py` 校验且零提交。
+- **载荷** 仍平铺：`vod_mcp/`、`skills/`、`contract/`、`safety/`、`hooks/`
+  （`payload.sources`：代码取 `SRC_ROOT`，资产取 `ASSETS`，hook 取其真实位置）。
+- **npm files**：`src/vod_mcp/*` 逐文件枚举（防 `runtime.json` 入包），`src/vod_mcp/host_adapters/`
+  与 `src/vod_mcp/packs/` 整目录，资产走 `assets/`，hook 走 `integrations/`。
+- **运行期状态**：`runtime.json` 不再住在包目录，落 `DIST_ROOT/vod_mcp/runtime.json`
+  （gitignore），安装器落盘前建父目录。
+
+### 7.4 pip 入口修正（顺手修掉的存量缺陷）
+
+`pyproject.toml` 的 `[project.scripts]` 原写 `vod-devkit = "bin.vod-devkit"`——不是合法
+entry-point，`pip install -e .` 实测 `ValueError: must be python-entrypoint-reference`。
+改为 `vodkit_cli.cli:main`；`bin/vod-devkit` 继续作为 npx/脚本入口。wheel 不含 `assets/`，
+因此 pip 安装只面向开发/测试，正式分发仍是 npm 载荷与插件副本。
+
+### 7.5 踩过的坑（写下来免得再踩）
+
+1. **`bin/vod-devkit` 在 import 期写 `os.environ` 会污染整场测试**：测试用
+   `SourceFileLoader` 加载它取 `PRESETS`，于是"外层仓的根"泄漏进所有子进程，
+   "复制仓再跑安装器"的用例把 manifest 写到外层仓（症状：`install-manifest.json` 缺失）。
+   改为只在 `__main__` 里设 env。
+2. **`tests/conftest.py` 不要设 `PYTHONPATH`**：副本类用例的子进程会 import 到外层仓的包，
+   掩盖副本布局问题（实测插件副本探针读到仓内 `assets/`）。仅把 `src/` 插 `sys.path`。
+3. **路径替换不能机械**：载荷/插件副本布局是平铺的，`.../src/vod_mcp/server.py` 只在
+   "仓内真源"成立；批量替换会同时改坏副本断言（`test_codearts_host`、`test_installer`、
+   `host_matrix` 的 dsh 探测）。

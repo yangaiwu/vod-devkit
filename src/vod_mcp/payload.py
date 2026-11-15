@@ -102,11 +102,13 @@ def stage(version: str | None = None, quiet: bool = False) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
 
     from vod_mcp import paths as _paths
-    sources = {"vod_mcp": ROOT / "vod_mcp",
+    # 运行期源码取自 SRC_ROOT（仓内=src/，载荷/插件副本=根），资产取自 ASSETS，
+    # hook 脚本取自它的真实位置（仓内在 integrations/hermes/hooks/）。
+    sources = {"vod_mcp": _paths.SRC_ROOT / "vod_mcp",
                "contract": _paths.ASSETS / "contract",
                "safety": _paths.ASSETS / "safety",
                "skills": _paths.ASSETS / "skills",
-               "hooks": _paths.ASSETS / "hooks"}
+               "hooks": _paths.hook_script().parent}
     for name, src in sources.items():
         if not src.is_dir():
             continue  # hooks 可缺（历史版本载荷）

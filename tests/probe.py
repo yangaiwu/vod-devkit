@@ -17,7 +17,7 @@ class Probe:
     def __init__(self, env_extra=None, python=None):
         cmd = python or os.environ.get("VOD_PROBE_PYTHON") or sys_executable()
         env = dict(os.environ, **(env_extra or {}))
-        self.p = subprocess.Popen([cmd, str(ROOT / "vod_mcp" / "server.py")],
+        self.p = subprocess.Popen([cmd, str(ROOT / "src" / "vod_mcp" / "server.py")],
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=subprocess.DEVNULL, env=env, text=True)
         self.nid = 0

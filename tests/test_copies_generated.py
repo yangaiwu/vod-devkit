@@ -24,13 +24,13 @@ COPY_DIRS = [dst for _, dst in sync_plugin.PAIRS]
 
 def _bootstrap_repo(base: Path) -> Path:
     """造一个最小仓：四个源目录 + 版本号，副本刻意不存在（等价 fresh clone）。"""
-    (base / "vod_mcp").mkdir(parents=True)
-    (base / "vod_mcp" / "__init__.py").write_text('__version__ = "9.9.9"\n', encoding="utf-8")
-    (base / "vod_mcp" / "server.py").write_text("print('hi')\n", encoding="utf-8")
-    for rel in ("src/skills/core", "src/contract", "src/safety"):
+    (base / "src" / "vod_mcp").mkdir(parents=True)
+    (base / "src" / "vod_mcp" / "__init__.py").write_text('__version__ = "9.9.9"\n', encoding="utf-8")
+    (base / "src" / "vod_mcp" / "server.py").write_text("print('hi')\n", encoding="utf-8")
+    for rel in ("assets/skills/core", "assets/contract", "assets/safety"):
         (base / rel).mkdir(parents=True, exist_ok=True)
         (base / rel / "f.txt").write_text("x\n", encoding="utf-8")
-    (base / "vod_mcp" / "runtime.json").write_text('{"java_key": "secret"}\n', encoding="utf-8")
+    (base / "src" / "vod_mcp" / "runtime.json").write_text('{"java_key": "secret"}\n', encoding="utf-8")
     return base
 
 
@@ -100,7 +100,7 @@ def test_S110_consumers_sync_before_reading_copies():
     targets = {
         "tests/conftest.py": "sync_plugin",
         "scripts/host_matrix.py": "sync_plugin",
-        "vod_mcp/host_adapters/codex.py": "sync_plugin.py",
+        "src/vod_mcp/host_adapters/codex.py": "sync_plugin.py",
     }
     for rel, needle in targets.items():
         text = (ROOT / rel).read_text(encoding="utf-8")

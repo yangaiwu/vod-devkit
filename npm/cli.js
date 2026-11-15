@@ -12,6 +12,8 @@ import { dirname, join } from 'node:path';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const installer = join(ROOT, 'bin', 'vod-devkit');
+// 入口显式设根（与 bin/vod-devkit 同一契约）：npx 场景两种布局都可能出现
+const SRC = existsSync(join(ROOT, 'src', 'vod_mcp')) ? join(ROOT, 'src') : ROOT;
 
 const candidates = [process.env.VOD_PYTHON, 'python3', 'python3.12', 'python3.11', 'python3.10', 'python']
   .filter(Boolean);
@@ -35,5 +37,8 @@ if (!existsSync(installer)) {
   process.exit(1);
 }
 
-const result = spawnSync(py, [installer, ...process.argv.slice(2)], { stdio: 'inherit' });
+const result = spawnSync(py, [installer, ...process.argv.slice(2)], {
+  stdio: 'inherit',
+  env: { ...process.env, VOD_DEVKIT_SRC_ROOT: SRC, VOD_DEVKIT_DIST_ROOT: ROOT },
+});
 process.exit(result.status ?? 1);

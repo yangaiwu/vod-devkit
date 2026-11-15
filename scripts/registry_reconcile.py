@@ -38,11 +38,11 @@ def npm_view(pkg: str, field: str, runner=subprocess.run) -> object:
 
 def _contract_path(root: Path) -> Path:
     """契约文件位置：仓内 src/contract（S2 起），载荷/旧布局=根下 contract。"""
-    for rel in ("src/contract/tools.schema.json", "contract/tools.schema.json"):
+    for rel in ("assets/contract/tools.schema.json", "contract/tools.schema.json"):
         p = root / rel
         if p.exists():
             return p
-    return root / "src" / "contract" / "tools.schema.json"
+    return root / "assets" / "contract" / "tools.schema.json"
 
 
 def local_versions(root: Path = ROOT) -> dict:

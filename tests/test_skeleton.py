@@ -265,7 +265,7 @@ def _rpc(proc, message: dict) -> dict:
 
 
 def test_stdio_roundtrip():
-    env = dict(os.environ, VOD_PACKS="", PYTHONPATH=str(ROOT),
+    env = dict(os.environ, VOD_PACKS="", PYTHONPATH=str(ROOT / "src"),
                VOD_JAVA_API_BASE="http://127.0.0.1:9")
     proc = subprocess.Popen([sys.executable, "-m", "vod_mcp.server"],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -310,7 +310,7 @@ def test_presets_split_internal_external():
                 found = ast.literal_eval(node.value)
         return found
 
-    presets = _presets_in("vodkit_cli/common.py")
+    presets = _presets_in("src/vodkit_cli/common.py")
     assert presets, "vodkit_cli/common.py 缺 PRESETS"
     assert not _presets_in("bin/vod-devkit"), \
         "bin/vod-devkit 又出现了 PRESETS 字面量——单一真源已迁 vodkit_cli/common.py"

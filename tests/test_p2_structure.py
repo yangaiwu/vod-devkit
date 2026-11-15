@@ -47,7 +47,7 @@ def test_packs_use_module_attribute_access_not_symbol_imports():
     """packs/*.py 里禁止 `from vod_mcp.net import X` / `from vod_mcp import runtime_state as ...`？ 
     ——后者是模块导入（合法）；禁止的是从 net/runtime_state **导入符号**。"""
     bad = []
-    for path in sorted((ROOT / "vod_mcp" / "packs").glob("*.py")):
+    for path in sorted((ROOT / "src" / "vod_mcp" / "packs").glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module in (
@@ -120,7 +120,7 @@ def test_no_module_alias_leaked_into_ref_like_strings():
     """只扫"像 git ref / 路径 / 命令"的字面量（含 '/'、无空格），避免误伤
     f-string 里的真实调用表达式（那些片段里出现 core.search_products 是正常的）。"""
     bad = []
-    paths = list((ROOT / "vod_mcp").rglob("*.py")) + list((ROOT / "vodkit_cli").rglob("*.py"))
+    paths = list((ROOT / "src" / "vod_mcp").rglob("*.py")) + list((ROOT / "src" / "vodkit_cli").rglob("*.py"))
     for path in paths:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -139,6 +139,6 @@ def test_no_module_alias_leaked_into_ref_like_strings():
 
 def test_update_uses_origin_main_ref():
     """语义锁：cmd_update 比较的必须是 origin/main（上一条的具名实例）。"""
-    src = (ROOT / "vodkit_cli" / "update.py").read_text(encoding="utf-8")
+    src = (ROOT / "src" / "vodkit_cli" / "update.py").read_text(encoding="utf-8")
     assert '"origin/main"' in src, "cmd_update 的远端 ref 不是 origin/main"
     assert "cli.main" not in src, "origin/main 被拆分正则污染成 cli.main"

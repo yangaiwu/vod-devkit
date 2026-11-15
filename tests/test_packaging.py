@@ -23,23 +23,23 @@ def test_files_whitelist_covers_all_vod_mcp_modules():
     """
     pkg = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     files = {f.rstrip("/") for f in pkg.get("files", [])}
-    for entry in sorted((ROOT / "vod_mcp").iterdir()):
+    for entry in sorted((ROOT / "src" / "vod_mcp").iterdir()):
         if entry.name in NEVER_PACKED or entry.suffix in (".log", ".pyc"):
             continue
         if entry.is_dir():
             if entry.name == "__pycache__":
                 continue
             # 子包两种合法形态：整目录声明，或逐文件枚举（host_adapters 是后者）
-            if f"vod_mcp/{entry.name}" in files:
+            if f"src/vod_mcp/{entry.name}" in files:
                 continue
             missing = [p.name for p in entry.glob("*.py")
-                       if f"vod_mcp/{entry.name}/{p.name}" not in files]
+                       if f"src/vod_mcp/{entry.name}/{p.name}" not in files]
             assert not missing, (
-                f"vod_mcp/{entry.name}/ 既没整目录声明、也没逐文件覆盖：{missing}"
+                f"src/vod_mcp/{entry.name}/ 既没整目录声明、也没逐文件覆盖：{missing}"
                 "——npm 包将缺这些模块（功能静默丢失）")
             continue
-        assert f"vod_mcp/{entry.name}" in files, (
-            f"vod_mcp/{entry.name} 不在 package.json files 白名单——"
+        assert f"src/vod_mcp/{entry.name}" in files, (
+            f"src/vod_mcp/{entry.name} 不在 package.json files 白名单——"
             "npm 包将缺此文件（功能静默丢失）。请补白名单后再发版。")
 
 
@@ -48,7 +48,7 @@ def test_files_whitelist_covers_all_skills():
     （本用例锁的是：files 必须声明 skills/ 整目录，防止逐目录枚举再漏）。"""
     pkg = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     files = {f.rstrip("/") for f in pkg.get("files", [])}
-    assert any(f == "src/skills/" or f == "src/skills" for f in files), (
+    assert any(f == "assets/skills/" or f == "assets/skills" for f in files), (
         "files 缺 skills/ 整目录声明——新技能目录将不进包")
 
 
@@ -59,6 +59,6 @@ def test_runtime_json_never_packable():
     pkg = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     for f in pkg.get("files", []):
         assert "runtime.json" not in f, f"files 白名单含 {f}——key/账本泄漏风险"
-        assert f not in ("vod_mcp", "vod_mcp/"), (
+        assert f not in ("vod_mcp", "src/vod_mcp/"), (
             "files 含 vod_mcp 整目录——会把真实 runtime.json 打进包，"
             "必须逐文件枚举")

@@ -35,7 +35,7 @@
       "carrier": null
     },
     "S3": {
-      "carrier": null
+      "carrier": "tests/conftest.py"
     },
     "S4": {
       "carrier": "docs/design.md"
@@ -194,7 +194,7 @@
       "carrier": "docs/design.md"
     },
     "S56": {
-      "carrier": "dsh/test/ux-sync.test.mjs"
+      "carrier": "packages/dsh/test/ux-sync.test.mjs"
     },
     "S57": {
       "carrier": "docs/design.md"
@@ -511,7 +511,6 @@
   },
   "waivers": [
     "S2",
-    "S3",
     "S5",
     "S6",
     "S7",

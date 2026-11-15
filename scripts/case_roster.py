@@ -6,7 +6,7 @@
 
 扫描口径（与门禁同源，改这里只改一处）：
 - 定义：docs/proposal.md 行首（表格行/列表项也认）的 S/U/DG + 数字
-- 承载：docs/design.md、tests/*.py、dsh/test/*.mjs 里出现的同一编号（区间写法展开）
+- 承载：docs/design.md、tests/*.py、packages/dsh/test/*.mjs 里出现的同一编号（区间写法展开）
 """
 import re
 from pathlib import Path
@@ -36,7 +36,7 @@ def expand(text: str) -> set:
 def carrier_files() -> list:
     files = [ROOT / "docs" / "design.md"]
     files += sorted((ROOT / "tests").glob("*.py"))
-    files += sorted((ROOT / "dsh" / "test").glob("*.mjs"))
+    files += sorted((ROOT / "packages" / "dsh" / "test").glob("*.mjs"))
     return [f for f in files if f.exists()]
 
 

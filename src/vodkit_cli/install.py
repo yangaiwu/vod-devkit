@@ -239,6 +239,7 @@ def cmd_install(args):
     # 宿主产品（host_default）已删除（2026-11-12 复评）：宿主产品也是一次推断，
     # 错归会进引擎幂等/判重域。候选只走 vod_search_products，这里不再写 host_product。
     cfg["java_base"] = args.java_api_base
+    rt.parent.mkdir(parents=True, exist_ok=True)
     rt.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # ── 远程 attach / skills-only（D-attach-1）───────────────────────────

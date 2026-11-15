@@ -36,7 +36,7 @@ def _imports(path: Path) -> set:
 
 def test_vod_mcp_never_imports_engine_internals():
     offenders = {}
-    for p in sorted((ROOT / "vod_mcp").glob("*.py")):
+    for p in sorted((ROOT / "src" / "vod_mcp").glob("*.py")):
         bad = _imports(p) & _FORBIDDEN_IMPORTS
         if bad:
             offenders[p.name] = sorted(bad)
@@ -48,7 +48,7 @@ def test_vod_mcp_never_imports_engine_internals():
 def test_optional_mcp_sdk_stays_in_remote_modules():
     """可选 SDK（mcp）只能出现在远程面两个模块——stdio 主路径必须零第三方依赖。"""
     offenders = {}
-    for p in sorted((ROOT / "vod_mcp").glob("*.py")):
+    for p in sorted((ROOT / "src" / "vod_mcp").glob("*.py")):
         if p.name in _SDK_ALLOWED_FILES:
             continue
         bad = _imports(p) & _OPTIONAL_SDK
@@ -59,7 +59,7 @@ def test_optional_mcp_sdk_stays_in_remote_modules():
 
 def test_attribution_module_is_pure():
     """归因模块只做计算：不许开文件/读环境/发网络请求（否则单测会带副作用）。"""
-    p = ROOT / "vod_mcp" / "attribution.py"
+    p = ROOT / "src" / "vod_mcp" / "attribution.py"
     tree = ast.parse(p.read_text(encoding="utf-8"))
     forbidden_names = {"open", "write_text", "read_text", "write_bytes",
                        "read_bytes", "urlopen", "socket", "getenv", "environ"}
@@ -84,7 +84,7 @@ def test_attribution_module_is_pure():
 def test_contract_and_handlers_are_one_set():
     """契约是工具面单一真源：契约里的工具 == dispatch 注册的 handler。"""
     from vod_mcp import tools as impl
-    contract = json.loads((ROOT / "src" / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
+    contract = json.loads((ROOT / "assets" / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
     declared = set(contract["tools"])
     implemented = set(impl._HANDLERS)
     assert declared == implemented, (
@@ -98,8 +98,8 @@ def test_contract_and_handlers_are_one_set():
 
 def test_policy_rules_have_required_fields_and_real_tools():
     """护栏策略必备字段下限 + 规则指向的工具必须存在（防悬空规则）。"""
-    policy = json.loads((ROOT / "src" / "safety" / "policy.json").read_text(encoding="utf-8"))
-    contract = json.loads((ROOT / "src" / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
+    policy = json.loads((ROOT / "assets" / "safety" / "policy.json").read_text(encoding="utf-8"))
+    contract = json.loads((ROOT / "assets" / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
     tools = set(contract["tools"])
     rules = policy.get("rules") or []
     assert rules, "policy.json 没有规则——护栏静默失效"
@@ -152,7 +152,7 @@ def test_server_instructions_match_attribution_design():
     """真机实锤的文案漂移锁：D-attrib-B 改成运行期字面解析后，server 的
     instructions 仍写着"归因由安装绑定完成"——宿主会照这句话去绑定安装期的
     product，等于把已推翻的语义重新说给模型听。"""
-    text = (ROOT / "vod_mcp" / "server.py").read_text(encoding="utf-8")
+    text = (ROOT / "src" / "vod_mcp" / "server.py").read_text(encoding="utf-8")
     assert "安装绑定完成" not in text
     assert "必须问用户一次" in text and "禁止询问用户" not in text
 
@@ -161,8 +161,8 @@ def test_server_instructions_match_attribution_design():
 
 _ROOT_ALLOW = {
     # 目录
-    "bin", "contract", "dsh", "docs", "hooks", "integrations", "npm",
-    "plugins", "scripts", "src", "tests", "vod_mcp", "vodkit_cli",
+    "assets", "bin", "docs", "integrations", "npm", "packages",
+    "plugins", "scripts", "src", "tests",
     # 顶层文件（元数据 + 门面文档）
     "CHANGELOG.md", "CODE_OF_CONDUCT.md", "CONTRIBUTING.md", "INSTALL.md",
     "LICENSE.txt", "NOTICE", "OWNERS", "QUICKSTART.md", "README.en.md",
@@ -201,8 +201,8 @@ def test_s129_runtime_state_is_never_tracked():
     out = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
                          cwd=ROOT).stdout
     tracked = set(out.splitlines())
-    for p in ("install-manifest.json", "vod_mcp/runtime.json",
-              "vod_mcp/runtime.example.json".replace("example", "local")):
+    for p in ("install-manifest.json", "src/vod_mcp/runtime.json",
+              "src/vod_mcp/runtime.local.json"):
         assert p not in tracked, f"运行期状态被跟踪：{p}（必须 gitignore 且不入包）"
 
 

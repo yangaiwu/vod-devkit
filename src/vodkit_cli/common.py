@@ -14,7 +14,10 @@ from pathlib import Path
 from vod_mcp import hosts as host_specs
 
 
-ROOT = Path(__file__).resolve().parent.parent
+# 分发根（manifest / build-info / 载荷入口相对它）；包根在 src/，由 paths 负责
+from vod_mcp import paths as _paths
+
+ROOT = _paths.DIST_ROOT
 
 
 _HERMES_SPEC = host_specs.load("hermes")

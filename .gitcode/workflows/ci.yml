@@ -22,7 +22,7 @@ stages:
           - name: 定位仓库目录（不可静默）
             run: >-
               cd repo_workspace 2>/dev/null;
-              ls vod_mcp/tools.py >/dev/null
+              ls src/vod_mcp/tools.py >/dev/null
               || { echo "FAIL: 未定位到仓库根（repo_workspace 与当前目录均无 vod_mcp/）"; exit 1; }
           - name: 双副本一致性（单一门禁：sync_plugin + verify_copies）
             run: >-
@@ -31,6 +31,6 @@ stages:
               python3 scripts/verify_copies.py
               || { echo "FAIL: 双副本漂移——先跑 scripts/sync_plugin.py 再提交（实锤：npm 包曾以旧插件副本发出）"; exit 1; }
           - name: lint (pyflakes，递归)
-            run: cd repo_workspace 2>/dev/null; python3 -m pyflakes vod_mcp vodkit_cli hooks tests
+            run: cd repo_workspace 2>/dev/null; python3 -m pyflakes src/vod_mcp src/vodkit_cli integrations/hermes/hooks tests
           - name: run tests
             run: cd repo_workspace 2>/dev/null; python3 -m pytest tests/ -q

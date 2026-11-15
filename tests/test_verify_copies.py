@@ -57,14 +57,14 @@ def test_tracked_copy_is_reported(tmp_path):
     """生成物零提交：副本一旦进 git 就又有两份真值 → 必须判红。"""
     repo = tmp_path / "repo"
     repo.mkdir()
-    for rel in ("vod_mcp", "src/contract"):
-        _mk(repo / rel, {"f.txt": "same\n"})
-        _mk(repo / "plugins/vod-devkit" / rel.split("/")[-1], {"f.txt": "same\n"})
+    for src_rel, dst_rel in vc.PAIRS:
+        _mk(repo / src_rel, {"f.txt": "same\n"})
+        _mk(repo / dst_rel, {"f.txt": "same\n"})
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)  # 故意把副本也加进去
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
                     "commit", "-qm", "init"], cwd=repo, check=True)
-    assert vc.compare_trees(repo / "vod_mcp", repo / "plugins/vod-devkit/vod_mcp") == []
+    assert vc.compare_trees(repo / "src" / "vod_mcp", repo / "plugins/vod-devkit/vod_mcp") == []
     problems = vc.check(repo, git_check=True)
     assert any("副本被 git 跟踪" in p for p in problems), problems
 
@@ -73,15 +73,15 @@ def test_generated_untracked_copies_pass(tmp_path):
     """正常态：源在 git 里，副本在磁盘上但没被跟踪（.gitignore）。"""
     repo = tmp_path / "repo"
     repo.mkdir()
-    for rel in ("vod_mcp", "src/skills", "src/contract", "src/safety"):
-        _mk(repo / rel, {"f.txt": "same\n"})
-        _mk(repo / "plugins/vod-devkit" / rel.split("/")[-1], {"f.txt": "same\n"})
+    for src_rel, dst_rel in vc.PAIRS:
+        _mk(repo / src_rel, {"f.txt": "same\n"})
+        _mk(repo / dst_rel, {"f.txt": "same\n"})
     (repo / ".gitignore").write_text("plugins/vod-devkit/vod_mcp/\n"
                                      "plugins/vod-devkit/skills/\n"
                                      "plugins/vod-devkit/contract/\n"
                                      "plugins/vod-devkit/safety/\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    subprocess.run(["git", "add", ".gitignore", "vod_mcp", "src"],
+    subprocess.run(["git", "add", ".gitignore"] + [p for p, _ in vc.PAIRS],
                    cwd=repo, check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
                     "commit", "-qm", "init"], cwd=repo, check=True)

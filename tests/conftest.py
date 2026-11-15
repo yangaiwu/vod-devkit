@@ -1,10 +1,20 @@
 """全局测试隔离：所有用例的 runtime 读写重定向到 tmp。
 
-实锤教训：test_followup 等 _submit 路径用例桩了 _http 却没重定向
-_runtime_path，账本追加直接写进仓内真实 vod_mcp/runtime.json——
-本地 200 条账本被测试数据灌满（cap 挤压真实提交记录）。
-autouse 先生效，用例内自身 setattr 可覆盖（后 setattr 者胜）。
+S3 起包在 src/：conftest 是测试入口，负责把两个根与 sys.path 显式设好
+（paths.py 只读不猜；测试不再依赖"从哪个目录跑 pytest"）。
 """
+import sys
+from pathlib import Path
+
+_DIST = Path(__file__).resolve().parent.parent
+_SRC = _DIST / "src"
+# 只把 src/ 放进 sys.path；两个根由 paths 按物理位置 derive（仓内布局可判定），
+# 不在这里全局钉 env——否则"造一个临时仓再跑安装器"的用例会被外层根劫持。
+sys.path.insert(0, str(_SRC))
+# 注意：不设 PYTHONPATH env——否则"把仓复制到临时目录再跑入口"的用例会 import 到
+# 外层仓的包，掩盖副本布局问题（实测踩过：插件副本探针读到了仓内 assets/）。
+sys.path.insert(0, str(_DIST))
+
 import pytest
 
 
