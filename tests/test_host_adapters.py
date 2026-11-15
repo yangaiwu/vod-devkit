@@ -66,3 +66,20 @@ def test_generic_declares_known_hosts_table():
     assert generic.KNOWN_HOSTS, "通用探测表为空——未知宿主会退化成『不支持』"
     for h in generic.KNOWN_HOSTS:
         assert {"id", "paths", "config", "label"} <= set(h)
+
+def test_hermes_install_without_cli_degrades_instead_of_crashing(monkeypatch, tmp_path):
+    """无 hermes CLI 时 install 必须降级（写配置片段 + 提示），不得裸 exec 崩掉。
+
+    2026-11-15 CI host-matrix 失败根因：hermes 分支没有 CLI 守卫，
+    FileNotFoundError 直接把整条矩阵打红。
+    """
+    import types
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from vod_mcp.host_adapters import hermes
+    monkeypatch.setattr(hermes.shutil, "which", lambda _name: None)
+    args = types.SimpleNamespace(java_api_base="https://vod.example")
+    conf = hermes.install(args, "core,collect")
+    assert conf.exists(), "JSON 片段仍要落盘（用户可手工并入 config.yaml）"
+    payload = conf.read_text(encoding="utf-8")
+    assert "vod-devkit" in payload and "server.py" in payload
+    assert hermes._enabled_plugins() == [], "无 CLI 时读名单必须返回空而不是抛错"

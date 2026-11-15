@@ -92,3 +92,22 @@ def test_real_manifest_has_fingerprints_recorded():
         rec = entry.get("recorded") or {}
         assert rec.get("skill", "").startswith("sha256:"), f"{entry['skill']} 缺技能指纹"
         assert rec.get("engine"), f"{entry['skill']} 缺引擎指纹"
+
+def test_unreadable_engine_path_skips_instead_of_crashing(monkeypatch):
+    """GitHub runner 以非 root 跑：/root 不可读 → is_dir() 抛 PermissionError。
+
+    这是 2026-11-15 quality-gate 的真实失败根因——本该 SKIP 的一步直接红。
+    """
+    from pathlib import Path as _P
+
+    orig = _P.is_dir
+
+    def boom(self):
+        if str(self) == "/root/VOD-Project":
+            raise PermissionError(13, "Permission denied", str(self))
+        return orig(self)
+
+    monkeypatch.setattr(_P, "is_dir", boom)
+    rep = rp.check("/root/VOD-Project")
+    assert rep["status"] == "skip", rep
+    assert "只跳过" in rep["reason"]

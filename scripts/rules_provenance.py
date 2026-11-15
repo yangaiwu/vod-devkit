@@ -32,6 +32,20 @@ def sha256(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _engine_ok(engine_dir) -> bool:
+    """引擎目录是否可用。**必须吞 OSError**：GitHub runner 以非 root 跑，
+    /root 不可读 → Path("/root/VOD-Project").is_dir() 抛 PermissionError，
+    整条 quality-gate 就红在"本来该 SKIP"的那一步（2026-11-15 实测根因）。
+    路径不可 stat 与"不存在"同义：只跳过，不判绿也不误红。
+    """
+    if not engine_dir:
+        return False
+    try:
+        return Path(engine_dir).is_dir()
+    except OSError:
+        return False
+
+
 def load_manifest(path: Path = MANIFEST) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
@@ -48,11 +62,11 @@ def check(engine_dir: str | Path | None, manifest_path: Path = MANIFEST,
     root 可注入（单测用临时仓结构），默认本仓。
     """
     data = load_manifest(manifest_path)
-    if not engine_dir or not Path(engine_dir).is_dir():
+    if not _engine_ok(engine_dir):
         return {"status": "skip",
                 "reason": f"无引擎检出（{engine_dir or '未指定'}）——只跳过，不判绿",
                 "entries": []}
-    engine = Path(engine_dir)
+    engine = Path(str(engine_dir))   # 收窄：_engine_ok 已挡住 None/不可 stat
     report = {"status": "ok", "reason": "", "entries": []}
     for entry in data.get("skills") or []:
         skill_path = Path(root) / entry["skill"]
@@ -112,7 +126,7 @@ def main(argv=None) -> int:
     ap.add_argument("--update", action="store_true", help="人工复核后重录指纹")
     args = ap.parse_args(argv)
     if args.update:
-        if not Path(args.engine).is_dir():
+        if not _engine_ok(args.engine):
             print(f"FAIL: --update 需要引擎检出（{args.engine}）", file=sys.stderr)
             return 1
         record(args.engine, Path(args.manifest))

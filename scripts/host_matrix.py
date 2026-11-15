@@ -32,7 +32,9 @@ BIN = ROOT / "bin" / "vod-devkit"
 
 # host → 期望的配置落点（相对 HOME）与条目路径
 EXPECT = {
-    "hermes": {"config": ".hermes/mcp/vod-devkit.json", "entry": None},
+    # cli 缺省会跳过 CLI 探测 → CI（无 hermes）上会真跑 install 并在裸 exec 处炸；
+    # 实测 2026-11-15：这就是 GitHub CI host-matrix 的失败根因。
+    "hermes": {"cli": "hermes", "config": ".hermes/mcp/vod-devkit.json", "entry": None},
     "opencode": {"config": ".config/opencode/opencode.json", "entry": ("mcp", "vod-devkit")},
     "codeartsdoer": {"config": ".codeartsdoer/codearts_cli.json", "entry": ("mcp", "vod-devkit")},
     "codeartswork": {"config": ".codeartswork/mcp/mcp_settings.json",
