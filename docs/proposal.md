@@ -1322,3 +1322,28 @@ Hermes 的 shell hook 已确认支持 `pre_tool_call`（**阻塞事件**），�
 | # | 场景 | 断言 |
 |---|---|---|
 | S135 | 读 Key 拦截 | `cat runtime.json`/管道读取/`env \| grep VOD_JAVA_API_KEY` 命中 block 且文案含替代与关闭开关；`env \| cut -d= -f1` 放行；非 shell 工具与空/坏载荷零输出（fail-open）；`VOD_HOOK_READ_GUARD=0` 放行；两条 hook 注册幂等、摘除互不连坐、别人的 hook 原样保留 |
+
+
+## 跨面一致性与状态原子性（S136-S137，2026-11-16，并行评审收口）
+
+需求变更（两件，都是评审实测出的真缺陷）：
+
+**S136 会话内开关必须"三面同口径"**：`vod_packs_configure` 首版只改了工具面——
+`vod_devkit_info` / `vod_auth_status` 仍报 `VOD_PACKS` 旧包、技能枚举按旧包算，
+`vod_retrieve_skill` 会回"重跑 install 带上 --packs"。一个开关两种答案是比没有开关更坏
+的形态（模型会拿着旧答案要求用户重装）。修法=四处读取方统一走 `effective_packs()`
+（provenance 自述、auth_status、skills list/retrieve）。附带修 `dispatch` 的手写
+needs_host 清单 → 按签名判参（漏登记会静默丢 client_info）。
+
+**S137 runtime.json 的跨进程一致性**（唯一会造成生产事故的一条）：
+一份载荷 `runtime.json` 被同机多个宿主的 server 进程共用，而 `_RT_LOCK` 只是
+`threading.RLock`（进程内）。实测 4 进程各写 25 条 → 落盘只剩 36 条；整文件
+`write_text` 让读者读到半截 JSON（实测出现 JSONDecodeError），而解析失败
+`except: return {}` 静默归零 → 下一次任意更新把 key/账本冲成空。
+修法三条：跨进程 `fcntl.flock`（无 fcntl 平台退化并标注）+ tmp/`os.replace` 原子替换
+（先 chmod 0600 再替换）+ 坏文件 `runtime.json.corrupt-<ts>` 备份并 stderr 告警后继续。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S136 | 开关三面一致 | 关掉 knowledge 后 `vod_devkit_info`/`vod_auth_status` 的 packs、`vod_list_skills` 的 packs 与 enabled 标记、`vod_retrieve_skill` 的拒绝文案都与 `effective_packs()` 一致；`dispatch` 按签名给双参 handler 传 client_info、单参不传 |
+| S137 | 状态原子性 | 4 子进程各写 25 次 → 落盘 100 条；写 300 次期间并发读 0 次半截 JSON；坏文件产生 `.corrupt-*` 备份且 stderr 告警、新文件可用；正常文件不产生备份 |

@@ -453,3 +453,11 @@ python3 scripts/host_matrix.py    # 9 宿主安装矩阵：装→断言→拉起
   ——尊重既有 HTTP 约定；URL 里的口令一律掩码（doctor 输出常被贴进工单）。
 - 引擎可达**无 key 也探**：401/403 算「可达」（鉴权问题≠网络问题），连不上只 `warn`
   （离线装机 doctor 必须还能用），且不因此改退出码。
+
+状态文件（`runtime.json`）的并发与损坏处理：
+
+- 同机多个宿主的 server 进程**共用**一份载荷 `runtime.json` → 写入走 tmp + `os.replace`
+  （原子替换）+ POSIX `fcntl.flock`（`runtime.json.lock`）。**Windows 没有对等机制，未覆盖**，
+  如实标注（那里仍是进程内锁）。
+- 解析失败**不静默归零**：原文件备份为 `runtime.json.corrupt-<时间戳>` 并在 stderr 告警，
+  随后以空状态继续——可人工恢复；不会出现"key 和账本一起消失且无人知道"。
