@@ -32,7 +32,13 @@ PLUGIN_NAME = "vod-feedback-router"
 
 
 def _enabled_plugins() -> list:
-    """读 hermes 配置里的 plugins.enabled（CLI 输出是 "- name" 行）。"""
+    """读 hermes 配置里的 plugins.enabled（CLI 输出是 "- name" 行）。
+
+    无 CLI 直接返回空：裸 subprocess 会抛 FileNotFoundError 打崩整个 install
+    （CI/无宿主机器上实测）——缺 CLI 是"降级"不是"失败"。
+    """
+    if not shutil.which("hermes"):
+        return []
     r = subprocess.run(["hermes", "config", "get", "plugins.enabled"],
                        capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
@@ -82,10 +88,18 @@ def install(args, packs: str) -> Path:
     env_args = []
     for k, v in server_env(args, packs).items():
         env_args.extend([k + "=" + v])
-    r = subprocess.run(
-        ["hermes", "mcp", "add", "vod-devkit", "--command", sys.executable,
-         *["--env"] + env_args, "--args", server_entry()],
-        input="y\ny\n", capture_output=True, text=True)
+    # 无 CLI 时不裸 exec（FileNotFoundError 会打崩 install）：JSON 已落盘，
+    # 用户可手工并入 config.yaml —— 缺 CLI 是降级，不是失败。
+    if shutil.which("hermes"):
+        r = subprocess.run(
+            ["hermes", "mcp", "add", "vod-devkit", "--command", sys.executable,
+             *["--env"] + env_args, "--args", server_entry()],
+            input="y\ny\n", capture_output=True, text=True)
+    else:
+        r = None
+        print(f"提示：未找到 hermes CLI（PATH），已写出配置片段：{conf}\n"
+              "      将其并入 ~/.hermes/config.yaml 的 mcp_servers 后重启会话生效",
+              file=sys.stderr)
     # D-hook-1：强制评估路由插件（pre_llm_call 确定性意图路由，业界 forced-eval 模式）
     plug_src = ROOT / "hermes-plugin" / "vod-feedback-router"
     plug_dst = Path.home() / ".hermes" / "plugins" / PLUGIN_NAME
@@ -98,7 +112,9 @@ def install(args, packs: str) -> Path:
                 "unchanged": "已在 plugins.enabled 中",
                 "skipped": "未自动启用（见上方提示）"}[state]
         print(f"已安装 {PLUGIN_NAME} 路由插件（~/.hermes/plugins/，{verb}；重启会话生效）")
-    if r.returncode == 0:
+    if r is None:
+        pass  # 无 CLI：上面已经给过指引
+    elif r.returncode == 0:
         print("已注册 Hermes MCP（hermes mcp list 可见；重启会话生效）")
     else:
         print(f"提示：hermes mcp add 未成功（{r.stderr.strip()[:150]}）；"
