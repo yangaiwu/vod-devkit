@@ -25,7 +25,7 @@ import os
 import sys
 import threading
 
-from vod_mcp import paths
+from vod_mcp import net, paths
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DEFAULT_HOST = "127.0.0.1"
@@ -138,15 +138,14 @@ class RemoteRuntime:
                     sink.body(chunk)
 
         async def run():
-            from vod_mcp import tools
             # 协程体内 set：见 request() docstring 的身份传播修复说明
-            tok_key = tools._REQ_KEY.set(scope.get("x_vod_key") or None)
-            tok_face = tools._SERVER_FACE.set(True)
+            tok_key = net._REQ_KEY.set(scope.get("x_vod_key") or None)
+            tok_face = net._SERVER_FACE.set(True)
             try:
                 await self.manager.handle_request(scope, receive, send)
             finally:
-                tools._SERVER_FACE.reset(tok_face)
-                tools._REQ_KEY.reset(tok_key)
+                net._SERVER_FACE.reset(tok_face)
+                net._REQ_KEY.reset(tok_key)
                 sink.end()
 
         fut = asyncio.run_coroutine_threadsafe(run(), self._loop)

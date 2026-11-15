@@ -1063,3 +1063,73 @@ workbuddy / dsh / hermes（含 hooks 插件）这些都要具备」。落地口�
 device-mismatch/rejected 对照用例 + test_remote_attach.py 桩 hermes 补
 "真注册落盘"模拟。全量 447 passed（installer update 3 例失败为本地 origin
 fetch 环境噪音，基线同款）。
+
+## D-split-1：tools.py 按 pack 纵切（2026-11-15，结构债收口）
+
+**背景**：tools.py 1368 行单体承载了 10 个 handler + 采集链 + 归因胶水 + 账本 +
+草稿 + runtime.json 读写 + key 状态，域边界不存在；而 packs（core/collect/
+knowledge）本来就是工具面的装配边界，两者错位。前置 P1 已把路径收敛到
+`vod_mcp/paths.py`（挪文件不再重算相对深度）。
+
+**切法**（按装配边界，不按文件名）：
+- `vod_mcp/runtime_state.py` 运行期状态：runtime.json 读写/锁、账本、草稿、
+  会话记忆、install nonce、日志、分发形态位。
+- `vod_mcp/net.py` 出口与身份：`_http`、meta 缓存、key 探针、匿名令牌、
+  `ToolError`、请求身份 contextvars（`_REQ_KEY/_SERVER_FACE/_eff_key`）。
+- `vod_mcp/packs/{core,collect,knowledge}.py` 各 pack 的 handler 与其专属助手。
+- `vod_mcp/tools.py` 降为 shim：契约装载 + `tool_specs` + `_HANDLERS` + `dispatch`。
+- `vod_mcp/packs.py` → `vod_mcp/packs/__init__.py`（注册表放包里，保住
+  `importlib.reload(vod_mcp.packs)` 重读 VOD_PACKS 的既有测试语义）。
+
+**patch 面纪律（这是本次最容易出假绿的地方）**：拆分后
+`monkeypatch.setattr(tools, "_http", fake)` 会写到 shim 上而**静默无效**。
+三条锁（tests/test_p2_structure.py）：
+1. shim 不得 re-export 已迁走的私有符号 → 写 shim 直接 AttributeError；
+2. packs/*.py 禁止 `from vod_mcp.net import <符号>`（符号导入冻结引用）→
+   一律模块属性访问（`net._http` / `rt._save_runtime`）；
+3. patch 有效性：打桩到实现模块后，真实调用链必须命中假实现（HTTP 出口、
+   `JAVA_KEY` 常量、状态落盘三条代表）。
+90 处历史打桩点同批迁移到实现模块（`_http` 35 / `_load_meta` 29 /
+`JAVA_KEY` 32 / `_RT` 22 / `_save_runtime` 13 / `_runtime_path` 12 …）。
+
+**为什么不做"shim 属性转发"**：`__getattr__` 只能解决读，`monkeypatch.setattr`
+的写不会传播到实现模块——转发等于把静默无效变成"看起来能打桩"。
+
+**副作用**：mypy 作用域是整包（P1 反转），迁入的新模块默认被检查，本次为定位
+补了 6 处类型标注/收窄（无行为变更）——这是"新模块默认被检"的预期成本。
+
+**验证**：pytest 全绿（含新增 6 条结构护栏）；pyflakes 递归 0；mypy 36 文件 0 错；
+host_matrix 9 PASS；pack_verify 150 文件 OK；双副本 diff CLEAN。
+
+## D-bin-split-1：安装器按命令域拆分（2026-11-15，F8）
+
+**背景**：bin/vod-devkit 1245 行单体同时装着 install / status / doctor / verify /
+update / uninstall 六个子命令 + 版本烧录 + manifest 名册 + 技能指纹 + 远程探活 +
+产品校验。命令边界本来就存在（argparse 子命令表），代码却没按边界分文件。
+
+**切法**（`vodkit_cli/` 包，bin 只剩 20 行入口薄壳）：
+- `common.py` 根定位 / build-info 烧录 / manifest 名册 / 技能指纹 / PRESETS / 形态位
+- `remote.py` 远程面探活 + 安装期产品名录硬校验
+- `install.py` 探测 → 门禁 → 载荷固化 → 宿主写入 → 技能拷贝 → manifest
+- `doctor.py` status / doctor / verify / explain / detect
+- `update.py` git ff 更新 + 版本跳过状态
+- `uninstall.py` 按名册逐宿主摘除（共享配置只摘条目）
+- `cli.py` argparse 子命令表 + serve 直通 + 分派
+
+**对外稳定面**（入口薄壳 re-export + `__all__`）：`main / PRESETS / detect_targets /
+build_info / write_build_info`——测试按路径加载 bin 后直接取这些名字。pyflakes 认
+`__all__`，否则会误报"导入未用"。
+
+**两个必须跟实现走的测试**（拆分时当场红出来的，正是 patch 面纪律）：
+1. `test_doctor_repairs_dsh_patch_block` 原本 `monkeypatch.setattr(bin_mod.Path, "home", …)`
+   再调 `bin_mod._repair_dsh_patch_block` —— 实现搬到 doctor.py 后这条会**静默写到真
+   ~/.dsh**（各自的 pathlib.Path 是不同对象）。改为直接 patch `vodkit_cli.doctor`。
+2. `test_presets_split_internal_external` 通过 AST 从 bin 源码里抠 `PRESETS` —— 改为
+   从 `vodkit_cli/common.py` 抠，并反向断言 bin 里**不得再出现第二份 PRESETS 字面量**。
+
+**打包**：package.json files 增 `vodkit_cli`；pack_verify MUST_HAVE 增
+`vodkit_cli/cli.py` + `vodkit_cli/common.py`（漏打这个包=npx 装不上任何宿主，
+属于"包能发但装不了"的静默故障）。
+
+**验证**：pytest 全绿；pyflakes 0；mypy 44 文件 0 错（作用域同步扩到 vodkit_cli）；
+host_matrix 9 PASS；pack_verify 166 文件 OK（含 vodkit_cli）；dsh 47；双副本 CLEAN。

@@ -703,7 +703,8 @@ def test_presets_full_uses_runtime_pack_names():
     运行口单源——workflow 已随净删消失、kb=knowledge 旧称，漂移=静默失效）。"""
     import importlib.util
     from importlib.machinery import SourceFileLoader
-    loader = SourceFileLoader("p", str(Path(__file__).resolve().parent.parent / "vod_mcp" / "packs.py"))
+    loader = SourceFileLoader("p", str(Path(__file__).resolve().parent.parent
+                                   / "vod_mcp" / "packs" / "__init__.py"))
     spec = importlib.util.spec_from_loader("p", loader)
     m = importlib.util.module_from_spec(spec)
     loader.exec_module(m)
@@ -777,7 +778,9 @@ def _load_bin():
 def test_doctor_repairs_dsh_patch_block(monkeypatch, tmp_path):
     """S58/A doctor 自愈回归锁：三态——块缺失→重建嵌套组；打平→重建；
     完好嵌套→不动（返回 None 不写盘）。"""
-    mod = _load_bin()
+    # 实现已搬进 vodkit_cli/doctor.py（F8）：patch 面必须跟着实现走——
+    # 打桩 bin 上的 Path 只会静默无效（模块各自持有自己的 pathlib.Path）
+    from vodkit_cli import doctor as mod
     home = tmp_path / "home"
     monkeypatch.setattr(mod.Path, "home", staticmethod(lambda: home))
     patch = home / ".dsh" / "profiles" / "web" / "cordis.patch.yml"

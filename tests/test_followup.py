@@ -10,6 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from vod_mcp import net as _net
+from vod_mcp.packs import collect as _collect
+from vod_mcp import runtime_state as _rt
 from vod_mcp import tools
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -32,13 +35,13 @@ def hoard_capture(monkeypatch):
                     "data": {"token": "anon-token-xyz", "tier": "anonymous"}}
         return {}
 
-    monkeypatch.setattr(tools, "JAVA_KEY", "k-test")
-    monkeypatch.setattr(tools, "_http", fake_http)
+    monkeypatch.setattr(_net, "JAVA_KEY", "k-test")
+    monkeypatch.setattr(_net, "_http", fake_http)
     return captured
 
 
 def _submit(tools, voices):
-    return tools.submit_voices({"voices": voices, "product": "codearts",
+    return _collect.submit_voices({"voices": voices, "product": "codearts",
                                 "confirmed": True},
                                client_info={"name": "t"})
 
@@ -95,16 +98,16 @@ def test_followup_two_phase_draft_carries_fields(tmp_path, monkeypatch):
     拒答词集在 draft 路径同样拦截；content 原话不污染。
     HOME/仓内 runtime 隔离：_runtime_path 指 tmp（对齐 test_two_phase）。"""
     import hashlib, json as _json
-    monkeypatch.setattr(tools, "_runtime_path", lambda: tmp_path / "runtime.json")
-    monkeypatch.setattr(tools, "JAVA_KEY", "k-test")
-    out = tools.draft_voices(
+    monkeypatch.setattr(_rt, "_runtime_path", lambda: tmp_path / "runtime.json")
+    monkeypatch.setattr(_net, "JAVA_KEY", "k-test")
+    out = _collect.draft_voices(
         {"voices": [
             {"content": "导出卡住", "reproSteps": "  点导出后转圈  ", "expectedBehavior": "应出文件"},
             {"content": "搜索不准", "reproSteps": "没有"},
          ], "product": "codearts"},
         client_info={"name": "t"})
-    fresh = tools._runtime_cfg()
-    store = fresh.get(tools._DRAFT_KEY) or {}
+    fresh = _rt._runtime_cfg()
+    store = fresh.get(_rt._DRAFT_KEY) or {}
     d = store[out["draftId"]]
     v0, v1 = d["payload"]["voices"]
     assert v0["reproSteps"] == "点导出后转圈" and v0["expectedBehavior"] == "应出文件"
@@ -119,11 +122,11 @@ def test_followup_two_phase_draft_carries_fields(tmp_path, monkeypatch):
 def test_followup_fields_helper_single_source():
     """重构回归锁：单源 _followup_fields 的词集/截断/空白语义
     （submit 与 draft 双路径共用本函数，行为断言见上两路径用例）。"""
-    out = tools._followup_fields({"reproSteps": " 没有了 ", "expectedBehavior": " 应出文件 "})
+    out = _collect._followup_fields({"reproSteps": " 没有了 ", "expectedBehavior": " 应出文件 "})
     assert out == {"expectedBehavior": "应出文件"}  # "没有了"含拒答词但非精确命中——精确词集语义
-    assert tools._followup_fields({"reproSteps": "没有"}) == {}
-    assert tools._followup_fields({"expectedBehavior": "x" * 2500}) == {"expectedBehavior": "x" * 2000}
-    assert tools._followup_fields({}) == {}
+    assert _collect._followup_fields({"reproSteps": "没有"}) == {}
+    assert _collect._followup_fields({"expectedBehavior": "x" * 2500}) == {"expectedBehavior": "x" * 2000}
+    assert _collect._followup_fields({}) == {}
 
 
 def test_followup_skill_judgment_block_locked():
@@ -239,8 +242,8 @@ def test_followup_status_passthrough_submit(monkeypatch):
             return {"code": 200, "voiceIds": [f"ext_vod-agent_t{i}" for i in range(n)]}
         return {}
 
-    monkeypatch.setattr(tools, "JAVA_KEY", "k-test")
-    monkeypatch.setattr(tools, "_http", fake_http)
+    monkeypatch.setattr(_net, "JAVA_KEY", "k-test")
+    monkeypatch.setattr(_net, "_http", fake_http)
     out = _submit(tools, [
         {"content": "问题一", "followupStatus": " ANSWERED "},
         {"content": "问题二", "followupStatus": "declined"},
@@ -261,15 +264,15 @@ def test_followup_status_stashed_in_draft(tmp_path, monkeypatch):
     """S74：draft 暂存 followupStatus（commit 复用 payload 原样上送）；
     非法值不进暂存；payload sha 链不断。"""
     import hashlib, json as _json
-    monkeypatch.setattr(tools, "_runtime_path", lambda: tmp_path / "runtime.json")
-    monkeypatch.setattr(tools, "JAVA_KEY", "k-test")
-    out = tools.draft_voices(
+    monkeypatch.setattr(_rt, "_runtime_path", lambda: tmp_path / "runtime.json")
+    monkeypatch.setattr(_net, "JAVA_KEY", "k-test")
+    out = _collect.draft_voices(
         {"voices": [
             {"content": "导出卡住", "followupStatus": "Answered"},
             {"content": "搜索不准", "followupStatus": "bogus"},
          ], "product": "codearts"},
         client_info={"name": "t"})
-    d = (tools._runtime_cfg().get(tools._DRAFT_KEY) or {})[out["draftId"]]
+    d = (_rt._runtime_cfg().get(_rt._DRAFT_KEY) or {})[out["draftId"]]
     v0, v1 = d["payload"]["voices"]
     assert v0["followupStatus"] == "answered"
     assert "followupStatus" not in v1
