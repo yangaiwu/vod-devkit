@@ -10,3 +10,12 @@ vod_mcp/runtime.json
 .e2e-nightly.log
 .e2e-behavior-nightly.log
 *.tgz
+
+# 插件副本=生成物（scripts/sync_plugin.py 唯一生成入口，npm prepack 也会重跑）。
+# 零提交才让「两边漂移」在构造上不可能：v0.5.8 实锤——副本被 sync 改过、
+# 提交清单漏项，于是所有基于工作区的 diff 检查恒绿而 tarball ≠ tag。
+plugins/vod-devkit/vod_mcp/
+plugins/vod-devkit/skills/
+plugins/vod-devkit/contract/
+plugins/vod-devkit/safety/
+plugins/vod-devkit/build-info.json

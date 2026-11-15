@@ -307,6 +307,12 @@ def main():
                     help="只读巡检真实机器上的安装（不装/不卸/不写）")
     ap.add_argument("--verbose", action="store_true")
     a = ap.parse_args()
+    # 插件副本是生成物（v0.5.9 零提交）：矩阵要装的是当前源码，先同步一次。
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "sync_plugin.py")],
+                       cwd=ROOT, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"FAIL: 生成插件副本失败：{r.stderr[-300:]}", file=sys.stderr)
+        return 1
     build = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
     version = str(build.get("version"))
     hosts = a.host or list(EXPECT)

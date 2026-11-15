@@ -149,6 +149,20 @@ def install(args, packs: str) -> Path:
             agents.write_text(cleaned + "\n", encoding="utf-8")
             print(f"已移除旧 AGENTS.md 技能块（原生 skill 取代）：{agents}")
     mp_root = ROOT / "plugins"
+    # 插件副本是生成物（v0.5.9 起零提交，见 .gitignore）。仓内直跑安装时若还没生成，
+    # 这里补一次——否则 codex 只会报“marketplace 里找不到 vod-devkit”，看不出是没 sync。
+    if not (mp_root / "vod-devkit" / "vod_mcp").is_dir():
+        _sync = ROOT / "scripts" / "sync_plugin.py"
+        if _sync.is_file():
+            r = subprocess.run([sys.executable, str(_sync)], cwd=ROOT,
+                               capture_output=True, text=True, timeout=300)
+            if r.returncode != 0:
+                print(f"[vod-devkit] 生成插件副本失败：{r.stderr[-300:]}", file=sys.stderr)
+                sys.exit(2)
+            print("已生成插件副本（scripts/sync_plugin.py）")
+        else:
+            print(f"[vod-devkit] 插件副本缺失：{mp_root / 'vod-devkit'}（npm 包损坏？）", file=sys.stderr)
+            sys.exit(2)
 
     def _run(cmd):
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)

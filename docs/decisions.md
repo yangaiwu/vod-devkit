@@ -1133,3 +1133,25 @@ build_info / write_build_info`——测试按路径加载 bin 后直接取这些
 
 **验证**：pytest 全绿；pyflakes 0；mypy 44 文件 0 错（作用域同步扩到 vodkit_cli）；
 host_matrix 9 PASS；pack_verify 166 文件 OK（含 vodkit_cli）；dsh 47；双副本 CLEAN。
+
+## D-copies-generated-1：插件副本零提交（生成物），双漂移从构造上消失（2026-11-15）
+
+**事故**（v0.5.8 实锤，两个方向）：
+1. release.sh 先跑 sync_plugin.py，把根与插件副本**都**写成新内容，随后提交清单漏了
+   `plugins/vod-devkit/contract` —— 所有基于工作区的 diff 检查恒绿（两边都是新版），
+   而提交树里副本仍是旧版：npm tarball ≠ tag，直到发完版才靠人肉发现。
+2. GitHub Actions 同一门禁假红：checkout 默认 fetch-depth=1 取不到 tag，
+   registry_reconcile 把「tag 不可见」判成「没打 tag」。
+
+**决定**：副本=生成物，零提交。
+- `.gitignore` 全域排除 `plugins/vod-devkit/{vod_mcp,skills,contract,safety}` 与 `build-info.json`
+- `scripts/sync_plugin.py` 是唯一生成入口；`package.json` 的 `prepack` 自动重跑（打包/发版不会再漏）
+- `scripts/verify_copies.py` 单一门禁：四目录内容一致 **且** 副本零跟踪；pre-push / CI / release.sh 共用同一把尺
+- release.sh：提交之后、打 tag 之前再验一次——这是唯一能抓「同步了但没提交」的位置
+- 仓内消费者各自入口补一次 sync（tests/conftest session 夹具、host_matrix、codex 安装器兜底）
+- registry_reconcile：浅克隆下 tag 缺失只提示不判红；CI checkout 改 fetch-depth=0
+
+**为什么不选「保留副本 + 加更多门禁」**：根因是「两份真值」，加门禁只提高发现率，
+漏一次就是又一次 tarball≠tag。零提交后这个矛盾不存在，做旧事也不可能。
+
+**代价**：仓内直接跑安装/测试前需要一次 sync（已内置到各入口，毫秒级 copytree）。

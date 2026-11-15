@@ -27,7 +27,13 @@ def main():
                        cwd=ROOT, capture_output=True, text=True, timeout=180)
     if r.returncode != 0:
         print("FAIL: npm pack 干跑失败：", r.stderr[:300]); sys.exit(1)
-    data = json.loads(r.stdout)
+    # 生命周期脚本（prepack 等）的 stdout 会混进 pack 输出——从第一个 '[' 起解析，
+    # 别假设整段 stdout 就是干净 JSON（v0.5.9 实锤：加 prepack 后当场解析失败）。
+    raw = r.stdout
+    start = raw.find("[")
+    if start < 0:
+        print("FAIL: npm pack 输出里没有 JSON：", raw[:300]); sys.exit(1)
+    data = json.loads(raw[start:])
     files = [f["path"] for f in data[0]["files"]]
     fail = []
     for m in MUST_HAVE:

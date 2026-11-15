@@ -2,7 +2,7 @@
 
 历史事故（v0.5.8）：sync 把 contract 版本写进插件副本，提交清单漏了它，
 所有基于工作区的 diff 检查全绿，而提交树里副本是旧版 → tarball ≠ tag。
-两条断言各锁一个方向：内容不同 与 「同步了但没提交」。
+根治=v0.5.9 起副本零提交（生成物），门禁两条：内容一致 + 副本不在 git 里。
 """
 import subprocess
 import sys
@@ -53,37 +53,36 @@ def test_runtime_state_and_caches_are_ignored(tmp_path):
     assert vc.compare_trees(a, b) == [], "runtime.json/__pycache__/*.log 不是副本内容"
 
 
-def test_uncommitted_sync_result_is_reported(tmp_path):
-    """核心方向：两侧内容相同、但插件副本的改动没进提交 → 必须判红。"""
+def test_tracked_copy_is_reported(tmp_path):
+    """生成物零提交：副本一旦进 git 就又有两份真值 → 必须判红。"""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _mk(repo / "contract", {"tools.schema.json": '{"version": "0.5.7"}\n'})
-    _mk(repo / "plugins/vod-devkit/contract", {"tools.schema.json": '{"version": "0.5.7"}\n'})
+    for rel in ("vod_mcp", "contract"):
+        _mk(repo / rel, {"f.txt": "same\n"})
+        _mk(repo / "plugins/vod-devkit" / rel, {"f.txt": "same\n"})
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)  # 故意把副本也加进去
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
                     "commit", "-qm", "init"], cwd=repo, check=True)
-
-    # sync 把两边都写成 0.5.8，但只提交了源侧 —— 副本侧仍留在工作区
-    for p in (repo / "contract/tools.schema.json",
-              repo / "plugins/vod-devkit/contract/tools.schema.json"):
-        p.write_text('{"version": "0.5.8"}\n', encoding="utf-8")
-    subprocess.run(["git", "add", "contract/tools.schema.json"], cwd=repo, check=True)
-
-    assert vc.compare_trees(repo / "contract", repo / "plugins/vod-devkit/contract") == [], \
-        "两侧内容此时相同——只看内容一定漏"
+    assert vc.compare_trees(repo / "vod_mcp", repo / "plugins/vod-devkit/vod_mcp") == []
     problems = vc.check(repo, git_check=True)
-    assert any("未提交改动" in p for p in problems), problems
+    assert any("副本被 git 跟踪" in p for p in problems), problems
 
 
-def test_clean_committed_repo_passes(tmp_path):
+def test_generated_untracked_copies_pass(tmp_path):
+    """正常态：源在 git 里，副本在磁盘上但没被跟踪（.gitignore）。"""
     repo = tmp_path / "repo"
     repo.mkdir()
     for rel in ("vod_mcp", "skills", "contract", "safety"):
         _mk(repo / rel, {"f.txt": "same\n"})
         _mk(repo / "plugins/vod-devkit" / rel, {"f.txt": "same\n"})
+    (repo / ".gitignore").write_text("plugins/vod-devkit/vod_mcp/\n"
+                                     "plugins/vod-devkit/skills/\n"
+                                     "plugins/vod-devkit/contract/\n"
+                                     "plugins/vod-devkit/safety/\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "add", ".gitignore", "vod_mcp", "skills", "contract", "safety"],
+                   cwd=repo, check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
                     "commit", "-qm", "init"], cwd=repo, check=True)
     assert vc.check(repo, git_check=True) == []

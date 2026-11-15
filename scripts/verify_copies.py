@@ -10,7 +10,10 @@
 
 本脚本两条断言，缺一不可：
     1. 四个运行时目录（vod_mcp / skills / contract / safety）源与插件副本逐文件相同；
-    2. 这四个目录（两侧）没有未提交 / 未跟踪改动（git status 为空）。
+    2. 这四个目录**一个文件都不许被 git 跟踪**——副本是生成物（.gitignore 全域排除），
+       进了 git 就又有「两份内容谁为准」的漂移面。
+（v0.5.9 起副本改为零提交：sync_plugin.py 是唯一生成入口，npm prepack 自动重跑；
+ 此前副本入库时，还多一条「同步了但没提交」的事故面。）
 用法：
     python3 scripts/verify_copies.py            # 提交前/推送前/发版后
     python3 scripts/verify_copies.py --no-git   # 只查内容（无 git 的打包环境）
@@ -76,13 +79,13 @@ def compare_trees(src: Path, dst: Path) -> list[str]:
     return problems
 
 
-def dirty_paths(root: Path, paths, runner=subprocess.run) -> list[str]:
-    """这四个目录下是否有未提交/未跟踪改动（=同步结果没进提交）。"""
-    r = runner(["git", "status", "--porcelain=v1", "--", *paths],
+def tracked_paths(root: Path, paths, runner=subprocess.run) -> list[str]:
+    """这些路径是否还在 git 里被跟踪（=副本又入库了，漂移面复活）。"""
+    r = runner(["git", "ls-files", "-z", "--", *paths],
                cwd=root, capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
-        return [f"git status 失败：{(r.stderr or '').strip()[:200]}"]
-    return [line for line in (r.stdout or "").splitlines() if line.strip()]
+        return [f"git ls-files 失败：{(r.stderr or '').strip()[:200]}"]
+    return [p for p in (r.stdout or "").split("\0") if p.strip()]
 
 
 def check(root: Path = ROOT, git_check: bool = True,
@@ -91,9 +94,9 @@ def check(root: Path = ROOT, git_check: bool = True,
     for src_rel, dst_rel in PAIRS:
         problems += compare_trees(root / src_rel, root / dst_rel)
     if git_check:
-        both = [p for pair in PAIRS for p in pair]
-        for line in dirty_paths(root, both, runner=runner):
-            problems.append(f"未提交改动：{line}")
+        dsts = [pair[1] for pair in PAIRS]
+        for path in tracked_paths(root, dsts, runner=runner):
+            problems.append(f"副本被 git 跟踪：{path}（生成物必须零提交）")
     return problems
 
 
@@ -104,13 +107,13 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     problems = check(Path(args.root), git_check=not args.no_git)
     if problems:
-        print("[copies] FAIL: 双副本不一致或同步结果未提交", file=sys.stderr)
+        print("[copies] FAIL: 双副本不一致，或生成物又进了 git", file=sys.stderr)
         for p in problems[:20]:
             print(f"  - {p}", file=sys.stderr)
-        print("  修法：scripts/sync_plugin.py 后把 plugins/vod-devkit/{vod_mcp,skills,contract,safety} 一起提交",
+        print("  修法：scripts/sync_plugin.py 重新生成；副本目录不得 git add（已在 .gitignore）",
               file=sys.stderr)
         return 1
-    print("[copies] OK: 四个目录内容一致且同步结果已提交")
+    print("[copies] OK: 四个目录内容一致，且副本零提交（生成物）")
     return 0
 
 

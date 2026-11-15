@@ -65,5 +65,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "scripts": {
+    "prepack": "python3 scripts/sync_plugin.py > /dev/null"
   }
 }

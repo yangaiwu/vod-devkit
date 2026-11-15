@@ -21,8 +21,10 @@ jobs:
         run: python3 -m pip install pytest pyflakes mypy pyyaml 'mcp>=1.0' 
       - name: lint（pyflakes，递归——子目录模块漏检=门禁形同虚设）
         run: python3 -m pyflakes vod_mcp tests
-      - name: 双副本一致性（内容一致 + 同步结果已提交；单一入口）
-        run: python3 scripts/verify_copies.py
+      - name: 双副本一致性（生成物同步后必须与源一致；副本零提交）
+        run: |
+          python3 scripts/sync_plugin.py
+          python3 scripts/verify_copies.py
       - name: 凭据/高危模式扫描（与 pre-push 同一把尺）
         run: python3 scripts/secret_scan.py
       - name: 用例花名册对账（docs ↔ tests/case_roster.json）

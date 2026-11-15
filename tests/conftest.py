@@ -8,6 +8,21 @@ autouse 先生效，用例内自身 setattr 可覆盖（后 setattr 者胜）。
 import pytest
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _sync_plugin_copy():
+    """插件副本是生成物（v0.5.9 起零提交）：整场测试前同步一次，保证
+    「副本自包含」类用例读到的是当前源码，而不是上次留在磁盘上的残骸。"""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([sys.executable, str(root / "scripts" / "sync_plugin.py")],
+                       cwd=root, capture_output=True, text=True)
+    assert r.returncode == 0, f"sync_plugin 失败：{r.stderr[-500:]}"
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _isolate_runtime(tmp_path, monkeypatch):
     from vod_mcp import runtime_state

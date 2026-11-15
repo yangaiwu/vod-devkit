@@ -137,13 +137,12 @@ RANGE="${PREV_TAG}..HEAD" && [ -z "$PREV_TAG" ] && RANGE="HEAD"
 } >> CHANGELOG.md
 
 # 显式文件列表提交（纪律：禁 git add -A——曾误收垃圾文件）
-# plugins/vod-devkit/skills 也在提交清单（双副本同步的 skills 半边，此前漏加）
 git add package.json pyproject.toml vod_mcp/__init__.py contract/tools.schema.json \
-        plugins/vod-devkit/.codex-plugin/plugin.json plugins/vod-devkit/build-info.json \
-        plugins/vod-devkit/vod_mcp plugins/vod-devkit/skills dsh/package.json CHANGELOG.md \
-        plugins/vod-devkit/contract plugins/vod-devkit/safety \
+        plugins/vod-devkit/.codex-plugin/plugin.json dsh/package.json CHANGELOG.md \
         tests/golden \
         skills hermes-plugin docs/decisions.md build-info.json
+# 插件副本不再入库（.gitignore，v0.5.9 零提交）——不再出现在 git add 清单里；
+# 漏项类事故因此消失，副本内容由 sync_plugin.py 在 prepack/发版前生成。
 git commit -qm "release: v$BUMP"
 # 提交之后再验一次（tag/push 之前）：这是唯一能抓住「sync 了但提交清单漏项」的位置。
 # v0.5.8 实锤——清单漏 plugins/vod-devkit/contract，工作区 diff 全绿而提交树是旧版。
