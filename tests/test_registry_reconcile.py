@@ -90,13 +90,13 @@ def test_npm_view_swallows_failures():
 
 
 def test_local_versions_reads_repo(tmp_path):
-    (tmp_path / "dsh").mkdir()
-    (tmp_path / "contract").mkdir()
+    (tmp_path / "packages" / "dsh").mkdir(parents=True)
+    (tmp_path / "assets" / "contract").mkdir(parents=True)
     (tmp_path / "package.json").write_text(json.dumps({"version": "1.2.3"}), encoding="utf-8")
-    (tmp_path / "dsh" / "package.json").write_text(json.dumps({"version": "1.2.3"}),
-                                                   encoding="utf-8")
-    (tmp_path / "contract" / "tools.schema.json").write_text(json.dumps({"version": "1.2.3"}),
-                                                              encoding="utf-8")
+    (tmp_path / "packages" / "dsh" / "package.json").write_text(
+        json.dumps({"version": "1.2.3"}), encoding="utf-8")
+    (tmp_path / "assets" / "contract" / "tools.schema.json").write_text(
+        json.dumps({"version": "1.2.3"}), encoding="utf-8")
     got = rr.local_versions(tmp_path)
     assert got == {"vod-devkit": "1.2.3", "dsh-vod-devkit": "1.2.3", "contract": "1.2.3"}
 
@@ -104,3 +104,14 @@ def test_local_versions_reads_repo(tmp_path):
 def test_version_compare_is_numeric_not_string():
     assert rr._cmp("0.5.10", "0.5.9") > 0
     assert rr._cmp("0.5.0-rc1", "0.5.0") == 0
+
+def test_local_versions_resolve_against_real_tree():
+    """S3-A 回归锁：local_versions 的每个路径必须真实存在。
+
+    CI 直接跑 `python3 scripts/registry_reconcile.py`（不经过 pytest 夹具），
+    dsh 包迁到 packages/dsh/ 后脚本还在读 dsh/package.json——本地 pytest 全绿、
+    CI 红（实测 2026-11-15）。没有网络也要能抓住这类"路径搬家后忘了改"。
+    """
+    v = rr.local_versions()
+    missing = [k for k, val in v.items() if not val]
+    assert not missing, f"local_versions 读不到版本（路径搬家后未更新）：{missing}"

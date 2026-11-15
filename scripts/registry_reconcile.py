@@ -53,7 +53,7 @@ def local_versions(root: Path = ROOT) -> dict:
             return None
     return {
         "vod-devkit": _v(root / "package.json"),
-        "dsh-vod-devkit": _v(root / "dsh" / "package.json"),
+        "dsh-vod-devkit": _v(root / "packages" / "dsh" / "package.json"),
         "contract": _v(_contract_path(root)),
     }
 
@@ -73,7 +73,7 @@ def reconcile(local: dict, registry: dict, tags: dict | None = None,
     findings = []
     v_main, v_dsh = local.get("vod-devkit"), local.get("dsh-vod-devkit")
     if not v_main or not v_dsh:
-        return {"status": "drift", "findings": ["package.json / dsh/package.json 读不到版本"]}
+        return {"status": "drift", "findings": ["package.json / packages/dsh/package.json 读不到版本"]}
     if v_main != v_dsh:
         findings.append(f"两包版本不一致：vod-devkit={v_main} / dsh-vod-devkit={v_dsh}"
                         "（壳游离散版曾造成半个月静默故障）")
