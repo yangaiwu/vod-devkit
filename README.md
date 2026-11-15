@@ -48,6 +48,15 @@
 npx -y vod-devkit@latest install --target auto
 ```
 
+省略 `--target` 时安装器会自动扫描机器上的宿主（判据=宿主 CLI 在 PATH 或配置目录存在，
+数据在 `integrations/<host>/host.json`，不硬编码）：
+
+- 扫到 **1 个** → 直接装到它；
+- 扫到 **多个** → 交互终端列出编号让你多选（`1` / `1,3` / `all`，回车取消）；
+  非交互（CI/重定向）**不猜**，报错并提示 `--target <agent>` 或 `--target all`；
+- 扫到 **0 个** → 交互终端问一次 target 名；非交互报错并列出支持列表；
+- 一步全量：`install --target all`（`dsh` 缺 `--profile` 时跳过并说明，不算失败）。
+
 装完**重启会话**才生效（宿主在启动时读取 MCP 配置）。随后自检：
 
 ```bash

@@ -1162,6 +1162,7 @@ args 指向载荷；把 PATH 上的 python3 换成 3.9 再启动 → stderr 出�
 | S120 | packs 写纪律 | 缺省 dry-run 不改字节；`--apply` 只改 env.VOD_PACKS、宿主其它键原样保留、首改落 .bak、读回验证；`core` 禁不掉；`all` 置全包 |
 | S121 | --target all | 只循环探测到的宿主（缺 CLI 跳过）；零宿主时 exit 2 并说明 |
 | S122 | uninstall 收窄与清残留 | `--target` 只摘该行且保留其它行与在用载荷；`--clean-global` 只删无 payload.json 的载荷与含 vod-devkit 的 npx 缓存目录，不认得的目录不碰 |
+| S127 | 探测后的交互选择 | 扫到多个且终端可交互 → 列编号多选（`1`/`1,3`/`all`/回车取消，非法输入重问一次）；非交互一律报错不猜；扫到 0 个时交互问一次 target 名；`--target all` 里 dsh 缺 `--profile` 跳过并说明（不伪装成失败） |
 | S123 | status/doctor --target | 选中行输出该行 JSON；未知 target 明确报"没有该宿主的安装记录"并列出已有 |
 
 验收口径（目标环境执行，工具不入库）：`python3 -m pytest tests/test_global_cmds.py -q`
