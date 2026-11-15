@@ -69,7 +69,7 @@ vod_run_analysis / vod_task_status / vod_task_result / vod_kb_search
 四工具已删除：运营能力归 vod-system 前端（受众不同+职责耦合+负复杂度，
 净删 304 行）；kb 知识改 skills 形态本地分发（零工具零依赖）。历史契约
 详见 git 留档；现存工具面=2.5 info / 2.5b auth_status / 2.6 submit_voices
-/ 2.5e list_submitted，共 4 个。
+/ 2.5g list_submitted，共 4 个。
 
 ### 2.5 vod_devkit_info（读，core pack 常驻）
 
@@ -114,7 +114,7 @@ base}（明文禁止）+ packs + 缺 key 时三步引导（令牌/升级/宿主�
 对齐 devkit error-table"步骤=可执行动作"纪律）。
 调用链：纯本地读+运行时状态，探测上游时轻量 ping。
 
-### 2.5b 动态元数据（_load_meta）
+### 2.5c 动态元数据（_load_meta）
 
 GET /external/meta → {products:[...]}；缓存 runtime.json meta_cache
 （TTL 24h）；不可达→_META_SNAPSHOT 快照+stale=True。所有引导文案
@@ -122,7 +122,7 @@ GET /external/meta → {products:[...]}；缓存 runtime.json meta_cache
 +白名单常量为实证）；/external/products 是报告侧全集不可用作
 submit 源——meta 必须以 submit 校验常量为源（引擎侧 VOD-KEY 交付）。
 
-### 2.5f 传输协议守卫（_http 前置）
+### 2.5d 传输协议守卫（_http 前置）
 
 http 仅限本机回环（127.0.0.1/localhost/::1——recorder 测试与同机引擎）；
 非回环 http 拒绝（-32014，引导 https 配置）——Bearer key 不得明文过公网。
@@ -130,7 +130,7 @@ https 全场景放行（测试环境 TLS 链路已实测：taskId=419/420）。
 双向测试锁死（U38）：http 公网必须拒、http 回环必须放行（报 -32001
 而非协议拒绝）。
 
-### 2.5d 身份模型（归属/认证分离）
+### 2.5e 身份模型（归属/认证分离）
 
 归属（谁提的）=数据字段：voices[].userType/customer 随声音入库，
 引擎侧不建用户体系；授权（谁在调）=接入方 key 三档（匿名令牌/
@@ -140,14 +140,14 @@ https 全场景放行（测试环境 TLS 链路已实测：taskId=419/420）。
 scene ≤128。签名回执记 P2 前置（用户自助查询/撤回的前置条件，
 见 proposal 三·四e）。
 
-### 2.5c 产品归因（_resolve_product）
+### 2.5f 产品归因（_resolve_product）
 
 三层：runtime.json product（安装绑定）> 调用方显式 > 报错 -32013
 （引导 install --product / 传参 / 问用户）。静默默认禁止。
 别名归一对齐引擎（modelarts→MaaS）；白名单经 meta 动态校验
 （快照兜底时容忍提交并标 stale——引擎侧最终校验为准）。
 
-### 2.5e 提交账本与查询（层级①）
+### 2.5g 提交账本与查询（层级①）
 
 _ledger_append：submit 成功后落 runtime.json submissions（cap 200
 环形截断）；纪律=文件读改写+只动 submissions 键（防陈旧配置整体

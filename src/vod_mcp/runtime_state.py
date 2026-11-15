@@ -42,16 +42,18 @@ _RT = _runtime_cfg()
 
 
 def _runtime_update(update: dict, replace: bool = False) -> None:
-    """原子更新运行期状态：落盘 → 镜像（同锁内）。
+    """更新运行期状态：落盘（事务内）→ 内存镜像。
 
+    落盘的锁由 `_runtime_atomic` 持（嵌套持锁会让 flock 在同一文件上二次加锁而
+    死锁——同一进程两个 fd 互斥）；镜像只服务本进程，用 _RT_LOCK 单独保护。
     replace=False 时按单参调用 _save_runtime：测试桩普遍是 `lambda u: ...`
     （历史签名），多传一个默认值会把所有桩打红——签名兼容性属于接口契约。
     """
+    if replace:
+        _save_runtime(update, replace=True)
+    else:
+        _save_runtime(update)
     with _RT_LOCK:
-        if replace:
-            _save_runtime(update, replace=True)
-        else:
-            _save_runtime(update)
         if replace:
             _RT.clear()
         _RT.update(update)
@@ -118,38 +120,32 @@ def _quarantine_bad_runtime(p: Path, err: Exception) -> Path | None:
     return dst
 
 
-def _save_runtime(update: dict, replace: bool = False) -> None:
-    """低层落盘（唯一写文件处）。
+def _read_cfg_unlocked(p: Path) -> dict:
+    """锁内读（调用方已持 _RT_LOCK + 文件锁）。坏文件先备份再继续。"""
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:      # noqa: BLE001  坏文件：备份后继续
+        _quarantine_bad_runtime(p, e)
+        return {}
 
-    三层保障（P0 修复，2026-11-16）：
-    - `_RT_LOCK`：进程内互斥（可重入，复合操作嵌套安全）；
-    - `_file_lock`：**跨进程**互斥（多宿主共用同一份载荷 runtime.json）；
-    - tmp + `os.replace`：原子替换——读者永远不会看到半截 JSON（此前整文件
-      `write_text` 被读到半截后，下一次更新就把 key/账本冲成空）。
-    坏文件不静默归零：先 `_quarantine_bad_runtime()` 备份再继续。
-    """
-    p = _runtime_path()
-    with _RT_LOCK:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with _file_lock():
-            cfg = {}
-            if p.exists() and not replace:
-                try:
-                    cfg = json.loads(p.read_text(encoding="utf-8"))
-                except Exception as e:      # noqa: BLE001  坏文件：备份后继续
-                    _quarantine_bad_runtime(p, e)
-                    cfg = {}
-            cfg.update(update)
-            tmp = p.with_name(p.name + ".tmp")
-            tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-            try:
-                os.chmod(tmp, 0o600)        # 先给权限再替换，不留 0644 窗口
-            except OSError:
-                pass
-            os.replace(tmp, p)
-    # S1 式写后验（借 huaweicloud-devkit ensurePrivateMode 模式）：写完 chmod 0600
-    # 并 stat 回验——不假设 chmod 按文档工作（WSL/drvfs 会静默忽略 chmod），
-    # 验的是效果不是动作；runtime.json 含 java_key 明文，权限失效必须告警
+
+def _write_cfg_unlocked(p: Path, cfg: dict) -> None:
+    """锁内原子写：tmp → chmod 0600 → os.replace。"""
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        os.chmod(tmp, 0o600)        # 先给权限再替换，不留 0644 窗口
+    except OSError:
+        pass
+    os.replace(tmp, p)
+
+
+def _verify_perms(p: Path) -> None:
+    """S1 式写后验（借 huaweicloud-devkit ensurePrivateMode 模式）：chmod 0600 并 stat
+    回验——不假设 chmod 按文档工作（WSL/drvfs 会静默忽略），验的是效果不是动作；
+    runtime.json 含 java_key 明文，权限失效必须告警。"""
     try:
         os.chmod(p, 0o600)
         mode = stat.S_IMODE(os.stat(p).st_mode)
@@ -158,6 +154,41 @@ def _save_runtime(update: dict, replace: bool = False) -> None:
                   "key 可能被同机其他用户读取，请检查文件系统（WSL 挂载盘建议移回 Linux 原生盘）")
     except OSError as e:
         _warn(f"runtime.json 权限校验失败：{e}")
+
+
+def _runtime_atomic(mutate) -> dict:
+    """**事务式读改写**：进程内 RLock + 跨进程 flock 一起持，读 → mutate → 原子写。
+
+    为什么必须是事务（2026-11-16 第二轮评审实测）：只给"写"上锁不够。调用方若在锁外
+    `_runtime_cfg()` 读到整份 submissions、再在锁内整键覆盖，后写者会盖掉先写者——
+    4 进程各 25 条账本只剩 40-53 条。凡是"读整键→改→写整键"的路径都必须走这里。
+
+    mutate(cfg) 返回 False 表示"不改、不用落盘"（例如账本被 local_ledger=false 关闭）。
+    返回最终落盘的 cfg 快照（调用方可据此更新内存镜像）。
+    """
+    p = _runtime_path()
+    with _RT_LOCK:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with _file_lock():
+            cfg = _read_cfg_unlocked(p)
+            if mutate(cfg) is not False:
+                _write_cfg_unlocked(p, cfg)
+                _verify_perms(p)
+            return cfg
+
+
+def _save_runtime(update: dict, replace: bool = False) -> None:
+    """原子差分更新（公共 API）：把 update 合并进现有 cfg。
+
+    内部整段持锁（进程内 + 跨进程），所以"不同顶层键"的并发更新不会互相覆盖。
+    需要"读整键→改→写整键"的调用方**不要**用它（那会丢失并发新增），改走
+    `_runtime_atomic(mutate)`。
+    """
+    def _mutate(cfg: dict) -> None:
+        if replace:
+            cfg.clear()
+        cfg.update(update)
+    _runtime_atomic(_mutate)
 
 
 def _log(line: str, path: str = "/tmp/vod_mcp_server.log") -> None:
@@ -369,13 +400,15 @@ def _ledger_append(entries: list) -> None:
     vod_list_submitted 随之不可用——留痕是可选项不是义务。"""
     if not entries:
         return
-    with _RT_LOCK:   # 读改写整段持锁：远程面并发提交不再互相覆盖账本
-        fresh = _runtime_cfg()
-        if fresh.get("local_ledger") is False:
-            return
-        ledger = (fresh.get(_LEDGER_KEY) or [])[-_LEDGER_CAP:]
+
+    def _mutate(cfg: dict):
+        if cfg.get("local_ledger") is False:
+            return False          # 企业数据驻留：账本关闭，不写也不改
+        ledger = (cfg.get(_LEDGER_KEY) or [])[-_LEDGER_CAP:]
         ledger.extend(entries)
-        _save_runtime({_LEDGER_KEY: ledger[-_LEDGER_CAP:]})
+        cfg[_LEDGER_KEY] = ledger[-_LEDGER_CAP:]
+
+    _runtime_atomic(_mutate)   # 读整键 → 改 → 写整键 必须整段在锁内
 
 
 _DRAFT_KEY = "drafts"

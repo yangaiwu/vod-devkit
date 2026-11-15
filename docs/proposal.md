@@ -1367,3 +1367,26 @@ needs_host 清单 → 按签名判参（漏登记会静默丢 client_info）。
 | # | 场景 | 断言 |
 |---|---|---|
 | S138 | 卸载只碰自己的落点 | 双宿主假 HOME：`uninstall --target opencode` 后 hermes 技能副本仍在、opencode 自己的被摘；hermes 专属目录只摘技能子目录（目录与别人的技能保留）；落点在当前 HOME **之外**一律拒绝删除并打印原因 |
+
+
+## 状态事务化与守卫覆盖面（S139，2026-11-16，第二轮评审）
+
+需求变更（两条，都是"修了一半"的实测证据）：
+
+**S139-a 读改写必须事务化**：第一轮只给"写"上了锁（tmp+os.replace），但 `_ledger_append`
+与草稿存盘是"锁外读整键 → 锁内整键覆盖"——4 进程各写 25 条账本只剩 40-53 条（写原子了，
+条目照样丢）。修法=新增 `_runtime_atomic(mutate)`：进程内 `_RT_LOCK` + 跨进程 `flock`
+一起持，读 → mutate → 原子写；`_ledger_append`、`vod_draft_voices`、`vod_commit_voices`
+（校验+单次消费同事务）全部搬进去。`_save_runtime` 退化为它的薄封装。
+门禁同步换成**真实入口**（此前 S137 子进程写的是不同顶层键，合并在锁内天然安全，
+证明的是"不丢键"而不是"不丢条目"）。
+
+**S139-b 读 Key 拦截要覆盖文件/代码工具**：只拦 shell 类工具等于没拦——模型读
+`runtime.json` 的常规路径是 `read_file(path=…)` / `execute_code(open(...).read())` /
+`search_files(pattern=java_key)`，这三个当时全部放行（白名单外一律 allow）。
+修法=按工具分类判定：文件类看 path 是否点名 runtime.json、搜索类看 pattern 是否点名
+key 变量、代码类看代码里是否点名 runtime.json；其余仍 fail-open。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S139 | 事务与覆盖面 | 4 进程各 25 次 `_ledger_append`（真实入口）→ 落盘 100 条；`read_file`/`execute_code`/`search_files` 点名 runtime.json 或 key 变量 → BLOCK，正常读文件/普通代码/普通搜索 → ALLOW |

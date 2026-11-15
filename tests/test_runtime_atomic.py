@@ -134,3 +134,34 @@ def test_s137_good_file_is_not_quarantined(tmp_path):
     f = _runtime_file(tmp_path)
     assert not list(f.parent.glob("runtime.json.corrupt-*")), "正常文件不许产生备份"
     assert json.loads(f.read_text(encoding="utf-8")) == {"a": 1, "b": 2}
+
+# ── S139 账本条目在并发下不丢（真实入口） ───────────────────
+#
+# S137 子进程写的是**不同的顶层键**（`{'k3_1': 1}`），合并在锁内发生，天然不丢。
+# 真实路径是 `_ledger_append`：锁外 `_runtime_cfg()` 读整份 submissions 列表 →
+# 锁内 `_save_runtime({submissions: 整份})` 覆盖，后写者盖掉先写者。实测 4 进程
+# 各 25 条只剩 41 条。用例必须走真实入口，否则锁的是假安全。
+
+def _ledger_child(tmp_path, worker: int, count: int = 25) -> str:
+    return "\n".join([
+        "import os",
+        f"os.environ['VOD_DEVKIT_DIST_ROOT'] = {str(tmp_path)!r}",
+        f"os.environ['VOD_DEVKIT_SRC_ROOT'] = {str(SRC)!r}",
+        "from vod_mcp import runtime_state as rs",
+        f"for i in range({count}):",
+        f"    rs._ledger_append([dict(voiceId='V{worker}-' + str(i),"
+        " content='x', stage='committed')])",
+    ]) + "\n"
+
+
+def test_s139_concurrent_ledger_appends_keep_every_entry(tmp_path):
+    procs = [subprocess.Popen([sys.executable, "-c", _ledger_child(tmp_path, n)],
+                              env=_child_env(tmp_path),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+             for n in range(4)]
+    for p in procs:
+        out, err = p.communicate(timeout=180)
+        assert p.returncode == 0, err.decode()[-500:]
+    data = json.loads(_runtime_file(tmp_path).read_text(encoding="utf-8"))
+    ledger = data.get("submissions") or []
+    assert len(ledger) == 100, f"并发写账本丢了条目：{len(ledger)}/100（修前实测 40-53）"

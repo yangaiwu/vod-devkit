@@ -614,8 +614,8 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
     payload_sha = hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
-    with rt._RT_LOCK:   # 读改写整段持锁：并发 draft 不互相丢草稿
-        store = rt._drafts_load()
+    def _mutate(cfg: dict):
+        store = rt._drafts_purge(cfg.get(rt._DRAFT_KEY) or {})
         store[draft_id] = {
             "payload": payload, "payloadSha256": payload_sha,
             "tokenHash": rt._sha256(token),
@@ -631,7 +631,9 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
         }
         while len(store) > rt._DRAFT_CAP:  # 环形：最旧先淘汰
             store.pop(next(iter(store)))
-        rt._save_runtime({rt._DRAFT_KEY: store})
+        cfg[rt._DRAFT_KEY] = store
+
+    rt._runtime_atomic(_mutate)   # 读整键→改→写整键必须整段在锁内（跨进程）
 
     out = {
         "draftId": draft_id,
@@ -660,22 +662,34 @@ def commit_voices(params: dict, client_info: dict | None = None) -> dict:
     if not draft_id:
         raise net.ToolError("draftId 为必填（取自 vod_draft_voices 返回原样透传）", code=-32602)
 
-    store = rt._drafts_load()
-    draft = store.get(draft_id)
-    if draft is None:
-        raise net.ToolError("草稿不存在或已过期（10 分钟 TTL），请重新 vod_draft_voices", code=-32011)
-    token = str(params.get("approvalToken", "")) or str(draft.get("token", ""))
-    payload_sha = str(params.get("payloadSha256", "")) or str(draft["payloadSha256"])
-    if draft["tokenHash"] != rt._sha256(token):
-        raise net.ToolError("审批令牌不匹配（draft 返回的 approvalToken 原样透传）", code=-32011)
-    if draft["payloadSha256"] != payload_sha:
-        raise net.ToolError("载荷校验不符（payloadSha256 与 draft 签发值不一致，禁止改写已确认内容）",
-                        code=-32011)
-    # 单次消费：先摘除再提交——提交中途崩溃也不会二次提交（宁可丢一单重走流程）
-    # 整段持锁：并发 commit 同一 draftId 时只有一方能消费成功
-    with rt._RT_LOCK:
+    holder: dict = {}
+
+    def _consume(cfg: dict) -> None:
+        """校验 + 单次消费**同一事务内**完成。
+
+        为什么不能在锁外读 store 再进锁里 pop：读到的是一份快照，覆盖回去会把别的
+        draft 甚至已消费的草稿复活（跨进程时尤其明显）。
+        """
+        store = rt._drafts_purge(cfg.get(rt._DRAFT_KEY) or {})
+        draft = store.get(draft_id)
+        if draft is None:
+            raise net.ToolError("草稿不存在或已过期（10 分钟 TTL），请重新 vod_draft_voices",
+                                code=-32011)
+        token = str(params.get("approvalToken", "")) or str(draft.get("token", ""))
+        payload_sha = str(params.get("payloadSha256", "")) or str(draft["payloadSha256"])
+        if draft["tokenHash"] != rt._sha256(token):
+            raise net.ToolError("审批令牌不匹配（draft 返回的 approvalToken 原样透传）",
+                                code=-32011)
+        if draft["payloadSha256"] != payload_sha:
+            raise net.ToolError("载荷校验不符（payloadSha256 与 draft 签发值不一致，禁止改写已确认内容）",
+                                code=-32011)
+        # 单次消费：提交中途崩溃也不会二次提交（宁可丢一单重走流程）
         store.pop(draft_id)
-        rt._save_runtime({rt._DRAFT_KEY: store})
+        cfg[rt._DRAFT_KEY] = store
+        holder["draft"] = draft
+
+    rt._runtime_atomic(_consume)
+    draft = holder["draft"]
 
     out = submit_voices(dict(draft["payload"]), client_info,
                         ledger_extra={"stage": "committed", "draftId": draft_id})

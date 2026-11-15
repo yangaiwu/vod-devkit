@@ -1474,3 +1474,24 @@ PR，且要先补"长驻进程里 runtime 改值"的用例。
 
 **顺带**：`--clean-global` 的 npx 清理收窄到只删 `node_modules/vod-devkit`（同 hash 目录里的
 其它包不碰，删空才删目录）；删掉重复的 codex 分支；`bin` 对继承到的不一致根加 stderr 告警。
+
+## D-runtime-txn-1：读改写必须事务化（`_runtime_atomic`）（2026-11-16）
+
+**问题**：第一轮的原子写只保证"写不撕裂"，不保证"读改写不丢"。`_ledger_append` 与草稿
+存盘是 `_RT_LOCK` 内 `_runtime_cfg()` 读整份列表 → `_save_runtime({key: 整份})` 覆盖，
+而 `_RT_LOCK` 只是进程内锁；跨进程时后写者用旧快照盖掉先写者。实测 4 进程各 25 条账本
+只剩 40-53 条。门禁没抓到是因为用例写的是**不同顶层键**（合并在锁内天然安全）。
+
+**决定**：新增 `_runtime_atomic(mutate)`——进程内 `RLock` + 跨进程 `flock` 一起持，
+读 → `mutate(cfg)` → 原子写（tmp/`os.replace`/chmod 0600）。`mutate` 返回 `False` 表示
+"不改不落盘"（如 `local_ledger=false`）。`_save_runtime` 退化为它的薄封装（差分更新）。
+
+迁移点：`_ledger_append`、`vod_draft_voices` 写入、`vod_commit_voices`（**校验与单次消费
+同事务**——锁外读 store 再锁内 pop，会复活别的已消费草稿）。`update_check` 的 4 处
+"读 state → 整键写"同形态但属低价值（丢了只是重复提醒），暂留待下一批。
+
+**为什么不在 `_save_runtime` 里包一层就完事**：它自己持锁；若调用方已持锁再调它，
+同一进程对同一文件二次 `flock`（不同 fd）会**死锁**。所以锁只能出现在 `_runtime_atomic`
+一处，业务侧必须传 mutate 而不是先读后写。
+
+**门禁**：S139 用真实入口（`_ledger_append`）跑 4 子进程；旧代码上必红（实测 28/100）。
