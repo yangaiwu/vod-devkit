@@ -365,3 +365,11 @@
 - c5c7732 refactor(paths)!: 根定位单点化 + 插件副本自包含（P1）
 - 6ccf729 test(gates): 门禁先行——插件副本自包含用例(红) + mypy 反转整包 + pre-push 补门
 
+
+## v0.5.9（2026-11-15）
+
+- 58489fa refactor(copies): 插件副本零提交（生成物）——双漂移从构造上消失
+- 91bc0a2 fix(copies): 双副本漂移根治——同一门禁同时断言内容一致与已提交
+- 592024b fix(ci): 发版状态对账在浅克隆下假红（tag 不可见≠未打 tag）
+- 316a872 fix(release): 发版双副本检查/提交清单补插件副本 contract+safety
+
