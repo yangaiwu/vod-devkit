@@ -413,7 +413,9 @@ def test_doctor_verify_golden(env):
     mf = json.loads((env["repo"] / "install-manifest.json").read_text())
     actual = "\n".join(outs)
     for volatile, tag in ((str(env["home"]), "<HOME>"), (str(env["repo"]), "<REPO>"),
-                          (str(mf["source"]["commitSha"][:12]), "<SHA12>")):
+                          (str(mf["source"]["commitSha"][:12]), "<SHA12>"),
+                          # 引擎桩端口每次随机（出站可达行会打印它）
+                          (str(env["engine"]["base"]).rstrip("/"), "<ENGINE>")):
         actual = actual.replace(volatile, tag)
     golden = Path(__file__).parent / "golden" / "doctor_verify.txt"
     if os.environ.get("UPDATE_GOLDEN") == "1":

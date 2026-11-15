@@ -98,6 +98,59 @@ def _render_problems(problems) -> str:
     return diagnose.render_problems(problems)
 
 
+# ── 出站面（P2，对表 devkit 的 proxy / regional awareness 两节） ──────
+#
+# 两条都只**报告**，不新建配置、不改路由、不 FAIL：
+# - 代理：尊重既有 HTTP 约定（env 优先），devkit 也是"env 高于文件"；我们不建
+#   proxy.json（没有第二种真相就不会有"我改了为什么不生效"）。代理 URL 可能含
+#   口令，一律掩码后再打印。
+# - 引擎可达：无 key 时此前完全没有网络结论（key 探针只在有 key 时跑）。这里
+#   无条件探一次 meta 端点：401/403 也算**可达**（鉴权问题不等于网络问题）；
+#   不可达只 warn——离线装机 doctor 必须还能用。
+
+_PROXY_KEYS = ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY",
+               "https_proxy", "http_proxy", "no_proxy")
+_PROXY_CRED = re.compile(r"(://)[^/@]*:[^@]*@")
+
+
+def _mask_proxy(url: str) -> str:
+    return _PROXY_CRED.sub(r"\1***:***@", url)
+
+
+def _proxy_summary() -> str:
+    parts = [f"{k}={_mask_proxy(os.environ[k])}" for k in _PROXY_KEYS
+             if os.environ.get(k)]
+    return "；".join(parts) if parts else "未设（出站直连；urllib 会读 env，无需另配）"
+
+
+def _probe_engine(base: str, timeout: float = 4.0) -> tuple:
+    """(state, detail)；state ∈ ok / auth / unreachable。零依赖、不重试、不带 key。"""
+    import urllib.error
+    import urllib.request
+    url = base.rstrip("/") + "/rest/developer/manager/hdvodmngservice/v1/external/meta"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return ("ok", f"HTTP {r.status} {url}")
+    except urllib.error.HTTPError as e:
+        return ("auth", f"HTTP {e.code}（可达；鉴权/路径响应）{url}")
+    except Exception as e:  # noqa: BLE001  网络类异常一律只报告
+        return ("unreachable", f"{type(e).__name__}: {e}（{url}）")
+
+
+def _report_egress(api_base: str) -> None:
+    print(f"[doctor] 出站代理：{_proxy_summary()}")
+    if not api_base:
+        print("[doctor] 引擎可达：未配置 apiBase（install 未写入？）")
+        return
+    state, detail = _probe_engine(api_base)
+    if state == "ok":
+        print(f"[doctor] 引擎可达：{detail}")
+    elif state == "auth":
+        print(f"[doctor] 引擎可达：{detail}")
+    else:
+        print(f"warn: 引擎不可达（离线环境可忽略；提交会失败）：{detail}")
+
+
 def cmd_explain(args):
     """解释一条失败文案/错误码（-32010 等）：给层 + 原因 + 动作。"""
     from vod_mcp import diagnose
@@ -277,6 +330,14 @@ def cmd_doctor(args=None):
     if problems:
         print(_render_problems(problems))
         sys.exit(1)
+    # 出站面：代理生效值（掩码）+ 引擎可达（无 key 也回答"这个 apiBase 通不通"）
+    api_base = ""
+    if p.exists():
+        try:
+            api_base = json.loads(p.read_text(encoding="utf-8")).get("apiBase") or ""
+        except (OSError, json.JSONDecodeError):
+            api_base = ""
+    _report_egress(api_base)
     # key 探针（最佳努力）：配置了 key 就问一次引擎，无效当场报；网络不可达只提示不 FAIL
     #（离线环境 doctor 必须可用——网络问题不是 key 问题）
     from vod_mcp.runtime_state import _runtime_cfg

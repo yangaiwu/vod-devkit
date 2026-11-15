@@ -1006,6 +1006,28 @@ capabilities 必须声明 `tools.listChanged=true`，否则合规客户端不会
 **远程面摘除**：`REMOTE_WITHHELD` 加该工具。理由不是"安全"而是语义：HTTP 面每请求现造
 server、无会话，开关写完下一个请求就没了（"以为改了其实没改"）。dsh 壳同理不提供。
 
+## doctor 出站面：代理与引擎可达（D-doctor-egress-1，2026-11-16）
+
+doctor 此前对出站面是盲的：key 探针只在配了 key 时跑，没 key 时连"引擎通不通"都答不上；
+代理完全没有可观测面（urllib 隐式读 env，但没人能回答"现在走哪个代理"）。
+
+两条都**只报告**：不改退出码、不建配置文件、不改路由。理由是 doctor 的既有契约——
+离线装机必须能跑通 doctor；把网络问题变成 FAIL 会把"环境不可达"误报成"插件坏了"。
+
+- 代理：只读 env（`HTTPS_PROXY/HTTP_PROXY/ALL_PROXY/NO_PROXY` 及小写），值先过
+  `_mask_proxy()`（`user:pass@` → `***:***@`）。**不建 proxy.json**：devkit 建了，
+  但它有"文件 < env"的优先级链要解释；我们没有文件，就不存在"改了文件不生效"。
+  代价是没人能给"这台机器的代理"做持久记录——需要时写进宿主/CI 环境，不进插件状态。
+- 引擎可达：无条件 `GET <apiBase>/rest/developer/manager/hdvodmngservice/v1/external/meta`
+  （4s、不重试、不带 key）。判定三态：200=`ok`；`HTTPError`（含 401/403）=`auth`
+  **算可达**——把鉴权失败报成不稳定会把排查方向带偏；其它异常=`unreachable` 只 `warn`。
+  缺 `apiBase` 时明说"install 未写入"，不沉默。
+
+**诚实标注**（对齐 devkit 的 honest residual）：宿主对 `runtime.json` 的读取门控
+（沙箱规则/allow 列表）插件侧探测不到，所以 README 的「诚实残留」写"未验证"，不声称已拦。
+真实降低暴露面的做法已经落地：安装器不把 `java_key` 种进载荷副本（运行期走匿名令牌）、
+`auth status` 只输出指纹。
+
 ## 凭据单入口与技能读取教法（D-auth-init-1 / D-skill-teaching-1，2026-11-15）
 
 **凭据为什么必须只有一个写入口**：key 是设备绑定 + 引擎签发，不是配置项。多入口
