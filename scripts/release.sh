@@ -44,7 +44,7 @@ echo "版本: $CUR → $BUMP"
 # 质量门：发版前必须全绿（同 pre-push）
 PY=$(ls /root/.hermes/tools/python-3.14.7*/bin/python3 2>/dev/null || command -v python3)
 export PYTHONPATH="/root/.hermes/cache/scratch/pylibs:$PYTHONPATH"
-"$PY" -m pyflakes src/vod_mcp/*.py tests/*.py && "$PY" -m pytest tests/ -q || { echo "FAIL: 质量门未过，拒绝发版"; exit 1; }
+"$PY" -m pyflakes src/vod_mcp/*.py src/vodkit_cli/*.py tests/*.py && "$PY" -m pytest tests/ -q || { echo "FAIL: 质量门未过，拒绝发版"; exit 1; }
 
 # 旧解释器语法门（B4 实锤）：pyflakes/pytest 跑在 3.14 上测不出 ≤3.11 的语法错
 # （f-string 表达式内反斜杠 PEP 701 前禁止）。用固定旧解释器逐文件 py_compile，
