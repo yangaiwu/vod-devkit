@@ -703,7 +703,8 @@ def test_presets_full_uses_runtime_pack_names():
     运行口单源——workflow 已随净删消失、kb=knowledge 旧称，漂移=静默失效）。"""
     import importlib.util
     from importlib.machinery import SourceFileLoader
-    loader = SourceFileLoader("p", str(Path(__file__).resolve().parent.parent / "vod_mcp" / "packs.py"))
+    loader = SourceFileLoader("p", str(Path(__file__).resolve().parent.parent
+                                   / "vod_mcp" / "packs" / "__init__.py"))
     spec = importlib.util.spec_from_loader("p", loader)
     m = importlib.util.module_from_spec(spec)
     loader.exec_module(m)

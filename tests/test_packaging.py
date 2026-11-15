@@ -16,23 +16,38 @@ NEVER_PACKED = {"runtime.json"}
 
 
 def test_files_whitelist_covers_all_vod_mcp_modules():
-    """package.json files 必须覆盖 vod_mcp/ 下全部 .py 与 runtime.example.json。"""
+    """package.json files 必须覆盖 vod_mcp/ 下全部 .py 与 runtime.example.json。
+
+    P2 后 vod_mcp/ 有子包（packs/）：顶层仍逐文件枚举（顶层含真实 runtime.json，
+    整目录模式会把它打进包），子包允许整目录（子包内不含运行时状态）。
+    """
     pkg = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
-    files = set(pkg.get("files", []))
+    files = {f.rstrip("/") for f in pkg.get("files", [])}
     for entry in sorted((ROOT / "vod_mcp").iterdir()):
         if entry.name in NEVER_PACKED or entry.suffix in (".log", ".pyc"):
             continue
-        if entry.is_file() and entry.name != "__pycache__":
-            assert f"vod_mcp/{entry.name}" in files, (
-                f"vod_mcp/{entry.name} 不在 package.json files 白名单——"
-                "npm 包将缺此文件（功能静默丢失）。请补白名单后再发版。")
+        if entry.is_dir():
+            if entry.name == "__pycache__":
+                continue
+            # 子包两种合法形态：整目录声明，或逐文件枚举（host_adapters 是后者）
+            if f"vod_mcp/{entry.name}" in files:
+                continue
+            missing = [p.name for p in entry.glob("*.py")
+                       if f"vod_mcp/{entry.name}/{p.name}" not in files]
+            assert not missing, (
+                f"vod_mcp/{entry.name}/ 既没整目录声明、也没逐文件覆盖：{missing}"
+                "——npm 包将缺这些模块（功能静默丢失）")
+            continue
+        assert f"vod_mcp/{entry.name}" in files, (
+            f"vod_mcp/{entry.name} 不在 package.json files 白名单——"
+            "npm 包将缺此文件（功能静默丢失）。请补白名单后再发版。")
 
 
 def test_files_whitelist_covers_all_skills():
     """skills/ 下每个非空技能目录必须能被整目录模式 skills/ 覆盖
     （本用例锁的是：files 必须声明 skills/ 整目录，防止逐目录枚举再漏）。"""
     pkg = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
-    files = set(pkg.get("files", []))
+    files = {f.rstrip("/") for f in pkg.get("files", [])}
     assert any(f == "skills/" or f == "skills" for f in files), (
         "files 缺 skills/ 整目录声明——新技能目录将不进包")
 

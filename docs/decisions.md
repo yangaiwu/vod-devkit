@@ -1063,3 +1063,40 @@ workbuddy / dsh / hermes（含 hooks 插件）这些都要具备」。落地口�
 device-mismatch/rejected 对照用例 + test_remote_attach.py 桩 hermes 补
 "真注册落盘"模拟。全量 447 passed（installer update 3 例失败为本地 origin
 fetch 环境噪音，基线同款）。
+
+## D-split-1：tools.py 按 pack 纵切（2026-11-15，结构债收口）
+
+**背景**：tools.py 1368 行单体承载了 10 个 handler + 采集链 + 归因胶水 + 账本 +
+草稿 + runtime.json 读写 + key 状态，域边界不存在；而 packs（core/collect/
+knowledge）本来就是工具面的装配边界，两者错位。前置 P1 已把路径收敛到
+`vod_mcp/paths.py`（挪文件不再重算相对深度）。
+
+**切法**（按装配边界，不按文件名）：
+- `vod_mcp/runtime_state.py` 运行期状态：runtime.json 读写/锁、账本、草稿、
+  会话记忆、install nonce、日志、分发形态位。
+- `vod_mcp/net.py` 出口与身份：`_http`、meta 缓存、key 探针、匿名令牌、
+  `ToolError`、请求身份 contextvars（`_REQ_KEY/_SERVER_FACE/_eff_key`）。
+- `vod_mcp/packs/{core,collect,knowledge}.py` 各 pack 的 handler 与其专属助手。
+- `vod_mcp/tools.py` 降为 shim：契约装载 + `tool_specs` + `_HANDLERS` + `dispatch`。
+- `vod_mcp/packs.py` → `vod_mcp/packs/__init__.py`（注册表放包里，保住
+  `importlib.reload(vod_mcp.packs)` 重读 VOD_PACKS 的既有测试语义）。
+
+**patch 面纪律（这是本次最容易出假绿的地方）**：拆分后
+`monkeypatch.setattr(tools, "_http", fake)` 会写到 shim 上而**静默无效**。
+三条锁（tests/test_p2_structure.py）：
+1. shim 不得 re-export 已迁走的私有符号 → 写 shim 直接 AttributeError；
+2. packs/*.py 禁止 `from vod_mcp.net import <符号>`（符号导入冻结引用）→
+   一律模块属性访问（`net._http` / `rt._save_runtime`）；
+3. patch 有效性：打桩到实现模块后，真实调用链必须命中假实现（HTTP 出口、
+   `JAVA_KEY` 常量、状态落盘三条代表）。
+90 处历史打桩点同批迁移到实现模块（`_http` 35 / `_load_meta` 29 /
+`JAVA_KEY` 32 / `_RT` 22 / `_save_runtime` 13 / `_runtime_path` 12 …）。
+
+**为什么不做"shim 属性转发"**：`__getattr__` 只能解决读，`monkeypatch.setattr`
+的写不会传播到实现模块——转发等于把静默无效变成"看起来能打桩"。
+
+**副作用**：mypy 作用域是整包（P1 反转），迁入的新模块默认被检查，本次为定位
+补了 6 处类型标注/收窄（无行为变更）——这是"新模块默认被检"的预期成本。
+
+**验证**：pytest 全绿（含新增 6 条结构护栏）；pyflakes 递归 0；mypy 36 文件 0 错；
+host_matrix 9 PASS；pack_verify 150 文件 OK；双副本 diff CLEAN。
