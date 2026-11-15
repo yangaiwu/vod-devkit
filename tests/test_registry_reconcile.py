@@ -64,7 +64,7 @@ def test_published_but_missing_tag_is_drift():
 
 
 def test_shallow_clone_missing_tag_is_not_drift():
-    """浅克隆看不到 tag ≠ 没打 tag（v0.5.8 CI 假红实锤：tag 已推、包已发）。"""
+    """浅克隆看不到 tag ≠ 没打 tag（v0.5.8 CI 假红实锤：tag 已推、包已发）。S108。"""
     rep = rr.reconcile(_local("0.5.0"),
                        {"vod-devkit": "0.5.0", "dsh-vod-devkit": "0.5.0"},
                        {"v0.5.0": False}, shallow=True)

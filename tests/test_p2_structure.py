@@ -64,7 +64,7 @@ def test_patch_on_net_http_intercepts_real_call_chain():
 
     显式钉住 JAVA_KEY：auth_status 只有「有 key」时才走主动探针分支，而 key
     来自环境/runtime.json——CI（无 runtime.json、无 env）与开发机状态不同，
-    旧写法在 CI 上直接 KeyError: 'keyCheck'（v0.5.8 实锤假红）。
+    旧写法在 CI 上直接 KeyError: 'keyCheck'（v0.5.8 实锤假红）。S109。
     """
     seen = []
 

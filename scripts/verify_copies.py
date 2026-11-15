@@ -25,16 +25,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-PAIRS = (
-    ("vod_mcp", "plugins/vod-devkit/vod_mcp"),
-    ("skills", "plugins/vod-devkit/skills"),
-    ("contract", "plugins/vod-devkit/contract"),
-    ("safety", "plugins/vod-devkit/safety"),
-)
-# 运行期状态与构建缓存不是副本内容：runtime.json 只活在根侧（含 key 与账本），
-# 插件副本永远不该有它（sync 也按同样的模式排除）。
-IGNORE = ("runtime.json", "__pycache__", "*.pyc", "*.log")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+# 目录清单与忽略规则只有一处定义（sync_plugin.py）——生成器与门禁共用，
+# 免得两边各写一份、改一处忘一处。
+from sync_plugin import IGNORE_PATTERNS as IGNORE  # noqa: E402
+from sync_plugin import PAIRS, ROOT  # noqa: E402
 
 
 def _skip(name: str) -> bool:

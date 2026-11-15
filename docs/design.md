@@ -781,3 +781,79 @@ MCP 配置（MCP 已由别处注册的场景）。`doctor` 远程三查：端点
 走两段式；没有则单发 submit + 回执回显，且不承诺本机账本查询。这是 devkit
 "skillRoot 有/无" 双轨的同构做法（他们按面切换技能加载路径，我们按面切换流程）。
 
+
+## 插件副本生成物边界（D-copies-generated-1，v0.5.9，S103-S110）
+
+### 一句话
+
+`plugins/vod-devkit/{vod_mcp,skills,contract,safety,build-info.json}` 是**构建产物**：
+git 里没有它，`scripts/sync_plugin.py` 生成它，`scripts/verify_copies.py` 证明它
+与源一致且没有回流进 git。发版链上不再存在「两份真值」，因此也没有「两份不一致」。
+
+### 为什么必须零提交（而不是再加一道 diff 门禁）
+
+旧形态的门禁全部形如 `diff -r 源 副本`。而 sync 是「整目录覆盖」，它把**两边都**
+写成新内容——门禁比较的永远是「刚同步过的两份」，恒真。v0.5.8 的真实事故：
+提交清单漏 `plugins/vod-devkit/contract/tools.schema.json`，于是提交树里副本停在
+0.5.7、工作区两边都是 0.5.8、所有门禁绿，npm tarball 里的契约版本与 tag 不一致，
+直到发版之后才被发现。结论：能证明「同步跑过」的判据，证明不了「发布物 == tag 的代码」。
+唯一稳的修法是不让副本进入 commit 图。
+
+### 组件与职责
+
+| 组件 | 职责 | 关键约束 |
+|---|---|---|
+| `scripts/sync_plugin.py` | 唯一生成入口：整目录覆盖四目录 + 烧两处 build-info | `PAIRS` / `IGNORE_PATTERNS` / `BUILD_INFO` 在此定义；`sync(root, quiet)` 幂等；`runtime.json` 永不入副本 |
+| `scripts/verify_copies.py` | 唯一门禁：内容一致 + 副本零跟踪 | 从 sync_plugin import `PAIRS`/`IGNORE_PATTERNS`（清单只有一处）；`git ls-files` 为空是第二条断言 |
+| `package.json` `scripts.prepack` | 打包/发布前自动重跑生成器 | 输出重定向到 /dev/null（否则污染 `npm pack --json`） |
+| `.githooks/pre-push` | 推送前：sync → verify → 测试 | 先 sync 再 verify（干净检出也能过） |
+| `.github/workflows/ci.yml` | 同上，跑在完整历史（fetch-depth: 0） | 不再自拼 `diff -r`；浅克隆仍有脚本侧兜底 |
+| `scripts/release.sh` | 发版：sync → 门禁 → bump → commit → **复验** → tag → push → pack | 复验位置=commit 之后、tag 之前 |
+| `tests/conftest.py` | 全程测试前同步一次（import 生成器，非子进程） | 副本自包含类用例读到的是当前源码 |
+| `scripts/host_matrix.py` | 矩阵开始前同步一次 | 矩阵装的是当前源码 |
+| `vod_mcp/host_adapters/codex.py` | 仓内直跑安装时缺副本则兜底生成 | npm 包内副本本就随包，缺=包损坏，exit 2 |
+
+### 发版时序（顺序本身就是门禁）
+
+```
+sync_plugin → verify_copies（发版起点零漂移）
+→ bump 版本落点 → golden 重录 → CHANGELOG
+→ git add（显式清单，副本不在其中）→ git commit
+→ verify_copies（提交后再验：唯一能抓「同步了但没提交」的位置）
+→ git tag v$BUMP → push → npm pack（prepack 再跑一次 sync）
+→ 指纹断言：build-info.commitSha ∈ {v$BUMP^, v$BUMP}
+→ publish → publish_verify（registry 上真的有这颗版本）
+```
+
+指纹断言的区间语义：`prepack` 在发版提交之后重跑 sync，`commitSha` 于是等于发版
+提交本身而不是它的父提交。两者指的是同一份代码（release 提交只改版本号），
+断言接受这个区间；落在区间外=包内代码不是本 tag 的代码，禁止发布。
+
+### 环境一致性（同一批修掉的两个假红）
+
+| 现象 | 根因 | 修法 | 承载 |
+|---|---|---|---|
+| CI 报「缺 tag」判 DRIFT | `actions/checkout` 默认 fetch-depth=1，tag 不可见被当成没打 | 脚本 `is_shallow()` 区分「不可见/缺失」；CI 改 fetch-depth: 0 | S108 |
+| CI 上 `KeyError: 'keyCheck'` | 断言依赖本机 `runtime.json` 的 java key；CI 无该文件 | 用例显式钉 `JAVA_KEY` 并断言「探针必须命中假 `_http`」 | S109 |
+
+### 对既有结论的影响
+
+- 「双副本一致性」不再是「两份文件相同」的命题，而是「生成物与源一致 + 生成物不
+  回流 git」。**报验证结论时按这两条说**，别再说「diff 四目录无差异」。
+- `pack_verify` 的 166→172 文件不是内容膨胀，是副本现在由生成器产出（含忽略规则
+  统一的 `*.pyc`/`*.log` 之外的完整目录）。
+- 装机副本（`~/.hermes/...`、`~/.dsh/profiles/...`）仍是**运行时快照**，与本节的
+  仓库生成物是两回事：后者保证发布物与源码同源，前者要靠重装刷新。
+
+### 场景用例承载
+
+S103（零提交）→ `.gitignore` + `verify_copies.tracked_paths`；
+S104（单一入口/fresh clone）→ `sync_plugin.sync()`；
+S105（单门禁）→ `verify_copies.check()` + 三处调用点文本锁；
+S106（时序）→ release.sh 位置锁；
+S107（指纹区间）→ release.sh 断言结构；
+S108 → `registry_reconcile.reconcile(shallow=True)`；
+S109 → `tests/test_p2_structure.py::test_patch_on_net_http_intercepts_real_call_chain`；
+S110 → conftest / host_matrix / codex 适配器的兜底 sync。
+测试落点：`tests/test_copies_generated.py`、`tests/test_verify_copies.py`、
+`tests/test_registry_reconcile.py`。

@@ -316,6 +316,30 @@
     "S102": {
       "carrier": "tests/test_content_fidelity.py"
     },
+    "S103": {
+      "carrier": "docs/design.md"
+    },
+    "S104": {
+      "carrier": "docs/design.md"
+    },
+    "S105": {
+      "carrier": "docs/design.md"
+    },
+    "S106": {
+      "carrier": "docs/design.md"
+    },
+    "S107": {
+      "carrier": "docs/design.md"
+    },
+    "S108": {
+      "carrier": "docs/design.md"
+    },
+    "S109": {
+      "carrier": "docs/design.md"
+    },
+    "S110": {
+      "carrier": "docs/design.md"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

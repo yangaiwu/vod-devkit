@@ -1042,3 +1042,45 @@ product 不采信（契约删除该参数）；0 命中且无记忆/先验时落
 回归：tests/test_attribution.py（别名/边界/歧义/记忆 TTL/自报忽略/老引擎/
 账本留痕/歧义不写记忆）+ 既有 D-attrib-A 用例改造。
 
+
+## 双副本零提交与发版对账门禁（S103-S110，D-copies-generated-1，2026-11-15 负责人确认）
+
+需求变更：插件副本（`plugins/vod-devkit/{vod_mcp,skills,contract,safety}`）从
+「入库的第二份源码」改为**生成物**。发版与推送链上的每道检查只对一份真值断言，
+不再依赖「两边 diff 相同」这种在同步之后恒真的判据。
+
+背景（v0.5.8 两个方向的事故）：① release.sh 先跑 sync 把源与副本**都**写成新内容，
+提交清单漏了 `plugins/vod-devkit/contract` → 提交树里副本是旧版、npm tarball ≠ tag，
+而所有基于工作区的 diff 门禁全绿；② 同一门禁在 CI 上假红——checkout 默认
+fetch-depth=1 取不到 tag，对账脚本把「tag 不可见」判成「没打 tag」。
+
+硬规则：
+- 副本四目录与插件 `build-info.json` 一律不进 git；`.gitignore` 全域排除。
+- 生成只有一个入口 `scripts/sync_plugin.py`（暴露 `sync(root)`，幂等整目录覆盖）；
+  npm `prepack` 自动重跑，不靠人记得先同步。
+- 一致性门禁只有一个入口 `scripts/verify_copies.py`：内容一致 **且** 副本零跟踪；
+  pre-push / CI / release.sh 共用同一把尺，禁止各写一份 `diff -r`。
+- 发版在**提交之后、打 tag 之前**复验（顺序错误=没防）；tarball 指纹断言接受
+  `{v$BUMP^, v$BUMP}` 区间（prepack 重跑后 sha 前移一格，两者是同一份代码）。
+- 仓内消费入口（pytest、宿主矩阵、codex 安装器）在读副本前各自兜底一次 sync。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S103 | 副本零提交 | `.gitignore` 覆盖四目录 + 插件 build-info；`git ls-files` 对四目录为空；任一被跟踪即门禁红 |
+| S104 | 单一生成入口 | 干净检出（无副本）跑一次 `sync()` 即自足：四目录生成、内容与源一致、`runtime.json` 不入副本；重复跑幂等；`package.json` 的 `prepack` 挂生成器且 `files` 白名单含全部生成物 |
+| S105 | 一致性门禁单入口 | `verify_copies.py` 同时断言内容一致与副本零跟踪；ci.yml / pre-push / release.sh 三处都调它，且不再各自拼 `diff -r` |
+| S106 | 发版复验时序 | release.sh 中 `git commit` → `verify_copies` → `git tag` 的先后顺序被锁；漏项在打 tag 之前失败 |
+| S107 | 指纹区间断言 | prepack 重跑后 build-info 的 `commitSha` ∈ `{v$BUMP^, v$BUMP}`；两者皆非=包内不是本 tag 的代码，禁止发布 |
+| S108 | 浅克隆不假红 | 浅克隆下 tag 不可见只提示不判 DRIFT；CI checkout 取全量历史（fetch-depth: 0）让 tag 对账权威 |
+| S109 | 用例环境无关 | 断言不得依赖本机 runtime.json（auth_status 有无 keyCheck）：用例显式钉住所需要状态，CI 与开发机同结论 |
+| S110 | 消费入口兜底 | tests/conftest 会话夹具、host_matrix、codex 安装器在读副本前各自 sync；缺副本时给可读错误而不是「找不到插件」 |
+
+回归承载：`tests/test_copies_generated.py`（S103/S104/S106/S107/S110，含逐目录参数化）、
+`tests/test_verify_copies.py`（S105）、`tests/test_registry_reconcile.py`（S108）、
+`tests/test_p2_structure.py`（S109）；设计侧写法见 `docs/design.md`
+「插件副本生成物边界」一节。
+
+验收口径（目标环境执行，工具不入库）：干净检出 → `python3 scripts/sync_plugin.py` →
+`python3 scripts/verify_copies.py` 绿；`git status --porcelain` 对四目录为空；
+`npm pack --dry-run` 含四目录与 build-info；故意 `git add -f plugins/vod-devkit/vod_mcp`
+后门禁必须红（反向验证）。
