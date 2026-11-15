@@ -155,3 +155,62 @@ def test_server_instructions_match_attribution_design():
     text = (ROOT / "vod_mcp" / "server.py").read_text(encoding="utf-8")
     assert "安装绑定完成" not in text
     assert "必须问用户一次" in text and "禁止询问用户" not in text
+
+
+# ── S129 目录结构契约（根预算 / 运行期状态零跟踪）───────────
+
+_ROOT_ALLOW = {
+    # 目录
+    "bin", "contract", "dsh", "docs", "hooks", "integrations", "npm",
+    "plugins", "safety", "scripts", "skills", "tests", "vod_mcp", "vodkit_cli",
+    # 顶层文件（元数据 + 门面文档）
+    "CHANGELOG.md", "CODE_OF_CONDUCT.md", "CONTRIBUTING.md", "INSTALL.md",
+    "LICENSE.txt", "NOTICE", "OWNERS", "QUICKSTART.md", "README.en.md",
+    "README.md", "RELEASING.md", "SECURITY.md", "SUPPORT.md",
+    "build-info.json", "package.json", "plugin.json", "pyproject.toml",
+}
+
+
+def test_s129_root_budget_no_new_top_level_entries():
+    """根目录预算（D-structure-1）：新增顶层条目=结构变更，必须先改
+    docs/architecture.md 与这里。不设上限的根目录必然越用越散——devkit 26 条、
+    我们 2026-11-15 是 42 条，这条用例是把它拉回契约的机械手段。
+    """
+    import subprocess
+    out = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
+                         cwd=ROOT).stdout
+    tops = set()
+    for line in out.splitlines():
+        first = line.split("/", 1)[0]
+        if first.startswith("."):        # 点目录/点文件（.github/.gitignore/...）不计
+            continue
+        tops.add(first)
+    extra = sorted(tops - _ROOT_ALLOW)
+    assert not extra, (
+        "根目录出现契约外的条目：" + "、".join(extra)
+        + "；先改 docs/architecture.md 的预算表与本用例，再落目录")
+
+
+def test_s129_runtime_state_is_never_tracked():
+    """运行期状态绝不入库（install-manifest 含宿主路径/产品绑定；runtime.json 含 key）。
+
+    2026-11-15 之前的真实事故面：0.1.12 npm 包曾带上 vod_mcp/runtime.json（含匿名令牌）。
+    回退方式是把它们 gitignore + 打包白名单，而不是靠人记得别 add。
+    """
+    import subprocess
+    out = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
+                         cwd=ROOT).stdout
+    tracked = set(out.splitlines())
+    for p in ("install-manifest.json", "vod_mcp/runtime.json",
+              "vod_mcp/runtime.example.json".replace("example", "local")):
+        assert p not in tracked, f"运行期状态被跟踪：{p}（必须 gitignore 且不入包）"
+
+
+def test_s129_structure_doc_exists_and_matches_rules():
+    """结构契约必须写在文件里（docs/architecture.md），不是只活在 review 评论里。"""
+    doc = (ROOT / "docs" / "architecture.md")
+    assert doc.exists(), "缺 docs/architecture.md"
+    text = doc.read_text(encoding="utf-8")
+    for needle in ("唯一的\"宿主发布物\"", "源与生成物分离", "共享资产单一落点",
+                   "门禁脚本化", "迁移分阶"):
+        assert needle in text, f"结构契约缺少：{needle}"

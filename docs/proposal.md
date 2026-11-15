@@ -1215,3 +1215,22 @@ OBS、sandbox/DevStation、open-mcp 网关、区域感知、服务目录）在�
 
 验收口径：`python3 -m pytest tests/test_global_cmds.py::test_s126_scope_is_voice_collection_not_cloud_ops -q`。
 
+
+## 目录结构契约与根预算（S129，D-structure-1，2026-11-15 负责人要求通读对标）
+
+对标 huaweicloud-devkit v2（adfd826）通读后的结论：它根目录 26 条（排除点文件与 11 份
+`REPORT-*.md`），靠四条纪律不散——一个插件包、源与生成物分离、共享资产单一落点、门禁脚本化。
+我们 2026-11-15 是 **42 条**，散在语义层：四个共享资产挂在根上、发布物分两处、
+生成物 `build-info.json` 入库与零提交副本同名不同待遇、钩子曾以宿主特例
+（`hermes-plugin/`）存在。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S129 | 结构契约可执行 | ① 根目录**跟踪条目**（`git ls-files` 顶层）必须落在 `docs/architecture.md` 的预算表内，新增即红；② 运行期状态（`install-manifest.json`/`vod_mcp/runtime.json`）绝不入库；③ `docs/architecture.md` 存在且包含四条纪律与迁移分阶（不是只活在 review 评论里） |
+
+结构迁移分四阶（S1 本次：契约+预算门禁+README 对齐；S2 共享资产收进 `src/`；
+S3 运行时入口路径收进 `src/`；S4 运行期状态收进用户目录），详见 `docs/architecture.md`。
+
+验收口径：`python3 -m pytest tests/test_structure_guards.py -q`；`git ls-files | cut -d/ -f1`
+与预算表逐项比对。
+
