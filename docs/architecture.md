@@ -143,3 +143,72 @@ S2/S3 的顺序不能反：先让"共享资产有唯一落点"，再动"运行�
 | README 缺"每宿主四件套/钩子/能力包/安全模型/结构" | 本次补齐（见 README 对应节） |
 | 生成物与源混在根上 | S2 |
 | 运行期状态在仓根（`install-manifest.json`） | 已 gitignore；S4 迁到用户目录 |
+
+## 七、S3 规格（2026-11-15 评审后拍死，实现以此为准）
+
+### 7.1 两个根：取值表（三形态）
+
+`SRC_ROOT` = 找**源码**（Python 包与共享资产）；`DIST_ROOT` = 找**分发态**（manifest、
+build-info、载荷、指向 payload 的入口）。两者只在仓内分离，在载荷/插件副本里通常同指。
+
+| 形态 | SRC_ROOT | DIST_ROOT | 说明 |
+|---|---|---|---|
+| 仓内直跑（pytest / host_matrix / `bin/vod-devkit` 直接跑） | `<repo>/src` | `<repo>` | 唯一分离形态；`install-manifest.json` / `build-info.json` 在 DIST_ROOT |
+| 载荷副本 `~/.vod-devkit/payloads/<v>/` | 载荷根 | 载荷根 | 代码与资产都在载荷内；`paths.ROOT` 语义不变（本阶段不动载荷布局） |
+| 插件副本 `plugins/vod-devkit/` | 插件包根 | 插件包根 | **不做 src/ 内嵌**（见 7.2）；代码落点仍是 `plugins/vod-devkit/vod_mcp/` |
+
+判定顺序（`paths.py` 里只写一次）：`(DIST_ROOT/"src"/"vod_mcp").is_dir()` → 仓内形态；
+否则 → 载荷/插件形态（两根同指 DIST_ROOT）。
+
+### 7.2 插件副本拒绝内嵌 `src/`
+
+devkit 把源码放进插件包（`plugins/huaweicloud-core/src`），我们不跟：
+
+- 插件副本是**发布物**，布局已被多处断言（`tests/test_installer.py::test_plugin_selfcontained_contract`
+  断言 `plugins/vod-devkit/vod_mcp/server.py` 存在且与源码 hash 相同）；
+- `.mcp.json` 是 CLI 形态 + 安装器改写（D-mcp-manifest-a3-1），改写产物的 entry 指向**载荷**，
+  不是插件包内部路径；把代码挪进 `plugins/vod-devkit/src/vod_mcp/` 只会让发布物布局与
+  老装机假设分叉，换不来任何能力。
+结论：插件副本保持 `vod_mcp/ skills/ contract/ safety/` 平铺；`src/` 只属于仓内形态。
+
+### 7.3 旧布局回落的生命周期（不许永久活着）
+
+S3 落地后，仓内旧位置（`<repo>/vod_mcp/`、`<repo>/skills/`）不再存在。为了老分支/老脚本
+在迁移期不炸，`paths.py` 保留**一段**回落：
+
+- 触发：`DIST_ROOT/vod_mcp/` 存在但 `DIST_ROOT/src/vod_mcp/` 不存在；
+- 行为：按旧布局解析，并发 `DeprecationWarning("仓内旧布局已弃用：请使用 src/（0.7.0 删除）")`；
+- 退出条件：**0.7.0 删除该分支**（`docs/architecture.md` 与本条一起改），`tests/test_p2_structure.py`
+  锁一条"回落只能存在于 0.6.x"的断言（版本号从 `vod_mcp.__init__` 读，≥0.7 时该分支必须不存在）；
+- 载荷/插件副本**永不走**这条回落（它们从来是平铺布局）。
+
+### 7.4 测试影响（实测，不是估算）
+
+- `grep -rn "paths\.ROOT|monkeypatch.*ROOT|patch.*ROOT" tests/` → **0 处**：没有测试 patch 源码根；
+- 18 处属于 `_runtime_path` / `VOD_DEVKIT_MANIFEST` 的单点覆盖——它们与 S3 无关（运行期状态与
+  安装名册本来就通过这两个口重定向），迁移后不变；
+- 真正的迁移面是**字面路径拼接**：`tests/ + scripts/` 里 `... / "vod_mcp"` 共 45 处（9 个文件，
+  含 `tests/probe.py`、`scripts/e2e_nightly_behavior.py`）；S2 已收掉 16 处 skills/contract 拼接。
+  这 45 处按三类处理：①指向"源码树" → 改用 `paths.SRC_ROOT`；②指向"载荷/插件副本" → 保持字面；
+  ③测试夹具自建临时仓 → 改为同时建 `src/` 与旧布局（验证回落）。
+
+### 7.5 `hooks/` 归位：宿主侧资产，不进 `src/`
+
+实测：`vod_router.py` **不被 server import**，只被 hermes 适配器按路径引用
+（`paths.HOOKS / "vod_router.py"`）、被测试按路径加载。按"性质决定位置"：
+
+- 源：`integrations/hermes/hooks/vod_router.py`（与 devkit 的 `integrations/<host>/hooks/` 同构）；
+  将来 codex 侧要用，提升为 `integrations/hooks/` 共享，不复制文件；
+- 发布：载荷仍是 `<payload>/hooks/vod_router.py`（装机路径不变），`payload.sources["hooks"]`
+  改从 `integrations/hermes/hooks` 取；
+- S2 把 hooks 放进 `src/` 是按"共享资产"归并，性质核对后纠正——记在这里，避免下次又按对称性摆。
+
+### 7.6 PR 拆分（回滚粒度）
+
+| PR | 范围 | 验证面 |
+|---|---|---|
+| S3-A | 两个根 + `src/{vod_mcp,vodkit_cli}` 迁移 + `packages/dsh/` + hook 归位 + 旧布局回落 + 测试路径 | 三形态都还在跑：pytest / 临时 HOME 装机 / host_matrix 9 PASS + dsh 41 例 |
+| S3-B（单独） | `bin/` 与 `npm/cli.js` 合并成一个引导壳 | 三种入口都能起：npx / 插件副本 / 仓内直跑 |
+
+合并壳不并进 S3-A：目录迁移的验证是"三种形态还在跑"，壳合并的验证是"三种入口都能起"，
+验证面不同，混在一起回滚粒度太粗。
