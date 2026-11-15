@@ -9,7 +9,10 @@ import sys
 from pathlib import Path
 
 # 自举包路径（对任意 MCP 宿主成立：不依赖宿主透传 PYTHONPATH——
-# Hermes 等宿主出于安全过滤环境变量，stdio 子进程只继承白名单）
+# Hermes 等宿主出于安全过滤环境变量，stdio 子进程只继承白名单）。
+# 这里是全仓唯一保留物理相对深度的位置：本文件会被当脚本直跑
+# （python vod_mcp/server.py），此时包还不可导入，无法先 import paths。
+# 其余所有资源路径一律走 vod_mcp/paths.py（含 VOD_DEVKIT_ROOT 覆盖）。
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from vod_mcp import guardrails, packs, tools  # noqa: E402

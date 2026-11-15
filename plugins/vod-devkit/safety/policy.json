@@ -1,0 +1,48 @@
+{
+  "version": "0.1.0",
+  "maxVoicesPerSubmit": 50,
+  "rules": [
+    {
+      "id": "vod-write-submit-voices",
+      "category": "write",
+      "severity": "confirm",
+      "match": {
+        "tool": "vod_submit_voices",
+        "param": "confirmed",
+        "equals": false
+      },
+      "message": "提交用户反馈声音（内容入库），需用户逐次确认：重试并传 confirmed=true"
+    },
+    {
+      "id": "vod-voices-batch-limit",
+      "category": "write",
+      "severity": "deny",
+      "match": {
+        "tool": "vod_submit_voices",
+        "param": "voices",
+        "gt": "maxVoicesPerSubmit"
+      },
+      "message": "单批声音条数超上限"
+    },
+    {
+      "id": "vod-no-db-direct",
+      "category": "exfil",
+      "severity": "deny",
+      "match": {
+        "field": "text",
+        "regex": "(mysql|jdbc|t_vod_|\\bselect\\b.+\\bfrom\\b)\\s"
+      },
+      "message": "外部工具不允许数据库直连意图"
+    },
+    {
+      "id": "vod-no-credential",
+      "category": "exfil",
+      "severity": "deny",
+      "match": {
+        "field": "text",
+        "regex": "(access[_-]?key|secret[_-]?key|x[_-]?auth[_-]?token|password|passwd|private[_-]?key)[^\\n]{0,6}(:|=|值|发|读|取)"
+      },
+      "message": "凭据读取意图被拦截"
+    }
+  ]
+}

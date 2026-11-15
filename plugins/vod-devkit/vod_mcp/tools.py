@@ -18,6 +18,7 @@ import urllib.error
 from pathlib import Path
 
 from vod_mcp import attribution as _attrib
+from vod_mcp import paths
 from vod_mcp import provenance
 from vod_mcp import DEFAULT_JAVA_BASE
 
@@ -61,11 +62,12 @@ def _followup_fields(voice: dict) -> dict:
         out["followupStatus"] = _st
     return out
 
-_CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contract" / "tools.schema.json"
+# 路径单源：vod_mcp/paths.py（禁止在本文件再写相对深度算式）
+_CONTRACT_PATH = paths.CONTRACT
 
 
 def _runtime_path() -> Path:
-    return Path(__file__).resolve().parent / "runtime.json"
+    return paths.RUNTIME_JSON
 
 
 def _runtime_cfg() -> dict:
@@ -1026,7 +1028,7 @@ _RUNTIME_STATE_KEYS = ("java_key", "token_tier", "install_nonce", "submissions",
 def _distribution() -> str:
     """分发形态位（D-key-guard-3）：install --distribution preset 写入 manifest。
     devkit=自装自管；preset=产品随 agent 分发（客户机首启重生成运行时状态）。"""
-    p = Path(__file__).resolve().parent.parent / "install-manifest.json"
+    p = paths.INSTALL_MANIFEST
     if not p.exists():
         return "devkit"
     try:

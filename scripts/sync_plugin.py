@@ -15,6 +15,16 @@ skill_dst = ROOT / "plugins" / "vod-devkit" / "skills"
 if skill_dst.exists():
     shutil.rmtree(skill_dst)
 shutil.copytree(ROOT / "skills", skill_dst, ignore=shutil.ignore_patterns("__pycache__"))
+# 资源目录同步（插件副本自包含的另一半）：宿主把 plugins/vod-devkit 整块拷走后，
+# 副本 ROOT 就是该目录，contract/ 与 safety/ 必须随副本携带——否则
+# tools.load_contract() 直接 FileNotFoundError（2026-11-15 实测，用例
+# tests/test_plugin_copy_selfcontained.py 钉住）。两份资源都是纯声明文件，无运行时状态。
+for _res in ("contract", "safety"):
+    _res_dst = ROOT / "plugins" / "vod-devkit" / _res
+    if _res_dst.exists():
+        shutil.rmtree(_res_dst)
+    shutil.copytree(ROOT / _res, _res_dst,
+                    ignore=shutil.ignore_patterns("__pycache__"))
 # 烧录 build-info.json（provenance 的版本/SHA 真源）：插件包没有它，vod_devkit_info 版本号失真
 import subprocess, datetime
 sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip() or None

@@ -4,7 +4,9 @@ import os
 import shutil
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+from vod_mcp import paths
+
+ROOT = paths.ROOT
 
 # 载荷目录（bin 在 install 前用 payload.stage() 落好并 set_payload_dir 指过来）
 _PAYLOAD_DIR = None

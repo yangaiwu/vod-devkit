@@ -15,7 +15,9 @@ import json
 import platform
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from vod_mcp import paths
+
+ROOT = paths.ROOT
 INTEGRATIONS = ROOT / "integrations"
 
 

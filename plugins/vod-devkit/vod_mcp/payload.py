@@ -22,7 +22,9 @@ import shutil
 import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from vod_mcp import paths
+
+ROOT = paths.ROOT
 
 def payload_home() -> Path:
     """载荷根（用户级，多宿主共享；版本目录隔离）。
