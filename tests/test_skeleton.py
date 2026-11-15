@@ -63,6 +63,8 @@ def test_tool_specs_follow_packs(monkeypatch):
     monkeypatch.setenv("VOD_PACKS", "core")
     specs = tools.tool_specs(packs.enabled_tools())
     assert [s["name"] for s in specs] == ["vod_devkit_info", "vod_auth_status",
+                                         # 会话内能力面开关（D-packs-configure-1，core 常驻）
+                                         "vod_packs_configure",
                                          "vod_check_update", "vod_search_products"]
 
 
@@ -282,7 +284,9 @@ def test_stdio_roundtrip():
                               # 版本提醒（core）
                               "vod_check_update",
                               # 第二轨：领域规则技能的披露面（knowledge pack）
-                              "vod_list_skills", "vod_retrieve_skill"}
+                              "vod_list_skills", "vod_retrieve_skill",
+                              # 会话内能力面开关（core，D-packs-configure-1）
+                              "vod_packs_configure"}
         info = _rpc(proc, {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                            "params": {"name": "vod_devkit_info", "arguments": {}}})
         payload = json.loads(info["result"]["content"][0]["text"])

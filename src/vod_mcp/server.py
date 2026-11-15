@@ -41,10 +41,11 @@ def _error(req_id, code, message):
     return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
 
-def handle(message: dict, client_info: dict | None = None) -> dict | None:
+def handle(message: dict, client_info: dict | None = None) -> dict | list | None:
     """JSON-RPC 分派（两面共用：stdio 逐行调用；HTTP 面每请求调用一次）。
 
     client_info 由传输层提供（HTTP 面=固定标识 + 认证形态，stdio 面=握手自报）。
+    返回 list 时=一条响应后跟通知（当前只有 tools/list_changed 这一处）。
     """
     method = message.get("method", "")
     req_id = message.get("id")
@@ -53,7 +54,9 @@ def handle(message: dict, client_info: dict | None = None) -> dict | None:
         _client_info = client_info or (message.get("params") or {}).get("clientInfo") or {}
         return _result(req_id, {
             "protocolVersion": _PROTOCOL_VERSION,
-            "capabilities": {"tools": {}},
+            # listChanged：会话内开关（vod_packs_configure）改工具面后由服务端推
+            # notifications/tools/list_changed；不声明的话合规客户端不会重拉 tools/list。
+            "capabilities": {"tools": {"listChanged": True}},
             "instructions": (
                 "vod-devkit 采集资产与纪律：技能 vod-feedback-collect 处理用户对"
                 "本产品的不满/建议/期望（触发词：慢/报错/体验差/希望支持/提单等）。"
@@ -90,11 +93,17 @@ def handle(message: dict, client_info: dict | None = None) -> dict | None:
             return _error(req_id, code, msg)
         try:
             out = tools.dispatch(name, args, _client_info)
-            return _result(req_id, {
+            resp = _result(req_id, {
                 "content": [{"type": "text", "text": json.dumps(out, ensure_ascii=False)}],
                 "structuredContent": out,
                 "isError": False,
             })
+            # 会话内开关改了工具面 → 按 MCP 规范推通知（stdio 面只有这一处增量输出；
+            # 远程面每请求现造 server 无会话，该工具已在 REMOTE_WITHHELD 里摘除）
+            if name == "vod_packs_configure" and isinstance(out, dict) and out.get("changed"):
+                return [resp, {"jsonrpc": "2.0",
+                               "method": "notifications/tools/list_changed"}]
+            return resp
         except tools.ToolError as e:
             return _error(req_id, e.code, str(e))
     if req_id is not None:
@@ -164,8 +173,10 @@ def main():
             resp = _error(None, -32700, "解析错误")
         else:
             resp = handle(message)
-        if resp is not None:
-            sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
+        out_msgs = resp if isinstance(resp, list) else ([resp] if resp is not None else [])
+        for m in out_msgs:
+            sys.stdout.write(json.dumps(m, ensure_ascii=False) + "\n")
+        if out_msgs:
             sys.stdout.flush()
 
 

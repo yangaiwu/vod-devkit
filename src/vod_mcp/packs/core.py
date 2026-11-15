@@ -43,6 +43,53 @@ def devkit_info(params: dict, client_info: dict | None = None) -> dict:
     return provenance.info_payload(client_info)
 
 
+def _pack_ids(v) -> list:
+    if isinstance(v, str):
+        return [x.strip() for x in v.split(",") if x.strip()]
+    if isinstance(v, (list, tuple)):
+        return [str(x) for x in v]
+    return []
+
+
+def packs_configure(params: dict, client_info: dict | None = None) -> dict:
+    """会话内开关能力包（stdio 面；远程面在 REMOTE_WITHHELD 里被摘除）。
+
+    只改进程内状态：不写 env、不写宿主配置（持久化面是 CLI `packs
+    enable|disable --apply`，一个概念只留一个写入口）。返回新生效面 + 工具清单，
+    由 server 侧推 tools/list_changed。
+    """
+    from vod_mcp import packs as _packs
+    reset = bool(params.get("reset"))
+    enable = _pack_ids(params.get("enable") or [])
+    disable = _pack_ids(params.get("disable") or [])
+    if not reset and not enable and not disable:
+        raise net.ToolError("参数为空：给 enable / disable（包 id）或 reset=true", code=-32602)
+    current = _packs.effective_packs()
+    try:
+        if reset:
+            new = _packs.set_runtime_packs(None)
+        else:
+            want = [p for p in current if p not in set(disable)] + enable
+            new = _packs.set_runtime_packs(want)
+    except _packs.UnknownPack as e:
+        raise net.ToolError(str(e), code=-32602) from e
+    except _packs.PackRefused as e:
+        # 安全门禁拒绝（熔断）：不是参数错，别让模型以为改个拼写就能开
+        raise net.ToolError(str(e), code=-32015) from e
+    added = [p for p in new if p not in current]
+    removed = [p for p in current if p not in new]
+    return {
+        "packs": list(new),
+        "added": added,
+        "removed": removed,
+        "tools": _packs.enabled_tools(),
+        "changed": bool(added or removed),
+        "persisted": False,
+        "note": ("会话内生效、重启即清；持久化用 CLI："
+                 "vod-devkit packs enable|disable <id> --apply"),
+    }
+
+
 def auth_status(params: dict, client_info: dict | None = None) -> dict:
     """认证自检：指纹化输出（明文永不出现），无 key 也跑并给引导。
 

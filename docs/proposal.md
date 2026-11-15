@@ -1195,6 +1195,27 @@ args 指向载荷；把 PATH 上的 python3 换成 3.9 再启动 → stderr 出�
 | S131 | packs 对 dsh 不可写 | `packs status --target dsh` 出行且带 `[n/a]`+「需重装」；`packs enable … --target dsh --apply` 打印「跳过」与重装命令，profile 字节不变且**不生成 .bak**（不假装改过） |
 
 
+## 会话内能力面开关（S132-S133，D-packs-configure-1，2026-11-16）
+
+需求变更：能力面此前只有安装期/启动期的 `VOD_PACKS` 一个入口——改了要重启宿主会话，
+且没有任何工具能回答"现在开的是哪几个包"。对标 devkit 的 `packs_configure`（stdio 会话内
+开关 + 推 `tools/list_changed`）。
+
+- 新增 core 工具 `vod_packs_configure`：`enable` / `disable`（包 id 列表）或 `reset=true`；
+  返回新生效面、增删项、当前工具清单、`changed`、`persisted:false` 与持久化命令提示。
+- **只改进程内状态**：不写 env、不写宿主配置（持久化面仍只有 CLI `packs … --apply`）。
+- `core` 强制包含；未知包 id 报 `-32602` 并列出可用 id；**采集熔断期间开启 collect 报
+  `-32015`**（安全门禁，显式动作也不能绕过，且不做静默摘除）。
+- 形态变更才推 `notifications/tools/list_changed`（无变化不发，避免客户端重拉风暴）；
+  `initialize` 的 capabilities 声明 `tools.listChanged=true`。
+- 远程面（HTTP）摘除该工具：远程面每请求现造 server、无会话，开关会在下一个请求消失。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S132 | 会话内开关生效 | disable 后 `tools/list` 立即少掉该包工具、enable 后回来；`reset` 回到 VOD_PACKS；core 强制；未知 id `-32602`；空参数拒绝；熔断期 enable collect `-32015` 且状态不变；调用前后 `os.environ` 逐键不变（不写 env） |
+| S133 | 协议面与远程边界 | capabilities 声明 `listChanged=true`；有变化时同一次调用输出「响应 + 通知」两条（stdio 上各占一行）、无变化只输出响应；通知后 `tools/list` 反映新区面；`REMOTE_WITHHELD` 含该工具且远程 `tool_specs` 里没有它；契约含三参数 |
+
+
 ## 凭据单入口与技能读取教法（S124-S125，2026-11-15）
 
 需求变更（两条，都是"把已有的东西收成可解释的入口"，不新增数据面）：

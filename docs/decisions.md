@@ -1354,3 +1354,30 @@ uninstall 还可能误删壳依赖。视图缺失用探测解决，不靠改账�
 
 **代价**：多一条只读探测路径（`~/.dsh/profiles`），profile 存在但包没装下来时要靠
 "已装版本未知"这句诚实文案兜，不能假装有版本号。
+
+## D-packs-configure-1：会话内能力面开关（vod_packs_configure）（2026-11-16）
+
+**问题**：能力面只有 `VOD_PACKS`（安装期写入宿主配置、启动期读一次）。改一个包要重启
+宿主会话，且没有工具能回答"现在开的是哪几个包"——排查时只能读配置文件猜。
+
+**决定**：core 包常驻工具 `vod_packs_configure`（stdio 面）：
+`{"enable":[ids] | "disable":[ids] | "reset":true}` → `{packs, added, removed, tools,
+changed, persisted:false, note}`。三层写面分工：CLI `packs … --apply`（持久/写宿主配置）、
+本工具（会话内/进程状态）、`VOD_PACKS` env（平台注入/启动快照）。优先级：会话 > env。
+
+**为什么不写宿主配置**：同一个概念出现两个写入口后，"谁把我配置改了"就不可回答；而且
+MCP 工具改用户文件属于越界（与"卸载只摘自己条目"同一条纪律）。持久化面已经可解释。
+
+**熔断是硬门禁**：`collect` 遇 `BREAKER_MARKERS` 时**显式拒绝**（`PackRefused` → 错误码
+`-32015`），不做静默摘除。启动期 `_resolve` 的静默摘除+stderr 不变（那是"配置优先"的
+既有语义）。两者给不同信号：一个是"配了但被安全策略摘掉"，一个是"你要求开、我拒绝"。
+
+**协议面**：`initialize` 声明 `capabilities.tools.listChanged=true`；只有 `changed=true`
+才在响应后追加 `notifications/tools/list_changed`（无变化不发，防客户端重拉风暴）。
+`handle()` 允许返回 list，`main()` 逐条写出（stdio 上响应一行、通知一行）。
+
+**远程面摘除**（加入 `REMOTE_WITHHELD`）：HTTP 面每请求现造 server、无会话状态，
+开关会随下一个请求消失——"以为改了其实没改"比没有这个工具更坏。dsh 壳同理不提供。
+
+**没做（本轮边界）**：不做跨会话持久化、不做按工具粒度开关（粒度是包，与 PACK_TOOLS
+一一对应）、不加 `auth_switch` 之类的会话内账号切换（另一个评审项）。
