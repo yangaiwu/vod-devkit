@@ -153,7 +153,7 @@ build-info、载荷、指向 payload 的入口）。两者只在仓内分离，�
 
 | 形态 | SRC_ROOT | DIST_ROOT | 说明 |
 |---|---|---|---|
-| 仓内直跑（pytest / host_matrix / `bin/vod-devkit` 直接跑） | `<repo>/src` | `<repo>` | 唯一分离形态；`install-manifest.json` / `build-info.json` 在 DIST_ROOT |
+| 仓内直跑（pytest / host_matrix / `bin/vod-devkit` 直接跑） | `<repo>/src`（只含可导入包） | `<repo>` | 唯一分离形态；`install-manifest.json` / `build-info.json` 在 DIST_ROOT；项目级资产在 `<repo>/assets` |
 | 载荷副本 `~/.vod-devkit/payloads/<v>/` | 载荷根 | 载荷根 | 代码与资产都在载荷内；`paths.ROOT` 语义不变（本阶段不动载荷布局） |
 | 插件副本 `plugins/vod-devkit/` | 插件包根 | 插件包根 | **不做 src/ 内嵌**（见 7.2）；代码落点仍是 `plugins/vod-devkit/vod_mcp/` |
 
@@ -190,7 +190,7 @@ S3 落地后，仓内旧位置（`<repo>/vod_mcp/`、`<repo>/skills/`）不再�
 - 真正的迁移面是**字面路径拼接**：`tests/ + scripts/` 里 `... / "vod_mcp"` 共 45 处（9 个文件，
   含 `tests/probe.py`、`scripts/e2e_nightly_behavior.py`）；S2 已收掉 16 处 skills/contract 拼接。
   这 45 处按三类处理：①指向"源码树" → 改用 `paths.SRC_ROOT`；②指向"载荷/插件副本" → 保持字面；
-  ③测试夹具自建临时仓 → 改为同时建 `src/` 与旧布局（验证回落）。
+  ③测试夹具自建临时仓 → 同时建 `src/`（包）与 `assets/`（资产）+ 旧布局（验证回落）。
 
 ### 7.5 `hooks/` 归位：宿主侧资产，不进 `src/`
 
@@ -212,3 +212,37 @@ S3 落地后，仓内旧位置（`<repo>/vod_mcp/`、`<repo>/skills/`）不再�
 
 合并壳不并进 S3-A：目录迁移的验证是"三种形态还在跑"，壳合并的验证是"三种入口都能起"，
 验证面不同，混在一起回滚粒度太粗。
+
+### 7.7 业界对照后的三处收紧（2026-11-15 二次评审）
+
+**7.7.1 资产位置：仓根 `assets/`，不进 `src/`，也不用 `importlib.resources`。判据是"进不进 wheel"。**
+
+- `pyproject` 的打包面只有 `vod_mcp` / `vodkit_cli` 两个包；`skills/contract/safety` **不进 wheel**，
+  它们是**项目级资产**，随 npm 载荷分发（`<payload>/skills` 等）。
+- `importlib.resources` 解决的是"包内数据在 zip/命名空间包/冻结分发下的可靠访问"。我们的资产既不在
+  包内、又必须**以真实文件存在**（要拷进宿主技能目录；hook command 要可执行路径），所以 resources
+  在这里不适用；硬套会把"读资源"和"物化到磁盘"拆成两条路径，反而制造漂移。
+- 触发改用 resources 的条件（写死）：出现 wheel-only 或冻结分发（PyInstaller 等）时，资产打包进
+  `vod_mcp/assets/`，读取走 `importlib.resources`，载荷仍由安装器物化——以物化目录为运行时真源。
+- 因此 S2 把资产从仓根收进 `src/` 只完成了"收成一个资产根"；按性质，最终位置是仓根 `assets/`
+  （S3-A 挪过去）。`src/` 从此只放**可导入的 Python 包**。
+
+**7.7.2 根由入口显式设置，`paths.py` 只读不猜**
+
+| 入口 | 设置的变量 | 备注 |
+|---|---|---|
+| `bin/vod-devkit`（仓内/载荷都走它） | `VOD_DEVKIT_SRC_ROOT` / `VOD_DEVKIT_DIST_ROOT` | 脚本位置已知，直接算 |
+| `npm/cli.js` | 同上（透传给 python 子进程） | 只做引导，不猜布局 |
+| `vod_mcp/server.py` 的 `main()` | 同上（入口未设时） | 载荷形态两根同指 |
+| `tests/conftest.py`、`scripts/host_matrix.py` | 显式指向源码根 | 开发入口 |
+| 插件副本 `.mcp.json` | 安装器改写时写入 env/args | 插件包根 |
+
+`paths.py` 的职责收窄为：**读入口已设置的值**；读不到时用"`vod_mcp` 的父目录"derive-once 兜底
+（仓内开发/旧脚本），并发 `DeprecationWarning`；两处都不可知时**硬失败**并提示应设哪个变量——
+不再"猜自己在哪种形态下"。
+
+**7.7.3 `packages/dsh/` 与 uv workspace**
+
+- dsh 是**独立 npm 包**（`dsh-vod-devkit`），不是 Python 包；收进 `packages/dsh/` 只是归位，不引入 workspace。
+- S3 后 Python 可导入包仍只有一组（`src/vod_mcp` + `src/vodkit_cli`，同一 pyproject）。uv workspace 的
+  触发条件是"出现第二个可独立发布的 Python 成员包"（各自 pyproject + 版本），到那天再评估。
