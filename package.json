@@ -10,6 +10,7 @@
   "files": [
     "npm/cli.js",
     "bin/vod-devkit",
+    "vodkit_cli",
     "skills/",
     "contract/",
     "integrations/",

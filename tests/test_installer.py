@@ -778,7 +778,9 @@ def _load_bin():
 def test_doctor_repairs_dsh_patch_block(monkeypatch, tmp_path):
     """S58/A doctor 自愈回归锁：三态——块缺失→重建嵌套组；打平→重建；
     完好嵌套→不动（返回 None 不写盘）。"""
-    mod = _load_bin()
+    # 实现已搬进 vodkit_cli/doctor.py（F8）：patch 面必须跟着实现走——
+    # 打桩 bin 上的 Path 只会静默无效（模块各自持有自己的 pathlib.Path）
+    from vodkit_cli import doctor as mod
     home = tmp_path / "home"
     monkeypatch.setattr(mod.Path, "home", staticmethod(lambda: home))
     patch = home / ".dsh" / "profiles" / "web" / "cordis.patch.yml"

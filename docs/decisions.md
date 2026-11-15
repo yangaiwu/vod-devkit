@@ -1100,3 +1100,36 @@ knowledge）本来就是工具面的装配边界，两者错位。前置 P1 已�
 
 **验证**：pytest 全绿（含新增 6 条结构护栏）；pyflakes 递归 0；mypy 36 文件 0 错；
 host_matrix 9 PASS；pack_verify 150 文件 OK；双副本 diff CLEAN。
+
+## D-bin-split-1：安装器按命令域拆分（2026-11-15，F8）
+
+**背景**：bin/vod-devkit 1245 行单体同时装着 install / status / doctor / verify /
+update / uninstall 六个子命令 + 版本烧录 + manifest 名册 + 技能指纹 + 远程探活 +
+产品校验。命令边界本来就存在（argparse 子命令表），代码却没按边界分文件。
+
+**切法**（`vodkit_cli/` 包，bin 只剩 20 行入口薄壳）：
+- `common.py` 根定位 / build-info 烧录 / manifest 名册 / 技能指纹 / PRESETS / 形态位
+- `remote.py` 远程面探活 + 安装期产品名录硬校验
+- `install.py` 探测 → 门禁 → 载荷固化 → 宿主写入 → 技能拷贝 → manifest
+- `doctor.py` status / doctor / verify / explain / detect
+- `update.py` git ff 更新 + 版本跳过状态
+- `uninstall.py` 按名册逐宿主摘除（共享配置只摘条目）
+- `cli.py` argparse 子命令表 + serve 直通 + 分派
+
+**对外稳定面**（入口薄壳 re-export + `__all__`）：`main / PRESETS / detect_targets /
+build_info / write_build_info`——测试按路径加载 bin 后直接取这些名字。pyflakes 认
+`__all__`，否则会误报"导入未用"。
+
+**两个必须跟实现走的测试**（拆分时当场红出来的，正是 patch 面纪律）：
+1. `test_doctor_repairs_dsh_patch_block` 原本 `monkeypatch.setattr(bin_mod.Path, "home", …)`
+   再调 `bin_mod._repair_dsh_patch_block` —— 实现搬到 doctor.py 后这条会**静默写到真
+   ~/.dsh**（各自的 pathlib.Path 是不同对象）。改为直接 patch `vodkit_cli.doctor`。
+2. `test_presets_split_internal_external` 通过 AST 从 bin 源码里抠 `PRESETS` —— 改为
+   从 `vodkit_cli/common.py` 抠，并反向断言 bin 里**不得再出现第二份 PRESETS 字面量**。
+
+**打包**：package.json files 增 `vodkit_cli`；pack_verify MUST_HAVE 增
+`vodkit_cli/cli.py` + `vodkit_cli/common.py`（漏打这个包=npx 装不上任何宿主，
+属于"包能发但装不了"的静默故障）。
+
+**验证**：pytest 全绿；pyflakes 0；mypy 44 文件 0 错（作用域同步扩到 vodkit_cli）；
+host_matrix 9 PASS；pack_verify 166 文件 OK（含 vodkit_cli）；dsh 47；双副本 CLEAN。
