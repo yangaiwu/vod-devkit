@@ -33,7 +33,7 @@ def test_s116_server_exits_loudly_on_unknown_pack(tmp_path):
     import subprocess
     import sys
     root = __import__("pathlib").Path(__file__).resolve().parent.parent
-    r = subprocess.run([sys.executable, str(root / "vod_mcp" / "server.py")],
+    r = subprocess.run([sys.executable, str(root / "src" / "vod_mcp" / "server.py")],
                        input="", capture_output=True, text=True, timeout=60,
                        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",
                             "VOD_PACKS": "core,bogus"})
@@ -215,7 +215,7 @@ def test_s126_scope_is_voice_collection_not_cloud_ops():
     import json as _json
     from pathlib import Path as _P
     root = _P(__file__).resolve().parent.parent
-    contract = _json.loads((root / "src" / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
+    contract = _json.loads((root / "assets" / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
     tools = contract.get("tools", contract)
     names = list(tools) if isinstance(tools, dict) else [t["name"] for t in tools]
     assert packs.ALL_PACKS == ("core", "collect", "knowledge"), "新增能力包=范围变更，必须先拍板"

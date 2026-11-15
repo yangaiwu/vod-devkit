@@ -36,7 +36,7 @@ def _cfg() -> dict:
 def test_mypy_checks_the_whole_package_by_default():
     """files 必须是整包（含 F8 拆出的安装器包）：新增模块不写配置也会被检查。"""
     pytest.importorskip("tomllib")
-    assert _cfg()["tool"]["mypy"]["files"] == ["vod_mcp", "vodkit_cli"], (
+    assert _cfg()["tool"]["mypy"]["files"] == ["src/vod_mcp", "src/vodkit_cli"], (
         "mypy files 不是整包——新增模块会静默逃检；豁免请走 overrides 技术债清单")
 
 
@@ -51,5 +51,5 @@ def test_mypy_exemptions_are_explicit_and_resolvable():
         "mypy 豁免清单与 EXPECTED_LEGACY 不一致——豁免是一次显式决策，"
         f"差异：多 {sorted(exempt - EXPECTED_LEGACY)} / 少 {sorted(EXPECTED_LEGACY - exempt)}")
     for mod in sorted(exempt):
-        path = ROOT / (mod.replace(".", "/") + ".py")
+        path = ROOT / "src" / (mod.replace(".", "/") + ".py")
         assert path.is_file(), f"豁免清单里的模块不存在：{mod}（删模块要摘名单）"

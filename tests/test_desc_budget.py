@@ -26,7 +26,7 @@ TRUNC_WINDOW = 500         # B1：最严截断窗口（dsh 固定 500 字符）
 
 
 def _contract_desc() -> str:
-    c = json.loads((ROOT / "src" / "contract" / "tools.schema.json").read_text("utf-8"))
+    c = json.loads((ROOT / "assets" / "contract" / "tools.schema.json").read_text("utf-8"))
     return c["tools"]["vod_submit_voices"]["description"]
 
 
@@ -34,7 +34,7 @@ def _dsh_composed_desc() -> str:
     """从 dsh/lib/index.js 提取 vod_submit_voices 的组合后 description：
     截取 `description: '` 到 `parameters:` 的源码段，按 JS 单引号字符串
     字面量逐字符扫描求值后拼接（与运行时组合串等价；处理 \\' 与 \\\\ 转义）。"""
-    src = (ROOT / "dsh" / "lib" / "index.js").read_text("utf-8")
+    src = (ROOT / "packages" / "dsh" / "lib" / "index.js").read_text("utf-8")
     start = src.index("description: '") + len("description: '")
     end = src.index("parameters: buildParameters", start)
     seg, out, i, in_str = src[start:end], [], 0, True  # start 已跳过起始引号

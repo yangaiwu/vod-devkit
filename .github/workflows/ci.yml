@@ -20,7 +20,7 @@ jobs:
       - name: 安装依赖（含远程面可选 extra，否则远程面用例 SKIP）
         run: python3 -m pip install pytest pyflakes mypy pyyaml 'mcp>=1.0' 
       - name: lint（pyflakes，递归——子目录模块漏检=门禁形同虚设）
-        run: python3 -m pyflakes vod_mcp vodkit_cli hooks tests
+        run: python3 -m pyflakes src/vod_mcp src/vodkit_cli integrations/hermes/hooks tests
       - name: 双副本一致性（生成物同步后必须与源一致；副本零提交）
         run: |
           python3 scripts/sync_plugin.py
@@ -39,7 +39,7 @@ jobs:
         run: python3 -m pytest tests/ -q
       - name: 安装器烟雾
         run: |
-          python3 bin/vod-devkit build-info
+          PYTHONPATH=src python3 bin/vod-devkit build-info
           python3 -c "import ast; ast.parse(open('bin/vod-devkit').read()); print('bin 语法 OK')"
 
   host-matrix:
@@ -54,6 +54,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: 构建信息（矩阵用它断言探针版本）
-        run: python3 bin/vod-devkit build-info
+        run: PYTHONPATH=src python3 bin/vod-devkit build-info
       - name: 宿主矩阵
         run: python3 scripts/host_matrix.py

@@ -326,7 +326,7 @@ def test_plugin_selfcontained_contract(env):
     pj = json.loads((plug / ".codex-plugin" / "plugin.json").read_text())
     assert "interface" in pj and pj["skills"] == "./skills/"
     bundled = plug / "vod_mcp" / "server.py"
-    src = env["repo"] / "vod_mcp" / "server.py"
+    src = env["repo"] / "src" / "vod_mcp" / "server.py"
     assert bundled.exists(), "插件包必须自带 server（sync_plugin.py 产物已提交）"
     h = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
     assert h(bundled) == h(src), "插件包内 server 与源码漂移——跑 scripts/sync_plugin.py"
@@ -704,7 +704,7 @@ def test_presets_full_uses_runtime_pack_names():
     import importlib.util
     from importlib.machinery import SourceFileLoader
     loader = SourceFileLoader("p", str(Path(__file__).resolve().parent.parent
-                                   / "vod_mcp" / "packs" / "__init__.py"))
+                                   / "src" / "vod_mcp" / "packs" / "__init__.py"))
     spec = importlib.util.spec_from_loader("p", loader)
     m = importlib.util.module_from_spec(spec)
     loader.exec_module(m)

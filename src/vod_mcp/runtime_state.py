@@ -58,6 +58,7 @@ def _save_runtime(update: dict, replace: bool = False) -> None:
     上层 _runtime_update/_ledger_append/draft 复合操作嵌套调用安全。"""
     with _RT_LOCK:
         p = _runtime_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
         cfg = {}
         if p.exists() and not replace:
             try:

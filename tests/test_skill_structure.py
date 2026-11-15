@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover
                 pytrace=False)
 
 ROOT = Path(__file__).resolve().parent.parent
-SKILLS = ROOT / "src" / "skills"
+SKILLS = ROOT / "assets" / "skills"
 MAX_LINES = 500
 
 

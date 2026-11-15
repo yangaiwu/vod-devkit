@@ -70,7 +70,12 @@ def check(engine_dir: str | Path | None, manifest_path: Path = MANIFEST,
     report = {"status": "ok", "reason": "", "entries": []}
     for entry in data.get("skills") or []:
         # 技能路径相对**资产根**（仓内 src/，载荷/插件副本=根）——S2 起源在 src/skills
-        assets = root / "src" if (root / "src" / "skills").is_dir() else root
+        if (root / "assets" / "skills").is_dir():
+            assets = root / "assets"
+        elif (root / "src" / "skills").is_dir():
+            assets = root / "src"
+        else:
+            assets = root
         skill_path = assets / entry["skill"]
         problems = []
         skill_text = ""
@@ -114,7 +119,12 @@ def record(engine_dir: str | Path, manifest_path: Path = MANIFEST,
             if p.exists():
                 recorded["engine"][spec["file"]] = sha256(p)
         # 技能路径相对**资产根**（仓内 src/，载荷/插件副本=根）——S2 起源在 src/skills
-        assets = root / "src" if (root / "src" / "skills").is_dir() else root
+        if (root / "assets" / "skills").is_dir():
+            assets = root / "assets"
+        elif (root / "src" / "skills").is_dir():
+            assets = root / "src"
+        else:
+            assets = root
         skill_path = assets / entry["skill"]
         if skill_path.exists():
             recorded["skill"] = sha256(skill_path)

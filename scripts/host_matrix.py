@@ -25,6 +25,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from pathlib import Path as _Path
+
+# 入口显式设根（D-structure-1 S3）：脚本不再依赖"从哪跑"，包在 src/
+_DIST = _Path(__file__).resolve().parent.parent
+_SRC = _DIST / "src" if (_DIST / "src" / "vod_mcp").is_dir() else _DIST
+os.environ.setdefault("VOD_DEVKIT_SRC_ROOT", str(_SRC))
+os.environ.setdefault("VOD_DEVKIT_DIST_ROOT", str(_DIST))
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent

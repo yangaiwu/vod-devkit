@@ -68,7 +68,7 @@ def test_s111_packs_default_is_explicit():
 
 def test_s111_rewrite_entrypoint_exists():
     """运行时正确性靠改写——别以为静态清单能自足就拆掉 codex.py 的改写逻辑。"""
-    src = (ROOT / "vod_mcp" / "host_adapters" / "codex.py").read_text(encoding="utf-8")
+    src = (ROOT / "src" / "vod_mcp" / "host_adapters" / "codex.py").read_text(encoding="utf-8")
     assert "rewrite_plugin_mcp(" in src and "server_entry()" in src
 
 
@@ -195,7 +195,7 @@ def test_s114_verify_mismatch_is_hard_fail(tmp_path, monkeypatch):
 
 def test_s114_every_raised_kind_has_remedy():
     """新增分类必须同时给补救指引，否则 install 会打出 '见 INSTALL.md' 的空话。"""
-    src = (ROOT / "vod_mcp" / "host_adapters" / "codex.py").read_text(encoding="utf-8")
+    src = (ROOT / "src" / "vod_mcp" / "host_adapters" / "codex.py").read_text(encoding="utf-8")
     kinds = {chunk.split('"')[0] for chunk in src.split('PluginMcpRewriteError("')[1:]}
     assert kinds, "至少要有一个分类"
     assert kinds <= set(codex.PluginMcpRewriteError.REMEDY)
@@ -236,6 +236,6 @@ def test_s115_form_unreadable_when_broken(tmp_path):
 
 def test_s115_doctor_actually_reports_the_form():
     """文档写了"doctor 可查实际形态"——这句必须有用例兜着，否则是空话。"""
-    src = (ROOT / "vodkit_cli" / "doctor.py").read_text(encoding="utf-8")
+    src = (ROOT / "src" / "vodkit_cli" / "doctor.py").read_text(encoding="utf-8")
     assert "plugin_mcp_form(" in src
     assert "codex 插件 MCP 形态" in src

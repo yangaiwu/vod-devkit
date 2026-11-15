@@ -43,7 +43,7 @@ def test_host_adapters_package_is_packed():
     """适配器是运行期代码：不进 npm 包 = 装出来的安装器 import 崩。"""
     import json
     pkg = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
-    assert "vod_mcp/host_adapters/" in pkg["files"]
+    assert "src/vod_mcp/host_adapters/" in pkg["files"]
 
 
 def test_detect_targets_survives_profile_placeholder(tmp_path, monkeypatch):

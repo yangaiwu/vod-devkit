@@ -7,10 +7,19 @@
 
 首个参数是 `serve` 时整体透传给 MCP server（不读任何安装配置）。
 """
+import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# 入口显式设根（D-structure-1 S3：paths.py 只读不猜）。仓内形态=包在 src/、
+# 分发态在仓根；载荷/插件副本形态两者同指（包与资产都平铺在根下）。
+_DIST = Path(__file__).resolve().parent.parent
+_SRC = _DIST / "src" if (_DIST / "src" / "vod_mcp").is_dir() else _DIST
+# 注意：**不在 import 期写 env**——本文件会被测试用 SourceFileLoader 当模块加载
+# （取 PRESETS/detect_targets），import 期写 env 会把"外层仓的根"泄漏进整场测试，
+# 让"复制仓再跑安装器"的用例把 manifest 写到外层仓（实测踩过）。sys.path 无此风险。
+sys.path.insert(0, str(_SRC))
+sys.path.insert(0, str(_DIST))
 
 from vodkit_cli import main  # noqa: E402
 from vodkit_cli.common import PRESETS, build_info, write_build_info  # noqa: E402
@@ -20,4 +29,6 @@ from vodkit_cli.install import detect_targets  # noqa: E402
 __all__ = ["main", "PRESETS", "detect_targets", "build_info", "write_build_info"]
 
 if __name__ == "__main__":
+    os.environ.setdefault("VOD_DEVKIT_SRC_ROOT", str(_SRC))
+    os.environ.setdefault("VOD_DEVKIT_DIST_ROOT", str(_DIST))
     main()

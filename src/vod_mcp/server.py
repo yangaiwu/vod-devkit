@@ -112,6 +112,10 @@ def _consume_payload_marker() -> None:
 
 
 def main():
+    # 入口显式设根（宿主直接按脚本路径拉起时，这里就是"入口"）
+    from vod_mcp import paths as _paths
+    os.environ.setdefault("VOD_DEVKIT_SRC_ROOT", str(_paths.SRC_ROOT))
+    os.environ.setdefault("VOD_DEVKIT_DIST_ROOT", str(_paths.DIST_ROOT))
     _consume_payload_marker()
     import argparse
     ap = argparse.ArgumentParser(prog="vod-mcp-server",

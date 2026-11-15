@@ -1311,3 +1311,22 @@ S3 运行时入口路径收进 `src/`；S4 运行期状态收进用户目录。�
 **代价**：S2/S3 会触及 `paths.py`、`sync_plugin`、`payload`、`package.json files`、`pyproject`
 与约十处测试路径，必须每阶独立可回滚。
 
+
+**S3-A 落地（2026-11-15，实测口径）**：`vod_mcp/ vodkit_cli/` → `src/`（标准 src-layout，
+`package-dir={"":"src"}` + `packages.find where=["src"]`）；资产 → `assets/`；hermes hook →
+`integrations/hermes/hooks/`；`dsh/` → `packages/dsh/`。根定位从"`vod_mcp` 的父目录"一个算式
+改成**两个根 + 入口显式设置**（`VOD_DEVKIT_SRC_ROOT` / `VOD_DEVKIT_DIST_ROOT`，`paths.py` 只读
+不猜，旧布局回落只留到 0.7.0）。发布形态不变：插件副本与载荷仍平铺 `vod_mcp/skills/contract/
+safety/hooks`，由 `sync_plugin`（新增 `EXTRA_PAIRS` 带 hooks）生成、`verify_copies` 校验。
+
+**为什么不是"照抄 devkit 树"**：devkit 是 TS + `dist/` 编译产物，运行时根=发布包根，一个根够；
+vod 是零依赖 Python 直跑 + 三种运行形态（仓内直跑 / 载荷副本 / 插件副本），必须显式区分
+源码根与分发根，否则一处算式无法同时回答"包在哪"和"manifest 在哪"。
+
+**顺手修掉的存量缺陷**：`[project.scripts] vod-devkit = "bin.vod-devkit"` 不是合法
+entry-point（`pip install -e .` 实测 `ValueError`），改为 `vodkit_cli.cli:main`；`runtime.json`
+迁出包目录（`DIST_ROOT/vod_mcp/runtime.json`），安装器落盘前建父目录。
+
+**踩过的两个坑（已固化用法例/注释）**：① `bin/vod-devkit` 在 import 期写 `os.environ`
+会被测试的 `SourceFileLoader` 加载触发出"外层根泄漏"，导致临时仓安装写到外层仓；
+② conftest 设 `PYTHONPATH` 会让副本类用例的子进程 import 到外层包，掩盖副本布局问题。

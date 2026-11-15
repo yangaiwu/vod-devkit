@@ -44,9 +44,9 @@ POST /external/voices（囤积，不触发分析）→ 引擎按档建 issue
 
 ```
 dsh/src/client.jsx      # 源码：😊 按钮+弹窗表单+提交逻辑+账本（React）
-dsh/lib/client.js       # 构建产物（esbuild transform→CJS+wrap_client.py 包装）
+packages/dsh/lib/client.js       # 构建产物（esbuild transform→CJS+wrap_client.py 包装）
 dsh/scripts/wrap_client.py  # 官方 factory 模式包装器（见下）
-dsh/lib/index.js        # node 半：工具注册（不动）
+packages/dsh/lib/index.js        # node 半：工具注册（不动）
 ```
 
 **已实现并真机验证（2026-11-04）**：按钮渲染进 composer dock、弹窗表单

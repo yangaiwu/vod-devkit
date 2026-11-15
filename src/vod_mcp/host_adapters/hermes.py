@@ -40,7 +40,7 @@ def _profile_config() -> Path:
 
 
 def _hook_script() -> Path:
-    return paths.HOOKS / "vod_router.py"
+    return paths.hook_script()
 
 
 def _hook_command() -> str:

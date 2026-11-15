@@ -96,10 +96,10 @@ def test_s125_remote_face_withholds_paths():
 def test_s125_initialize_instructions_teach_action_first():
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
-    text = (root / "vod_mcp" / "server.py").read_text(encoding="utf-8")
+    text = (root / "src" / "vod_mcp" / "server.py").read_text(encoding="utf-8")
     assert "技能树：" in text and "动作优先" in text and "绝不反复请求" in text
     # 远程面仍按既有纪律：不发布本机路径
-    remote = (root / "vod_mcp" / "remote_app.py").read_text(encoding="utf-8")
+    remote = (root / "src" / "vod_mcp" / "remote_app.py").read_text(encoding="utf-8")
     assert "不提供服务器本机路径" in remote
 
 

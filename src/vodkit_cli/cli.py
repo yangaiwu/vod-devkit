@@ -12,9 +12,13 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "serve":
         # 显式声明这份副本的根（paths.py 读 VOD_DEVKIT_ROOT）：插件/载荷根
         # 不总是"CLI 所在包根"，隐式相对深度正是此前副本装载失败的原因。
+        from vod_mcp import paths as _paths
         os.execve(sys.executable,
-                  [sys.executable, str(common.ROOT / "vod_mcp" / "server.py"), *sys.argv[2:]],
-                  {**os.environ, "VOD_DEVKIT_ROOT": str(common.ROOT)})
+                  [sys.executable, str(_paths.SRC_ROOT / "vod_mcp" / "server.py"), *sys.argv[2:]],
+                  {**os.environ,
+                   "VOD_DEVKIT_SRC_ROOT": str(_paths.SRC_ROOT),
+                   "VOD_DEVKIT_DIST_ROOT": str(_paths.DIST_ROOT),
+                   "VOD_DEVKIT_ROOT": str(_paths.DIST_ROOT)})
     ap = argparse.ArgumentParser(prog="vod-devkit")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("install")

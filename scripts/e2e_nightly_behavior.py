@@ -45,7 +45,7 @@ def install_version_guard() -> str:
     """被测安装版本必须=仓库 head 版本（「测的是旧版=结论不代表 head」防线，
     实锤：首夜跑时 codex serve 跑的是全局 0.4.0 旧包，行为结论全部失真）。
     返回版本串供日志；不一致 exit 3。"""
-    repo_ver = (ROOT / "vod_mcp" / "__init__.py").read_text(encoding="utf-8").split(
+    repo_ver = (ROOT / "src" / "vod_mcp" / "__init__.py").read_text(encoding="utf-8").split(
         '__version__ = "')[1].split('"')[0]
     inst_ver = (eb.INSTALL_DIR / "vod_mcp" / "__init__.py").read_text(encoding="utf-8").split(
         '__version__ = "')[1].split('"')[0]
