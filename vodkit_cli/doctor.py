@@ -227,13 +227,21 @@ def cmd_doctor(args=None):
                 encoding="utf-8"):
             problems.append(f"AGENTS.md 仍含旧一代注入（教模型跳过同意）：{legacy_agents}"
                             "——重跑 install --target codex 自动清理")
-        # 路由插件副本（hermes）：仓内话术改了但装机副本没刷新 → 宿主还在注入旧口径
-        # （2026-11-11 实锤：仓里已把"归因由安装绑定决定"改成"原话解析"，装机副本仍是旧的）
-        rp_dst = Path.home() / ".hermes" / "plugins" / "vod-feedback-router" / "router.py"
-        rp_src = common.ROOT / "hermes-plugin" / "vod-feedback-router" / "router.py"
-        if rp_dst.exists() and rp_src.exists() and rp_dst.read_text(encoding="utf-8") != \
-                rp_src.read_text(encoding="utf-8"):
-            problems.append(f"路由插件副本落后于仓内：{rp_dst}（重跑 install --target hermes）")
+        # 预采集 hook（D-hook-unify-1）：hermes 侧靠 config.yaml 的 hooks.pre_llm_call
+        # 登记我们的脚本；脚本在载荷里（改口径随载荷更新，不再有"装机副本是旧的"）。
+        if mf.get("target") == "hermes":
+            from vod_mcp.host_adapters import hermes as _hermes
+            cfg = Path(_hermes._profile_config())
+            text = cfg.read_text(encoding="utf-8") if cfg.exists() else ""
+            if _hermes.HOOK_MARK not in text:
+                problems.append(f"预采集 hook 未注册（{cfg} 的 hooks.pre_llm_call）"
+                                "——重跑 install --target hermes")
+            if not _hermes._hook_script().exists():
+                problems.append(f"hook 脚本缺失：{_hermes._hook_script()}"
+                                "（载荷不含 hooks/ 的旧版本？重跑 install）")
+            if (Path.home() / ".hermes" / "plugins" / _hermes.LEGACY_PLUGIN).exists():
+                problems.append("旧插件形态仍在（~/.hermes/plugins/vod-feedback-router）"
+                                "= 与 hook 双份注入——重跑 install --target hermes 清理")
         # codex 插件 MCP 形态（D-mcp-manifest-a3-1）：静态清单只能是 CLI 形态
         # （codex 0.167 实测不展开 ${PLUGIN_ROOT}、cwd 也不是插件根），运行时正确性
         # 全靠安装器改写。所以 doctor 必须回答"现在实际跑的是哪一种"，不留猜测空间。

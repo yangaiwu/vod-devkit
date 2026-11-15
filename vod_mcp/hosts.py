@@ -99,4 +99,8 @@ def load(host: str, profile: str | None = None) -> dict:
                          for x in raw.get("managedPaths") or []],
         "notes": raw.get("notes") or "",
     }
+    # 可选键：宿主的"配置文件本体"落点（如 hermes 的 config.yaml）——
+    # 只在一部分宿主上有意义，没写就不出现（不塞 None 让调用方猜）
+    if raw.get("profileConfig"):
+        spec["profileConfig"] = _resolve(_pick(raw["profileConfig"]), profile)
     return spec

@@ -82,4 +82,8 @@ def test_hermes_install_without_cli_degrades_instead_of_crashing(monkeypatch, tm
     assert conf.exists(), "JSON 片段仍要落盘（用户可手工并入 config.yaml）"
     payload = conf.read_text(encoding="utf-8")
     assert "vod-devkit" in payload and "server.py" in payload
-    assert hermes._enabled_plugins() == [], "无 CLI 时读名单必须返回空而不是抛错"
+    # 无 CLI 时：hook 仍写进 config.yaml（脚本是载荷里的，不依赖 CLI），
+    # 只有"清理旧插件启用名"这一步跳过——降级但不崩
+    cfg = tmp_path / ".hermes" / "config.yaml"
+    assert hermes.HOOK_MARK in cfg.read_text(encoding="utf-8")
+    assert hermes.remove_legacy_plugin() == "" or "plugins.enabled" not in hermes.remove_legacy_plugin()
