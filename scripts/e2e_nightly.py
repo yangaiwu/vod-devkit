@@ -8,8 +8,11 @@ import glob
 import json
 import sys
 import time
+from pathlib import Path
 
-sys.path.insert(0, "/root/vod-devkit")
+# 仓根由脚本位置推导（S3 起包在 src/），不再钉死绝对路径
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
 SERVER_PY = glob.glob("/root/.hermes/tools/python-3.14.7*/bin/python3")[0]
 
 
@@ -19,7 +22,7 @@ async def main() -> int:
 
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     params = StdioServerParameters(
-        command=SERVER_PY, args=["/root/vod-devkit/vod_mcp/server.py"],
+        command=SERVER_PY, args=[str(ROOT / "src" / "vod_mcp" / "server.py")],
         # 2026-11-06：legacy 共用 key 移除（D-key-guard 线+用户拍板"不合理逻辑去掉"）——
         # nightly 验的应是对外主路径=匿名令牌链（零 key），legacy 属 GTD 兼容收尾
         # 不进健康检查；顺带清 scene 残留字段（契约已删 scene）

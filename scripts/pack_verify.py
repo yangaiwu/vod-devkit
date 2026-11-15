@@ -10,9 +10,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MUST_HAVE = ["package.json", "bin/vod-devkit",
              # 安装器实现包（F8 拆分后 bin 只是入口薄壳——漏打这个包=npx 装不上任何宿主）
-             "vodkit_cli/cli.py", "vodkit_cli/common.py",
-             "vod_mcp/server.py",
-             "contract/tools.schema.json", "README.md",
+             "src/vodkit_cli/cli.py", "src/vodkit_cli/common.py",
+             "src/vod_mcp/server.py",
+             "assets/contract/tools.schema.json", "assets/skills/vod-feedback-collect/SKILL.md",
+             "integrations/hermes/hooks/vod_router.py", "README.md",
              # codex 原生插件路径的 npm 分发必需（marketplace+插件随包）
              "plugins/.agents/plugins/marketplace.json",
              "plugins/vod-devkit/.codex-plugin/plugin.json",
@@ -20,7 +21,9 @@ MUST_HAVE = ["package.json", "bin/vod-devkit",
              "plugins/vod-devkit/vod_mcp/server.py",
              "plugins/vod-devkit/skills/vod-feedback-collect/SKILL.md"]
 MUST_NOT = ["runtime.json", ".log", "install-manifest.json",
-            "node_modules/", ".git"]
+            "node_modules/", ".git",
+            # 整目录白名单会把字节码带进包（0.5.9 实测 51 个 .pyc）
+            "__pycache__/", ".pyc", ".pytest_cache/", ".mypy_cache/"]
 
 def main():
     r = subprocess.run(["npm", "pack", "--dry-run", "--json"],

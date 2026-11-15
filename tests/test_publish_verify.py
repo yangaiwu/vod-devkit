@@ -73,10 +73,10 @@ def _run(env, *args):
 
 def _good_members(version="0.4.5"):
     return {
-        "package/vod_mcp/server.py": "print('srv')\n",
-        "package/vod_mcp/pending.py": "print('pending')\n",
-        "package/vod_mcp/config_forms.py": "print('forms')\n",
-        "package/contract/tools.schema.json": json.dumps({"version": version}),
+        "package/src/vod_mcp/server.py": "print('srv')\n",
+        "package/src/vod_mcp/pending.py": "print('pending')\n",
+        "package/src/vod_mcp/config_forms.py": "print('forms')\n",
+        "package/assets/contract/tools.schema.json": json.dumps({"version": version}),
     }
 
 
@@ -105,7 +105,7 @@ def test_fail_when_registry_still_on_old_version(tmp_path):
 def test_fail_when_tarball_misses_a_module(tmp_path):
     """files 白名单漏新模块（0.4.1 缺 pending.py 的形态）。"""
     members = _good_members()
-    members.pop("package/vod_mcp/pending.py")
+    members.pop("package/src/vod_mcp/pending.py")
     tgz = tmp_path / "bad.tgz"
     _make_tarball(tgz, members)
     env = _env(tmp_path, {"vod-devkit": "0.4.5"}, {"vod-devkit": tgz})
