@@ -68,7 +68,13 @@ def _server_face() -> bool:
 
 
 def list_skills(params: dict) -> dict:
-    """列出可披露的技能（元技能一并列出，标出 pack 与是否原生安装）。"""
+    """列出可披露的技能（元技能一并列出，标出 pack 与是否原生安装）。
+
+    字段对齐 devkit 的技能目录：name/description/version/引用文件名，外加
+    skillRoot 与每个技能的绝对路径——**只在 stdio 面给**（远程面不给服务器本机路径）。
+    给路径的目的不是装饰：教法是"动作优先"，agent 先按路径直读 SKILL.md
+    （尝试本身即可达性检查），读不到才回落 vod_retrieve_skill，绝不反复请求。
+    """
     from vod_mcp import packs
     enabled = set(packs.enabled_packs())
     items = []
@@ -76,17 +82,32 @@ def list_skills(params: dict) -> dict:
         text = (d / "SKILL.md").read_text(encoding="utf-8")
         meta = _frontmatter(text)
         pack = SKILL_PACK.get(d.name, "core")
-        items.append({
+        item = {
             "name": d.name,
             "pack": pack,
             "enabled": pack in enabled,
             "native": d.name in META_SKILLS,
             "description": meta.get("description", ""),
             "chars": len(text),
-        })
-    return {"skills": items, "packs": sorted(enabled),
-            "note": "领域规则技能用 vod_retrieve_skill 取全文；元技能由宿主原生"
-                    "加载，只在本工具里列名以便路由。"}
+        }
+        if meta.get("version"):
+            item["version"] = meta["version"]
+        refs = sorted(p.name for p in (d / "references").glob("*")
+                      if p.is_file()) if (d / "references").is_dir() else []
+        if refs:
+            item["references"] = refs
+        if not _server_face():
+            item["path"] = str(d / "SKILL.md")
+        items.append(item)
+    out = {"skills": items, "packs": sorted(enabled),
+           "note": "领域规则技能用 vod_retrieve_skill 取全文；元技能由宿主原生"
+                   "加载，只在本工具里列名以便路由。"}
+    if not _server_face():
+        out["skillRoot"] = str(SKILLS_ROOT)
+        out["readHint"] = ("动作优先：先直接读 skillRoot/<name>/SKILL.md（尝试本身"
+                          "即可达性检查，不做预判）；被拒/失败才回落 vod_retrieve_skill，"
+                          "绝不反复请求。")
+    return out
 
 
 def retrieve_skill(params: dict) -> dict:

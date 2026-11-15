@@ -27,7 +27,7 @@ if sys.version_info < (3, 10):
         % sys.version_info[:2])
     sys.exit(2)
 
-from vod_mcp import guardrails, packs, runtime_state, tools  # noqa: E402
+from vod_mcp import guardrails, packs, runtime_state, skills_registry, tools  # noqa: E402
 
 _PROTOCOL_VERSION = "2025-06-18"
 _client_info = {}
@@ -62,6 +62,13 @@ def handle(message: dict, client_info: dict | None = None) -> dict | None:
                 "禁止改写、概括、增删字词。product 归因：原话唯一命中可直接用；"
                 "未命中或多产品歧义时必须问用户一次\"这条是哪个产品的反馈\"，"
                 "回答填 product；用户说不知道就告知他缺产品不能提交，不要猜。不许不填直接提交。"
+                # 技能读取教法（对齐 devkit 的"动作优先"）：树路径在 initialize 就给，
+                # 让 agent 不必先调目录工具；先直读、被拒再回落、不反复请求。
+                " 技能树：" + str(skills_registry.SKILLS_ROOT)
+                + "（本机路径）。读法=动作优先：先直接读 "
+                  "skillRoot/<技能名>/SKILL.md（尝试本身即可达性检查，不做预判）；"
+                  "被拒或读取失败才用 vod_retrieve_skill 取全文（无需文件权限），"
+                  "绝不反复请求。"
             ),
             "serverInfo": {
                 "name": "vod-devkit",

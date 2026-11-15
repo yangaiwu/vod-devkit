@@ -379,6 +379,12 @@
     "S123": {
       "carrier": "docs/design.md"
     },
+    "S124": {
+      "carrier": "docs/design.md"
+    },
+    "S125": {
+      "carrier": "docs/design.md"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

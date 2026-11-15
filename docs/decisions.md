@@ -1228,3 +1228,34 @@ C：新宿主 officeace/openclaw）。负责人拍板 A3/B1/C3；A3 落地前实
 
 **代价**：多一套读路径（宿主配置解析）。用递归定位而不是九张硬编码表，新增宿主时
 只需配置里存在该条目即可被识别。
+
+## D-auth-init-1：凭据单入口（auth status / auth init）（2026-11-15）
+
+**问题**：换 key 的唯一现实路径是"删 runtime.json 重装"。运维解释不了，也没有任何
+命令能回答"这台机器现在用的是哪把钥匙、是哪一档"。
+
+**决定**：
+- `auth init --key <k> [--apply]` 是写 runtime.json 的唯一入口；缺省 dry-run。
+- `auth status` 打印引擎地址 + 指纹 + 档位，并**区分显式 key 与匿名令牌**（后者是设备
+  绑定领取的 token，不是 key；混称会让人以为配过 key——本机实测就出现过这种困惑）。
+- 拒写规则：形态可疑（空白/过短）、引擎可达且判拒（401/-32012）；引擎不可达只告警
+  （离线装机必须能走，网络问题不是 key 问题）。
+- 明文 key 不进输出/日志/文档示例；回显一律指纹。
+- 优先级链写进文档：显式 key（auth init）> env `VOD_JAVA_API_KEY` > 匿名自动领取；
+  禁令：不要把 key 写进宿主 MCP 配置 env（明文且随配置进 git）。
+
+**没做**：会话内 `auth_init` / `auth_switch`（内存态切账号）——需要 MCP 工具面新增写入口，
+与"远程面不代签身份"的既有边界要一起评审；本轮不硬塞，文档与 README 都不写成"已有"。
+
+## D-skill-teaching-1：技能读取教法=动作优先（2026-11-15）
+
+**决定**：`initialize` 的 instructions 直接给技能树绝对路径与读法（先直读 SKILL.md，
+被拒/失败才回落 `vod_retrieve_skill`，绝不反复请求）；`vod_list_skills` 增
+`skillRoot`/每技能 `path`/`version`/`references`/`readHint`。
+
+**为什么**：把"能不能读"当运行时探测，而不是在文档里预判某个宿主能读/不能读——两类
+预判都会错（openCode 有门控但可预授权；codex 沙箱基本不受限）。代价是第一次可能被拒一次，
+可接受：回落路径不需要文件权限。
+
+**边界**：远程面不给 `skillRoot`/`path`（未鉴权面不交安装路径）。实现点在
+`skills_registry._server_face()`，不是只写在文案里。

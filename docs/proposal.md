@@ -1167,3 +1167,34 @@ args 指向载荷；把 PATH 上的 python3 换成 3.9 再启动 → stderr 出�
 验收口径（目标环境执行，工具不入库）：`python3 -m pytest tests/test_global_cmds.py -q`
 全绿；真机上 `version` 输出四行（本机实测 hermes/opencode/dsh/codex）；
 `packs disable knowledge`（不带 `--apply`）打印"未写盘"，文件 mtime 不变。
+
+
+## 凭据单入口与技能读取教法（S124-S125，2026-11-15）
+
+需求变更（两条，都是"把已有的东西收成可解释的入口"，不新增数据面）：
+
+**S124 凭据单入口**（D-auth-init-1）：换 key 此前只有"删 runtime.json 重装"一条路。
+- `auth status`：打印引擎地址 + 当前凭据**指纹**与档位；区分"显式 key"与
+  "匿名令牌（设备绑定领取）"——后者不是 key，混着说会让人以为配过 key。
+- `auth init --key <k> [--apply]`：写 runtime.json 的唯一入口。缺省 dry-run（只校验 +
+  显示指纹，明文永不打印，写后读回一致才算成功）；引擎可达且判拒 → 拒写 exit 2；
+  引擎不可达 → 告警后允许（网络问题不是 key 问题）；形态可疑（含空白/过短）拒写。
+- 优先级链（实现口径）：显式 key（`auth init` 写入）> 环境变量 `VOD_JAVA_API_KEY`
+  （平台/CI 注入）> 匿名令牌自动领取。禁令：不要把 key 写进宿主 MCP 配置的 `env`
+  （明文且随配置进 git）。
+
+**S125 技能读取教法**（D-skill-teaching-1）：对齐 devkit 的"动作优先"。
+- `vod_list_skills` 增字段：`skillRoot`（stdio 面）、每技能 `path`、`version`（有则给）、
+  `references`（有则给）、`readHint`（教法一句话）。
+- `initialize` 的 instructions 直接给技能树绝对路径与读法：先直读
+  `skillRoot/<name>/SKILL.md`（尝试本身即可达性检查，不做预判），被拒/失败才回落
+  `vod_retrieve_skill`，绝不反复请求。
+- 远程面继续不给服务器本机路径（既有纪律：未鉴权面不交出安装路径）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S124 | 凭据单入口 | 无 key 时 status 报匿名档；init 缺省 dry-run 不写盘且输出只含指纹不含明文；`--apply` 写入并读回一致、档位置 key；引擎判拒则 exit 2 且不落盘；引擎不可达告警后允许；含空白/过短拒写 |
+| S125 | 技能读取教法 | stdio 面的目录含 skillRoot/readHint/每技能 path；远程面三者都不给；initialize instructions 含"技能树/动作优先/绝不反复请求"，且远程文案仍写明不给本机路径 |
+
+验收口径（目标环境执行，工具不入库）：`python3 -m pytest tests/test_auth_and_skills.py -q`
+全绿；真机 `auth status` 能区分匿名令牌与显式 key（本机实测显示"匿名令牌：已缓存"）。

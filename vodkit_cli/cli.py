@@ -3,7 +3,7 @@ import argparse
 import os
 import sys
 
-from vodkit_cli import common, doctor, install, packs_cmd, uninstall, update
+from vodkit_cli import auth_cmd, common, doctor, install, packs_cmd, uninstall, update
 
 
 def main():
@@ -84,6 +84,13 @@ def main():
     sp_packs.add_argument("--apply", action="store_true",
                           help="真正写盘（缺省只报告将改什么；core 强制包含）")
     sp_packs.set_defaults(fn=packs_cmd.cmd_packs)
+    sp_auth = sub.add_parser("auth", help="凭据：status | init（写 runtime.json 的唯一入口）")
+    sp_auth.add_argument("auth_action", nargs="?", default="status",
+                         choices=["status", "init"])
+    sp_auth.add_argument("--key", default="", help="引擎签发的 key（也可用 env VOD_JAVA_API_KEY）")
+    sp_auth.add_argument("--apply", action="store_true",
+                         help="真正写盘（缺省只校验并显示指纹）")
+    sp_auth.set_defaults(fn=auth_cmd.cmd_auth)
     sub.add_parser("build-info").set_defaults(fn=lambda a: common.write_build_info(strict=False))
 
     def _serve(a):

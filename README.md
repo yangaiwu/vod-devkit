@@ -68,7 +68,14 @@ npx -y vod-devkit@latest packs enable collect --apply   # 真写：只改受管�
 npx -y vod-devkit@latest install --target all           # 所有探测到的宿主一步装全（缺 CLI 的跳过）
 npx -y vod-devkit@latest uninstall --target codex       # 只摘这一个宿主，其它安装行保留
 npx -y vod-devkit@latest uninstall --target codex --clean-global   # 并清载荷残留与 npx 缓存
+npx -y vod-devkit@latest auth status                     # 引擎地址 + 凭据指纹 + 档位（key / 匿名令牌）
+npx -y vod-devkit@latest auth init --key <k>             # 校验并显示指纹（缺省不写盘）
+npx -y vod-devkit@latest auth init --key <k> --apply     # 写 runtime.json（唯一入口，0600）
 ```
+
+凭据优先级：显式 key（`auth init` 写入）> 环境变量 `VOD_JAVA_API_KEY`（平台/CI 注入）
+> 匿名令牌自动领取（设备绑定）。**不要把 key 写进宿主 MCP 配置的 `env`**——明文，且会随
+配置进 git；`env` 只留给平台注入。
 
 多宿主账本在 `install-manifest.json` 的 `installs[]`（按 target 去重）。`--target` 缺省
 作用于全部行；`packs` 的写操作默认 dry-run，`--apply` 才落盘（首改留 `.bak`，写后读回验证，
