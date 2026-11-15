@@ -1,0 +1,249 @@
+"""全局命令：version（各宿主已装版本一眼视图）/ packs（能力包启用面查看与持久改写）。
+
+为什么要有（对齐 huaweicloud-devkit 的三条全局命令）：
+多宿主分发必然产生版本碎片与能力面漂移——同一个包在 codex 缓存、hermes 配置、
+dsh profile 里可能是三个版本/三套 VOD_PACKS。单宿主命令回答"这个宿主好不好"，
+全局命令回答"整台机器现在是什么状态"。没有它，排查就是各查一遍配置文件。
+
+数据源唯一：install-manifest.json 的 installs[]（D-installs-1：一个 manifest
+记全部宿主安装）。本模块只**读**宿主真实配置来回答"实际生效的是哪一套"，
+写只在 `packs enable/disable/all --apply` 时发生，并且只改受管条目的 env。
+"""
+import json
+import shutil
+from pathlib import Path
+
+from vod_mcp import packs as packs_mod
+from vodkit_cli import common
+
+_ENV_KEYS = ("env", "environment")
+
+
+def _rows() -> list:
+    p = common.manifest_path()
+    if not p.exists():
+        return []
+    mf = json.loads(p.read_text(encoding="utf-8"))
+    return mf.get("installs") or ([mf] if mf.get("target") else [])
+
+
+def _filter(rows: list, target: str) -> list:
+    if not target:
+        return rows
+    return [r for r in rows if r.get("target") == target]
+
+
+def _current_version() -> str:
+    from vod_mcp import __version__
+    return __version__
+
+
+# ── 宿主配置定位与受管条目 ────────────────────────────────
+
+def _config_path(row: dict) -> Path | None:
+    """该安装行的 MCP 配置文件。codex 走插件缓存（manifest 里无 mcpConfig）。"""
+    target = row.get("target")
+    if target == "codex":
+        from vod_mcp.host_adapters import codex
+        ver = row.get("version")
+        if ver:
+            # 优先读"与 manifest 记录同版本"的缓存目录：多版本残留时按 mtime 取最新
+            # 会把 0.5.5 的配置当成 0.5.9 的（实测本机就是这样）
+            p = Path.home() / ".codex" / "plugins" / "cache" / "vod-local" / "vod-devkit" / ver / ".mcp.json"
+            if p.exists():
+                return p
+        return codex.locate_plugin_mcp(None)
+    cfg = row.get("mcpConfig")
+    return Path(cfg) if cfg else None
+
+
+def _locate_entry(cfg):
+    """在任意宿主 JSON 里找到 vod-devkit 条目 → (entry_dict, env_key) 或 None。
+
+    形态差异（实测）：hermes 的独立 mcp json 顶层就是条目本身；opencode 在
+    `mcp.vod-devkit.environment`；其余在 `mcpServers.vod-devkit.env`；
+    codex 插件缓存同 mcpServers。用递归定位而不是写死九张表——写死就会在
+    下一个宿主形态上再漏一次。
+    """
+    if isinstance(cfg, dict) and cfg.get("name") == "vod-devkit" and "command" in cfg:
+        return cfg, ("env" if "env" in cfg else "environment")
+    stack = [cfg]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, dict):
+            for k, v in cur.items():
+                if k == "vod-devkit" and isinstance(v, dict) and (
+                        "command" in v or "args" in v):
+                    env_key = next((e for e in _ENV_KEYS if e in v), "env")
+                    return v, env_key
+                if isinstance(v, (dict, list)):
+                    stack.append(v)
+        elif isinstance(cur, list):
+            stack.extend(x for x in cur if isinstance(x, (dict, list)))
+    return None
+
+
+def _read_effective(row: dict) -> tuple:
+    """(形态, 实际生效 packs, 说明)。形态: ok / missing / unparsable / unsupported"""
+    path = _config_path(row)
+    if path is None:
+        return ("unsupported", None, "该宿主的 MCP 配置不在可写 JSON 里（dsh 等需重跑 install）")
+    if path.suffix not in (".json", ".jsonc"):
+        return ("unsupported", None, f"不是 JSON 形态（{path.name}），该宿主改 packs 需重跑 install")
+    if not path.exists():
+        return ("missing", None, f"配置不存在：{path}")
+    stale = ""
+    if row.get("target") == "codex" and row.get("version"):
+        # manifest 记的版本与缓存目录不一致时说出来：实际跑的是哪个版本，别让人自己猜
+        want = (Path.home() / ".codex" / "plugins" / "cache" / "vod-local" / "vod-devkit"
+                / str(row["version"]) / ".mcp.json")
+        if not want.exists():
+            stale = f"（manifest 记 {row['version']}，cache 无该版本目录，读到的是残留副本）"
+    try:
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        return ("unparsable", None, f"配置读不出（{e}）")
+    hit = _locate_entry(cfg)
+    if hit is None:
+        return ("missing", None, f"配置里没有 vod-devkit 条目：{path}")
+    entry, env_key = hit
+    raw = (entry.get(env_key) or {}).get("VOD_PACKS")
+    try:
+        eff = packs_mod.parse_packs(raw or "")
+    except packs_mod.UnknownPack as e:
+        return ("unparsable", None, str(e))
+    return ("ok", eff, f"{path}（{'.'.join([env_key, 'VOD_PACKS'])}）{stale}")
+
+
+# ── version ───────────────────────────────────────────
+
+def cmd_version(_args):
+    """CLI 版本 + 每个宿主已装版本 + 实际生效的能力包（一眼诊断碎片）。"""
+    cur = _current_version()
+    print(f"vod-devkit CLI: {cur}")
+    rows = _rows()
+    if not rows:
+        print("未安装（无 install-manifest；先 install --target <agent>）")
+        return
+    for row in rows:
+        target = row.get("target", "?")
+        inst = row.get("version") or row.get("source", {}).get("version") or "?"
+        if inst == cur:
+            verdict = "同版"
+        else:
+            verdict = f"≠ CLI（{inst} → {cur}，重跑 install 刷新）"
+        state, eff, note = _read_effective(row)
+        eff_s = ",".join(eff) if eff else "—"
+        print(f"  {target:14s} 已装 {inst:8s} {verdict}")
+        print(f"  {'':14s} 生效 packs: {eff_s}   [{state}] {note}")
+
+
+# ── packs ────────────────────────────────────────────
+
+def _write_packs(row: dict, new_packs: tuple, apply: bool) -> tuple:
+    """把受管条目的 VOD_PACKS 改成 new_packs。返回 (changed?, 说明)。
+
+    只改 env 里这一个键：其它 env（VOD_JAVA_API_BASE 等）与宿主其它 server、
+    用户自有键原样保留；首改落 .bak。apply=False 时只报"将改什么"。
+    """
+    path = _config_path(row)
+    if path is None or not path.exists():
+        return (False, "配置不在可写 JSON 里（该宿主需重跑 install 改 packs）")
+    try:
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        return (False, f"配置读不出（{e}），拒绝改动")
+    hit = _locate_entry(cfg)
+    if hit is None:
+        return (False, "配置里没有 vod-devkit 条目，拒绝改动")
+    entry, env_key = hit
+    env = dict(entry.get(env_key) or {})
+    want = ",".join(new_packs)
+    if env.get("VOD_PACKS") == want:
+        return (False, "已是目标值")
+    if not apply:
+        return (True, f"将把 {env_key}.VOD_PACKS: {env.get('VOD_PACKS') or '(缺省=全包)'} → {want}"
+                      "（未写盘；加 --apply 生效）")
+    shutil.copyfile(path, str(path) + ".bak")
+    env["VOD_PACKS"] = want
+    entry[env_key] = env
+    path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # 写后读回：写成功 ≠ 落盘就是我们要的（并发改写/宿主升级会改回去）
+    back = json.loads(path.read_text(encoding="utf-8"))
+    hit2 = _locate_entry(back)
+    if not hit2 or (hit2[0].get(hit2[1]) or {}).get("VOD_PACKS") != want:
+        raise RuntimeError(f"写入后读回不一致：{path}")
+    return (True, f"已写入 {path}（重启宿主会话生效；旧值备份 .bak）")
+
+
+def cmd_packs(args):
+    action = getattr(args, "packs_action", "status")
+    target = getattr(args, "target", "") or ""
+    rows = _filter(_rows(), target)
+    if not rows:
+        print("未安装（无 install-manifest）" if not _rows() else f"没有该宿主的安装记录：{target}")
+        return
+    if action == "status":
+        for row in rows:
+            state, eff, note = _read_effective(row)
+            eff_s = ",".join(eff) if eff else "—"
+            print(f"{row.get('target'):14s} 生效 packs: {eff_s}   [{state}] {note}")
+        return
+    # enable/disable/all
+    if action == "all":
+        want = packs_mod.ALL_PACKS
+    else:
+        ids = [p.strip() for p in (getattr(args, "ids", "") or "").split(",") if p.strip()]
+        if not ids:
+            print("用法：packs enable|disable core,collect [--target <agent>] [--apply]",
+                  file=__import__("sys").stderr)
+            return
+        for row in rows:
+            state, eff, note = _read_effective(row)
+            if eff is None:
+                print(f"{row.get('target'):14s} 跳过：{note}")
+                continue
+            base = list(eff)
+            if action == "enable":
+                base += [p for p in ids if p not in base]
+            else:
+                base = [p for p in base if p not in ids]
+            want = tuple(dict.fromkeys(["core"] + base))   # core 强制包含
+            try:
+                changed, note = _write_packs(row, want, getattr(args, "apply", False))
+            except RuntimeError as e:
+                print(f"{row.get('target'):14s} 失败：{e}")
+                continue
+            print(f"{row.get('target'):14s} → {','.join(want)}  {note}")
+            if changed and getattr(args, "apply", False):
+                _update_row_packs(row.get("target"), ",".join(want))
+        return
+    for row in rows:
+        state, eff, note = _read_effective(row)
+        if eff is None:
+            print(f"{row.get('target'):14s} 跳过：{note}")
+            continue
+        try:
+            changed, note = _write_packs(row, want, getattr(args, "apply", False))
+        except RuntimeError as e:
+            print(f"{row.get('target'):14s} 失败：{e}")
+            continue
+        print(f"{row.get('target'):14s} → {','.join(want)}  {note}")
+        if changed and getattr(args, "apply", False):
+            _update_row_packs(row.get("target"), ",".join(want))
+
+
+def _update_row_packs(target: str, packs: str) -> None:
+    """manifest 行同步（幂等；读改写整份文件，只动目标行的 packs）。"""
+    p = common.manifest_path()
+    if not p.exists():
+        return
+    mf = json.loads(p.read_text(encoding="utf-8"))
+    rows = mf.get("installs") or []
+    for r in rows:
+        if r.get("target") == target:
+            r["packs"] = packs
+    if rows:
+        mf["installs"] = rows
+        mf["packs"] = packs
+    p.write_text(json.dumps(mf, ensure_ascii=False, indent=2), encoding="utf-8")

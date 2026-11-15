@@ -116,6 +116,14 @@ def main():
     ap.add_argument("--host", default="127.0.0.1", help="remote 绑定地址（默认回环）")
     args, _unknown = ap.parse_known_args()
 
+    # VOD_PACKS 未知 id 启动即报错（D-packs-config-1，对齐 devkit 口径）：
+    # 静默过滤会让"配了"和"生效"分叉，排障时没人能看出是拼写错还是没装。
+    try:
+        packs.enabled_packs()
+    except packs.UnknownPack as e:
+        print(f"[vod-devkit] {e}", file=sys.stderr)
+        sys.exit(2)
+
     # 启动自诊（排障：写 /tmp，宿主过滤环境变量时可观察实际 env）
     try:
         runtime_state._ensure_first_boot()  # D-key-guard-3①：首启标记+构建机残留清理（preset 兜底）

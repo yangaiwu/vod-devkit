@@ -11,11 +11,22 @@ from vod_mcp import hosts as host_specs
 from vodkit_cli import common, remote
 
 
-def cmd_status(_args):
+def cmd_status(args=None):
+    target = (getattr(args, "target", "") or "") if args else ""
     p = common.manifest_path()
     if not p.exists():
         print("未安装（无 install-manifest）")
         sys.exit(1)
+    if target:
+        mf = json.loads(p.read_text(encoding="utf-8"))
+        rows = mf.get("installs") or ([mf] if mf.get("target") else [])
+        hit = next((r for r in rows if r.get("target") == target), None)
+        if hit is None:
+            print(f"没有该宿主的安装记录：{target}"
+                  f"（现有：{', '.join(r.get('target','?') for r in rows) or '无'}）")
+            sys.exit(1)
+        print(json.dumps(hit, ensure_ascii=False, indent=2))
+        return
     # golden 稳定性：apiBase 含安装期动态值（本地验证实例端口），归一化后输出
     text = p.read_text(encoding="utf-8")
     text = re.sub(r'"apiBase": "http://127\.0\.0\.1:\d+"',
@@ -117,13 +128,29 @@ def cmd_detect(args):
     print("摘要：" + detect_framework.summary_line(info))
 
 
-def cmd_doctor(_args):
+def cmd_doctor(args=None):
+    target = (getattr(args, "target", "") or "") if args else ""
     problems = []
     p = common.manifest_path()
     if not p.exists():
         problems.append("无 install-manifest.json（未 install？）")
     else:
         mf = json.loads(p.read_text(encoding="utf-8"))
+        rows = mf.get("installs") or ([mf] if mf.get("target") else [])
+        if rows:
+            row_names = ", ".join(r.get("target", "?") for r in rows)
+            if target:
+                hit = next((r for r in rows if r.get("target") == target), None)
+                if hit is None:
+                    problems.append(f"没有该宿主的安装记录：{target}（现有：{row_names}）")
+                else:
+                    # --target：把该行的字段覆盖到视图上，检查按这一行走
+                    mf = {**mf, **{k: v for k, v in hit.items() if v is not None}}
+                    print(f"[doctor] 检查安装行：{target}")
+            elif len(rows) > 1:
+                # 缺省视图=最近一次安装（顶层字段即最后一次写入）；多行只在末尾列出，
+                # 要看单个宿主用 --target（避免在多宿主上把"某一行的问题"说成全局）
+                print(f"[doctor] 安装行: {row_names}（--target <agent> 选择单个）")
         # dsh patch 块自愈（S58/A 止血，2026-11-06 真机实锤）：dsh 运行时
         # 序列化会冲掉 profile patch 里的 vod 块（配置树不含手工块）——
         # doctor 检测缺失/打平后按 manifest 的 product/apiBase 重建嵌套块

@@ -1193,3 +1193,38 @@ C：新宿主 officeace/openclaw）。负责人拍板 A3/B1/C3；A3 落地前实
 不设量化触发器（没有安装面可统计）。将来出现可安装形态再按同一套 integrations
 宿主规格 + 适配器 + 用例补，不做提前适配（无消费者的适配层）。
 覆盖现状：任意 MCP 宿主今天可走 `install --target generic --mcp-config <file>`。
+
+## D-global-cmds-1：全局命令与多宿主消费面（2026-11-15，负责人要求"全部优化"）
+
+**背景**：install-manifest 早就按宿主记多行（`installs[]`，D-installs-1），但消费命令
+（status/doctor/update）只读顶层、uninstall 没有 --target。结果是"账本多宿主、视图单宿主"，
+而 huaweicloud-devkit 的三条全局命令（version / packs status / uninstall --clean-global）
+恰好都建立在这个视图上。
+
+**决定**：
+- 新增 `version`：manifest 的已装版本 + 宿主配置里**实际生效**的 packs 并排打。
+- 新增 `packs status|enable|disable|all`：读宿主真实配置；写默认 dry-run，`--apply` 才落盘，
+  只改受管条目 `env.VOD_PACKS`（首改 .bak、写后读回、core 强制、不可写 JSON 的宿主明说
+  "需重跑 install"）。
+- `install --target all`：只装探测到的专属宿主；generic 不参与（它是手填配置的兜底）。
+- `uninstall --target` / `--clean-global`：按行摘+保留在用载荷；残留只清认得的（无
+  payload.json 的载荷、含 vod-devkit 的 npx 缓存）。
+- `status|doctor --target`：多行里选一行。
+- 未知包 id：安装口与启动口都 exit 2（此前静默过滤，实测 `core,bogus` → `('core',)`）。
+
+**为什么"读宿主配置"而不只读 manifest**：manifest 是我们写过的意图，宿主配置是现状。
+宿主可能被手工改、被别的安装覆盖；只读 manifest 会把"以为的"报成"实际的"，而版本/能力面
+漂移正是要发现的东西。
+
+**为什么 dry-run 默认**：packs 写入会一次影响九台宿主配置。改配置这个动作的风险不对称：
+少改一次只是没生效（可重跑），多改一次可能把别的宿主的键改坏（用户要自己修）。所以默认
+只报将改什么，`--apply` 是显式动作。
+
+**没做的（本轮边界，非遗漏）**：
+- `packs_configure`（stdio 会话内开关 + 真推 tools/list_changed）：需要运行期工具面变更，
+  与远程面无状态语义冲突，另行评估。
+- `auth init` 向导与会话内 auth_switch、PreToolUse 真拦截：见 README/设计里的后续项，
+  未在本轮落地，不许在文档里写成"已有"。
+
+**代价**：多一套读路径（宿主配置解析）。用递归定位而不是九张硬编码表，新增宿主时
+只需配置里存在该条目即可被识别。

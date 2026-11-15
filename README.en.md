@@ -48,6 +48,22 @@ npx -y vod-devkit@latest status   # install-manifest: version / source / host / 
 evidence and no memory); when given it is validated against the catalog and a
 typo exits 2.
 
+### Global commands (whole-machine view)
+
+```bash
+vod-devkit version                              # CLI version + per-host installed version + effective packs
+vod-devkit packs status                         # read each host's real config (not the manifest) for VOD_PACKS
+vod-devkit packs enable collect                 # dry-run: shows what would change
+vod-devkit packs enable collect --apply          # write: managed entry env only, .bak on first change
+vod-devkit install --target all                 # install to every detected host (hosts without CLI are skipped)
+vod-devkit uninstall --target codex             # remove just this host row
+vod-devkit uninstall --target codex --clean-global   # also purge payload residue and stale npx cache
+```
+
+The multi-host ledger lives in `install-manifest.json` → `installs[]` (deduped by target).
+`--target` defaults to all rows. An unknown id in `VOD_PACKS` makes **both** install and server
+startup exit 2 (never silently filtered — that produced "configured but not in effect").
+
 ## Per-host install
 
 `install` takes `--target`; `doctor` / `status` / `verify` / `update` /

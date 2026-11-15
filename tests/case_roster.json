@@ -355,6 +355,30 @@
     "S115": {
       "carrier": "docs/design.md"
     },
+    "S116": {
+      "carrier": "docs/design.md"
+    },
+    "S117": {
+      "carrier": "docs/design.md"
+    },
+    "S118": {
+      "carrier": "docs/design.md"
+    },
+    "S119": {
+      "carrier": "docs/design.md"
+    },
+    "S120": {
+      "carrier": "docs/design.md"
+    },
+    "S121": {
+      "carrier": "docs/design.md"
+    },
+    "S122": {
+      "carrier": "docs/design.md"
+    },
+    "S123": {
+      "carrier": "docs/design.md"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

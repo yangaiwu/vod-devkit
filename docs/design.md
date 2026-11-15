@@ -915,3 +915,48 @@ cache 内 .mcp.json 被改写成 `python3` 绝对路径 + `payloads/0.5.9/vod_mc
 
 用例承载：`tests/test_mcp_manifest_a3.py`（S111-S114）；
 需求侧见 `docs/proposal.md`「插件 MCP 清单形态」一节。
+
+## 全局命令：读路径与写纪律（D-global-cmds-1，2026-11-15）
+
+一个视图，两个来源：
+
+| 来源 | 用途 | 为什么不是另一个 |
+|---|---|---|
+| `install-manifest.json` 的 `installs[]` | "我装过哪些宿主、装的是哪个版本、用了哪个载荷" | 这是**我们写过的**记录，回答安装意图 |
+| 宿主真实配置文件 | "现在实际生效的 packs/入口是什么" | 宿主可能被手工改过、被别的安装动作覆盖；只读 manifest 会把"以为的"当成"实际的" |
+
+`version` 把两者并排打：已装版本来自 manifest，生效 packs 来自宿主配置。两者不一致
+本身就是诊断信息（例如人在配置里改了 VOD_PACKS，manifest 还停在安装值）。
+
+宿主配置定位（不写九张表）：递归找"哪个对象里有 `vod-devkit` 且该值像 server 条目
+（有 command/args）"，再取它的 `env` 或 `environment`；hermes 那种"独立 mcp json 顶层
+就是条目"单独判一次。写死九个路径的写法在下一个宿主形态上必然再漏一次——递归定位
+把"新宿主"退化成"配置里有没有这条目"。
+
+写纪律（`packs enable|disable|all`）：
+- 缺省 dry-run，`--apply` 才写：多宿主批量改配置属于"一次影响九台宿主"，必须两步。
+- 只改 `env.VOD_PACKS`：其它 env（`VOD_JAVA_API_BASE` 等）、宿主其它 server、用户自有键
+  原样保留；首改落 `.bak`。
+- 写后读回：与 codex 改写同一条纪律——写成功 ≠ 落盘就是我们要的；不一致抛错。
+- `core` 强制包含：禁 core 等于关掉元数据/安全面，跟 devkit 同口径。
+- 不可写 JSON 的宿主（dsh 的 cordis.patch.yml、codex-desktop 的 marketplace）**明确报
+  "需重跑 install"**，不打印成功。
+
+卸载语义（`uninstall --target` / `--clean-global`）：
+- `--target` 只摘该行；其它行、与其它行共用的载荷、`skillInstalls` 里属于别的宿主
+  的原生副本都不动。
+- `--clean-global` 只清两类认得的残留：①无 `payload.json` 的载荷目录（`payload.residue`）；
+  ②`~/.npm/_npx/*/node_modules/vod-devkit` 的 npx 缓存目录。在用载荷与不认得的目录绝不碰，
+  逐条打印删了什么。
+
+未知包 id 的两个入口（S116）：安装口（`install` 在写任何宿主配置之前）与运行口
+（server 启动、`initialize` 之前）共用 `packs.parse_packs`，都 exit 2 并列可用 id。
+静默过滤的反例是实测的：`VOD_PACKS=core,bogus` 曾静默变成 `('core',)`——操作者以为
+关掉/打开了某个包，实际两头都不是。
+
+已知边界（诚实标注）：
+- `version` 报"已装版本"来自 manifest 记录，不启动宿主、不探活；版本漂移的**真实**
+  运行时形态由 `doctor` 回答（它会读 codex 插件缓存的实际 command/args）。
+- dsh 的 packs 目前改不了（写在 profile patch 里），`packs` 会明说而不是静默跳过。
+
+用例承载：`tests/test_global_cmds.py`（S116-S123）。

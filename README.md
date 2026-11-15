@@ -1,5 +1,13 @@
 # vod-devkit
 
+[![CI](https://github.com/yangaiwu/vod-devkit/actions/workflows/ci.yml/badge.svg)](https://github.com/yangaiwu/vod-devkit/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/vod-devkit)](https://www.npmjs.com/package/vod-devkit)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
+
+**成熟度：Beta（0.5.x）** —— 运行时接口与契约面稳定，安装/配置面在小版本间可能有
+形态调整（每次在 CHANGELOG 写明）；对外采集口径（两段式同意、原话逐字、归因不问用户）
+视为红线，不随版本放宽。
+
 [English](README.en.md) | 中文
 
 把 **AI agent 产品的用户反馈**原话送进 VOD（Voice of Developer）囤积区：MCP server +
@@ -25,6 +33,15 @@
 
 远程面额外需要官方 MCP SDK：`pip install 'vod-devkit[remote]'`（stdio 形态零第三方依赖）。
 
+### 装不上怎么办（四类实测失败，先按这个自查）
+
+| 现象 | 判据 | 修法 |
+|---|---|---|
+| `No module named mcp` | 起了 `--transport remote` 却没装 SDK | `pip install 'vod-devkit[remote]'`（stdio 不需要） |
+| 宿主侧工具面为空 / 启动失败 | 宿主 PATH 里没有能用的解释器（沙箱/精简 PATH） | 安装时钉解释器：`VOD_PYTHON=/usr/bin/python3.12 npx -y vod-devkit@latest install ...`；`doctor` 看 MCP 实际形态 |
+| `ETARGET` / 拿到的还是旧版本 | npm 镜像滞后（npmmirror、内部镜像常见） | `npx --yes --registry=https://registry.npmjs.org vod-devkit@latest ...` |
+| 更新了但行为没变 | codex 插件缓存跑旧副本（实测 0.4.2） | 重跑 `install --target codex`；`doctor` 会报"CLI 形态 / 载荷形态" |
+
 ## 快速开始
 
 ```bash
@@ -40,6 +57,23 @@ npx -y vod-devkit@latest status   # install-manifest：版本 / 来源 / 宿主 
 
 `--product <产品名>` 是可选先验（仅在无字面证据且无记忆时兜底）；给了就会做名录
 硬校验，拼错直接 `exit 2`，不给也能装。
+
+### 全局命令（一次性看整台机器）
+
+```bash
+npx -y vod-devkit@latest version                        # CLI 版本 + 每个宿主已装版本 + 生效的能力包
+npx -y vod-devkit@latest packs status                   # 各宿主实际生效的 VOD_PACKS（读宿主真实配置）
+npx -y vod-devkit@latest packs enable collect           # 将改什么（默认不写盘）
+npx -y vod-devkit@latest packs enable collect --apply   # 真写：只改受管条目的 env，重启用生效
+npx -y vod-devkit@latest install --target all           # 所有探测到的宿主一步装全（缺 CLI 的跳过）
+npx -y vod-devkit@latest uninstall --target codex       # 只摘这一个宿主，其它安装行保留
+npx -y vod-devkit@latest uninstall --target codex --clean-global   # 并清载荷残留与 npx 缓存
+```
+
+多宿主账本在 `install-manifest.json` 的 `installs[]`（按 target 去重）。`--target` 缺省
+作用于全部行；`packs` 的写操作默认 dry-run，`--apply` 才落盘（首改留 `.bak`，写后读回验证，
+`core` 强制包含）。`VOD_PACKS` 里出现未知包 id 时**安装口与 server 启动口都会报错退出**
+——不静默过滤，免得"配了没生效"。
 
 ## 按宿主安装
 

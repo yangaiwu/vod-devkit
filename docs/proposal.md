@@ -1133,3 +1133,37 @@ A3（`${PLUGIN_ROOT}` 静态形态）的当前处置：**搁置，不废弃**。
 验收口径（目标环境执行，工具不入库）：`python3 -m pytest tests/test_mcp_manifest_a3.py -q`
 全绿；装机后 `codex mcp get vod-devkit --json` 的 command 是本机 3.10+ 绝对路径且
 args 指向载荷；把 PATH 上的 python3 换成 3.9 再启动 → stderr 出现版本 guard 文案而非 traceback。
+
+
+## 全局命令与多宿主消费面（S116-S123，D-global-cmds-1，2026-11-15）
+
+需求变更：install-manifest 早就记了全部宿主（`installs[]`，D-installs-1），但消费方
+还是单宿主。本组把读路径统一成"整台机器一个视图"，并给能力包一个可解释的写入面。
+
+- `version`：CLI 版本 + 每个宿主已装版本（同版/≠CLI）+ 该宿主**实际生效**的 VOD_PACKS。
+- `packs status`：读每个宿主的真实配置回答"现在跑的是哪一套"（不是读 manifest 猜）。
+- `packs enable|disable|all [--apply]`：缺省 dry-run；`--apply` 只改受管条目的
+  `env.VOD_PACKS`，首改留 `.bak`，写后读回验证；`core` 强制包含；宿主配置不是可写
+  JSON 的（dsh 等）明确报"需重跑 install"，不假装改成功。
+- `install --target all`：只装探测到的专属宿主，缺 CLI 的跳过（generic 不参与）。
+- `uninstall --target <agent>`：只摘该行，其它安装行保留；`--clean-global` 逐条清
+  载荷残留与 npx 缓存里的旧副本——**在用载荷与不认得的目录一律不碰**。
+- `status|doctor --target <agent>`：从多行里选一行检查；缺省视图=最近一次安装（顶层
+  字段即最后一次写入），多行时打印安装行清单提示用 `--target`。
+- 未知包 id：安装口与 server 启动口都 `exit 2` 并列出可用 id（此前静默过滤——实测
+  `VOD_PACKS=core,bogus` 会静默变成 `('core',)`，属"配了不生效"）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S116 | 未知包 id 即报错 | `parse_packs("core,bogus")` 抛 UnknownPack 且列出可用 id；`kb` 别名仍映射 knowledge；server 子进程以该 env 启动 → exit 2 + stderr 文案 |
+| S117 | 前置与排障段 | README 有"装不上怎么办"四类（SDK 缺失/解释器不在 PATH/镜像滞后/插件缓存旧副本），每条给判据与修法，且不引用不存在的参数（`VOD_PYTHON` 存在，`--python` 不存在） |
+| S118 | version 全局视图 | 两行 manifest（同版 / 落后）分别输出"同版"与"≠ CLI"，并同时打印各自生效 packs |
+| S119 | packs status 读真实配置 | 从宿主配置文件读出 VOD_PACKS（不是从 manifest 推断） |
+| S120 | packs 写纪律 | 缺省 dry-run 不改字节；`--apply` 只改 env.VOD_PACKS、宿主其它键原样保留、首改落 .bak、读回验证；`core` 禁不掉；`all` 置全包 |
+| S121 | --target all | 只循环探测到的宿主（缺 CLI 跳过）；零宿主时 exit 2 并说明 |
+| S122 | uninstall 收窄与清残留 | `--target` 只摘该行且保留其它行与在用载荷；`--clean-global` 只删无 payload.json 的载荷与含 vod-devkit 的 npx 缓存目录，不认得的目录不碰 |
+| S123 | status/doctor --target | 选中行输出该行 JSON；未知 target 明确报"没有该宿主的安装记录"并列出已有 |
+
+验收口径（目标环境执行，工具不入库）：`python3 -m pytest tests/test_global_cmds.py -q`
+全绿；真机上 `version` 输出四行（本机实测 hermes/opencode/dsh/codex）；
+`packs disable knowledge`（不带 `--apply`）打印"未写盘"，文件 mtime 不变。
