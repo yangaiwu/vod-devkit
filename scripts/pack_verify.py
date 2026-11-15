@@ -8,7 +8,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MUST_HAVE = ["package.json", "bin/vod-devkit", "vod_mcp/server.py",
+MUST_HAVE = ["package.json", "bin/vod-devkit",
+             # 安装器实现包（F8 拆分后 bin 只是入口薄壳——漏打这个包=npx 装不上任何宿主）
+             "vodkit_cli/cli.py", "vodkit_cli/common.py",
+             "vod_mcp/server.py",
              "contract/tools.schema.json", "README.md",
              # codex 原生插件路径的 npm 分发必需（marketplace+插件随包）
              "plugins/.agents/plugins/marketplace.json",

@@ -6,11 +6,12 @@ preset 形态零外呼。另外顺带钉死 semver 比较——字符串比较�
 """
 import json
 
+from vod_mcp import runtime_state as _state
 from vod_mcp import tools, update_check as uc
 
 
 def _rt():
-    return json.loads(tools._runtime_path().read_text(encoding="utf-8"))
+    return json.loads(_state._runtime_path().read_text(encoding="utf-8"))
 
 
 def test_version_tuple_orders_numerically():
@@ -74,7 +75,7 @@ def test_preset_distribution_never_calls_network(monkeypatch):
     def boom(timeout=3):
         raise AssertionError("preset 形态不应发外呼")
     monkeypatch.setattr(uc, "_fetch_latest", boom)
-    monkeypatch.setattr(tools, "_distribution", lambda: "preset")
+    monkeypatch.setattr(_state, "_distribution", lambda: "preset")
     out = tools.dispatch("vod_check_update", {})
     assert out["checked"] is False
     assert "preset" in out["note"]
@@ -100,9 +101,9 @@ def test_skip_version_suppresses_only_that_version(monkeypatch):
 
     # 更新的版本出现 → 照常提醒（不提供永久静音）
     # 先把 24h 缓存打到过期，模拟"过一阵子再检查"
-    st = dict(tools._runtime_cfg().get("update_check") or {})
+    st = dict(_state._runtime_cfg().get("update_check") or {})
     st["checkedAt"] = "2000-01-01T00:00:00"
-    tools._save_runtime({"update_check": st})
+    _state._save_runtime({"update_check": st})
     monkeypatch.setattr(uc, "_fetch_latest", lambda timeout=3: "99.1.0")
     out3 = tools.dispatch("vod_check_update", {})
     assert out3["updateAvailable"] is True and out3["latestVersion"] == "99.1.0"
@@ -121,8 +122,8 @@ def test_clear_skip_restores_nagging(monkeypatch):
 
 def test_skip_when_registry_unreachable_is_honest(monkeypatch):
     # 隔离：清掉缓存里的 latestVersion（否则 skip 会直接拿缓存值，测不到不可达路径）
-    tools._save_runtime({"update_check": {k: v for k, v in
-                                          (tools._runtime_cfg().get("update_check") or {}).items()
+    _state._save_runtime({"update_check": {k: v for k, v in
+                                          (_state._runtime_cfg().get("update_check") or {}).items()
                                           if k != "latestVersion"}})
     monkeypatch.setattr(uc, "_fetch_latest", lambda timeout=3: None)
     out = tools.dispatch("vod_check_update", {"skip": True})

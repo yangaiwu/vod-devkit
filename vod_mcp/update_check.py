@@ -52,7 +52,7 @@ def _version_tuple(v: str) -> tuple:
 
 
 def check(params: dict | None = None) -> dict:
-    from vod_mcp import __version__, tools
+    from vod_mcp import __version__, runtime_state as tools
     params = params or {}
     dismiss = bool(params.get("dismiss"))
     skip = bool(params.get("skip"))

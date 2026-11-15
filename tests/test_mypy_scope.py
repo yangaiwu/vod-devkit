@@ -34,9 +34,9 @@ def _cfg() -> dict:
 
 
 def test_mypy_checks_the_whole_package_by_default():
-    """files 必须是整包：新增模块不写任何配置也会被检查。"""
+    """files 必须是整包（含 F8 拆出的安装器包）：新增模块不写配置也会被检查。"""
     pytest.importorskip("tomllib")
-    assert _cfg()["tool"]["mypy"]["files"] == ["vod_mcp"], (
+    assert _cfg()["tool"]["mypy"]["files"] == ["vod_mcp", "vodkit_cli"], (
         "mypy files 不是整包——新增模块会静默逃检；豁免请走 overrides 技术债清单")
 
 
