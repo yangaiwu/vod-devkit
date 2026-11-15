@@ -84,7 +84,7 @@ def test_attribution_module_is_pure():
 def test_contract_and_handlers_are_one_set():
     """契约是工具面单一真源：契约里的工具 == dispatch 注册的 handler。"""
     from vod_mcp import tools as impl
-    contract = json.loads((ROOT / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
+    contract = json.loads((ROOT / "src" / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
     declared = set(contract["tools"])
     implemented = set(impl._HANDLERS)
     assert declared == implemented, (
@@ -98,8 +98,8 @@ def test_contract_and_handlers_are_one_set():
 
 def test_policy_rules_have_required_fields_and_real_tools():
     """护栏策略必备字段下限 + 规则指向的工具必须存在（防悬空规则）。"""
-    policy = json.loads((ROOT / "safety" / "policy.json").read_text(encoding="utf-8"))
-    contract = json.loads((ROOT / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
+    policy = json.loads((ROOT / "src" / "safety" / "policy.json").read_text(encoding="utf-8"))
+    contract = json.loads((ROOT / "src" / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
     tools = set(contract["tools"])
     rules = policy.get("rules") or []
     assert rules, "policy.json 没有规则——护栏静默失效"
@@ -162,7 +162,7 @@ def test_server_instructions_match_attribution_design():
 _ROOT_ALLOW = {
     # 目录
     "bin", "contract", "dsh", "docs", "hooks", "integrations", "npm",
-    "plugins", "safety", "scripts", "skills", "tests", "vod_mcp", "vodkit_cli",
+    "plugins", "scripts", "src", "tests", "vod_mcp", "vodkit_cli",
     # 顶层文件（元数据 + 门面文档）
     "CHANGELOG.md", "CODE_OF_CONDUCT.md", "CONTRIBUTING.md", "INSTALL.md",
     "LICENSE.txt", "NOTICE", "OWNERS", "QUICKSTART.md", "README.en.md",

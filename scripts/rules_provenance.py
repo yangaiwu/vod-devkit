@@ -69,7 +69,9 @@ def check(engine_dir: str | Path | None, manifest_path: Path = MANIFEST,
     engine = Path(str(engine_dir))   # 收窄：_engine_ok 已挡住 None/不可 stat
     report = {"status": "ok", "reason": "", "entries": []}
     for entry in data.get("skills") or []:
-        skill_path = Path(root) / entry["skill"]
+        # 技能路径相对**资产根**（仓内 src/，载荷/插件副本=根）——S2 起源在 src/skills
+        assets = root / "src" if (root / "src" / "skills").is_dir() else root
+        skill_path = assets / entry["skill"]
         problems = []
         skill_text = ""
         if not skill_path.exists():
@@ -111,7 +113,9 @@ def record(engine_dir: str | Path, manifest_path: Path = MANIFEST,
             p = engine / spec["file"]
             if p.exists():
                 recorded["engine"][spec["file"]] = sha256(p)
-        skill_path = Path(root) / entry["skill"]
+        # 技能路径相对**资产根**（仓内 src/，载荷/插件副本=根）——S2 起源在 src/skills
+        assets = root / "src" if (root / "src" / "skills").is_dir() else root
+        skill_path = assets / entry["skill"]
         if skill_path.exists():
             recorded["skill"] = sha256(skill_path)
         entry["recorded"] = recorded

@@ -10,7 +10,8 @@ import sys
 from pathlib import Path
 
 from vod_mcp import hosts as host_specs
-from vod_mcp.host_adapters.base import ROOT, server_env, server_entry
+from vod_mcp import paths
+from vod_mcp.host_adapters.base import server_env, server_entry
 
 HOST = "hermes"
 SUPPORTS_REMOTE = True
@@ -39,7 +40,7 @@ def _profile_config() -> Path:
 
 
 def _hook_script() -> Path:
-    return ROOT / "hooks" / "vod_router.py"
+    return paths.HOOKS / "vod_router.py"
 
 
 def _hook_command() -> str:

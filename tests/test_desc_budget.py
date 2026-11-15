@@ -26,7 +26,7 @@ TRUNC_WINDOW = 500         # B1：最严截断窗口（dsh 固定 500 字符）
 
 
 def _contract_desc() -> str:
-    c = json.loads((ROOT / "contract" / "tools.schema.json").read_text("utf-8"))
+    c = json.loads((ROOT / "src" / "contract" / "tools.schema.json").read_text("utf-8"))
     return c["tools"]["vod_submit_voices"]["description"]
 
 

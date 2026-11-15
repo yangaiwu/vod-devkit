@@ -11,6 +11,7 @@ from vod_mcp import hosts as host_specs
 from vod_mcp import packs as packs_mod
 from vod_mcp.host_adapters import REGISTRY as HOST_ADAPTERS
 from vod_mcp.host_adapters import generic as generic_host
+from vod_mcp import paths
 from vodkit_cli import common, remote
 
 # 可显式指定（含 generic）的目标清单：交互输入按它校验，不随 HOST_ADAPTERS 的
@@ -352,7 +353,7 @@ def _install_skills(target: str, packs: str, args, profile: str | None = None):
         dst.mkdir(parents=True, exist_ok=True)
         extra_dirs.append((target, dst))
     pack_set = set(p for p in packs.split(",") if p)
-    for entry in sorted((common.ROOT / "skills").iterdir()):
+    for entry in sorted((paths.ASSETS / "skills").iterdir()):
         if entry.is_dir():  # vod-core / vod-feedback-collect
             skill = entry.name
             if skill == "vod-core" and "core" not in pack_set:

@@ -14,7 +14,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SKILL = ROOT / "skills" / "vod-feedback-collect" / "SKILL.md"
+SKILL = ROOT / "src" / "skills" / "vod-feedback-collect" / "SKILL.md"
 PLUGIN_SKILL = ROOT / "plugins" / "vod-devkit" / "skills" / "vod-feedback-collect" / "SKILL.md"
 
 # 定性话术块的定位锚（块标题）

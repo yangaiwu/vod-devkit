@@ -12,7 +12,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SKILL = (ROOT / "skills" / "vod-feedback-collect" / "SKILL.md").read_text(encoding="utf-8")
+SKILL = (ROOT / "src" / "skills" / "vod-feedback-collect" / "SKILL.md").read_text(encoding="utf-8")
 PROPOSAL = (ROOT / "docs" / "proposal.md").read_text(encoding="utf-8")
 
 PROBLEM_TYPES = ("产品缺陷", "技术业务咨询", "体验改进", "主观评价", "无效问题", "功能需求")

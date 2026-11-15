@@ -85,7 +85,7 @@ def test_followup_oversize_truncated_engine_aligned(hoard_capture):
 
 def test_fixed_question_verbatim_in_contract():
     """话术固定化：固定问句必须逐字在契约描述中，且恰好出现一次。"""
-    c = json.load(open("contract/tools.schema.json"))
+    c = json.load(open("src/contract/tools.schema.json"))
     desc = c["tools"]["vod_submit_voices"]["description"]
     assert desc.count(FIXED_QUESTION) == 1, "固定问句必须逐字出现且仅一次"
     # 数据分层纪律句在位
@@ -135,7 +135,7 @@ def test_followup_skill_judgment_block_locked():
     四行为用例（已有现象不问/泛化抱怨问一次/未答引导补充问一次/答没有直接
     提交）属 agent 行为，文本锁钉死判定规则本身防漂移。"""
     blocks = []
-    for p in ("skills/vod-feedback-collect/SKILL.md",
+    for p in ("src/skills/vod-feedback-collect/SKILL.md",
               "plugins/vod-devkit/skills/vod-feedback-collect/SKILL.md"):
         s = open(p, encoding="utf-8").read()
         blocks.append(s)
@@ -159,7 +159,7 @@ def test_followup_skill_judgment_block_locked():
 def test_followup_skip_clause_in_contract():
     """S67-S70：契约 description 跳过句（引导补充已获实质内容不再追问）
     逐字在位——判定块三层与契约/SKILL 三载体同源。"""
-    c = json.load(open("contract/tools.schema.json"))
+    c = json.load(open("src/contract/tools.schema.json"))
     desc = c["tools"]["vod_submit_voices"]["description"]
     assert ("引导补充（说下具体现象）已获实质内容并并入 content 时不再追问、直接提交" in desc)
     assert ("仅引导补充未获回应或仅泛化抱怨且用户确认提交时才带出固定问句" in desc)
@@ -170,7 +170,7 @@ def test_followup_boundary_refinement_locked():
     新字段来源唯一=固定追问原样回答；②"未回应/泛化抱怨"可执行判定例；
     ③一句话口径=可测原文（payload 键+issue 段+来源注记三处诚实回退）。
     三载体（SKILL 双副本/契约/proposal）锚点断言。"""
-    skill = open("skills/vod-feedback-collect/SKILL.md", encoding="utf-8").read()
+    skill = open("src/skills/vod-feedback-collect/SKILL.md", encoding="utf-8").read()
     assert "不回溯摘入新字段" in skill
     assert "新字段仅承载固定追问的原样回答" in skill
     assert '"未回应"=用户未针对引导补充给出任何具体信息' in skill
@@ -179,7 +179,7 @@ def test_followup_boundary_refinement_locked():
             and "payload 不含对应键" in skill
             and "不作来源注记" in skill
             and "符合诚实回退" in skill)
-    c = json.load(open("contract/tools.schema.json"))
+    c = json.load(open("src/contract/tools.schema.json"))
     assert "不回溯摘入新字段" in c["tools"]["vod_submit_voices"]["description"]
     # proposal 与 SKILL 口径同源
     prop = open("docs/proposal.md", encoding="utf-8").read()
@@ -196,9 +196,9 @@ def test_followup_questionnaire_structure_words_banned():
     # 禁的是对用户话术层的问卷化措辞——语义词命中才是问卷化信号）
     banned = ["偶尔还是每次", "大概频率", "期望 vs 实际", "期望vs实际",
               "找不到入口", "步骤太多", "哪个功能难用", "打开页面慢"]
-    for p in ("skills/vod-feedback-collect/SKILL.md",
+    for p in ("src/skills/vod-feedback-collect/SKILL.md",
               "plugins/vod-devkit/skills/vod-feedback-collect/SKILL.md",
-              "contract/tools.schema.json"):
+              "src/contract/tools.schema.json"):
         s = open(p, encoding="utf-8").read()
         # 数字编号列表在话术载体中出现=问卷化信号（判定块用 1.2.3. 但那是
         # 给 agent 的规则层不是对用户话术层——话术载体白名单外禁编号清单）
@@ -210,7 +210,7 @@ def test_anti_truncation_redline_locked():
     """opencode 实锤（2026-11-08）：用户补充"操作不方便，流程合理"被模型
     截成"操作不方便"提交——SKILL 反截断红线钉死：补充句整体=content，
     禁摘片段；多轮分散表达=按序拼接。双副本逐字在位。"""
-    for p in ("skills/vod-feedback-collect/SKILL.md",
+    for p in ("src/skills/vod-feedback-collect/SKILL.md",
               "plugins/vod-devkit/skills/vod-feedback-collect/SKILL.md"):
         s = open(p, encoding="utf-8").read()
         assert "反截断红线" in s
@@ -223,7 +223,7 @@ def test_concat_verbatim_judgment_example_locked():
     """S72 拼接判定例（第二次实锤）：多轮拼接禁删语气词/禁补标点——
     实锤"产品体验很差劲啊"被拼成"产品体验很差劲。"（删啊补句号）。
     双副本判定例逐字在位。"""
-    for p in ("skills/vod-feedback-collect/SKILL.md",
+    for p in ("src/skills/vod-feedback-collect/SKILL.md",
               "plugins/vod-devkit/skills/vod-feedback-collect/SKILL.md"):
         s = open(p, encoding="utf-8").read()
         assert "拼接判定例" in s
@@ -282,7 +282,7 @@ def test_followup_status_stashed_in_draft(tmp_path, monkeypatch):
 
 def test_followup_status_skill_mapping_locked():
     """S74：SKILL 判定块三态映射话术锁（双副本）。"""
-    for p in ("skills/vod-feedback-collect/SKILL.md",
+    for p in ("src/skills/vod-feedback-collect/SKILL.md",
               "plugins/vod-devkit/skills/vod-feedback-collect/SKILL.md"):
         s = open(p, encoding="utf-8").read()
         assert "followupStatus" in s
@@ -292,7 +292,7 @@ def test_followup_status_skill_mapping_locked():
 
 def test_followup_status_contract_enum_locked():
     """S74：契约 draft/submit 双工具 items 均含 followupStatus 白名单枚举。"""
-    c = json.loads((_ROOT / "contract" / "tools.schema.json").read_text("utf-8"))
+    c = json.loads((_ROOT / "src" / "contract" / "tools.schema.json").read_text("utf-8"))
     for tn in ("vod_submit_voices", "vod_draft_voices"):
         prop = c["tools"][tn]["input"]["properties"]["voices"]["items"]["properties"]["followupStatus"]
         assert prop["enum"] == ["not_asked", "declined", "answered"]

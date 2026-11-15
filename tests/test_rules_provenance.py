@@ -18,7 +18,7 @@ def _fixture(tmp_path, engine_symbols=("甲类", "乙类"), skill_text="规则�
     (engine / "workflow" / "src" / "n01.py").write_text(
         "TYPE_DEFS = {" + "".join(f'"{s}": 1,' for s in engine_symbols) + "}\n",
         encoding="utf-8")
-    skill = tmp_path / "skills" / "demo"
+    skill = tmp_path / "src" / "skills" / "demo"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text(skill_text, encoding="utf-8")
     manifest = {

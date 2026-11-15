@@ -31,8 +31,26 @@ def root() -> Path:
 
 
 ROOT = root()
-SKILLS = ROOT / "skills"
-CONTRACT = ROOT / "contract" / "tools.schema.json"
-POLICY = ROOT / "safety" / "policy.json"
+
+
+def assets() -> Path:
+    """共享资产根（skills/contract/safety/hooks）。
+
+    仓内布局是 `src/<asset>`（D-structure-1 阶段 S2 起），而**发布布局不变**：
+    载荷与插件副本里四个资产直接挂在根下（`<payload>/skills` …）。这条差异只
+    在这里判一次，其它模块一律走下面的常量——否则"资产在哪"会在十几个文件里
+    各写一份判断，正是 S2 要收掉的东西。
+    """
+    cand = ROOT / "src"
+    if (cand / "skills").is_dir() or (cand / "contract").is_dir():
+        return cand
+    return ROOT
+
+
+ASSETS = assets()
+SKILLS = ASSETS / "skills"
+CONTRACT = ASSETS / "contract" / "tools.schema.json"
+POLICY = ASSETS / "safety" / "policy.json"
+HOOKS = ASSETS / "hooks"
 INSTALL_MANIFEST = ROOT / "install-manifest.json"
 RUNTIME_JSON = ROOT / "vod_mcp" / "runtime.json"
