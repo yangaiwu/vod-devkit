@@ -59,7 +59,7 @@ def test_packs_use_module_attribute_access_not_symbol_imports():
                      + "\n  ".join(bad))
 
 
-def test_patch_on_net_http_intercepts_real_call_chain():
+def test_patch_on_net_http_intercepts_real_call_chain(monkeypatch):
     """打桩 net._http → probe_key / auth_status 必须走假实现（而不是真发请求）。
 
     显式钉住 JAVA_KEY：auth_status 只有「有 key」时才走主动探针分支，而 key
@@ -72,30 +72,27 @@ def test_patch_on_net_http_intercepts_real_call_chain():
         seen.append((method, path))
         return {"data": {"products": ["CodeArts"], "productCatalog": [{"id": 7, "name": "CodeArts"}]}}
 
-    orig_http, orig_key = net._http, net.JAVA_KEY
-    net._http = fake
-    net.JAVA_KEY = "k-test"
-    try:
-        out = net.probe_key("k-test")
-        assert out["ok"] is True, out
-        assert seen and seen[0][0] == "GET", seen
-        seen.clear()
-        res = core.auth_status({})
-        assert res["keyCheck"]["ok"] is True, res
-        assert seen, "auth_status 的探针没命中假 _http（patch 面失效）"
-    finally:
-        net._http = orig_http
-        net.JAVA_KEY = orig_key
+    # 一律 monkeypatch（自动撤销）：直接给模块属性赋值会**永久**覆盖
+    # net.__getattr__ 的现读（D-state-read-1），污染后续用例
+    monkeypatch.setattr(net, "_http", fake)
+    monkeypatch.setattr(net, "JAVA_KEY", "k-test")
+    out = net.probe_key("k-test")
+    assert out["ok"] is True, out
+    assert seen and seen[0][0] == "GET", seen
+    seen.clear()
+    res = core.auth_status({})
+    assert res["keyCheck"]["ok"] is True, res
+    assert seen, "auth_status 的探针没命中假 _http（patch 面失效）"
 
 
-def test_patch_on_java_key_is_seen_by_eff_key():
-    """常量类打桩：net.JAVA_KEY 改了，net._eff_key() 必须读到新值。"""
-    orig = net.JAVA_KEY
-    net.JAVA_KEY = "k-patched"
-    try:
-        assert net._eff_key() == "k-patched"
-    finally:
-        net.JAVA_KEY = orig
+def test_patch_on_java_key_is_seen_by_eff_key(monkeypatch):
+    """常量类打桩：net.JAVA_KEY 改了，net._eff_key() 必须读到新值。
+
+    这是 patch 面契约：显式 set 过的模块属性优先于现读（PEP 562 __getattr__ 只在
+    属性缺失时触发）。必须用 monkeypatch，直接赋值会永久覆盖。
+    """
+    monkeypatch.setattr(net, "JAVA_KEY", "k-patched")
+    assert net._eff_key() == "k-patched"
 
 
 def test_patch_on_save_runtime_intercepts_state_writes(tmp_path, monkeypatch):

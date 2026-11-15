@@ -463,8 +463,9 @@ def submit_voices(params: dict, client_info: dict | None = None,
                 _raise_explicit_key_rejected(net._eff_key())
             # 缺 key/匿名令牌失效 → 零字段匿名令牌 → 落 runtime.json → 重试一次
             token = net._acquire_anon_token_or_raise()
-            net.JAVA_KEY = token
-            rt._save_runtime({"java_key": token, "token_tier": "anonymous"})
+            # 统一状态入口（落盘 + 镜像）；net 的 key 是调用期现读，不再写模块属性——
+            # 写属性会让 __getattr__ 失效、这份 token 又被冻结在进程里（D-state-read-1）
+            rt._runtime_update({"java_key": token, "token_tier": "anonymous"})
             out = net._http("POST", _SUBMIT_HOARDING, body, base=net.JAVA_BASE, key=net._eff_key())
         else:
             raise  # 网络/413 等如实上抛
@@ -524,8 +525,7 @@ def submit_voices(params: dict, client_info: dict | None = None,
                     _raise_explicit_key_rejected(net._eff_key())
                 # 零字段匿名令牌：缺 key/401 → 自动取令牌 → 落 runtime.json → 重试一次
                 token = net._acquire_anon_token_or_raise()
-                net.JAVA_KEY = token
-                rt._save_runtime({"java_key": token, "token_tier": "anonymous"})
+                rt._runtime_update({"java_key": token, "token_tier": "anonymous"})
                 vid, tid = _legacy_submit(i, v, content)
                 accepted += 1
                 voice_ids.append(vid)

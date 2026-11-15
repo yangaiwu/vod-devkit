@@ -38,6 +38,9 @@ def _sync_plugin_copy():
 def _isolate_runtime(tmp_path, monkeypatch):
     from vod_mcp import runtime_state
     monkeypatch.setattr(runtime_state, "_runtime_path", lambda: tmp_path / "runtime.json")
+    # 镜像也清空：net 的身份读取是"文件优先、_RT 回落"，而 _RT 是**导入期**从真实
+    # runtime.json 读出来的快照——不清它，隔离用例会读到真机安装的 java_key/base。
+    monkeypatch.setattr(runtime_state, "_RT", {})
     yield
 
 

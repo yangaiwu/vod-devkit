@@ -20,17 +20,65 @@ _REQ_KEY = contextvars.ContextVar("vod_req_key", default=None)
 _SERVER_FACE = contextvars.ContextVar("vod_server_face", default=False)
 
 
+def _live(field: str, default: str = "") -> str:
+    """身份类值的**调用期**解析：env（平台注入）> runtime.json 现读 > 默认。
+
+    为什么不能在 import 期定常量（D-state-read-1）：MCP server 是长驻进程，
+    `auth init --apply` 换 key、自动领取匿名令牌、安装器改 apiBase 都会改
+    runtime.json；常量把进程启动那一刻的值冻结住，表现是"明明配了/换了 key，
+    工具仍用旧的"（401 或打到旧环境）。读失败回落默认，不阻断出口。
+    """
+    env_key = "VOD_JAVA_API_KEY" if field == "java_key" else "VOD_JAVA_API_BASE"
+    env = os.environ.get(env_key, "")
+    if env:
+        return env
+    try:
+        val = rt._runtime_cfg().get(field)
+    except Exception:      # noqa: BLE001  状态文件坏/不可读时不阻断出口
+        val = None
+    if val:
+        return str(val)
+    # 镜像回落：本进程刚写的值（_runtime_update 同步镜像）与测试桩都走这条路；
+    # 文件优先保证"外部（auth init / 重装）改过的值"立刻生效。
+    return str(rt._RT.get(field) or default)
+
+
+def _java_key() -> str:
+    # 显式 set 过的模块属性优先（monkeypatch / 历史赋值）：这是仓内已有的 patch 面契约
+    # （"共享符号用模块属性访问"），现读只在**没人 set** 时生效。
+    override = globals().get("JAVA_KEY")
+    if override:
+        return str(override)
+    return _live("java_key", "")
+
+
+def _java_base() -> str:
+    override = globals().get("JAVA_BASE")
+    if override:
+        return str(override)
+    return _live("java_base", DEFAULT_JAVA_BASE)
+
+
+def __getattr__(name: str):
+    """`net.JAVA_KEY` / `net.JAVA_BASE` 一律**现读**（PEP 562 模块级 __getattr__）。
+
+    保留这两个名字只为不动既有调用点与测试的 patch 面：属性被显式 set 过
+    （monkeypatch / 历史赋值）时优先用 set 的值，否则每次现读 runtime。
+    模块**内部**必须直接调 `_java_key()` / `_java_base()`——模块内部的全局名查找
+    不会触发 __getattr__，写成 `JAVA_KEY` 会 NameError 或读到旧值。
+    """
+    if name == "JAVA_KEY":
+        return _java_key()
+    if name == "JAVA_BASE":
+        return _java_base()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def _eff_key(explicit=None) -> str:
     """当前生效的 key：显式参数 > 请求头（HTTP 面）> env/runtime（stdio 面）。"""
     if explicit is not None:
         return explicit
-    return _REQ_KEY.get() or JAVA_KEY
-
-
-JAVA_BASE = os.environ.get("VOD_JAVA_API_BASE") or rt._RT.get("java_base") or DEFAULT_JAVA_BASE
-
-
-JAVA_KEY = os.environ.get("VOD_JAVA_API_KEY", "") or rt._RT.get("java_key", "")   # ExternalApiKeyFilter Bearer
+    return _REQ_KEY.get() or _java_key()
 
 
 _META_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/meta"
@@ -65,7 +113,7 @@ def _load_meta(force: bool = False) -> dict:
                 "dictVersion": cache["data"].get("dictVersion"),
                 "stale": False, "source": "cache"}
     try:
-        out = _http("GET", _META_PATH, None, base=JAVA_BASE, key=_eff_key(), timeout=10)
+        out = _http("GET", _META_PATH, None, base=_java_base(), key=_eff_key(), timeout=10)
         data = out.get("data") or {}
         if isinstance(data.get("products"), list) and data["products"]:
             rt._runtime_update({"meta_cache": {"fetchedAt": int(now), "data": data}})
@@ -95,8 +143,8 @@ def _http(method: str, path: str, body: dict | None = None,
     base/key 缺省在调用时解析模块级配置（不能用函数默认值——定义时即冻结，
     环境变更/测试 monkeypatch 均无法生效）。
     """
-    base = base if base is not None else JAVA_BASE
-    key = key if key is not None else JAVA_KEY
+    base = base if base is not None else _java_base()
+    key = key if key is not None else _java_key()
     # 传输协议守卫：非本机回环一律要求 https（Bearer 不得明文过公网）
     _host = base.split("//", 1)[-1].split("/", 1)[0].split(":")[0]
     if not base.startswith("https://") and _host not in ("127.0.0.1", "localhost", "::1"):
@@ -145,7 +193,7 @@ def probe_key(key: str | None = None, timeout: int = 8) -> dict:
       不判定——网络问题不是 key 问题，报"无法验证"而非"无效"
     """
     explicit = key is not None  # 显式传参（服务面=请求头 Bearer）按显式口径判
-    key = key if key is not None else JAVA_KEY
+    key = key if key is not None else _java_key()
     fp = _fingerprint(key)
     if not key:
         return {"ok": None, "reason": "no-key", "fingerprint": None}
@@ -180,9 +228,9 @@ def probe_key(key: str | None = None, timeout: int = 8) -> dict:
 
 
 def _key_state() -> dict:
-    return {"configured": bool(JAVA_KEY), "fingerprint": _fingerprint(JAVA_KEY),
-            "base": JAVA_BASE,
-            "note": "已配置" if JAVA_KEY else "未配置（首次提交自动取匿名令牌）"}
+    return {"configured": bool(_java_key()), "fingerprint": _fingerprint(_java_key()),
+            "base": _java_base(),
+            "note": "已配置" if _java_key() else "未配置（首次提交自动取匿名令牌）"}
 
 
 def _explicit_key() -> bool:
@@ -195,7 +243,9 @@ def _explicit_key() -> bool:
     """
     if bool(os.environ.get("VOD_JAVA_API_KEY")):
         return True
-    return bool(JAVA_KEY) and str(rt._RT.get("token_tier") or "") != "anonymous"
+    tier = str(rt._runtime_cfg().get("token_tier")
+               or rt._RT.get("token_tier") or "")
+    return bool(_java_key()) and tier != "anonymous"
 
 
 def _legacy_key_hint() -> str:
@@ -235,7 +285,7 @@ def _fetch_anon_token() -> str | None:
     D-anon-verify（2026-11-05 真机实锤）：引擎返回 ApiResponse 信封，
     顶层取 token 恒 None → 无 key 首提必 -32012，信封解析为必经路径。"""
     try:
-        out = _http("POST", _TOKEN_PATH, {}, base=JAVA_BASE, key="", timeout=15)
+        out = _http("POST", _TOKEN_PATH, {}, base=_java_base(), key="", timeout=15)
         return _extract_anon_token(out)
     except ToolError:
         return None

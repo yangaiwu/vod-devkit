@@ -83,7 +83,8 @@ npx -y vod-devkit@latest auth init --key <k> --apply     # 写 runtime.json（�
 ```
 
 凭据优先级：显式 key（`auth init` 写入）> 环境变量 `VOD_JAVA_API_KEY`（平台/CI 注入）
-> 匿名令牌自动领取（设备绑定）。**不要把 key 写进宿主 MCP 配置的 `env`**——明文，且会随
+> 匿名令牌自动领取（设备绑定）。**换 key 不需要重启宿主会话**：插件在每次调用引擎前现读
+runtime.json 的身份值（`auth init --apply` 之后的下一次提交立刻用新 key）。**不要把 key 写进宿主 MCP 配置的 `env`**——明文，且会随
 配置进 git；`env` 只留给平台注入。
 
 多宿主账本在 `install-manifest.json` 的 `installs[]`（按 target 去重）。`--target` 缺省

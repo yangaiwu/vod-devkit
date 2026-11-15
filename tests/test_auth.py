@@ -25,7 +25,7 @@ def test_auth_status_fingerprint_not_plaintext(monkeypatch):
 
 
 def test_auth_status_no_key_gives_guidance(monkeypatch):
-    monkeypatch.setattr(_net, "JAVA_KEY", "")
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)  # 现读：清空要走 env，setattr 会永久覆盖
     out = _core.auth_status({}, client_info={})
     assert out["javaKey"]["configured"] is False
     assert [g["order"] for g in out["guidance"]] == [1, 2, 3], \
@@ -61,7 +61,7 @@ def test_submit_voices_auto_token_then_retry(monkeypatch):
     def fake_save(update):
         saved.update(update)
 
-    monkeypatch.setattr(_net, "JAVA_KEY", "")
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)  # 现读：清空要走 env，setattr 会永久覆盖
     monkeypatch.setattr(_net, "_http", fake_http)
     monkeypatch.setattr(_rt, "_save_runtime", fake_save)
     out = _collect.submit_voices(
@@ -81,7 +81,7 @@ def test_submit_voices_token_unreachable_gives_guidance(monkeypatch):
                         lambda force=False: {"products": ["codearts"],
                                              "stale": True, "source": "snapshot"})
     """令牌端点不可用（引擎未上线）→ 结构化引导错误，不是死胡同。"""
-    monkeypatch.setattr(_net, "JAVA_KEY", "")
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)  # 现读：清空要走 env，setattr 会永久覆盖
 
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
         raise _net.ToolError("上游返回 404: Not Found", code=404)  # 对齐真实 _http：HTTP 状态进 code
@@ -482,7 +482,7 @@ def test_explicit_key_rejected_401_fails_fast(monkeypatch):
 def test_anon_token_expired_401_refetches(monkeypatch):
     """匿名令牌过期 401 → 重领链保持（与显式 key fail fast 分流互斥）。"""
     monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
-    monkeypatch.setattr(_net, "JAVA_KEY", "stale-anon-token")
+    _rt._runtime_update({"java_key": "stale-anon-token", "token_tier": "anonymous"})
     monkeypatch.setattr(_rt, "_RT", {"token_tier": "anonymous"})
     monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": [], "stale": True, "source": "snapshot"})
@@ -497,7 +497,6 @@ def test_anon_token_expired_401_refetches(monkeypatch):
         raise _net.ToolError("鉴权失败", code=-32012)
 
     monkeypatch.setattr(_net, "_http", fake_http)
-    monkeypatch.setattr(_rt, "_save_runtime", lambda u: None)
     out = _collect.submit_voices(
         {"voices": [{"content": "希望优化导出速度"}], "product": "codearts",
          "confirmed": True}, client_info={"name": "t"})
@@ -543,7 +542,8 @@ def test_probe_key_three_verdicts(monkeypatch):
     out = _net.probe_key()
     assert out["ok"] is None and out["reason"] == "unreachable", "不可达≠无效"
 
-    monkeypatch.setattr(_net, "JAVA_KEY", "")
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
+    monkeypatch.setattr(_net, "JAVA_KEY", "")   # falsy 覆盖 → 走现读（runtime 为空）
     out = _net.probe_key()
     assert out == {"ok": None, "reason": "no-key", "fingerprint": None}
 
@@ -552,7 +552,7 @@ def test_probe_key_expired_anonymous_token(monkeypatch):
     """匿名令牌 401 → expired-anonymous（非 rejected）：runtime 残留过期匿名
     令牌不得被误读为正式 key 失效；note 指明下次提交自动重领。"""
     monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
-    monkeypatch.setattr(_net, "JAVA_KEY", "anon-token-stale")
+    _rt._runtime_update({"java_key": "anon-token-stale", "token_tier": "anonymous"})
 
     def denied(method, path, body=None, timeout=30, base=None, key=None):
         raise _net.ToolError("401", code=401)
@@ -578,7 +578,7 @@ def test_probe_key_device_mismatch_is_not_rejected(monkeypatch):
     显式传参（服务面 auth_status 传请求头 key）与本地档同语义：按原文判。
     """
     monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
-    monkeypatch.setattr(_net, "JAVA_KEY", "anon-token-device-drift")
+    _rt._runtime_update({"java_key": "anon-token-device-drift", "token_tier": "anonymous"})
 
     def mismatch(method, path, body=None, timeout=30, base=None, key=None):
         raise _net.ToolError(
@@ -693,7 +693,7 @@ def test_legacy_key_removed_falls_to_anon_chain_e2e(monkeypatch):
         return {}
 
     saved = {}
-    monkeypatch.setattr(_net, "JAVA_KEY", "")  # 模拟移除老平台 key 后的 runtime
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)  # 现读：清空要走 env，setattr 会永久覆盖  # 模拟移除老平台 key 后的 runtime
     monkeypatch.setattr(_net, "_http", fake_http)
     monkeypatch.setattr(_rt, "_save_runtime", lambda u: saved.update(u))
     out = _collect.submit_voices(

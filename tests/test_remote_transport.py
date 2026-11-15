@@ -59,7 +59,7 @@ def remote(monkeypatch):
     monkeypatch.setenv("VOD_JAVA_API_BASE", base)
     from vod_mcp import tools
     monkeypatch.setattr(_net, "JAVA_BASE", base)
-    monkeypatch.setattr(_net, "JAVA_KEY", "")
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)  # 现读：清空要走 env，setattr 会永久覆盖
 
     runtime = tr.RemoteRuntime("127.0.0.1", 0)
     runtime.start()
