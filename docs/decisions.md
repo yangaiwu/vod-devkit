@@ -1330,3 +1330,27 @@ entry-point（`pip install -e .` 实测 `ValueError`），改为 `vodkit_cli.cli
 **踩过的两个坑（已固化用法例/注释）**：① `bin/vod-devkit` 在 import 期写 `os.environ`
 会被测试的 `SourceFileLoader` 加载触发出"外层根泄漏"，导致临时仓安装写到外层仓；
 ② conftest 设 `PYTHONPATH` 会让副本类用例的子进程 import 到外层包，掩盖副本布局问题。
+
+## D-dsh-global-view-1：全局视图补账本外宿主（只读探测 dsh profile）（2026-11-16）
+
+**问题**：`version` / `packs status` 的行数等于 `installs[]` 条数。dsh 由
+`dsh-vod-devkit` 的 profile 依赖承载（`install --target dsh` 只装壳包与 patch），
+安装器不写账本行，于是全局视图里它**连一行都没有**，连 `[missing]` 都不给（那个提示
+只服务"账本有行、配置没条目"）。对外说"一次看整台机器"就是失真的。
+
+**决定**：只读探测 `~/.dsh/profiles/*/package.json`，只列声明了 `dsh-vod-devkit`
+（dependencies 或 `dsh.profile.bundles`）的 profile，输出 `dsh(<profile>)` 行：
+
+- 版本取 `node_modules/dsh-vod-devkit/package.json` 的**实际安装版本**；取不到报
+  「已装版本未知」并给 `dsh plugin add` 提示，**不回落到 spec**——`file:…tgz` 或范围号
+  是意图，把意图报成现状正是这个命令要消灭的那类失真。
+- 漂移时给可直接复制的重装命令（`install --target dsh --profile <p>`）。
+- `packs` 面对 dsh 一律 `[n/a]` + "壳不走 MCP env、改 pack 需重装"；
+  `enable/disable/all --target dsh` 打印"跳过"，**不写 profile、不留 .bak、不打印成功**。
+
+**为什么不把 dsh 塞进 installs[]**：账本行是"安装器写过这个宿主"的事实记录，`uninstall`
+会按行去摘配置、删目录；dsh 的卸载语义是 profile 依赖/patch，塞进去会把两条链混成一条，
+uninstall 还可能误删壳依赖。视图缺失用探测解决，不靠改账本语义。
+
+**代价**：多一条只读探测路径（`~/.dsh/profiles`），profile 存在但包没装下来时要靠
+"已装版本未知"这句诚实文案兜，不能假装有版本号。
