@@ -1,8 +1,9 @@
 """溯源与宿主身份：build-info.json（构建烧录）+ 握手 clientInfo + install-manifest。"""
 import json
-from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parent.parent
+from vod_mcp import paths
+
+_ROOT = paths.ROOT
 _BUILD_INFO = _ROOT / "build-info.json"
 _MANIFEST = _ROOT / "install-manifest.json"
 

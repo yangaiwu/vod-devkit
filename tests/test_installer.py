@@ -438,6 +438,10 @@ def test_golden_status_and_preset_update_refusal(env):
     # JSON 结构稳定性：归一化后必须仍是合法 JSON（status 契约=原样 manifest）
     d = json.loads(actual)
     d["skillHashes"] = "<SKILL_HASHES>"  # 漂移锁专项覆盖，golden 不锁哈希值
+    # ref 是环境（安装源当前分支），不是输出口径：归一化后单独断言“它就是真实分支”，
+    # 避免 golden 因切分支而红——门禁的失败必须落在真问题上（P1 门禁收口同一条理由）。
+    assert d["source"]["ref"] == _head_branch(env), d["source"]
+    d["source"]["ref"] = "<REF>"
     actual = json.dumps(d, ensure_ascii=False, indent=2)
     _assert_golden("status", actual)
     cli(env, "install", "--target", "hermes", "--product", "CodeArts",

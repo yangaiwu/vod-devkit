@@ -6,9 +6,10 @@
 """
 import json
 import re
-from pathlib import Path
 
-_POLICY_PATH = Path(__file__).resolve().parent.parent / "safety" / "policy.json"
+from vod_mcp import paths
+
+_POLICY_PATH = paths.POLICY
 
 
 def load_policy() -> dict:

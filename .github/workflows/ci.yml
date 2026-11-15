@@ -15,12 +15,14 @@ jobs:
           python-version: "3.12"
       - name: 安装依赖（含远程面可选 extra，否则远程面用例 SKIP）
         run: python3 -m pip install pytest pyflakes mypy pyyaml 'mcp>=1.0' 
-      - name: lint（pyflakes）
-        run: python3 -m pyflakes vod_mcp/*.py tests/*.py
-      - name: 双副本一致性（vod_mcp + skills 同步锁）
+      - name: lint（pyflakes，递归——子目录模块漏检=门禁形同虚设）
+        run: python3 -m pyflakes vod_mcp tests
+      - name: 双副本一致性（vod_mcp + skills + contract + safety 同步锁）
         run: >-
           diff -r -x 'runtime.json' -x '__pycache__' -x '*.log' vod_mcp plugins/vod-devkit/vod_mcp
           && diff -r -x '__pycache__' skills plugins/vod-devkit/skills
+          && diff -r -x '__pycache__' contract plugins/vod-devkit/contract
+          && diff -r -x '__pycache__' safety plugins/vod-devkit/safety
           || { echo "FAIL: 双副本漂移——先跑 scripts/sync_plugin.py 再提交"; exit 1; }
       - name: 凭据/高危模式扫描（与 pre-push 同一把尺）
         run: python3 scripts/secret_scan.py

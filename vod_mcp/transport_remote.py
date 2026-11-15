@@ -24,6 +24,8 @@ import json
 import os
 import sys
 import threading
+
+from vod_mcp import paths
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DEFAULT_HOST = "127.0.0.1"
@@ -56,7 +58,7 @@ def payload_problems(force: bool = False) -> list:
         # 从载荷副本直接起来的服务（entry = <payload>/vod_mcp/server.py）没有
         # install 期注入的 payload_dir —— 用自身所在树推断：载荷根里有 payload.json
         # 就说明"我就是那份副本"，必须自校验（否则被改的副本会一直对外服务）。
-        root = _P(__file__).resolve().parent.parent
+        root = _P(paths.ROOT)
         d = root if (root / "payload.json").exists() else None
     if d is None:
         return []

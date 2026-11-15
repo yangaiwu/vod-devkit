@@ -14,9 +14,10 @@
   （vod_list_skills / vod_retrieve_skill），裁剪时拒绝并给指引，不是文件可见性。
 """
 import re
-from pathlib import Path
 
-SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
+from vod_mcp import paths
+
+SKILLS_ROOT = paths.SKILLS
 
 # 技能 → 归属 pack（core 常驻；knowledge 可裁剪）
 SKILL_PACK = {

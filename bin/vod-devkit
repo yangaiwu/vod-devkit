@@ -1165,8 +1165,11 @@ def main():
     # `serve` 后的参数整体透传给 MCP server（argparse 的 REMAINDER 会把
     # --transport 当成未知参数拦下，devkit 的二进制本身就是 server，同形处理）
     if len(sys.argv) > 1 and sys.argv[1] == "serve":
-        os.execv(sys.executable,
-                 [sys.executable, str(ROOT / "vod_mcp" / "server.py"), *sys.argv[2:]])
+        # 显式声明这份副本的根（paths.py 读 VOD_DEVKIT_ROOT）：插件/载荷根
+        # 不总是"CLI 所在包根"，隐式相对深度正是此前副本装载失败的原因。
+        os.execve(sys.executable,
+                  [sys.executable, str(ROOT / "vod_mcp" / "server.py"), *sys.argv[2:]],
+                  {**os.environ, "VOD_DEVKIT_ROOT": str(ROOT)})
     ap = argparse.ArgumentParser(prog="vod-devkit")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("install")
@@ -1226,8 +1229,9 @@ def main():
         （与 huaweicloud-devkit 的 `--transport remote` 同形）。
         """
         extra = list(getattr(a, "server_args", []) or [])
-        os.execv(sys.executable,
-                 [sys.executable, str(ROOT / "vod_mcp" / "server.py"), *extra])
+        os.execve(sys.executable,
+                 [sys.executable, str(ROOT / "vod_mcp" / "server.py"), *extra],
+                  {**os.environ, "VOD_DEVKIT_ROOT": str(ROOT)})
     sp_serve = sub.add_parser("serve", help="启动 MCP server（默认 stdio；"
                                             "--transport remote 起 Streamable HTTP）")
     sp_serve.add_argument("server_args", nargs=argparse.REMAINDER,

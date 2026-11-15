@@ -22,6 +22,7 @@
     "vod_mcp/server.py",
     "vod_mcp/tools.py",
     "vod_mcp/packs.py",
+    "vod_mcp/paths.py",
     "vod_mcp/policy.py",
     "vod_mcp/config_forms.py",
     "vod_mcp/skills_registry.py",
@@ -43,6 +44,8 @@
     "plugins/vod-devkit/build-info.json",
     "plugins/vod-devkit/vod_mcp",
     "plugins/vod-devkit/skills",
+    "plugins/vod-devkit/contract",
+    "plugins/vod-devkit/safety",
     "plugins/.agents/plugins/marketplace.json"
   ],
   "keywords": [
