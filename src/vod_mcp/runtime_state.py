@@ -5,10 +5,14 @@
 本模块只依赖 paths 与 stdlib；需要身份（net._eff_key）时**函数内懒导入**，避免
 net ↔ runtime_state 的循环。
 """
+import datetime
 import json
 import os
+import shutil
 import stat
+import sys
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 from vod_mcp import attribution as _attrib
@@ -53,20 +57,96 @@ def _runtime_update(update: dict, replace: bool = False) -> None:
         _RT.update(update)
 
 
-def _save_runtime(update: dict, replace: bool = False) -> None:
-    """低层落盘（唯一写文件处）。整段读改写必须持 _RT_LOCK——锁可重入，
-    上层 _runtime_update/_ledger_append/draft 复合操作嵌套调用安全。"""
-    with _RT_LOCK:
-        p = _runtime_path()
+def _lock_path() -> Path:
+    """跨进程锁文件（与 runtime.json 同目录、同名前缀，便于 --clean-global 认出来）。"""
+    p = _runtime_path()
+    return p.with_name(p.name + ".lock")
+
+
+@contextmanager
+def _file_lock():
+    """跨进程互斥：同一份载荷 runtime.json 被同一台机器上多个宿主的 server 进程共用。
+
+    `_RT_LOCK` 只保护**进程内**；多进程同时"读→改→写"会互相覆盖（实测：4 进程各写
+    25 次，落盘只剩 36 条；`pending.py` 那条低价值补交队列反而是原子的）。
+    POSIX 用 `fcntl.flock`；没有 fcntl 的平台退化为空上下文——那里没有对等的成熟机制，
+    硬造一个只会引入新故障，README 按"仅 POSIX 覆盖"标注。
+    """
+    try:
+        import fcntl
+    except ImportError:            # pragma: no cover - Windows
+        yield
+        return
+    p = _lock_path()
+    try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        cfg = {}
-        if p.exists() and not replace:
+        f = open(p, "a+", encoding="utf-8")
+    except OSError:                # 锁不可用不该让写入失败（宁可有竞态也不要写不进）
+        yield
+        return
+    try:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        finally:
+            f.close()
+
+
+def _quarantine_bad_runtime(p: Path, err: Exception) -> Path | None:
+    """坏文件**先备份再继续**，绝不静默丢弃。
+
+    为什么不选"拒绝覆盖"：那会让插件在坏文件之后完全不能提交/记账（用户看到的是
+    "插件坏了"），而备份已经保住可恢复性。备份名带时间戳，告警里给绝对路径。
+    """
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    dst = p.with_name(f"{p.name}.corrupt-{ts}")
+    try:
+        shutil.copy2(p, dst)
+    except OSError as e:
+        msg = f"runtime.json 解析失败（{err}）且备份失败（{e}）——本次以空状态继续"
+        _warn(msg)
+        print(f"[vod-devkit] warn: {msg}", file=sys.stderr)
+        return None
+    msg = (f"runtime.json 解析失败（{err}）：原文件已备份到 {dst}，"
+           "本次以空状态继续（可人工核对/恢复）")
+    _warn(msg)
+    # 这份文件里有 key 与账本：宿主必须当场看到（stdio 面的 stderr 会透给用户），
+    # 只写 /tmp 日志等于没有告警。
+    print(f"[vod-devkit] warn: {msg}", file=sys.stderr)
+    return dst
+
+
+def _save_runtime(update: dict, replace: bool = False) -> None:
+    """低层落盘（唯一写文件处）。
+
+    三层保障（P0 修复，2026-11-16）：
+    - `_RT_LOCK`：进程内互斥（可重入，复合操作嵌套安全）；
+    - `_file_lock`：**跨进程**互斥（多宿主共用同一份载荷 runtime.json）；
+    - tmp + `os.replace`：原子替换——读者永远不会看到半截 JSON（此前整文件
+      `write_text` 被读到半截后，下一次更新就把 key/账本冲成空）。
+    坏文件不静默归零：先 `_quarantine_bad_runtime()` 备份再继续。
+    """
+    p = _runtime_path()
+    with _RT_LOCK:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with _file_lock():
+            cfg = {}
+            if p.exists() and not replace:
+                try:
+                    cfg = json.loads(p.read_text(encoding="utf-8"))
+                except Exception as e:      # noqa: BLE001  坏文件：备份后继续
+                    _quarantine_bad_runtime(p, e)
+                    cfg = {}
+            cfg.update(update)
+            tmp = p.with_name(p.name + ".tmp")
+            tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
             try:
-                cfg = json.loads(p.read_text(encoding="utf-8"))
-            except Exception:
-                cfg = {}
-        cfg.update(update)
-        p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(tmp, 0o600)        # 先给权限再替换，不留 0644 窗口
+            except OSError:
+                pass
+            os.replace(tmp, p)
     # S1 式写后验（借 huaweicloud-devkit ensurePrivateMode 模式）：写完 chmod 0600
     # 并 stat 回验——不假设 chmod 按文档工作（WSL/drvfs 会静默忽略 chmod），
     # 验的是效果不是动作；runtime.json 含 java_key 明文，权限失效必须告警

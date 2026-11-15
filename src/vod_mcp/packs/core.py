@@ -102,7 +102,7 @@ def auth_status(params: dict, client_info: dict | None = None) -> dict:
     req_key = net._eff_key() if net._SERVER_FACE.get() else None
     out = {
         "javaKey": net._key_state(),
-        "packs": sorted(__import__("vod_mcp.packs", fromlist=["enabled_packs"]).enabled_packs()),
+        "packs": sorted(__import__("vod_mcp.packs", fromlist=["effective_packs"]).effective_packs()),
     }
     if req_key:
         out["requestKey"] = {"fingerprint": net._fingerprint(req_key),

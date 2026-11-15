@@ -52,10 +52,26 @@ _HANDLERS = {
 }
 
 
+def _needs_client_info(handler) -> bool:
+    """handler 是否吃 client_info（按签名判，不靠手写清单）。
+
+    为什么不用元组白名单：新增双参 handler 忘登记时**静默收到 None**，宿主归因/
+    设备标识这类字段就丢了，不报错也不告警（本次 vod_packs_configure 只因不吃
+    client_info 才没暴露）。签名判参把这类漏登记一次性消掉。
+    """
+    import inspect
+    try:
+        params = list(inspect.signature(handler).parameters.values())
+    except (TypeError, ValueError):      # 内建/不可反射：按单参处理（原行为）
+        return False
+    positional = [p for p in params
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    has_varargs = any(p.kind == p.VAR_POSITIONAL for p in params)
+    return has_varargs or len(positional) >= 2
+
+
 def dispatch(name: str, params: dict, client_info: dict | None = None) -> dict:
     handler = _HANDLERS.get(name)
     if handler is None:
         raise ToolError(f"未知工具: {name}", code=-32601)
-    needs_host = handler in (core.devkit_info, collect.submit_voices, core.auth_status,
-                             collect.draft_voices, collect.commit_voices)
-    return handler(params, client_info) if needs_host else handler(params)
+    return handler(params, client_info) if _needs_client_info(handler) else handler(params)

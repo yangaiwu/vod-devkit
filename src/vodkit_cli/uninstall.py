@@ -1,5 +1,6 @@
 """uninstall 子命令：按 manifest 名册逐宿主摘除（共享配置只摘条目）。"""
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -61,23 +62,34 @@ def _remove_managed_mcp_entry(target: str, path: Path) -> None:
             cli, args = None, []
     elif target == "codex" and shutil.which("codex"):
         cli, args = "codex", ["mcp", "remove", "vod-devkit"]
-    elif target == "codex" and shutil.which("codex"):
-        cli, args = "codex", ["mcp", "remove", "vod-devkit"]
     if cli:
         r = subprocess.run([cli, *args], capture_output=True, text=True, timeout=120)
         print(f"{cli} mcp remove:", "OK" if r.returncode == 0
               else (r.stderr or r.stdout).strip()[-120:])
 
 
-def _remove_managed_skills(mf: dict, path: Path, target: str) -> None:
-    """技能摘除：hermes 目录是专属的（整目录删）；其它宿主技能目录是**共享**的
-    （opencode ~/.config/opencode/skills 等），只摘本插件改名下的技能。
-    2026-11-11 与 uninstall 共享配置收口同批修：整目录删会连带删掉用户的其它技能。"""
-    if target == "hermes":
-        if path.exists():
-            shutil.rmtree(path)
-            print("removed:", path)
-        return
+def _outside_home(p: Path) -> bool:
+    """落点是否在当前 HOME 之外——**卸载是破坏性动作，守卫必须在这里**。
+
+    实锤（2026-11-16）：`common.HERMES_SKILLS_DIR` 是 import 期常量，同进程里
+    monkeypatch HOME 后它仍指真实家目录，隔离用例于是删掉了真机的 vod-core。
+    判据用 resolve() 后前缀比较（符号链接/相对路径都归一）。
+    """
+    try:
+        home = Path.home().resolve()
+        return not str(Path(p).resolve()).startswith(str(home) + os.sep)
+    except OSError:
+        return True
+
+
+def _remove_managed_skills(mf: dict, path: Path, target: str | None = None) -> None:
+    """技能摘除：**只摘本插件装进去的子目录**，目录本身与别人的技能一律不动。
+
+    为什么不再"hermes 目录整删"（2026-11-16 并行评审 P2）：该目录
+    `~/.hermes/skills/devops/vod-devkit` 是所有安装共用的副本池（`install._install_skills`
+    对每个宿主都会往这里拷一份），用户/其它插件也可能在这里放技能——整删会连带删掉
+    不属于我们的东西。留下的空目录无害，`uninstall` 也不是清理工具。
+    """
     names = {rel.split("/")[0] for rel in (mf.get("skillHashes") or {})}
     removed = []
     for n in sorted(names):
@@ -85,14 +97,22 @@ def _remove_managed_skills(mf: dict, path: Path, target: str) -> None:
         if d.is_dir():
             shutil.rmtree(d)
             removed.append(n)
-    print(f"removed skills: {removed}（共享目录保留）：{path}") if removed \
-        else print(f"skip（无需摘除的技能）：{path}")
+    if removed:
+        print(f"removed skills: {removed}（目录与其它技能保留）：{path}")
+    else:
+        print(f"skip（无需摘除的技能）：{path}")
 
 
-def _cleanup_install_row(row: dict, skill_hashes: dict | None = None) -> None:
-    """按一条安装记录清理：MCP 条目 / 技能落点 / 宿主专属产物。
+def _cleanup_install_row(row: dict, skill_hashes: dict | None = None,
+                        skill_installs: list | None = None,
+                        remaining_targets: set | None = None) -> None:
+    """按一条安装记录清理：技能落点 / MCP 条目 / 宿主专属产物。
 
     技能名清单来自 manifest 顶层 skillHashes（各安装行共用同一份技能集合）。
+    技能**落点**来自顶层 skillInstalls（按 host 匹配）——不能只用 row["skillsDir"]：
+    历史 manifest 把每一行的 skillsDir 都写成 hermes 目录（common.py 单值形态），
+    于是 `uninstall --target opencode` 会去删 hermes 的技能目录、而 opencode 自己的
+    `~/.config/opencode/skills` 永远漏删（并行评审 P2 实测）。
     """
     target = str(row.get("target") or "")   # 名册老条目可能缺 target：按空串走"未知宿主"分支
     # codex-desktop：mcpConfig 指向共享的 marketplace.json，绝不能走"整文件删"分支
@@ -103,13 +123,41 @@ def _cleanup_install_row(row: dict, skill_hashes: dict | None = None) -> None:
         return
     mf = dict(row)
     mf["skillHashes"] = skill_hashes or {}
-    for key in ("mcpConfig", "skillsDir"):
-        path_s = row.get(key)
-        if not path_s:
-            continue  # codex 等宿主 mcpConfig 可为 None（P0-3：无托管配置文件）
-        if key == "skillsDir":
-            _remove_managed_skills(mf, Path(path_s), target)
+    # ① 技能：落点真源是 skillInstalls（按 host 匹配），且**共享落点不许摘**——
+    #    历史 manifest 把每行 skillsDir 都写成 hermes 目录（单值形态），若照此行删，
+    #    卸 opencode 会删掉 hermes 正在用的副本（卸 A 删 B），而 opencode 自己的
+    #    ~/.config/opencode/skills 永远漏删。老 manifest 无该键时 skillsDir 只有
+    #    hermes 行可信，其它行宁可漏删也不猜。
+    installs = list(skill_installs or [])
+    mine = [si for si in installs if si.get("host") == target and si.get("dir")]
+    # hermes 目录是**所有安装共用**的副本池（install._install_skills 对每个宿主都往里拷，
+    # _skill_installs 也恒含 hermes 条目）。所以它不是"别人的落点"，而是"我们冗余的一份"：
+    # 本次卸载后若不再有 hermes 安装行，这一份也该摘。用自己的落点之外判据 = 剩余行。
+    if target != "hermes" and "hermes" not in (remaining_targets or set()):
+        # 路径**调用期**解析：common.HERMES_SKILLS_DIR 是 import 期常量，同进程里
+        # monkeypatch HOME 之后它会指到真实家目录（隔离测试会去删真机技能，实锤）。
+        try:
+            pool = str(host_specs.load("hermes")["skillsDir"])
+        except KeyError:
+            pool = ""
+        if pool:
+            mine.append({"host": "hermes", "dir": pool})
+    if not mine:
+        legacy = row.get("skillsDir")
+        if legacy and target == "hermes":
+            mine = [{"host": target, "dir": legacy}]
+    for si in mine:
+        d = Path(si["dir"])
+        if _outside_home(d):
+            print(f"skip（落点不在当前 HOME 之下，拒绝删除）：{d}")
             continue
+        _remove_managed_skills(mf, d, si.get("host"))
+    # ② MCP 配置
+    path_s = row.get("mcpConfig")
+    if path_s and _outside_home(Path(path_s)):
+        print(f"skip（配置不在当前 HOME 之下，拒绝改动）：{path_s}")
+        path_s = None
+    if path_s:  # codex 等宿主 mcpConfig 可为 None（P0-3：无托管配置文件）
         path = Path(path_s)
         # 深审 P0-3（破坏性路径一票否决）：共享用户配置永不整文件删除
         #（config.toml/opencode.json/codearts_cli.json/.claude.json 里有用户自己的
@@ -119,8 +167,7 @@ def _cleanup_install_row(row: dict, skill_hashes: dict | None = None) -> None:
                       "workbuddy", "atomcode") or path.name in _SHARED_CONFIG_NAMES:
             print(f"skip（用户配置文件，uninstall 只摘托管条目）：{path}")
             _remove_managed_mcp_entry(target, path)
-            continue
-        if path.exists():
+        elif path.exists():
             shutil.rmtree(path) if path.is_dir() else path.unlink()
             print("removed:", path)
     # codex 摘除：remote 形态摘 MCP 条目；stdio 形态摘原生插件（best-effort）
@@ -174,9 +221,20 @@ def _clean_global(rows: list) -> None:
     if npx.is_dir():
         for d in npx.iterdir():
             pkg = d / "node_modules" / "vod-devkit"
-            if pkg.is_dir():
+            if not pkg.is_dir():
+                continue
+            # 只删我们那一份：一个 npx hash 目录里可能同时缓存了别的包
+            #（整目录 rmtree 会连带删掉用户其它 npx 缓存，评审 P2 实测）。
+            shutil.rmtree(pkg, ignore_errors=True)
+            try:
+                leftovers = [x for x in (d / "node_modules").iterdir()]
+            except OSError:
+                leftovers = []
+            if not leftovers:
                 shutil.rmtree(d, ignore_errors=True)
                 print("removed npx cache:", d)
+            else:
+                print(f"removed npx copy of vod-devkit（保留同目录其它包）：{pkg}")
 
 
 def cmd_uninstall(args=None):
@@ -194,7 +252,9 @@ def cmd_uninstall(args=None):
               f"（现有：{', '.join(r.get('target','?') for r in all_rows)}）")
         return
     for row in rows:
-        _cleanup_install_row(row, mf.get("skillHashes"))
+        still_installed = {r.get("target") for r in all_rows if r not in rows}
+        _cleanup_install_row(row, mf.get("skillHashes"), mf.get("skillInstalls"),
+                             still_installed)
     # 载荷清理（D-payload-1）：逐目录去重后删——但别删还被保留行引用的载荷
     keep = {r.get("payloadDir") for r in all_rows if r not in rows and r.get("payloadDir")}
     seen = set()

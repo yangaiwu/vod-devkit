@@ -412,6 +412,15 @@
     "S135": {
       "carrier": "docs/design.md"
     },
+    "S136": {
+      "carrier": "docs/design.md"
+    },
+    "S137": {
+      "carrier": "docs/design.md"
+    },
+    "S138": {
+      "carrier": "tests/test_global_cmds.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

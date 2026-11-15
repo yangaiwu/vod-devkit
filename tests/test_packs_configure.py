@@ -167,3 +167,55 @@ def test_s133_contract_has_the_tool():
     spec = t.load_contract()["tools"]["vod_packs_configure"]
     assert set(spec["input"]["properties"]) == {"enable", "disable", "reset"}
     assert "stdio" in spec["description"]
+
+# ── S136 跨面一致性（开关不能只改工具面） ────────────────────
+#
+# 实测过的缺陷：S132 只断言了 tools/list。开关之后 vod_devkit_info / vod_auth_status
+# 仍报 VOD_PACKS 的旧包、技能枚举也按旧包算 —— 一个开关两种答案，模型会拿着旧答案
+# 让用户"重跑 install 带上 --packs"（把会话内开关说成需要重装）。
+
+def test_s136_switch_is_reflected_on_every_read_surface(monkeypatch):
+    from vod_mcp import net
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
+    monkeypatch.setattr(net, "JAVA_KEY", "")
+    packs.set_runtime_packs(["core", "collect"])
+    assert packs.effective_packs() == ("core", "collect")
+    assert tools.dispatch("vod_devkit_info", {})["packs"] == ["collect", "core"]
+    assert tools.dispatch("vod_auth_status", {})["packs"] == ["collect", "core"]
+    with pytest.raises(tools.ToolError) as e:
+        tools.dispatch("vod_retrieve_skill", {"name": "vod-scoring-rules"})
+    assert "knowledge" in str(e.value), "关掉的包里的技能必须拒绝，且说清属于哪个包"
+    assert tools.dispatch("vod_retrieve_skill", {"name": "vod-core"})["name"] == "vod-core"
+
+
+def test_s136_list_skills_matches_tool_surface():
+    """技能目录**不隐藏**技能（要让人知道有哪几本），但 enabled 标记必须跟着开关走
+    ——否则会出现"列出来了却取不到"的第二种答案。"""
+    packs.set_runtime_packs(["core"])
+    listed = tools.dispatch("vod_list_skills", {})
+    assert sorted(listed["packs"]) == ["core"]
+    flags = {s["name"]: s["enabled"] for s in listed["skills"]}
+    assert flags["vod-scoring-rules"] is False
+    assert flags["vod-problem-classification-rules"] is False
+    assert flags["vod-core"] is True
+
+
+# ── S136 dispatch 判参（手写清单会静默丢 client_info） ────────
+
+def test_s136_dispatch_passes_client_info_by_signature(monkeypatch):
+    seen = {}
+
+    def two(params, client_info):
+        seen["two"] = client_info
+        return {"ok": True}
+
+    def one(params):
+        seen["one"] = "called"
+        return {"ok": True}
+
+    monkeypatch.setitem(tools._HANDLERS, "vod_devkit_info", two)
+    monkeypatch.setitem(tools._HANDLERS, "vod_check_update", one)
+    tools.dispatch("vod_devkit_info", {}, {"name": "host-a"})
+    tools.dispatch("vod_check_update", {})
+    assert seen["two"] == {"name": "host-a"}
+    assert seen["one"] == "called"

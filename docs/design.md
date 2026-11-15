@@ -975,8 +975,8 @@ cache 内 .mcp.json 被改写成 `python3` 绝对路径 + `payloads/0.5.9/vod_mc
 安装循环（`_install_many`）：缺落点（dsh 无 `--profile`）跳过并说明，单宿主失败不阻塞其它。
 
 用例承载：`tests/test_global_cmds.py`（S116-S123、S126-S128、S130-S131）、
-`tests/test_packs_configure.py`（S132-S133）、`tests/test_doctor_egress.py`（S134）、
-`tests/test_key_guard_hook.py`（S135）。
+`tests/test_packs_configure.py`（S132-S133、S136）、`tests/test_doctor_egress.py`（S134）、
+`tests/test_key_guard_hook.py`（S135）、`tests/test_runtime_atomic.py`（S137）。
 
 ## 会话内能力面开关（D-packs-configure-1，2026-11-16）
 

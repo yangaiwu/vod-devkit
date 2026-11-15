@@ -1431,3 +1431,46 @@ README 标"未验证"，不假装拦。
 
 **没做**：codex / opencode 侧等价注册（这两个宿主的 hook 形态未与本仓对齐，没做等于没有，
 README 已按"未做"标注）；不做 `modify`（改写命令）——改写比拦截更难解释，且用户看不见。
+
+## D-runtime-atomic-1：runtime.json 的跨进程一致性（2026-11-16，并行评审 P0）
+
+**问题（三条实测，全部复现）**：
+1. 一份载荷 `runtime.json` 被同机多个宿主的 server 进程共用，而 `_RT_LOCK` 是
+   `threading.RLock`（进程内）→ 4 进程各写 25 次，落盘只剩 **36** 条（期望 100）。
+2. 整文件 `write_text` 非原子 → 并发读会读到半截 JSON（实测出现 `JSONDecodeError`）。
+3. 解析失败 `except: return {}` **静默归零** → 下一次任意状态更新把文件重写成只剩那一个
+   键：`java_key` 消失、账本 0 条、`install_nonce` 重新生成（设备绑定换锚点，后续提交 401）。
+
+**决定**：`_save_runtime` 三层保障——
+- 进程内 `_RT_LOCK`（原有）+ **跨进程 `fcntl.flock`**（`runtime.json.lock`，POSIX）；
+- **tmp + `os.replace`** 原子替换，tmp 先 chmod 0600（不留 0644 窗口）；
+- 坏文件 `_quarantine_bad_runtime()`：备份成 `runtime.json.corrupt-<ts>` + **stderr 告警**后
+  以空状态继续。
+
+**为什么坏文件选"备份后继续"而不是"拒绝覆盖"**：拒绝覆盖会让插件在坏文件之后完全不能
+提交/记账（用户看到的是"插件坏了"），而备份已经保住可恢复性。两者都不静默，区别只在
+"停摆"还是"带着备份继续"——后者对用户更好，最坏伤害半径更小。
+
+**为什么 Windows 退化而不是硬造**：无 `fcntl` 平台没有对等的成熟机制（`msvcrt.locking`
+语义不同、需重试循环）。硬造一个会引入新故障面；README 按"仅 POSIX 覆盖"诚实标注。
+
+**没做**：把 `_RT` 内存镜像收敛成"每次现读"（重构级，见评审建议第 1 条）——那是另一个
+PR，且要先补"长驻进程里 runtime 改值"的用例。
+
+## D-uninstall-skill-dest-1：卸载按 skillInstalls 定位技能落点（2026-11-16）
+
+**问题（实测）**：`common.py` 写 manifest 时把**每一行**的 `skillsDir` 都填成
+`HERMES_SKILLS_DIR`（单值形态的遗留），而 `uninstall` 只读 `row["skillsDir"]`：
+- `uninstall --target opencode` 会去删 **hermes** 的技能副本（卸 A 删 B）；
+- opencode 自己的 `~/.config/opencode/skills` 只在 `skillInstalls[]` 里，卸载路径从不读它
+  （漏删），卸载后磁盘上留一份孤儿技能。
+
+**决定**：技能清理按 `manifest.skillInstalls` 里 `host == target` 的 dir 摘；老 manifest
+没有该键时，`skillsDir` **只对 hermes 行可信**（hermes 目录是本插件专属、可整目录删），
+其它宿主**跳过**——没有落点信息时宁可漏删，也不许猜着删别人的目录。
+
+**为什么不做"按目录内容反推宿主"**：那又是一次推断（同一目录可能被多个宿主共用），
+而卸载是破坏性动作，判断依据必须是 manifest 里的事实（`skillInstalls` 就是为此存在的）。
+
+**顺带**：`--clean-global` 的 npx 清理收窄到只删 `node_modules/vod-devkit`（同 hash 目录里的
+其它包不碰，删空才删目录）；删掉重复的 codex 分支；`bin` 对继承到的不一致根加 stderr 告警。

@@ -34,7 +34,7 @@ def info_payload(client_info: dict | None = None) -> dict:
     return {
         "version": bi.get("version"),
         "commitSha": bi.get("commitSha"),
-        "packs": sorted(__import__("vod_mcp.packs", fromlist=["enabled_packs"]).enabled_packs()),
+        "packs": sorted(__import__("vod_mcp.packs", fromlist=["effective_packs"]).effective_packs()),
         "hostClient": host,
         "manifestSummary": {
             "target": mf.get("target"),
