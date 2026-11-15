@@ -160,11 +160,16 @@ if git push github main --tags 2>/dev/null; then echo "已推送 GitHub 镜像";
 TGZ="vod-devkit-$BUMP.tgz"
 npm pack --silent >/dev/null
 TAG_PARENT=$(git rev-parse "v$BUMP^")
-if ! tar xzOf "$TGZ" package/plugins/vod-devkit/build-info.json | grep -q "\"commitSha\": \"$TAG_PARENT\""; then
-  echo "FAIL: pack 出的 tarball 代码指纹（应=$TAG_PARENT，即 v$BUMP 父提交）不符——禁止发布这颗包" >&2
+TAG_COMMIT=$(git rev-parse "v$BUMP")
+BI_SHA=$(tar xzOf "$TGZ" package/plugins/vod-devkit/build-info.json | grep -o '"commitSha": "[0-9a-f]*"' | head -1 | grep -o '[0-9a-f]\{7,\}')
+# v0.5.9 起 prepack 会重跑 sync（副本零提交），于是 build-info 的 sha 变成发版提交
+# 本身而不是它的父提交——两者指的是同一份代码（release 提交只改版本号），
+# 断言接受这一个区间：既不是父提交也不是发版提交 = 包内代码不是本 tag 的代码。
+if [ "$BI_SHA" != "$TAG_PARENT" ] && [ "$BI_SHA" != "$TAG_COMMIT" ]; then
+  echo "FAIL: pack 出的 tarball 代码指纹（$BI_SHA）既不是 v$BUMP^（$TAG_PARENT）也不是发版提交（$TAG_COMMIT）——禁止发布这颗包" >&2
   exit 1
 fi
-echo "npm tarball 已验证：$TGZ（代码指纹=$TAG_PARENT）"
+echo "npm tarball 已验证：$TGZ（代码指纹=$BI_SHA）"
 
 # dsh 壳同版发布（2026-11-10 实锤教训：dsh 壳游离在发版流程外，npm 停在
 # 0.1.1 半个月，期间所有按包名安装的 dsh 装机全拿旧包——安装器内部就是
