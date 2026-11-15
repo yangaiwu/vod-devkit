@@ -346,3 +346,22 @@
 
 - 3c20721 fix(兼容): tools.py f-string 表达式内反斜杠致 Python 3.10/3.11 SyntaxError——join 提至 f-string 外（行为等价），双副本同步；release.sh 质量门新增旧解释器语法扫（B4）
 
+
+## v0.5.8（2026-11-15）
+
+- 6186b93 merge: P2+P8 并入 main（含拆分正则误伤 origin/main 的修复 + 护栏）
+- 9feafaa fix(cli): 拆分正则误伤 "origin/main" → "origin/cli.main"（update 静默失效）+ 护栏
+- b71033a Merge commit '69a9353' into merge/p2-f8-into-main
+- 6d4f8cf !5 merge fix/ci-gates-v2 into main
+- fd9d963 fix(ci): 三处只在 CI 暴露的红灯（rules_provenance / hermes 无 CLI / host_matrix 探测）
+- 69a9353 !4 merge refactor/f8-bin-split into refactor/p2-pack-split
+- ab6948f refactor(cli)!: bin/vod-devkit 按命令域拆分（F8）+ 两处测试 patch 面跟随实现
+- b15e53d refactor(packs)!: tools.py 按 pack 纵切 + patch 面迁移（P2 结构债收口）
+- 7296c94 !2 merge fix/findings-f1-f7 into main
+- 3d6c4f0 test(gate): 契约→pack 归属的反方向门禁（F4 核查后的真缺口）
+- f78d8e1 fix(dsh)+test(parity): 归因双实现漂移修复 + 运行时路径兜底（F1/F6/F7）
+- 5443342 fix(tools): 运行期状态单点写入 + 锁（F2/F3）+ 清死代码与重复常量（F5/F7）
+- 7db9b2b !1 merge refactor/p1-paths-and-gates into main
+- c5c7732 refactor(paths)!: 根定位单点化 + 插件副本自包含（P1）
+- 6ccf729 test(gates): 门禁先行——插件副本自包含用例(红) + mypy 反转整包 + pre-push 补门
+
