@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url';
 process.env.VOD_DSH_RUNTIME = join(mkdtempSync(join(tmpdir(), 'dsh-parity-')), 'runtime.json');
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FIXTURE = join(HERE, '..', '..', 'tests', 'fixtures', 'attribution_parity.json');
+// 仓根：packages/dsh/test → ../../..（S3 起 dsh 在 packages/dsh）
+const REPO = join(HERE, '..', '..', '..');
+const FIXTURE = join(REPO, 'tests', 'fixtures', 'attribution_parity.json');
 
 const { attributeProduct } = await import('../lib/index.js');
 const fx = JSON.parse(readFileSync(FIXTURE, 'utf8'));

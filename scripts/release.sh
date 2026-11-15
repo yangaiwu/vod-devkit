@@ -44,7 +44,7 @@ echo "版本: $CUR → $BUMP"
 # 质量门：发版前必须全绿（同 pre-push）
 PY=$(ls /root/.hermes/tools/python-3.14.7*/bin/python3 2>/dev/null || command -v python3)
 export PYTHONPATH="/root/.hermes/cache/scratch/pylibs:$PYTHONPATH"
-"$PY" -m pyflakes vod_mcp/*.py tests/*.py && "$PY" -m pytest tests/ -q || { echo "FAIL: 质量门未过，拒绝发版"; exit 1; }
+"$PY" -m pyflakes src/vod_mcp/*.py tests/*.py && "$PY" -m pytest tests/ -q || { echo "FAIL: 质量门未过，拒绝发版"; exit 1; }
 
 # 旧解释器语法门（B4 实锤）：pyflakes/pytest 跑在 3.14 上测不出 ≤3.11 的语法错
 # （f-string 表达式内反斜杠 PEP 701 前禁止）。用固定旧解释器逐文件 py_compile，
@@ -54,7 +54,7 @@ if [ -n "$SYNTAX_PY" ] && [ -x "$SYNTAX_PY" ]; then
   FAILS=""
   while IFS= read -r f; do
     "$SYNTAX_PY" -m py_compile "$f" 2>/dev/null || FAILS="$FAILS $f"
-  done < <(git ls-files '*.py' | grep -v '^dsh/')
+  done < <(git ls-files '*.py' | grep -v '^packages/dsh/')
   [ -z "$FAILS" ] || { echo "FAIL: 旧解释器($SYNTAX_PY)语法门未过：$FAILS"; exit 1; }
   echo "语法门($SYNTAX_PY)：全绿"
 else
@@ -86,15 +86,15 @@ def sub_line(path, pattern, repl, flags=re.M):
 # 核心落点：整行正则替换（非子串 replace——静默 no-op 的根因）
 sub_line("package.json", r'(?m)^  "version": ".*",$', f'  "version": "{new}",')
 sub_line("pyproject.toml", r'(?m)^version = ".*"$', f'version = "{new}"')
-sub_line("vod_mcp/__init__.py", r'(?m)^__version__ = ".*"$', f'__version__ = "{new}"')
-sub_line("contract/tools.schema.json", r'(?m)^  "version": ".*",$', f'  "version": "{new}",')
+sub_line("src/vod_mcp/__init__.py", r'(?m)^__version__ = ".*"$', f'__version__ = "{new}"')
+sub_line("assets/contract/tools.schema.json", r'(?m)^  "version": ".*",$', f'  "version": "{new}",')
 
 # 附加落点表驱动（对齐 devkit release-please extra-files 语义）：
 # 加版本落点=在表里加一行，不再改脚本逻辑。
 EXTRA_FILES = [
     ("plugins/vod-devkit/.codex-plugin/plugin.json", "json"),
     ("plugins/vod-devkit/build-info.json", "json"),
-    ("dsh/package.json", "json"),
+    ("packages/dsh/package.json", "json"),
 ]
 for f, kind in EXTRA_FILES:
     try:
@@ -106,8 +106,8 @@ for f, kind in EXTRA_FILES:
         open(f, "w").write(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
 
 # 全落点硬断言兜底（表漏了/替换没生效都在这里拦住）
-ALL = ["package.json", "pyproject.toml", "vod_mcp/__init__.py",
-       "contract/tools.schema.json"] + [f for f, _ in EXTRA_FILES]
+ALL = ["package.json", "pyproject.toml", "src/vod_mcp/__init__.py",
+       "assets/contract/tools.schema.json"] + [f for f, _ in EXTRA_FILES]
 for f in ALL:
     try:
         s = open(f).read()
@@ -137,10 +137,10 @@ RANGE="${PREV_TAG}..HEAD" && [ -z "$PREV_TAG" ] && RANGE="HEAD"
 } >> CHANGELOG.md
 
 # 显式文件列表提交（纪律：禁 git add -A——曾误收垃圾文件）
-git add package.json pyproject.toml vod_mcp/__init__.py contract/tools.schema.json \
-        plugins/vod-devkit/.codex-plugin/plugin.json dsh/package.json CHANGELOG.md \
+git add package.json pyproject.toml src/vod_mcp/__init__.py assets/contract/tools.schema.json \
+        plugins/vod-devkit/.codex-plugin/plugin.json packages/dsh/package.json CHANGELOG.md \
         tests/golden \
-        skills hermes-plugin docs/decisions.md build-info.json
+        assets/skills docs/decisions.md build-info.json
 # 插件副本不再入库（.gitignore，v0.5.9 零提交）——不再出现在 git add 清单里；
 # 漏项类事故因此消失，副本内容由 sync_plugin.py 在 prepack/发版前生成。
 git commit -qm "release: v$BUMP"
@@ -176,9 +176,9 @@ echo "npm tarball 已验证：$TGZ（代码指纹=$BI_SHA）"
 # `dsh plugin add dsh-vod-devkit` 按包名走 npm）。版本随主包同 bump（落点表），
 # pack 后断言包内 lib 指纹 == 工作区（防 stale build 产物随包发出），并与
 # 主包一起给出发布命令——两个包都必须发布，缺一即复发。
-DSH_TGZ="dsh/dsh-vod-devkit-$BUMP.tgz"
-( cd dsh && npm pack --silent >/dev/null )
-if ! tar xzOf "$DSH_TGZ" package/lib/index.js | diff -q - dsh/lib/index.js >/dev/null 2>&1; then
+DSH_TGZ="packages/dsh/dsh-vod-devkit-$BUMP.tgz"
+( cd packages/dsh && npm pack --silent >/dev/null )
+if ! tar xzOf "$DSH_TGZ" package/lib/index.js | diff -q - packages/dsh/lib/index.js >/dev/null 2>&1; then
   echo "FAIL: dsh tarball lib/index.js 与工作区不一致（src 改后未 build-client？）——禁止发布" >&2
   exit 1
 fi
@@ -190,7 +190,7 @@ if [ "$PUBLISH" = "1" ]; then
   npm publish "$TGZ" --access public || { echo "FAIL: vod-devkit publish 失败"; exit 1; }
   # 用子 shell + 本地文件名：v0.5.2 实锤——从仓根用相对路径 dsh/xxx.tgz 发布时
   # npm 把不存在的相对路径当 git 地址（ssh://git@github.com/dsh/...），报 publickey 失败。
-  ( cd dsh && npm publish "./dsh-vod-devkit-$BUMP.tgz" --access public ) \
+  ( cd packages/dsh && npm publish "./dsh-vod-devkit-$BUMP.tgz" --access public ) \
     || { echo "FAIL: dsh 壳 publish 失败"; exit 1; }
   python3 scripts/publish_verify.py --version "$BUMP" \
       --pkg vod-devkit --pkg dsh-vod-devkit \

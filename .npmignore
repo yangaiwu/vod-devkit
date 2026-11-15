@@ -1,0 +1,14 @@
+# 发布物只装源码与资产：字节码/缓存/运行期状态/本地包一律不进 tarball。
+# 为什么需要它：package.json files 里有整目录条目（src/vod_mcp/packs/、
+# src/vod_mcp/host_adapters/、integrations/、plugins/vod-devkit/*），
+# 整目录会把这些目录下的 __pycache__ 一起带进包——实测 0.5.9 包内 51 个 .pyc。
+__pycache__/
+*.pyc
+*.pyo
+*.tgz
+runtime.json
+install-manifest.json
+.e2e-*
+.pytest_cache/
+.mypy_cache/
+node_modules/

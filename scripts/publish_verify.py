@@ -28,10 +28,10 @@ import urllib.request
 # 每个包的关键内容断言：tarball 内路径 → 期望包含的子串（None=只要求存在）
 REQUIRED = {
     "vod-devkit": [
-        ("package/vod_mcp/pending.py", None),
-        ("package/vod_mcp/config_forms.py", None),
-        ("package/vod_mcp/server.py", None),
-        ("package/contract/tools.schema.json", None),
+        ("package/src/vod_mcp/pending.py", None),
+        ("package/src/vod_mcp/config_forms.py", None),
+        ("package/src/vod_mcp/server.py", None),
+        ("package/assets/contract/tools.schema.json", None),
     ],
     "dsh-vod-devkit": [
         ("package/lib/index.js", None),
@@ -106,7 +106,7 @@ def check_tarball(pkg: str, blob: bytes, version: str) -> list:
             continue
         if needle and needle not in members[path].decode("utf-8", "replace"):
             problems.append(f"{pkg} tarball 的 {path} 不含 {needle!r}")
-    schema = members.get("package/contract/tools.schema.json")
+    schema = members.get("package/assets/contract/tools.schema.json")
     if schema:
         ver = json.loads(schema).get("version")
         if str(ver) != str(version):

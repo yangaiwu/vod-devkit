@@ -81,3 +81,5 @@ vendor 链已停用：VOD-Project 的 skills/ 文档与引擎 v2 代码分叉）
 2. 提 MR（base=main），标题写清动机；破坏行为变更须先在
    `docs/decisions.md` 记决策依据
 3. 评审关注：最坏伤害半径自审、护栏（confirm/批量上限/传输守卫）未被绕过
+4. 合入 main 后由维护者快进同步到 GitHub 镜像（GitHub 不接受直接 PR；
+   规则与命令见 `RELEASING.md`「双仓」节）
