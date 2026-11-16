@@ -1998,3 +1998,22 @@ OfficeAce 是桌面端（Windows 10/11、macOS 13+、HarmonyOS 6.1+，官方无 
 
 **验证**：`release.sh` 干跑通过 mypy；`tests/test_openclaw_officeace_hosts.py` 新增快照一致性 /
 回滚 / 保留期三条与"兜底不靠文案"一条；`officeace.py:213` 类型错误清零（mypy 49 文件全绿）。
+
+## D-doctor-provenance-1：provenance 判据取载荷，不取仓根（2026-11-16 真机实锤）
+
+**缺陷**：`doctor` / `verify`（preset 分支）用**仓根** `build-info.json` 比对 manifest 的
+commitSha。根这份是 tracked 文件，release 按 tag 口径写 `v^`（release 提交只 bump 版本），
+而 `install` 会按 HEAD 重烧 → 发版后的真机上二者**永远不等**。后果是两条纪律互斥：
+`git checkout -- build-info.json` 让工作树干净，doctor 立刻
+`FAIL: install-manifest 与 build-info 的 commitSHA 不一致`；不还原则工作树永远脏。
+实测（v0.5.27 真机）：tracked = `d7c4a8d`（v^），install 重烧 = `4628f40`（tag 提交）。
+
+**决定**：判据取**载荷** `payloadDir/build-info.json`——它由 install 与 manifest 同一次写入，
+是真源且不受工作树 git 状态影响；老账本无 `payloadDir` / 载荷缺该文件时回落仓根（不新增误伤面）。
+
+**代价**：载荷目录被人删掉时判据失效（同一状态下完整性检查另有 FAIL，不靠这条兜）。
+根 `build-info.json` 从此只是"发版快照"，不参与一致性判定——工作树里它可以保持干净。
+
+**验证**：S158-1（根记 `v^` 时 doctor 仍 OK，命令面）+ S158-2（载荷 ≠ manifest 必须报，
+直调 `doctor._provenance_problem()`，判据退化回读根即红）；既有
+`test_verify_preset_fails_on_mixed_artifacts` 改为改载荷而不改根。

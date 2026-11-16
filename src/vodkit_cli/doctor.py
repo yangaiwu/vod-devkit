@@ -175,6 +175,33 @@ def _repair_dsh_patch_block(mf: dict) -> str | None:
     return str(patch)
 
 
+def _provenance_problem(mf: dict) -> str | None:
+    """安装记录与**安装产物**必须同源：manifest 的 commitSha == 载荷 build-info 的 commitSha。
+
+    为什么取载荷不取仓根（S158 / D-doctor-provenance-1，2026-11-16 真机实锤）：
+    根 `build-info.json` 是 tracked 文件，release 按 tag 口径把它写成 `v^`，而 `install`
+    会按 HEAD 重烧——发版后的真机上二者永远不等，于是「工作树干净」与「doctor OK」互斥
+    （实测 `git checkout -- build-info.json` 后 doctor 立即 FAIL）。载荷那份是 install
+    与 manifest 同一次写入的真源，且不受工作树 git 状态影响。
+    回落规则：老账本无 payloadDir / 载荷缺 build-info 时退回仓根（不新增误伤面）。
+    """
+    pd = mf.get("payloadDir")
+    layers = []
+    if pd:
+        layers.append((Path(pd) / "build-info.json", "载荷"))
+    layers.append((common.ROOT / "build-info.json", "仓根"))
+    installed = (mf.get("source") or {}).get("commitSha")
+    for path, where in layers:
+        try:
+            bi = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if installed != bi.get("commitSha"):
+            return f"install-manifest 与{where} build-info 的 commitSHA 不一致"
+        return None
+    return None
+
+
 def _render_problems(problems) -> str:
     """分层报告（对表 devkit 的 doctor-report）：按 环境/载荷/配置/技能/网络/插件 分组，
     每条失败给「原因」与「动作」，避免运维只看到一堆 FAIL 文案。"""
@@ -300,9 +327,9 @@ def cmd_doctor(args=None):
             if patched:
                 print(f"[doctor] 已补 dsh patch 形态缺口（profile={row.get('dshProfile')}）："
                       f"{patched}（重启 dsh 生效）")
-        bi = json.loads((common.ROOT / "build-info.json").read_text(encoding="utf-8"))
-        if mf["source"]["commitSha"] != bi.get("commitSha"):
-            problems.append("install-manifest 与 build-info 的 commitSHA 不一致")
+        prov = _provenance_problem(mf)
+        if prov:
+            problems.append(prov)
         if (mf.get("source") or {}).get("released") is False:
             print("[doctor] 提示：安装期提交不在任何 tag 里（非发布构建）——版本号相同，"
                   "内容可能与该版本的 npm 包不同（R10-2）；要一字不差请用 "
@@ -512,9 +539,14 @@ def cmd_verify(_args):
     if common._distribution() == "preset":
         # D-key-guard-3②：产品分发形态客户机无 git 源——只做本地完整性校验，
         # 源端比对降级为 unchecked 不 FAIL（离线 verify 必须可用）
-        bi = json.loads((common.ROOT / "build-info.json").read_text(encoding="utf-8"))
-        if sha != bi.get("commitSha"):
-            print("FAIL: manifest 与 build-info commitSHA 不一致（安装产物被篡改/混装）")
+        # S158：完整性取**载荷** build-info（仓根那份是 tracked 的发版快照，发版后
+        # 与安装提交天然不等；拿它比会把正常装机报成混装）
+        mfv = json.loads(p.read_text(encoding="utf-8"))
+        rows = mfv.get("installs") or [mfv]
+        view = {**mfv, **{k: v for k, v in (rows[-1] or {}).items() if v is not None}}
+        problem = _provenance_problem(view)
+        if problem:
+            print(f"FAIL: {problem}（安装产物被篡改/混装）")
             sys.exit(1)
         print("verify: OK（preset 本地完整性；源端比对 unchecked）")
         return

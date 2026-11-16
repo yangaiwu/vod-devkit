@@ -82,7 +82,9 @@ def test_verify_preset_local_integrity_no_git(env):
 def test_verify_preset_fails_on_mixed_artifacts(env):
     cli(env, "install", "--target", "hermes", "--product", "GTD",
         "--distribution", "preset")
-    bi = env["repo"] / "build-info.json"
+    # 混装判据取载荷 build-info（仓根那份是发版快照，与本用例无关；见 D-doctor-provenance-1）
+    mf = json.loads((env["repo"] / "install-manifest.json").read_text())
+    bi = Path(mf["payloadDir"]) / "build-info.json"
     d = json.loads(bi.read_text())
     d["commitSha"] = "0" * 40
     bi.write_text(json.dumps(d))

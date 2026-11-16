@@ -1312,3 +1312,14 @@ doctor 的 dsh patch 自愈只做一件事：让文件回到**安装器该写的
   的 args 指向的载荷根——版本错位时另一个 profile 仍在用的载荷不会被当孤儿删掉。
 - `--audit` 逐 profile 判，并读 manifest 的 `dshPatch.mcpClient` 区分"MCP 块被清"（DRIFT）
   与"合法降级"（PASS）；降级分支只做配置面判据，不冒充 L3 拉起。
+
+## provenance 判据的取值面（D-doctor-provenance-1，2026-11-16）
+
+诊断链（doctor / verify 的 preset 分支）判定「装的东西是不是同一份构建」时，一律读
+**载荷** `payloadDir/build-info.json`：
+
+| 判据 | 取值 | 为什么不是另一个 |
+|---|---|---|
+| 安装记录 ↔ 安装产物同源 | `<payloadDir>/build-info.json` | 根 `build-info.json` 是 tracked 的发版快照，release 记 `v^`、install 重烧 HEAD，发版后天然不等 |
+| 回落 | 老账本无 `payloadDir` / 载荷缺文件 → 仓根 | 不新增误伤面；载荷缺失另有完整性 FAIL |
+| 与调用方的约定 | `doctor._provenance_problem(mf) -> str \| None` | 单一入口，doctor 与 verify 共用，禁止第二套读法 |
