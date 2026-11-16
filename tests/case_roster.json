@@ -505,6 +505,12 @@
     "S167": {
       "carrier": "tests/test_explain_codes.py"
     },
+    "S168": {
+      "carrier": "tests/test_review_r2.py"
+    },
+    "S169": {
+      "carrier": "tests/test_review_r2.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

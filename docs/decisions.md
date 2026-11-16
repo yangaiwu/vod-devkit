@@ -2129,3 +2129,32 @@ S164-1/2、S165（桩 CLI sleep 5 + timeout 1 → <3.5s 返回且片段在）、
   引擎 `ua_hash = sha256(deviceId)`，两处（安装器 remote.py / 运行期 net.py）带同一锚点。
 
 **验证**：S167；`tests/test_explain_codes.py` 四条全绿（含 -320XX 与 raise 点一致性）。
+
+## D-hermes-root-3way-1：隔离 HOME 下 HERMES_HOME 三分支；副本 provenance 按 HEAD（2026-11-17 评审）
+
+**缺陷（实测，基于 ab4f7ca）**：
+
+1. **收窄过头**：S161 之后隔离 HOME 下只认「位于该 HOME 之内」的 HERMES_HOME。容器形态
+   （`HOME=/app`、`HERMES_HOME=/data/hermes` 挂载卷）的显式配置被静默忽略 → 配置/技能写进
+   镜像层，重建即丢。这是本轮自己引入的破坏路径，评审当场指出。
+2. **副本 provenance 错标**：`sync --no-build-info` 在副本缺失时拿根 build-info 补写；根是
+   v^ 发版快照时，副本把自己标成 v^ 而代码是 HEAD。结构门禁只判「sha 是本仓真实提交」，
+   查不出这类语义错误（触发面窄：副本被清 + 走 --no-build-info）。
+
+**决定**（三分支，逐支对应真实形态）：
+
+| HERMES_HOME 位置（隔离 HOME 下） | 处理 | 对应形态 |
+|---|---|---|
+| 当前隔离 HOME 之内 | 认 | 矩阵 / 显式钉根 |
+| 真实家目录之下（且不在隔离 HOME 内） | 忽略，两边跟随 `<HOME>/.hermes` | 网关派生的 `/root/.hermes` 泄漏面 |
+| 其余 | 认 | 容器挂载卷 `/data/hermes` 等显式运维配置 |
+
+不采用评审建议的「二分（在 real 之下就忽略）」：pytest 的 tmp_path 落在 `/root/.hermes/cache/…`
+下，会让「隔离根内」与「挂载卷」两类都被判成泄漏（实测 2 条红）。三分支每支可测且互斥。
+文件与 CLI 仍只读 `_effective_hermes_home()` 一个判据，不重新引入分裂。
+
+**副本 provenance**：副本缺失时按 `git rev-parse HEAD` 烧（目录不存在则建），根 build-info
+仍只由 `build-info`/release 写。
+
+**验证**：S168-1..3（假 real 隔离，避免 tmp_path 干扰）、S169（副本=HEAD、根字节不变）；
+host_adapters / hermes_hooks / installer / distribution 全量仍绿。

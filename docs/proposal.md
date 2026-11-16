@@ -1831,3 +1831,20 @@ Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此�
 | # | 场景 | 断言 |
 |---|---|---|
 | S167 | HTTP 429 解释 | `explain("上游返回 429: …")` known，动作含「重试」，且不得指向本机配置（不含 VOD_JAVA） |
+
+## 隔离 HOME 下 HERMES_HOME 的三分支与副本 provenance（S168/S169，D-hermes-root-3way-1，2026-11-17 评审）
+
+**背景**（真机评审第二轮，基于 ab4f7ca）：
+
+1. S161 把判据收窄成「隔离 HOME 下只认位于该 HOME 之内」→ 容器形态
+   `HOME=/app` + `HERMES_HOME=/data/hermes`（挂载卷）的显式运维配置被**静默忽略**，
+   配置与技能写进镜像层、重建即丢，只剩一行 stderr。属本轮引入的破坏路径。
+2. `sync --no-build-info` 在副本缺失时按「根 build-info 的现有内容」补写：根是 v^ 发版快照
+   时副本会把自己标成 v^ 而代码是 HEAD——结构门禁查不出（sha 确实真实），provenance 语义错。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S168-1 | 隔离 HOME + HERMES_HOME 在该 HOME 之外、也不在真实家目录下（容器挂载卷） | 文件与 CLI 落点**都**用它（显式配置被尊重） |
+| S168-2 | 隔离 HOME + HERMES_HOME 在真实家目录之下（网关派生的 `/root/.hermes`） | 两边都跟随 `<HOME>/.hermes`（泄漏面继续挡住） |
+| S168-3 | 隔离 HOME + HERMES_HOME 在该 HOME 之内 | 两边都用它（矩阵/显式钉根） |
+| S169 | 副本缺失 + `--no-build-info` | 副本按**当前 HEAD** 烧，根 build-info 字节不变 |
