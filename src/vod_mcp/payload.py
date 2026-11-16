@@ -229,6 +229,8 @@ def prune_candidates(rows=None, keep: int = 0) -> list:
       · 只删清单内：必须是 `<payload_home>/payloads/<ver>/` 且带 `payload.json`
         （= stage() 落的），绝不按 glob 删目录；
       · 保留当前版本，以及任何安装行 payloadDir 指向的版本（在用的不碰）；
+      · S153：dsh 各 profile 的 patch args 指向的版本也算在用（账本只记最近一行，
+        配置面若不扫，另一个 profile 的载荷会被当孤儿删掉）；
       · keep>0 时额外保留最新的 keep 份；
       · 只读 payloads/ 目录，不碰机器级 state（令牌/账本）。
     返回 [(path, version, size_bytes)]，按版本升序（最旧的在前）。

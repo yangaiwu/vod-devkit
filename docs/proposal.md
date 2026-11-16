@@ -132,7 +132,8 @@ F3 采集技能观测（排期）：识别准确率/确认时机需一次真实�
 ①安装绑定（install --product，装插件的人声明，落 runtime.json+manifest）
 ②反馈内容/调用显式指定 ③询问用户。静默默认已删除（曾为 codearts，
 会把 AIShell 反馈错误归因到 CodeArts——归因错误污染目标产品数据，
-比报错更糟；护栏 -32013 引导三种解法）。
+比报错更糟；护栏 -32013 引导三种解法——**该本地拦截码后已废除，见 D-attrib-binding-1：
+改为运行期引导（无证据就问用户一次），不再有错误码**）。
 **引擎缺口（已解决，2026-11-05 口径更新）**：submit 白名单=代码常量
 VALID_PRODUCTS（六值，无 AIShell）曾致 AIShell 类反馈被拒收——
 T7f/normalizeLoose（MR !152 线）已改为**不设白名单**：任意产品名
@@ -164,8 +165,8 @@ S11 归因-绑定主路径
   confirm → product 取绑定值 → 提交正确归属 aishell
 
 S12 归因-未归因引导
-  无绑定无传参 → 护栏 -32013 报错含三种解法+当前白名单
-  （meta stale 时附 [stale] 提示）→ agent 询问用户 → 补齐提交
+  无绑定无传参 → **不猜产品**，agent 询问用户一次（旧口径"护栏 -32013 报错含三种解法"已废除，
+  见 D-attrib-binding-1；meta stale 时附 [stale] 提示）→ 补齐提交
 
 S13 meta 动态取
   引擎新增产品（如 AISHELL）→ meta 端点返回新白名单 → 插件

@@ -839,6 +839,7 @@ npx 安装时 repo 在 `~/.npm/_npx/<hash>/`——npm 清缓存或换版本后�
 
 落地：`installs[]` 每宿主一行（target/transport/mcpConfig/skillsDir/payloadDir/
 product/packs/dshProfile/apiBase/version/commitSha），按 target 去重合并；
+**已被 D-installs-profile-1 细化：行键 = `(target, dshProfile)`（dsh 的多 profile 各自一行）**；
 `uninstall` 逐行清理（老 manifest 无 installs[] 时退化为单行）；顶电平字段保留
 「最近一次」语义（golden/status 兼容）。
 

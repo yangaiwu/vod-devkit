@@ -36,8 +36,8 @@ npx --yes vod-devkit install --target opencode --mcp-url http://<host>:9528/mcp 
     --mcp-token <VOD key> --product codearts
 ```
 
-- `--mcp-token` 必填：远程面**不代签匿名令牌**（身份只从请求头 Bearer 走，
-  引擎侧落库/配额按请求方记账）。hermes/codex 的 token 落 env 引用，opencode
+- `--mcp-token` 必填：远程面身份**只从请求头 Bearer 走**；无 Bearer 时与本地同链领/复用
+  机器级匿名令牌（D-token-machine-1；旧"不代签匿名单层"口径已废除）。hermes/codex 的 token 落 env 引用，opencode
   明文入配置（注意文件权限）。dsh 不走 MCP，此模式显式拒绝。
 - **token 探活**（安装期 fail fast）：attach 前探活三步——连接（initialize）、
   工具面（tools/list 必须等于契约 − 远程面裁剪集）、**key 真伪**（经远程面真调
@@ -134,7 +134,8 @@ npm 首发已解锁，收录审核进行中。
   匿名端点 404——等待部署或改用正式 key
 - **`-32014` 非 https 且非回环**：`--java-api-base` 配了公网 http——改 https 或回环地址
 - **`-32011` confirm 拦截**：写操作需逐次确认，重试并带 `confirmed=true`
-- **`-32013` 产品归因引导**：`--product` 未传或传了非法值，报错含权威名单
+- **产品归因**：安装期 `--product` 做名录硬校验（不在名录 `exit 2`）；运行期**没有** `-32013`
+  这类本地拦截码——归因顺序=原话字面唯一命中 > 显式参数 > 会话记忆 > 安装先验，都没有就先问用户一次
 - **attach 时 `token 无效（引擎判定 rejected）`**：坏 key 被探活拦下——确认是
   VOD 平台签发的 key（引擎 401 原文「API Key 无效或已失效」）
 - **`设备绑定校验失败`**：匿名令牌跨设备使用——token 有效但本机不是签发设备，

@@ -142,8 +142,8 @@ scene ≤128。签名回执记 P2 前置（用户自助查询/撤回的前置条
 
 ### 2.5f 产品归因（_resolve_product）
 
-三层：runtime.json product（安装绑定）> 调用方显式 > 报错 -32013
-（引导 install --product / 传参 / 问用户）。静默默认禁止。
+四层（D-attrib-binding-1 起的口径）：原话字面唯一命中 > 调用方显式 > 会话记忆 > 安装绑定先验；
+都没有就**问用户一次**。本地不再有 `-32013` 归因拦截码（旧三层含报错码，已废除）。静默默认禁止。
 别名归一对齐引擎（modelarts→MaaS）；白名单经 meta 动态校验
 （快照兜底时容忍提交并标 stale——引擎侧最终校验为准）。
 
@@ -1273,7 +1273,10 @@ productCatalog 的 state 缓存（TTL + 强制刷新开关）。
 
 用例承载：`tests/test_host_matrix.py`（S150）。
 
-## doctor 自愈的边界（D-doctor-repair-1，2026-11-16）
+## doctor 自愈的边界（D-doctor-repair-1，2026-11-16；**判据已被 D-doctor-repair-2 取代，本节保留历史**）
+
+D-doctor-repair-1 只解决了"切块"，判据仍是块文本比对——该判据把环境值当正确性，被
+D-doctor-repair-2 推翻（结构化不变量 + 安装期真源，见下节）。当时的口径如下（不再执行）：
 
 doctor 的 dsh patch 自愈只做一件事：让文件回到**安装器该写的样子**。判据是块文本比对
 （`_patch_block(...)` 生成块整体 `in text` 即完好），重建走 `upsert_patch`（托管标记优先划界）。

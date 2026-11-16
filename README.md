@@ -96,7 +96,9 @@ npx -y vod-devkit@latest prune --payloads --apply --yes  # 真删（保留当前
 
 - **只清清单内**：`payloads/<版本>/` 且带 `payload.json`（安装器 `stage()` 落的）；
   没有该文件的手工目录与残留一律不在此列，绝不按 glob 删目录；
-- **保留**：当前版本 + 任何安装行 `payloadDir` 在用的版本；`--keep N` 额外保留最新 N 份；
+- **保留**：当前版本 + 任何安装行 `payloadDir` 在用的版本 **+ `~/.dsh/profiles/*/cordis.patch.yml`
+  里 args 指向的版本**（配置面也算在用——多 profile 各指一份时，另一个 profile 的在用载荷不许被删）；
+  `--keep N` 额外保留最新 N 份；
 - **默认 dry-run**（打印 版本/大小/路径 + 总量）；`--apply` 才删，交互式再问 y/N，
   非 tty 必须 `--yes`，否则拒绝执行（exit 2）；
 - **只删载荷**，不碰机器级 state（令牌/账本）；单条删除失败记录后继续，最后非零退出；
@@ -122,7 +124,8 @@ npx -y vod-devkit@latest prune --payloads --apply --yes  # 真删（保留当前
 runtime.json 的身份值（`auth init --apply` 之后的下一次提交立刻用新 key）。**不要把 key 写进宿主 MCP 配置的 `env`**——明文，且会随
 配置进 git；`env` 只留给平台注入。
 
-多宿主账本在 `install-manifest.json` 的 `installs[]`（按 target 去重）。`--target` 缺省
+多宿主账本在 `install-manifest.json` 的 `installs[]`（按 `(target, dshProfile)` 去重——
+dsh 的 web / headless 是独立安装对象，各一行）。`--target` 缺省
 作用于全部行；`packs` 的写操作默认 dry-run，`--apply` 才落盘（首改留 `.bak`，写后读回验证，
 `core` 强制包含）。`VOD_PACKS` 里出现未知包 id 时**安装口与 server 启动口都会报错退出**
 ——不静默过滤，免得"配了没生效"。
@@ -430,7 +433,9 @@ hermes hooks test pre_llm_call --payload-file payload.json
 1. **技能教**：`vod-feedback-collect` 规定先承接、再征得同意、原话逐字、不猜产品。
 2. **钩子提醒**：pre_llm_call 命中采集意图时注入指令（防止模型把抱怨当排障问题去复现）。
 3. **运行期护栏**：`safety/policy.json` 的声明式规则 + 两段式草稿/令牌
-   （`-32010` 未确认、`-32011` 载荷不符、`-32012` 无凭据、`-32013` 过期、`-32014` 单次消费）
+   （`-32010` deny、`-32011` 草稿/令牌不符、`-32012` 无凭据/令牌不可用、`-32014` 非回环 http；
+   归因**没有**本地错误码——`-32013` 已废除，改为运行期引导：原话唯一命中 > 显式参数 >
+   会话记忆 > 安装先验，都没有就先问用户一次）
    + 护栏 deny 直连数据库意图。
 
 诚实残留（写清楚，不掩）：

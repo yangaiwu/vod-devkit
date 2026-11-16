@@ -4,7 +4,7 @@
 1. 默认 dry-run，不加 --apply 不删任何东西；
 2. 非交互环境无 --yes 必须拒绝（exit 2），交互式再问 y/N；
 3. 只删清单内（带 payload.json 的安装器产物），无 payload.json 的手工目录不在此列；
-4. 保留当前版本 + 安装行 payloadDir 指向的版本；
+4. 保留当前版本 + 安装行 payloadDir 指向的版本 + dsh 各 profile patch args 指向（配置面）；
 5. --keep N 额外保留最新 N 份；逐条打印 版本/大小/路径；
 6. 只删载荷，机器级 state（令牌/账本）不动。
 """

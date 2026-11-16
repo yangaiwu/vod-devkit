@@ -7,7 +7,8 @@
 约束（定案原文的落法）：
   · 只删清单内：`payload.prune_candidates()` 只认 `<payload_home>/payloads/<ver>/`
     且带 `payload.json`（stage() 落的）的目录，绝不 glob 盲删；
-  · 保留当前版本 + 任何安装行 payloadDir 指向的版本；`--keep N` 额外保留最新 N 份；
+  · 保留当前版本 + 任何安装行 payloadDir 指向的版本 + dsh 各 profile patch 里 args 指向的
+    版本（配置面也算在用）；`--keep N` 额外保留最新 N 份；
   · 默认 dry-run（只打印清单）；真删要 `--apply`；
   · 二次确认：交互式 y/N；非 tty 必须 `--yes`，否则拒绝；
   · 逐条打印 路径/版本/大小；
