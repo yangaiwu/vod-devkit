@@ -550,3 +550,11 @@
 - e132b3a docs(adr): D-gate-mypy-1 + S157（类型门禁进发版、OfficeAce sqlite 快照、OpenClaw 兜底判据）
 - 9308bd6 docs+fix: 全系统文档刷新 + mypy 门禁/OfficeAce 快照/OpenClaw 兜底
 
+
+## v0.5.28（2026-11-17）
+
+- 9e6182d fix(hosts): hermes 落点重定向按前缀归属，隔离 HOME 不认外部 HERMES_HOME（S159）
+- df33a3b test(门禁先行): S159 hermes spec 重定向不得按分量名自我嵌套
+- c19206c fix(diagnose): provenance 判据改读载荷 build-info（S158，D-doctor-provenance-1）
+- 72aa299 test(门禁先行): S158 doctor provenance 判据应以载荷为准
+
