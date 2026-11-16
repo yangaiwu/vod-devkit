@@ -497,3 +497,9 @@
 
 - b8e4cf0 fix(install): 载荷 commitSha 不在任何 tag 里时提示"非发布构建"（R10-2）
 
+
+## v0.5.20（2026-11-16）
+
+- a34dbc7 test(installer): status golden 归一化 reachable/released（环境值，别锁检出）
+- db6e98e fix(dsh,cli): 托管块标量加引号 + status/doctor --target 多 profile 全列（P1/P4/P5）
+
