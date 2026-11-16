@@ -10,15 +10,16 @@
 ```
 终端用户（对 agent 说反馈，零 VOD 感知）
    ↓ 采集技能：识别→征得同意→结构化（title=用户原文）
-宿主 agent（Hermes/任意 MCP 客户端，配置一条 mcpServers 即集成）
-   ↓ MCP stdio（JSON-RPC，工具 mcp_vod_devkit_*）
-vod-devkit 插件（Python 单进程薄壳，零第三方依赖）
+宿主 agent（11 个专属适配：hermes / opencode / codeartsdoer / codeartswork / codex /
+codex-desktop / dsh / workbuddy / atomcode / openclaw / officeace；其它 MCP 客户端走 --target generic）
+   ↓ MCP stdio（JSON-RPC，工具名 `vod_*`；dsh 的 MCP 模式前缀为 `mcp__vod-devkit__vod_*`）
+vod-devkit 插件（Python 单进程薄壳，零第三方依赖；另有远程面 Streamable HTTP 供多 agent 共用）
    ├ 护栏：confirm 逐次 / 单批≤50 / 内容≤2000 / DB·凭据意图 deny
-   ├ 归因三层：安装绑定 > 显式传参 > 问用户（禁止静默默认）
-   ├ 零字段令牌：无 key 时首次提交或 `vod_auth_ensure` 自动申请（无需注册），机器级一份
-   └ 动态元数据：meta 拉取+24h 缓存+快照兜底+stale 标记
-   ↓ Authorization: Bearer
-VOD Java backend（唯一上游：/external/voice/submit + /external/token）
+   ├ 归因链：用户明确回答 → 原话唯一命中 → 会话记忆 → 安装先验；都没有 → -32010 拒绝并给候选
+   ├ 身份：零字段匿名令牌（机器级一份，`vod_auth_ensure` 判+领）→ 正式 key（升级制）→ 宿主 key
+   └ 动态元数据：meta 拉取 + 名录缓存（7 天 TTL）+ 快照兜底 + stale 标记
+   ↓ Authorization: Bearer（远程面缺省走机器级匿名令牌，Bearer 优先）
+*** Java backend（唯一上游：/external/voices 囤积批量 + /external/token + /external/meta）
    → 复用 saveCollectRecord 入库 → 增量分析 → 报告/看板
 ```
 
