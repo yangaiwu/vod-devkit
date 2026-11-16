@@ -207,12 +207,24 @@ def _clean_global(rows: list) -> None:
     纪律：只删"认得的东西"，逐条打印；在用载荷、仓内源码、宿主配置一律不碰。
     """
     from vod_mcp import payload as _payload
+    from vod_mcp import paths as _paths
     in_use = {r.get("payloadDir") for r in rows if r.get("payloadDir")}
     for res in _payload.residue():
         if str(res) in in_use:
             continue
         shutil.rmtree(res, ignore_errors=True)
         print("removed payload residue:", res)
+    # D-token-machine-1：机器级 state（跨版本/跨宿主共享的那一份）。
+    # 只删我们认得的两个文件名（state 目录由本插件独占，但按"删认得的东西"纪律列名）。
+    state = _paths.machine_state_home()
+    for name in ("runtime.json", "runtime.json.lock", ".migrated"):
+        f = state / name
+        if f.is_file():
+            f.unlink()
+            print("removed state:", f)
+    if state.is_dir() and not any(state.iterdir()):
+        state.rmdir()
+        print("removed empty:", state)
     root = Path.home() / ".vod-devkit"
     if root.is_dir() and not any(root.iterdir()):
         root.rmdir()

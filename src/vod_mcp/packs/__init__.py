@@ -9,7 +9,7 @@ ALL_PACKS = ("core", "collect", "knowledge")
 
 PACK_TOOLS = {
     # vod_search_products：问用户"是哪个产品"前给候选（只读，D-product-ask-1）
-    "core": ["vod_devkit_info", "vod_auth_status", "vod_check_update",
+    "core": ["vod_devkit_info", "vod_auth_status", "vod_auth_ensure", "vod_check_update",
              "vod_search_products", "vod_packs_configure"],
     # 两段式（D-token-approval-2 极简形态）随 collect 下发；codex 话术走 draft→commit
     "collect": ["vod_submit_voices", "vod_draft_voices", "vod_commit_voices", "vod_list_submitted"],
@@ -19,11 +19,15 @@ PACK_TOOLS = {
 }
 
 
-BREAKER_MARKERS = (
-    # 熔断标记（D-codex-circuit-breaker-1）：install 门禁可被
-    # `VOD_PACKS=core,collect serve` 绕过——运行期同查标记强制降级
-    os.path.expanduser("~/.codex/vod-collect-suspended.json"),
-)
+BREAKER_MARKERS = ()
+# 熔断标记（D-codex-circuit-breaker-1）：install 门禁可被 `VOD_PACKS=core,collect serve`
+# 绕过——运行期同查标记强制降级。默认值**调用期解析**（不用 import 期 expanduser：
+# 测试 monkeypatch HOME 时模块常量会钉在真机 HOME 上，标记就查错了机器）；
+# 非空即视为测试注入的显式清单（monkeypatch.setattr(packs, "BREAKER_MARKERS", ...)）。
+def breaker_markers() -> tuple:
+    if BREAKER_MARKERS:
+        return tuple(BREAKER_MARKERS)
+    return (os.path.expanduser("~/.codex/vod-collect-suspended.json"),)
 
 
 def enabled_packs() -> tuple:
@@ -61,7 +65,7 @@ def _resolve(raw: str) -> tuple:
     packs = parse_packs(raw)
     if "core" not in packs:
         packs = ("core",) + packs
-    if "collect" in packs and any(os.path.isfile(m) for m in BREAKER_MARKERS):
+    if "collect" in packs and any(os.path.isfile(m) for m in breaker_markers()):
         # 运行期熔断门禁：collect 强制摘除（非静默——stderr 告警）。
         # 解除=删熔断标记（install --ack-suspension 即此语义）
         packs = tuple(p for p in packs if p != "collect")
@@ -72,17 +76,15 @@ def _resolve(raw: str) -> tuple:
     return packs
 
 
-# 服务面（HTTP 传输）摘除的"写本机状态"工具——对齐 huaweicloud-devkit 的
-# remoteSurface 门控语义：远程面没有"本机"这个概念。
-#   draft/commit：草稿暂存在本机 runtime.json，HTTP 面由多客户端共享一个进程，
-#                 "本机草稿"既不隔离也不可审计；
-#   list_submitted：本地账本是装机维度的记录，服务面读它不是客户端想要的答案
-#                 （跨机对账走引擎端点）。
+# 服务面（HTTP 传输）摘除的工具。（2026-11-16 D-token-machine-1 修订：远程面收窄为
+# 只剩这一项——远程部署的实际形态是"同一台机器上独立跑一个 MCP server 进程，
+# 多个 agent 通过 HTTP 连它"，和本地同一套身份/账本语义，所以 draft/commit/ledger 都放开。）
 #   packs_configure：会话内开关是**进程内状态**，HTTP 面每请求现造 server、无会话，
-#                 开关会在下一个请求消失（"以为改了其实没改"）。
+#                 开关会在下一个请求消失（"以为改了其实没改"）；且多 agent 共用进程时会互相影响。
+# draft/commit 放开的前置是**草稿归属隔离**：草稿落 owner（宿主名+身份 hash），commit 校验归属，
+# 避免同机两个 agent 之间"A 的草稿被 B 提交"（collect.draft_voices / commit_voices）。
 # 注意：submit 不摘——它对 VOD 的唯一动作是调用引擎 HTTP API，落库是服务端的事。
-REMOTE_WITHHELD = ("vod_draft_voices", "vod_commit_voices", "vod_list_submitted",
-                   "vod_packs_configure")
+REMOTE_WITHHELD = ("vod_packs_configure",)
 
 
 def enabled_tools(remote: bool = False) -> list:
@@ -125,7 +127,7 @@ def normalize_packs(ids) -> tuple:
                 f"未知包 id: {p}；可用: {','.join(ALL_PACKS)}")
         if p not in want:
             want.append(p)
-    if "collect" in want and any(os.path.isfile(m) for m in BREAKER_MARKERS):
+    if "collect" in want and any(os.path.isfile(m) for m in breaker_markers()):
         # 熔断是安全门禁：显式开启也不能绕过。静默摘掉等于"配了没生效"。
         raise PackRefused(
             "采集熔断生效（codex 未确认提交 ≥2 次，D-codex-circuit-breaker-1）："

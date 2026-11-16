@@ -45,7 +45,7 @@ def _isolate_runtime(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_machine_writes(monkeypatch):
+def _isolate_machine_writes(monkeypatch, tmp_path):
     """S143 修复：切断所有可能把写操作导到真机的**继承**入口。
 
     为什么不是"把 manifest 一律指到 tmp"（第一版这么写，19 条用例立刻红）：装机器用例
@@ -60,8 +60,12 @@ def _isolate_machine_writes(monkeypatch):
     兜底由 S143 的 session 前后快照负责：真有谁漏隔离，跑完就对不上（exit 1）。
     """
     for k in ("VOD_DEVKIT_MANIFEST", "VOD_PAYLOAD_HOME", "VOD_DEVKIT_SRC_ROOT",
-              "VOD_DEVKIT_DIST_ROOT", "VOD_JAVA_API_KEY"):
+              "VOD_DEVKIT_DIST_ROOT", "VOD_JAVA_API_KEY", "VOD_DEVKIT_HOME"):
         monkeypatch.delenv(k, raising=False)
+    # D-token-machine-1：机器级 state 必须**显式**指到 tmp，而不是 pop 了事。
+    # 因为 paths.runtime_json_path() 的优先级②是"机器级 state 已存在即用"——
+    # pop 之后子进程/同进程会读到真机 ~/.vod-devkit/state 的匿名令牌（凭据泄漏进测试）。
+    monkeypatch.setenv("VOD_DEVKIT_HOME", str(tmp_path / "machine-state"))
     yield
 
 
@@ -95,11 +99,21 @@ def _machine_state() -> dict:
             return None
 
     home = Path(_os.path.expanduser("~"))
+    repo = Path(__file__).resolve().parent.parent
     payloads = home / ".vod-devkit" / "payloads"
+    state = home / ".vod-devkit" / "state"
     return {
-        "manifest": _md5(Path(__file__).resolve().parent.parent / "install-manifest.json"),
+        "manifest": _md5(repo / "install-manifest.json"),
         "payloads": sorted(p.name for p in payloads.iterdir()) if payloads.is_dir() else [],
         "hermes_config": _md5(home / ".hermes" / "config.yaml"),
+        # D-token-machine-1：机器级 state（跨版本/跨宿主共享的那一份）。
+        # 带上 runtime 的 md5——目录清单不变但内容被改写同样算漂移（令牌/账本被测试污染）。
+        "state": (sorted(p.name for p in state.iterdir()) if state.is_dir() else [],
+                  _md5(state / "runtime.json")),
+        # 仓根不该出现运行期状态（改造后单源在机器级 state；出现即说明有子进程按
+        # 旧 derive 写了 legacy 位——测试会连带把"工作树只剩构建产物"这条自检污染）。
+        "repo_state_dir": (sorted(p.name for p in (repo / "vod_mcp").iterdir())
+                           if (repo / "vod_mcp").is_dir() else []),
     }
 
 

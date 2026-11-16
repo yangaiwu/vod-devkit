@@ -223,7 +223,11 @@ def cmd_install(args):
     if distribution == "preset" and os.environ.pop("VOD_JAVA_API_KEY", None):
         print("[vod-devkit] warn: preset 形态下 VOD_JAVA_API_KEY 已忽略且不写入宿主配置"
               "（key 落在哪台机器哪台就是信任边界；客户机走匿名令牌）", file=sys.stderr)
-    rt = common.ROOT / "vod_mcp" / "runtime.json"
+    # 运行期状态单源（D-token-machine-1）：装机写的是**机器级 state**，
+    # 不再是 "仓根/vod_mcp/runtime.json"——后者在改造后只有 server 的首启迁移会读，
+    # 写在那里等于 product/java_base 绑定在运行期读不到（这是路径统一时必须同步的点）。
+    from vod_mcp import paths as _paths
+    rt = _paths.runtime_json_path()
     cfg = {}
     if rt.exists():
         try:
@@ -241,11 +245,19 @@ def cmd_install(args):
     cfg["java_base"] = args.java_api_base
     rt.parent.mkdir(parents=True, exist_ok=True)
     rt.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:                      # 含 key/锚点：立刻收紧（与运行期写盘同口径）
+        os.chmod(rt, 0o600)
+    except OSError:
+        pass
 
     # ── 远程 attach / skills-only（D-attach-1）───────────────────────────
     # 形态：MCP 单独部署一个远程端点，宿主只把 MCP 配置指向它（+ 本地技能）。
-    # 约束：远程面无匿名链（缺 key fail fast）→ token 必填；探活先于写入，
-    # 失败零副作用。dsh 壳不走 MCP，这两种模式对 dsh 无意义（显式拒绝）。
+    # 约束（2026-11-16 D-token-machine-1 修订）：远程面与本地同一套身份语义——
+    # 带 token 就用请求头身份（并验有效）；不带 token 时由**服务端**领/复用机器级
+    # 匿名令牌（同机部署的默认形态）。所以 token 从"必填"改为"可选"：
+    #   · 有 token → verify_token=True（坏 key 拒装，零副作用）
+    #   · 无 token → 只做连接级探活（不注入 Authorization，提交走匿名链）
+    # 探活一律先于写入，失败零副作用。dsh 壳不走 MCP，这两种模式对 dsh 无意义（显式拒绝）。
     remote_url = (getattr(args, "mcp_url", "") or "").strip()
     skills_only = bool(getattr(args, "skills_only", False))
     if remote_url or skills_only:
@@ -258,13 +270,8 @@ def cmd_install(args):
             sys.exit(2)
         token = (getattr(args, "mcp_token", "") or os.environ.get("VOD_MCP_TOKEN") or "").strip()
         if remote_url:
-            if not token:
-                print("[vod-devkit] 远程 attach 必须提供 --mcp-token 或 env VOD_MCP_TOKEN：\n"
-                      "  远程面不代签匿名令牌（身份只从请求头来），无 token 装上也提交不了",
-                      file=sys.stderr)
-                sys.exit(2)
             try:
-                names = remote._probe_remote(remote_url, token)
+                names = remote._probe_remote(remote_url, token, verify_token=bool(token))
             except Exception as e:  # noqa: BLE001
                 print(f"[vod-devkit] 远程 MCP 探活失败（未写入任何配置）：{e}", file=sys.stderr)
                 sys.exit(2)
@@ -317,20 +324,9 @@ def _stage_payload():
     from vod_mcp import payload as _payload
     from vod_mcp.host_adapters import base as _base
     dest = _payload.stage()
-    # 把安装期运行配置种进载荷（载荷 runtime 与仓内 runtime 是两份文件）：
-    # 否则 host_product/product/java_base 只写在仓内，真正跑起来的副本看不到
-    seeded = {k: v for k, v in common._runtime_cfg_read().items()
-              if k in ("product", "host_product", "java_base", "local_ledger")}
-    if seeded:
-        rt = dest / "vod_mcp" / "runtime.json"
-        cur = {}
-        if rt.exists():
-            try:
-                cur = json.loads(rt.read_text(encoding="utf-8"))
-            except Exception:
-                cur = {}
-        cur.update(seeded)
-        rt.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 种运行配置到载荷副本的旧做法已删除（D-token-machine-1）：运行期状态单源在
+    # 机器级 state（paths.runtime_json_path()），server 不再读 '<载荷>/vod_mcp/runtime.json'。
+    # 继续种会在已迁移机器上成为"死写"，并让装机读侧/服务读侧看起来有两个落点。
     _base.set_payload_dir(dest)
     return dest
 

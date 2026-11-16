@@ -30,6 +30,15 @@ import re
 
 MEM_TTL = 30 * 60  # 记忆窗口：负责人拍板 P2-A（机器级 + 30 分钟）
 
+# 自指词表（2026-11-16 负责人拍板 A，D-product-ask-1 修订）：
+# 安装先验（--product 写入的 binding）**只在原话出现自指时**才作为归因证据。
+# 理由：先验是无字面证据的推断，用户在 A 产品插件里吐槽 B 产品时会错归；
+# 而"这个产品/你们家"这类自指说明用户就在说当前产品，此时先验有语境支撑。
+# 收录口径：只放"指向当前语境"的词，不放泛称（"产品"单字不收——太容易误命中）。
+SELF_REFERENCE = ("这个产品", "这款产品", "本产品", "该产品", "你们这个", "你们这款",
+                  "你们的产品", "你们的这个", "本平台", "这个平台", "这个系统",
+                  "你们家", "你们这", "咱这个", "咱们这个", "这插件")
+
 _SNIPPET_PAD = 20
 _SNIPPET_MAX = 80
 _BOUNDARY = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
@@ -359,8 +368,18 @@ def attribute(text: str, meta: dict, memory: dict | None = None,
                                "at": mem.get("at"), "reason": "memory"}]}
 
     if binding:
-        return {"product": resolve_id(binding, meta), "productName": str(binding),
-                "source": "install_binding", "evidence": []}
+        # D-product-ask-1 修订（2026-11-16 负责人拍板 A）：先验必须有语境支撑。
+        # 原话出现自指（"这个产品/你们家/本平台"）→ 承认先验，证据留痕；
+        # 没有自指 → 不拿先验硬归（错归会进引擎幂等/判重域，污染静默难追溯），
+        # 与"缺产品先问一次"同一条纪律：宁可多问一句，不可无证据归因。
+        hit = next((p for p in SELF_REFERENCE if p in text), None)
+        if hit:
+            idx = text.find(hit)
+            snippet = text[max(0, idx - _SNIPPET_PAD): idx + len(hit) + _SNIPPET_PAD]
+            return {"product": resolve_id(binding, meta), "productName": str(binding),
+                    "source": "install_binding",
+                    "evidence": [{"product": str(binding), "alias": hit,
+                                  "snippet": snippet, "reason": "self-reference"}]}
 
     return {"product": None, "productName": None, "source": "unknown",
             "evidence": [{"reason": "no-evidence"}]}

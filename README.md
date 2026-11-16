@@ -17,10 +17,12 @@
 
 - **只采集**：插件的唯一写动作是调用引擎 HTTP API（`POST /external/voices`）。
   落库、配额、审计、身份判定全在服务端；本仓没有任何数据库连接代码路径。
-- **身份随请求走**：stdio 面走本机匿名令牌；远程面只从请求头取 Bearer，缺 key
-  直接拒绝、**不代签匿名令牌**（插件只搬运身份，不产生身份）。
+- **身份随请求走**：stdio 面走本机匿名令牌（机器级一份，跨版本/跨宿主共享）；远程面优先取
+  请求头 Bearer，没有时与本地同链——由服务端领/复用同一枚机器级匿名令牌（`vod_auth_ensure`
+  可显式确认）。即"配置了就用配置的，没配置就领匿名"，本地/远程同一套语义。
 - **归因不问用户**：产品由插件从用户原话字面解析（引擎名录别名），唯一命中才采信；
-  多产品命中=歧义 → 落 UNKNOWN 由运营判。安装时的 `--product` 只是可选先验。
+  多产品命中=歧义 → 落 UNKNOWN 由运营判。安装时的 `--product` 只是可选先验，**且只在原话
+  出现自指（"这个产品/你们家/本平台"）时才生效**——没有语境支撑就不拿先验硬归，回到"先问一次"。
 
 ## 前置条件
 
@@ -275,7 +277,7 @@ vod-devkit serve --transport remote --port 9528 --host 127.0.0.1   # 前面需�
     "type": "remote", "url": "http://localhost:9528", "enabled": true } } }
 ```
 
-宿主 attach（token 必填——远程面不代签匿名身份，缺 key 会被拒装 `exit 2`）：
+宿主 attach（token 可选——给了就用请求头身份，不给就走远程 server 侧的机器级匿名令牌）：
 
 ```bash
 npx -y vod-devkit@latest install --target hermes   --mcp-url https://<网关>/mcp --mcp-token <key>
@@ -286,17 +288,22 @@ npx -y vod-devkit@latest install --target codex    --mcp-url https://<网关>/mc
 写入前先探活（三步）：`initialize`（连接）+ `tools/list`（工具面必须等于
 远程面工具集）+ **key 真伪**（经远程面真调 `vod_auth_status`，引擎三态：
 `rejected` = API Key 无效 → 拒装且**不写任何配置**；`device-mismatch` =
-匿名令牌设备锚点漂移（token 有效、本机非签发设备）→ 放行，首次提交自动
-重领；引擎不可达 → 放行，网络问题不是 key 问题）。`doctor` 复查端点与
-工具面。远程面与 stdio 面的实质差别：
+匿名令牌设备锚点漂移（token 有效、本机非签发设备）→ 放行，首次提交或
+`vod_auth_ensure` 时自动重领；引擎不可达 → 放行，网络问题不是 key 问题）。`doctor` 复查端点与
+工具面。远程面与 stdio 面的一致性（D-token-machine-1，2026-11-16）：
 
-- **工具面收窄**：草稿/本机账本类工具（`vod_draft_voices` / `vod_commit_voices` /
-  `vod_list_submitted`）不在远程面——它们写"本机状态"，共享进程没有"本机"
+- **工具面**：与本地一致，唯一例外是 `vod_packs_configure`（进程内开关，HTTP 每请求现造
+  server、多 agent 共用会互相影响）。两段式草稿与本机账本在远程同样可用——草稿按宿主
+  隔离（`owner`），A 的草稿 B 提交会被拒（`-32011`）。
+- **身份**：请求头 Bearer 优先；没有时与本地同链，用机器级匿名令牌。
 - token 承载：hermes 走 env `MCP_VOD_DEVKIT_API_KEY`（配置里只留 `${...}` 引用）；
-  opencode 写在 `headers`（注意文件权限）；codex 走 `VOD_MCP_TOKEN`
-- **无内建鉴权**：本进程不校验身份，默认只绑回环；对外必须反代 TLS + 身份校验
-- 技能自带传输面自适应：没有草稿工具 → 单发 + 回显，不承诺"草稿/两步"；没有本机
-  账本工具 → 不承诺查询历史反馈
+  opencode 写在 `headers`（注意文件权限）；codex 走 `VOD_MCP_TOKEN`；**不给 token 也行**
+  （配置里不写认证，提交走服务端匿名令牌）。
+- **`--product` 的边界**：它写进的是**执行安装那台机器**的 state。远程面与插件同机时
+  server 读同一份 state（有效）；若 server 在另一台机器上，这个先验对 server 的归因不起作用。
+- **无内建鉴权**：本进程不校验身份，默认只绑回环；对外必须反代 TLS + 身份校验。
+  **非回环绑定（`--host 0.0.0.0`）默认关闭匿名代领**，调用方必须带 Bearer；
+  确需在可信内网共享本机身份，加 `--allow-anon-mint`。
 
 端口被占用用 `--port <port>`（同步改 url）；`--host 0.0.0.0` 可开 LAN 访问。
 
@@ -396,7 +403,8 @@ hermes hooks test pre_llm_call --payload-file payload.json
 - 宿主对 `runtime.json` 的读取门控（沙箱规则 / allow 列表）**未验证**：插件侧探测不到宿主的
   权限策略，因此不声称"已拦"。降低暴露面的做法是 `runtime.json` 不种 key（安装器故意不把
   `java_key` 写进载荷副本，运行期走匿名令牌）+ `auth status` 只输出指纹。
-- 远程面**不内置鉴权**：默认只绑回环，对外必须自建 TLS 反代与身份校验；插件不代签身份。
+- 远程面**不内置鉴权**：默认只绑回环，对外必须自建 TLS 反代与身份校验；身份优先取请求头
+  Bearer，没有时按整机匿名令牌（同一台机器上的多 agent 共用一份，多租户场景请各带 Bearer）。
 - 不允许把 key 写进宿主 MCP 配置的 `env`（明文且随配置进 git）——用 `auth init`。
 
 ## 目录结构（摘要）

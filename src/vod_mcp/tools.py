@@ -46,6 +46,7 @@ _HANDLERS = {
     "vod_list_submitted": collect.list_submitted,
     "vod_devkit_info": core.devkit_info,
     "vod_auth_status": core.auth_status,
+    "vod_auth_ensure": core.auth_ensure,
     "vod_packs_configure": core.packs_configure,
     "vod_draft_voices": collect.draft_voices,
     "vod_commit_voices": collect.commit_voices,

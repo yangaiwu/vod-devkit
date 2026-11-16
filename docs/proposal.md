@@ -1479,3 +1479,77 @@ subprocess`；巡检 1 PASS / 8 DRIFT（清一色"server 无响应"）；`~/.vod
 | # | 场景 | 断言 |
 |---|---|---|
 | S143 | 整套测试不写真机 | 全量跑完，真仓根账本 md5、`~/.vod-devkit/payloads` 清单、`~/.hermes/config.yaml` md5 三者不变；故意写真机 → session 门禁 `exit 1` 并指名漂移项 |
+
+
+## 机器级匿名令牌与显式身份确认（S145，D-token-machine-1，2026-11-16 负责人拍板）
+
+**需求（负责人原话）**：MCP 单独部署时，skill 先判断当前有没有 token —— 有且有效就继续用，
+没有就由 MCP 服务代理去服务端领匿名令牌；**一台机器一个 token**（"我觉得可以"）。
+
+**现象（本机实测）**：
+1. 匿名令牌绑 `install_nonce`（设备锚点），而 nonce 存在 `runtime.json` 里；该文件旧位置是
+   `DIST_ROOT/vod_mcp/`，装机形态即 `~/.vod-devkit/payloads/<版本>/vod_mcp/`。**升级/重装换
+   目录就换 nonce、重领令牌**，匿名档日限额重新计、账本断档。
+2. 机器上同时存在三份 runtime（载荷 `payloads/0.5.9` / 仓内 `src/vod_mcp` /
+   `packages/dsh/data`）→ 三个匿名令牌，限额被拆散；`probe_key` 的 `device-mismatch`
+   （"令牌有效但非本机签发"）就是这类 nonce 漂移的现形。
+3. MCP 单独部署（无装机、无 key、独立 HOME）实测可用链路已成立：11 工具全在、匿名令牌
+   端点可达并领到（32 字符，指纹 `8a33ef89`）、`probe_key` 返回 `verified`。**缺的只是
+   "显式判 + 领"的入口** —— 现在只能在首次提交时副作用领取，skill 无法先确认身份再采集。
+4. 优先级现状已符合"配置了就用"：`net._live()` 每次现读 env `VOD_JAVA_API_KEY` >
+   runtime > 内存镜像 > 默认 base；实测 env 注入坏 key → `auth_status` 报 `rejected`
+   且不降级（`legacyKeyHint` 在位）。
+
+**修法（四条，缺一条需求就不成立）**：
+
+1. **机器级 state**（`paths.machine_state_home()` / `runtime_json_path()`）：`VOD_DEVKIT_HOME`
+   （默认 `~/.vod-devkit/state`）下的 `runtime.json`；解析优先级 `VOD_DEVKIT_HOME` >
+   机器级 state 已存在（存在即用）> 旧 `DIST_ROOT/vod_mcp/runtime.json`（首启兼容）。
+   每次现读，不冻结（D-state-read-1 同纪律）。"机器级"的准确含义是**该用户/服务账户下的
+   安装实例级**：多用户共机时各用户各一份（系统级共享需显式配 `VOD_DEVKIT_HOME` 并处理
+   多账户权限，本轮不默认开启）。权限：文件 0600、目录 0700。
+2. **首启迁移**（`migrate_state_once()`）：state 无 runtime 而旧位置有 → 复制一次，
+   `install_nonce` / `java_key` / `token_tier` / `product` / 账本原样保留，旧文件不删，
+   并落 `<state>/.migrated` 标记防止回灌（state 被手工清掉后旧文件不得复活）；
+   此后旧位置只读（全仓写点只有 `paths.runtime_json_path()` 一处）。
+3. **`vod_auth_ensure`（core pack）**：唯一有副作用的认证工具，幂等；判定表 ——
+   显式 env key → 只探针不覆盖；runtime 显式 key（`auth init` 写入）→ 只探针、被拒 fail fast；
+   runtime 匿名令牌 verified → 原样返回（`changed=false`）；
+   `no-key` / `expired-anonymous` / `device-mismatch` → 代理领匿名 → 落 state → 复探；
+   `rejected`（显式 key）→ **不领**，fail fast；`unreachable` → **不领**，`verified=null`。
+   返回 `source ∈ {env, runtime-key, runtime-anonymous, new-anonymous, none}`（身份来源可审计）。
+   远程 HTTP 面拒绝（多租户共享进程不代领）。`auth_status` 保持只读。
+   并发语义写死：两宿主同时 ensure 可能各领一枚（最后写入者生效）；状态写本身事务化
+   （RLock + flock + tmp→replace + 0600），只可能重复领取，不会丢更新或写坏文件。
+4. **装机注入 + 回收 + 隔离**：`host_adapters/base.server_env()` 统一写
+   `VOD_DEVKIT_HOME` 进各宿主 env（9 宿主一致，不依赖默认值）；`uninstall --clean-global`
+   逐条打印后回收 state；`tests/conftest.py` 把 `VOD_DEVKIT_HOME` 显式指向 tmp，S143
+   session 门禁增加第 4 项（`state` 目录清单 + runtime md5）。
+
+**门禁（S145）**：`tests/conftest.py` 的 `_machine_state()` 四项快照（账本 / 载荷清单 /
+hermes config / **机器级 state**）任一漂移 → `[S143] 测试写到了真机（隔离缺失）` 并 `exit 1`。
+机器级 state 用"目录清单 + runtime md5"双判：目录不变但内容被改写同样算漂移。
+
+用例承载：`tests/test_token_machine_scope.py`（S145-1..S145-10）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S145-1 | 跨宿主/跨进程共享一份 state | 两个子进程，载荷根分别为 `payloads/0.5.9` 与 `0.5.10`，同一 `VOD_DEVKIT_HOME` → `runtime_json_path()` 相同、`install_nonce` 相同、指纹相同 |
+| S145-2 | 升级不换身份 | 版本目录变化不影响 nonce/令牌（同上用例的第二条断言） |
+| S145-3 | 首启迁移保留锚点 | 旧 `DIST_ROOT/vod_mcp/runtime.json` 有 `install_nonce=deadbeef` + 账本 → 迁移后 state 里原样；旧文件保留；文件 0600；二次调用幂等 |
+| S145-4 | 无 key 时 ensure 领取 | 代理领匿名令牌 → `changed=true`、`source=new-anonymous`、`tier=anonymous`，state 落 `token_tier=anonymous` 与令牌 |
+| S145-5 | 已有有效令牌不重领 | `probe_key=verified` → `source=runtime`、`changed=false`、领取函数调用次数 0 |
+| S145-6 | 显式 key 被拒不降级 | env key + `probe_key=rejected` → 返回 `verified=false/reason=rejected`、领取调用 0 次、state 不被覆盖 |
+| S145-7 | 不可达不领取不判定 | `probe_key=unreachable` → `verified=null`、领取调用 0 次、state 原样 |
+| S145-8 | 装机 env 注入 | `base.server_env()` 输出含 `VOD_DEVKIT_HOME=<机器级 state>` |
+| S145-9 | clean-global 回收 state | state 下 runtime/lock 被删、空目录被 rmdir、逐条打印 |
+| S145-10 | 测试不落真机 state | 测试进程 `machine_state_home()` ≠ `~/.vod-devkit/state`；session 门禁第 4 项跑完不漂移 |
+| S145-11 | `.migrated` 防回灌 | 迁移后手工删 state/runtime → 再调迁移不复活旧文件（`migrated=false`，state 仍为空） |
+| S145-12 | runtime 显式 key 不降级 | runtime 里 tier≠anonymous 的 `auth init` key 被拒 → `source=runtime-key`、`verified=false`、领取调用 0 次、key 不被覆盖 |
+| S145-13 | 远程面与本地同效果（身份） | 远程 HTTP 面：带 Bearer → `source=request`、不代领；不带 → 领/复用机器级匿名令牌并完成提交（引擎 401→领令牌→重试 200） |
+| S145-14 | 远程面工具面收窄 | `enabled_tools(remote=True)` = 本地 − `{vod_packs_configure}`；draft/commit/list_submitted 均在；被摘工具直接调用仍 `[remote]` 拒绝 |
+| S145-15 | 草稿按宿主隔离 | A 的草稿 B 提交 → `-32011`「不属于当前客户端」；A 自己提交成功且 `twoPhase=true`；旧草稿无 owner 兼容放行 |
+| S145-16 | 安装先验需自指证据 | 装着 `--product=CodeArts`，原话「导出太慢了」无自指 → `source=unknown`（转去问用户）；不得凭先验归因 |
+| S145-17 | 自指时先验成立 | 原话「你们这个产品导出太慢了」→ `source=install_binding`、`product=31`、`evidence=[{reason:self-reference, alias, snippet}]` 可回指 |
+| S145-18 | 代领护栏随绑定地址 | 回环 → 允许代领；非回环无开关 → 关闭（`net.ANON_MINT_DISABLED=True`）；非回环 + `--allow-anon-mint` → 开启 |
+| S145-19 | 禁用态不外呼 | `ANON_MINT_DISABLED=True` 时 `_fetch_anon_token()` 返回 None 且**一次引擎请求都不发**（不是"发了再失败"） |

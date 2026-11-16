@@ -1,4 +1,10 @@
-"""core pack：自述、认证自检、版本提醒、产品候选检索（只读，零写盘副作用）。"""
+"""core pack：自述、认证自检、版本提醒、产品候选检索（只读，零写盘副作用）。
+
+例外：`auth_ensure` 是唯一有写盘副作用的认证工具（领匿名令牌后落 state），
+显式 key 一律不覆盖、远程面不领取（见 D-token-machine-1）。
+"""
+import os
+
 from vod_mcp import attribution as _attrib
 from vod_mcp import net, provenance
 
@@ -125,3 +131,86 @@ def auth_status(params: dict, client_info: dict | None = None) -> dict:
 def check_update(params: dict, client_info: dict | None = None) -> dict:
     from vod_mcp import update_check as uc
     return uc.check(params)
+
+
+def auth_ensure(params: dict, client_info: dict | None = None) -> dict:
+    """判 + 领（D-token-machine-1）：幂等，显式 key 一律不覆盖。
+
+    与 auth_status 的分工：status 只读，ensure 是唯一的"需要时替你领一枚"入口。
+    判定表（返回值 source 指明身份从哪来，方便事后审计）：
+      · VOD_JAVA_API_KEY 显式存在      → 只探针，source=env，绝不覆盖
+      · runtime 有令牌且 verified      → source=runtime，changed=false（不重复领）
+      · no-key / expired-anonymous /
+        device-mismatch                → 领零字段匿名令牌 → 落 state → 复探
+      · rejected（显式 key 被引擎拒）  → **不领**，fail fast（不静默降档）
+      · unreachable                    → **不领**，verified=null（网络问题不是身份问题）
+
+    远程面同样是这套语义（D-token-machine-1 定稿：本地/远程同一个效果）：
+    请求头 Bearer 优先（调用方自带身份就用它）；没有就由服务端领/复用机器级匿名令牌。
+    多租户部署要按调用方隔离时，各调用方带自己的 Bearer；匿名档就是"整机一份"的低信任档。
+    """
+    from vod_mcp import runtime_state as rt
+
+    req_key = net._eff_key() if net._SERVER_FACE.get() else None
+    has_key = bool(req_key) or bool(net._java_key())
+    # source 要能回答问题"这身份是哪来的"：运行时显式 key（auth init 写入）、
+    # 请求头身份、自动领的匿名令牌不是一回事——被拒后的处置也不同。
+    if req_key:
+        source = "request"
+    elif os.environ.get("VOD_JAVA_API_KEY"):
+        source = "env"
+    elif has_key and net._explicit_key():
+        source = "runtime-key"
+    elif has_key:
+        source = "runtime-anonymous"
+    else:
+        source = "none"
+
+    if source in ("runtime-anonymous", "new-anonymous"):
+        tier = "anonymous"
+    elif source == "none":
+        tier = "none"
+    else:
+        tier = "formal"
+
+    probe = (net.probe_key(req_key) if req_key
+             else (net.probe_key() if has_key else
+                   {"ok": None, "reason": "no-key", "fingerprint": None}))
+    if probe.get("ok") is True:
+        return {"tier": tier, "source": source, "verified": True,
+                "reason": probe.get("reason"), "fingerprint": probe.get("fingerprint"),
+                "changed": False, "base": net._java_base()}
+
+    reason = probe.get("reason")
+    # 显式身份被拒：配置错误必须冒出来，静默换匿名 = 归因/额度双错位。
+    # 显式=请求头 Bearer / env key / runtime 里的正式 key（tier≠anonymous）。
+    if reason == "rejected" and (req_key or os.environ.get("VOD_JAVA_API_KEY")
+                                 or net._explicit_key()):
+        return {"tier": tier, "source": source, "verified": False, "reason": "rejected",
+                "fingerprint": probe.get("fingerprint"), "changed": False,
+                "base": net._java_base(),
+                "guidance": [{"action": "fix-key", "label": "显式 key 被引擎拒绝：换一把有效 key"
+                                                         "（auth init --key … --apply），不要落到匿名档"}]}
+    if reason == "unreachable":
+        return {"tier": tier, "source": source, "verified": None,
+                "reason": "unreachable", "fingerprint": probe.get("fingerprint"),
+                "changed": False, "base": net._java_base(),
+                "note": "引擎不可达：未领取、未判定——网络问题不等于令牌问题"}
+
+    # 需要领：no-key / expired-anonymous / device-mismatch（以及过期但探针没给原文）
+    token = net._fetch_anon_token()
+    if not token:
+        hint = ("；远程面若绑定非回环地址，代领默认关闭——请带 Authorization: Bearer <key>，"
+                "或服务端以 --allow-anon-mint 显式开启" if net.ANON_MINT_DISABLED else "")
+        raise net.ToolError(
+            "未配置接入 key 且匿名令牌端点不可用。引导："
+            + "；".join(str(g["label"]) for g in net._KEY_GUIDANCE) + hint, code=-32012)
+    rt._runtime_update({"java_key": token, "token_tier": "anonymous"})
+    probe2 = net.probe_key()
+    return {"tier": "anonymous", "source": "new-anonymous",
+            "verified": probe2.get("ok"), "reason": probe2.get("reason") or reason,
+            "fingerprint": probe2.get("fingerprint"), "changed": True,
+            "base": net._java_base()}
+
+
+

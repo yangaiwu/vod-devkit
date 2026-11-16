@@ -4,9 +4,12 @@
 运维不可解释，也没人能回答"这台机器现在用的是哪把钥匙"。本命令把写 key 收成一个
 入口，并把回显固定为**指纹**（绝不打印明文）。
 
-优先级链（写进文档、也在这里实现）：显式 key（本命令写入 runtime.json）
-  > 环境变量 VOD_JAVA_API_KEY（平台/CI 注入）
-  > 匿名令牌自动领取（设备绑定，无 key 时首提自动领）。
+优先级链（写进文档、也在这里实现）：
+  环境变量 VOD_JAVA_API_KEY（平台/CI 注入，最高）
+  > runtime 里的显式 key（本命令写入）
+  > 匿名令牌自动领取（设备绑定，无 key 时首次提交或 vod_auth_ensure 时自动领）。
+注意：真正的现读顺序在 net._live()（env 优先于 runtime，D-state-read-1），本命令
+只负责"写入 runtime"这一条入口，不改变读取优先级。
 """
 import sys
 
@@ -35,7 +38,7 @@ def cmd_auth(args=None):
             print(f"匿名令牌：已缓存（指纹 {_fingerprint(key)}，档位 {tier}）"
                   "——设备绑定领取，不是显式 key；要换显式 key 用 auth init")
         else:
-            print("key：未配置 —— 走匿名令牌自动领取（设备绑定；首提自动领）")
+            print("key：未配置 —— 走匿名令牌自动领取（设备绑定；首次提交或 vod_auth_ensure 时领取）")
         return
 
     # init：把 key 写进 runtime.json（唯一入口）

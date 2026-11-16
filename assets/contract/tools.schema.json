@@ -201,6 +201,62 @@
       },
       "backend": "local(无上游；探测时轻量 ping)"
     },
+    "vod_auth_ensure": {
+      "description": "身份判定 + 领取（幂等，唯一有副作用的认证工具）：有可用令牌就原样返回并只做一次探针；没有或已过期/设备不匹配时，由本服务代理向引擎令牌端点领取零字段匿名令牌、落机器级 state 后复探并返回。调用时机：开始采集前一次（不要每次工具调用都调）。本地 stdio 与远程 HTTP（同机独立部署）同一套语义：请求头 Bearer 优先（source=request，不代领）；无 Bearer 时由服务端领/复用机器级匿名令牌（整机一份）。显式配置的 key（env 或 auth init 写入）一律不覆盖，被引擎拒绝时如实报错、不静默降级；引擎不可达时不领取、不判定（verified=null）。返回指纹，不下发明文。",
+      "input": {
+        "type": "object",
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "tier": {
+            "type": "string",
+            "description": "formal|anonymous|none"
+          },
+          "source": {
+            "type": "string",
+            "description": "env(平台注入 key)|request(请求头 Bearer)|runtime-key(auth init 写入)|runtime-anonymous(已缓存匿名令牌)|new-anonymous(本次领取)|none"
+          },
+          "verified": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "true=引擎确认有效；false=被拒；null=不可达（不判定）"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "changed": {
+            "type": "boolean",
+            "description": "是否发生了领取/落盘"
+          },
+          "base": {
+            "type": "string"
+          },
+          "guidance": {
+            "type": "array"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tier",
+          "source",
+          "verified",
+          "changed"
+        ]
+      },
+      "backend": "local(无令牌时调引擎 /external/token)"
+    },
     "vod_packs_configure": {
       "description": "会话内开关能力包（stdio 面）：enable/disable 包 id 或 reset=true，立即改工具面并推 tools/list_changed。不写 env/宿主配置、重启即清；持久化用 CLI `vod-devkit packs enable|disable <id> --apply`。core 强制包含；未知 id 报错；采集熔断期间不能开启 collect（安全门禁）。",
       "input": {

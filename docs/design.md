@@ -653,9 +653,9 @@ test/remote-mcp-server.test.ts 是参照物），只在我们有身份/写面的
 | 启动 | 同一二进制 `--transport remote --port 9528 --host 127.0.0.1` | `vod-devkit serve --transport remote --port 9528 --host 127.0.0.1`（bin 透传） |
 | 传输 | 官方 SDK Streamable HTTP，stateless + jsonResponse | 官方 Python SDK `StreamableHTTPSessionManager(json_response=True, stateless=True)` |
 | 方法契约 | POST 进传输；GET 405；OPTIONS 204 + ACAO:*；通知 202；坏 JSON 400 | 同（逐条测试钉死）；`Accept` 必须含 `application/json`——只给 `text/event-stream` 的客户端按 jsonResponse 模式回 406（与 devkit 同） |
-| 工具面门控 | remoteSurface 摘掉 secrets 包 + 本地写工具 | `packs.REMOTE_WITHHELD` 摘掉 draft/commit/list_submitted；submit 保留（它只调引擎 API） |
+| 工具面门控 | remoteSurface 摘掉 secrets 包 + 本地写工具 | `packs.REMOTE_WITHHELD` 只摘 `vod_packs_configure`（2026-11-16 修订，见 D-token-machine-1）；draft/commit/ledger 与本地一致，草稿按宿主隔离 |
 | instructions | remote 版不给 skillRoot，教 retrieve_skill | 同；`vod_retrieve_skill` 在远程面不返回 path，`vod_list_skills` 不返回 skillsDir |
-| 身份 | 不管（凭据在服务器本机文件） | **请求头 Authorization 逐请求注入**；缺 key 时 submit fail fast，不代签匿名令牌 |
+| 身份 | 不管（凭据在服务器本机文件） | **请求头 Authorization 逐请求注入优先**；无 Bearer 时与本地同链领/复用机器级匿名令牌（2026-11-16 修订） |
 | 鉴权 | 无，README 警告别公开 | 无内建鉴权（同），默认回环 + 反代承担 TLS/身份 |
 
 插件不写库这条在远程面同样成立：HTTP 面唯一的出站动作仍是引擎 HTTP API
@@ -686,6 +686,14 @@ dsh 壳归因同步（2026-11-11，负责人要求「能力一致」）：`packa
 含行为级 stub fetch：无证据走先验、中文别名压过先验、歧义不带 product）。
 
 ## 归因：运行期字面解析（D-attrib-B，2026-11-11 负责人拍板 A/A/A/A）
+
+**2026-11-16 修订（负责人拍板 A，D-attrib-binding-1）**：安装先验不再无条件兜底。
+`--product` 写入的 binding 只有**原话出现自指**（"这个产品/你们家/本平台/这插件"等，
+词表在 `attribution.SELF_REFERENCE`）时才作为归因证据（`source=install_binding`，
+`evidence.reason=self-reference` 带 snippet 可回指）；无自指 → 视为无证据，回到
+"先问用户一次"。理由与删 `host_default` 同源：先验是无字面证据的推断，用户在 A 产品
+插件里吐槽 B 产品时会错归，而错归会进引擎幂等/判重域，污染静默且难追溯。
+单产品部署的免打扰场景仍由自指覆盖（用户说"你们这个产品"即可归）。
 
 产品不再由安装/启动配置决定。install `--product` 由必填降为可选先验；归因在
 提交/起草时由插件从**用户原话**解析，证据落账本。推翻面：D-product-id-2 的
@@ -1077,3 +1085,108 @@ doctor 此前对出站面是盲的：key 探针只在配了 key 时跑，没 key
 不是只写在文档里。
 
 用例承载：`tests/test_auth_and_skills.py`（S124-S125）。
+
+## 凭据作用域：一台机器一个匿名令牌（D-token-machine-1，2026-11-16 负责人拍板）
+
+**结论**：匿名令牌是**机器级**身份，不是版本级、不是宿主级。同一台机器上，9 个宿主、跨版本升级、
+MCP 单独部署，都共用 `<state>/runtime.json` 里的同一个 `install_nonce` 与同一枚匿名令牌。
+
+**为什么改**（两处实测隐患）：
+
+1. 令牌绑 `install_nonce`（设备锚点），而 nonce 活在 `runtime.json` 里；旧路径
+   `DIST_ROOT/vod_mcp/runtime.json` 是**按载荷版本目录**分的（`payloads/0.5.9`）。一次升级
+   就是新目录 → 新 nonce → 重领令牌，匿名档日限额重新计。这比"多宿主各领一份"更常发生。
+2. 机器上实际存在三份 runtime（载荷 / 仓内 `src/vod_mcp` / `packages/dsh/data`）→ 三个匿名
+   令牌，限额被拆散；`probe_key` 的 `device-mismatch`（"令牌本身有效，但不是本机签发"）
+   正是这类 nonce 漂移的现形。
+
+**状态目录契约**：
+
+| 项 | 取值 |
+|---|---|
+| 显式 | `VOD_DEVKIT_HOME`（装机由 `server_env()` 写进各宿主配置，测试写 tmp） |
+| 默认 | `~/.vod-devkit/state` |
+| 文件 | `<state>/runtime.json` + `runtime.json.lock`（flock 同目录） |
+| 权限 | 文件 0600、目录 0700（迁移与每次写都收紧） |
+| 解析优先级 | `VOD_DEVKIT_HOME` > 机器级 state 已存在（存在即用）> 旧 `DIST_ROOT/vod_mcp/runtime.json`（首启兼容） |
+
+**"机器级"的准确含义**：指**该用户（服务账户）下的安装实例级**，不是操作系统级。
+多用户共享同一台物理机时，各用户仍各一份 state、各一枚令牌（匿名限额仍会按用户拆开）。
+要做真正的系统级共享（如 `/var/lib/vod-devkit`）需要显式配置 `VOD_DEVKIT_HOME` 并处理
+多账户写权限（0700 目录 + 同组），本轮不默认开启——默认把状态放到用户目录里，
+是"零配置可用"与"多用户不互相踩"的取舍。
+
+**装机注入的口径**：装机是权威——`merge_json_mcp()` 整块重写宿主的 mcp 条目，
+用户在宿主配置里手改的 `env`（包括 `VOD_DEVKIT_HOME`）会在下一次重装时被覆盖（与 `VOD_PACKS`
+同语义）。要换状态目录，请在外层进程环境（systemd/容器 env）设置，不要手改宿主配置。
+
+**不提供**模块级 `RUNTIME_JSON` 快照常量（收口时删除）：零消费方，且违反"路径类值不
+import 期冻结"的纪律（D-state-read-1）。`runtime_state._runtime_path()` 一律走 `runtime_json_path()`。
+
+**迁移（只做一次，保留设备锚点）**：首启时若 `<state>/runtime.json` 不存在、而旧位置有内容 →
+**复制**过去（含 `install_nonce` / `java_key` / `token_tier` / `product` / 账本），旧文件保留不删，
+并落 `<state>/.migrated` 标记。标记的用途是**防止回灌**：用户手工清掉 state 后，旧文件不得
+被下一次启动悄悄还原（令牌/账本复活）。有标记即视为"这台机器已经迁过"。
+此后旧位置**只读**：全仓写点只有 `paths.runtime_json_path()` 一处，任何形态（载荷 / 仓内直跑 /
+CLI / 测试）都走它——实测仓内形态、不带任何 env 时解析结果就是 `<state>/runtime.json`。
+不迁移的代价是改造当天全机变新设备、限额重计且历史账本断档。
+
+**新工具 `vod_auth_ensure`（core pack，判 + 领，幂等）**：
+
+| 当前态 | 动作 | 返回 |
+|---|---|---|
+| `VOD_JAVA_API_KEY` 显式存在 | 只探针，绝不覆盖 | `source=env` |
+| runtime 有显式 key（`auth init` 写入，tier≠anonymous） | 只探针；被拒即 fail fast | `source=runtime-key` |
+| runtime 有匿名令牌且 `verified` | 原样返回 | `source=runtime-anonymous`，`changed=false` |
+| `no-key` / `expired-anonymous` / `device-mismatch` | 领零字段匿名令牌 → 落 state → 复探 | `source=new-anonymous`，`changed=true` |
+| `rejected`（显式 key 被引擎拒） | **不领**，报错（fail fast，不静默降档） | `verified=false` + guidance |
+| `unreachable` | **不领**，不判定 | `verified=null` |
+
+返回字段：`tier / source / fingerprint / verified / reason / changed / base`；
+`source ∈ {env, runtime-key, runtime-anonymous, new-anonymous, none}` —— 事后审计要能回答
+"这身份是哪来的"，所以 runtime 里的显式 key 与自动领的匿名令牌分开报（前者被拒必须
+fail fast，后者被拒可重领）。
+`auth_status` 保持**只读**语义不变（ensure 是唯一有副作用的认证工具）。
+
+**并发语义（明确写死，不加跨网络全局锁）**：两个宿主同时 ensure 时可能各领一枚匿名令牌
+（最后写入者生效）。不为此加覆盖"探针 + 领取"的全局锁：那段持锁最长 25s，会把其他宿主的
+账本/草稿写全堵住，代价大于收益。状态写本身是事务的（进程内 RLock + 跨进程 flock +
+tmp→`os.replace` + 0600），并发不会丢更新、不会写坏文件。
+
+**远程面 = 同机独立进程，与本地同效果（2026-11-16 负责人澄清）**：远程部署的实际形态是
+"同一台机器上把 MCP server 跑成一个常驻进程（127.0.0.1:9528），多个 agent 通过 HTTP 连它"，
+不是跨机/多租户。因此：
+
+- 身份：与本地同一套——请求头 Bearer 优先；没有就由服务端领/复用**机器级匿名令牌**。
+  旧口径"服务面不代签身份"（-32012 硬拒）已废除。
+- 工具面：`REMOTE_WITHHELD` 收窄到只剩 `vod_packs_configure`（进程内开关，HTTP 每请求现造
+  server、多 agent 共用会互相影响）。`vod_draft_voices` / `vod_commit_voices` /
+  `vod_list_submitted` 远程同样可用。
+- 两段式放开的前置是**草稿归属隔离**：草稿落盘时记 `owner = _session_key(client_info)`
+  （宿主名 + 身份 hash），commit 校验归属，不同 clientInfo 提交一律 -32011
+  （"这份草稿不属于当前客户端"）。旧草稿无 owner 字段 → 兼容放行（升级不断回合）。
+- **匿名代领护栏**：回环绑定（同机部署默认 `127.0.0.1`）与本地一致、可代领；
+  非回环绑定（`--host 0.0.0.0` 或可能被反代触达）**默认关闭代领**，调用方必须带
+  Authorization，确需开启用 `--allow-anon-mint`（`net.ANON_MINT_DISABLED` 进程级开关，
+  判定在 `transport_remote._apply_anon_mint_policy`）。理由：服务面无内建鉴权，
+  代领等于"任何能连端口的进程都能用本机身份提交、消耗额度"。
+
+**边界（不做什么）**：
+
+- 不做跨机器共享：令牌绑设备锚点，集中发放要改引擎侧；共享卷上的 flock 不可靠，
+  并发领取会重复。
+- 不做每宿主一令牌：与"机器级一份"相反，且把匿名限额拆散。
+- 不让 skill 读 env 判档：env 是 **server 进程**的环境，宿主 agent 侧读到的可能不是同一份；
+  server 身份由 `net._live()` 现读 env > runtime，skill 只调 `vod_auth_ensure` 读结果。
+- **dsh 壳本轮不并入**（诚实边界）：它是独立的 JS 实现，runtime 里混装身份与账本
+  （cap 200 环形），与 Python 侧共享同一 JSON 需要跨语言共用锁与字段契约——那是破坏性合并，
+  单独评审再做（记为待办，不占新编号）。当前若手工把 `VOD_DSH_RUNTIME` 指向 `<state>/runtime.json`，
+  两侧会互相覆盖账本（无共同锁），**不要这么做**。
+
+**护栏**：`<state>/runtime.json` 0600（写后立即 chmod，已有）；同目录 flock（已有）；
+镜像克隆检测（`firstBootAt` vs 本机 uptime，已有）+ 装机 checklist"冻结前清 state"；
+`uninstall --clean-global` 把 state 列为外部残留逐条打印后删除；**测试必须把
+`VOD_DEVKIT_HOME` 指到 tmp，且测试隔离门禁增加第 4 项快照（机器级 state 目录清单）**——
+否则机器级"存在即用"会让测试读到真机令牌。
+
+用例承载：`tests/test_token_machine_scope.py`（S145）。

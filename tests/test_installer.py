@@ -111,6 +111,10 @@ def env(tmp_path, engine_stub):
                     ignore=shutil.ignore_patterns(".git", "__pycache__",
                                                   ".e2e-nightly.log",
                                                   ".smoke", "runtime.json",
+                                                  # 工具缓存目录：并发跑 lint/mypy 时会边写边删，
+                                                  # copytree 撞上已消失的 db-shm/db-wal 直接报错
+                                                  # （实测 2026-11-16：Error: No such file ...）。
+                                                  ".mypy_cache", ".pytest_cache", ".ruff_cache",
                                                   # 真实安装产物不许混进隔离仓（本机装过
                                                   # codeartsdoer 后 golden 拿它对比 hermes 实锤）
                                                   "install-manifest.json"))
@@ -119,10 +123,25 @@ def env(tmp_path, engine_stub):
     e["HOME"] = str(home)
     e["PATH"] = str(stub) + os.pathsep + e["PATH"]
     e.pop("VOD_JAVA_API_KEY", None)
+    # D-token-machine-1：conftest 的 autouse 把 VOD_DEVKIT_HOME 指到了 pytest tmp
+    # （防止测试读到真机 state）。装机器用例测的是**克隆仓自己的**落点语义，
+    # 继承这个值会让 runtime 写到 tmp 而不是 <clone>，与既有断言不符——pop 掉，
+    # 让子进程按自己的形态派生（隔离已由 HOME=<fake> + repo=<tmp clone> 保证）。
+    e.pop("VOD_DEVKIT_HOME", None)
     e["VOD_JAVA_API_BASE"] = engine_stub["base"]  # 安装校验/绑定全打桩引擎（零外呼）
     return {"home": home, "repo": repo, "bare": bare, "env": e,
             "hermes_calls": calls, "stub": stub, "engine": engine_stub,
             "codex_calls": codex_calls}
+
+
+def _rt_path(env):
+    """机器级 state 的 runtime 路径（D-token-machine-1）。
+
+    装机写的是 `<fake HOME>/.vod-devkit/state/runtime.json`，不是克隆仓的
+    `vod_mcp/runtime.json`——conftest 已 pop 掉 VOD_DEVKIT_HOME，所以由 HOME 派生，
+    仍在隔离环境内。
+    """
+    return env["home"] / ".vod-devkit" / "state" / "runtime.json"
 
 
 def shq(p):
@@ -279,7 +298,7 @@ def test_install_without_product_is_allowed(env):
     给了仍必须对（见 test_install_rejects_unregistered_product）。"""
     r = cli(env, "install", "--target", "opencode")
     assert r.returncode == 0, r.stderr
-    rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
+    rt = json.loads(_rt_path(env).read_text())
     assert not rt.get("product"), "未提供 --product 时不得写默认绑定（不做静默默认）"
 
 def test_install_binds_explicit_product(env):
@@ -288,7 +307,7 @@ def test_install_binds_explicit_product(env):
     cli(env, "install", "--target", "codex", "--product", "高校AI开发者平台",
         "--java-api-base", env["engine"]["base"])
     mf = json.loads((env["repo"] / "install-manifest.json").read_text())
-    rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
+    rt = json.loads(_rt_path(env).read_text())
     assert mf["product"] == "高校AI开发者平台" and rt["product"] == "高校AI开发者平台"
 
 
@@ -310,7 +329,7 @@ def test_install_product_accepts_name_or_id(env):
     cli(env, "install", "--target", "codex", "--product", "codearts")  # 小写名
     assert "vod-devkit@vod-local" in env["codex_calls"].read_text()
     cli(env, "install", "--target", "codex", "--product", "651")  # 平台主键 id
-    rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
+    rt = json.loads(_rt_path(env).read_text())
     assert rt["product"] == "651"
 
 
@@ -485,7 +504,7 @@ def test_install_java_base_defaults_to_platform(env):
     # 地址优先级：--java-api-base > env VOD_JAVA_API_BASE > DEFAULT_JAVA_BASE；
     # env 与插件运行时同键（安装器跟随同链），此处验证 env 兜底生效
     cli(env, "install", "--target", "opencode", "--product", "CodeArts")
-    rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
+    rt = json.loads(_rt_path(env).read_text())
     assert rt["java_base"] == env["engine"]["base"]
     oc = json.loads((env["home"] / ".config/opencode/opencode.json").read_text())
     assert oc["mcp"]["vod-devkit"]["environment"]["VOD_JAVA_API_BASE"] \
@@ -497,7 +516,7 @@ def test_install_persists_java_base_to_runtime(env):
     cli(env, "install", "--target", "opencode",
         "--java-api-base", env["engine"]["base"],
         "--product", "CodeArts")
-    rt = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
+    rt = json.loads(_rt_path(env).read_text())
     assert rt["java_base"] == env["engine"]["base"]
     oc = json.loads((env["home"] / ".config/opencode/opencode.json").read_text())
     assert oc["mcp"]["vod-devkit"]["environment"]["VOD_JAVA_API_BASE"] \

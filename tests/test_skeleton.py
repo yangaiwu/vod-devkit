@@ -63,6 +63,8 @@ def test_tool_specs_follow_packs(monkeypatch):
     monkeypatch.setenv("VOD_PACKS", "core")
     specs = tools.tool_specs(packs.enabled_tools())
     assert [s["name"] for s in specs] == ["vod_devkit_info", "vod_auth_status",
+                                         # 身份判定+领取（D-token-machine-1，core 常驻）
+                                         "vod_auth_ensure",
                                          # 会话内能力面开关（D-packs-configure-1，core 常驻）
                                          "vod_packs_configure",
                                          "vod_check_update", "vod_search_products"]
@@ -281,6 +283,8 @@ def test_stdio_roundtrip():
         assert set(names) == {"vod_search_products", "vod_submit_voices", "vod_draft_voices",
                               "vod_commit_voices", "vod_list_submitted",
                               "vod_devkit_info", "vod_auth_status",
+                              # 身份判定+领取（core，D-token-machine-1）
+                              "vod_auth_ensure",
                               # 版本提醒（core）
                               "vod_check_update",
                               # 第二轨：领域规则技能的披露面（knowledge pack）

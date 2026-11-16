@@ -29,9 +29,18 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 TOKEN = "tenant-key-A"
-REMOTE_TOOLS = ["vod_submit_voices", "vod_devkit_info", "vod_auth_status",
-                "vod_list_skills", "vod_retrieve_skill", "vod_check_update",
-                "vod_search_products"]
+# 远程面工具集按真源动态算（契约 − REMOTE_WITHHELD）：手抄清单会在加/放工具时
+# 与实现脱节，且失败信息是"端点工具面不符"，看不出是夹具过期。
+def _remote_tools() -> list:
+    import sys
+    sys.path.insert(0, str(ROOT / "src"))
+    from vod_mcp import packs
+    contract = json.loads((ROOT / "assets" / "contract" / "tools.schema.json")
+                          .read_text(encoding="utf-8"))
+    return sorted(set(contract["tools"]) - set(packs.REMOTE_WITHHELD))
+
+
+REMOTE_TOOLS = _remote_tools()
 
 
 class _Mcp(BaseHTTPRequestHandler):
@@ -115,7 +124,8 @@ def env(tmp_path):
     repo = tmp_path / "repo"
     shutil.copytree(ROOT, repo, dirs_exist_ok=True, ignore=shutil.ignore_patterns(
         ".git", "__pycache__", "node_modules", ".smoke", "*.tgz", "runtime.json",
-        "install-manifest.json", ".e2e-nightly.log", ".e2e-behavior-nightly.log"))
+        "install-manifest.json", ".e2e-nightly.log", ".e2e-behavior-nightly.log",
+        ".mypy_cache", ".pytest_cache", ".ruff_cache"))
     e = os.environ.copy()
     e["HOME"] = str(home)
     e["PATH"] = str(stub) + os.pathsep + e["PATH"]

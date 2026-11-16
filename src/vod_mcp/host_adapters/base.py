@@ -31,7 +31,10 @@ def server_env(args, packs: str) -> dict:
     # 无 key 不写空串（空串会让探针/严格解析器误当字面值；运行时空=未设置，
     # 自动兜底 runtime.json java_key 或首提申请匿名令牌）
     env = {"VOD_PACKS": packs,
-           "VOD_JAVA_API_BASE": args.java_api_base}
+           "VOD_JAVA_API_BASE": args.java_api_base,
+           # D-token-machine-1：机器级状态目录显式写进宿主配置——
+           # 不依赖"默认值恰好一致"，也不随载荷版本目录漂移（升级不换令牌）。
+           "VOD_DEVKIT_HOME": str(paths.machine_state_home())}
     key = os.environ.get("VOD_JAVA_API_KEY", "")
     if key:
         env["VOD_JAVA_API_KEY"] = key

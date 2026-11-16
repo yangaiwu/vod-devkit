@@ -337,14 +337,19 @@ def install(args, packs: str) -> Path:
 
 
 def install_remote(args, url, token):
-    """codex mcp add --url + --bearer-token-env-var（token 由用户环境提供）。"""
+    """codex mcp add --url [+ --bearer-token-env-var]（token 由用户环境提供）。
+
+    token 可选（D-token-machine-1）：给了才加 --bearer-token-env-var；
+    没给就不带 Bearer，由远程 server 用机器级匿名令牌提交。
+    """
     codex = shutil.which("codex")
     if not codex:
         print("[vod-devkit] 未找到 codex CLI，无法走远程注册", file=sys.stderr)
         sys.exit(2)
-    r = subprocess.run([codex, "mcp", "add", "vod-devkit", "--url", url,
-                        "--bearer-token-env-var", "VOD_MCP_TOKEN"],
-                       capture_output=True, text=True, timeout=180)
+    cmd = [codex, "mcp", "add", "vod-devkit", "--url", url]
+    if token:
+        cmd += ["--bearer-token-env-var", "VOD_MCP_TOKEN"]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     if r.returncode != 0:
         print(f"[vod-devkit] codex mcp add（remote）失败：{(r.stderr or r.stdout).strip()[-200:]}",
               file=sys.stderr)
@@ -354,6 +359,7 @@ def install_remote(args, url, token):
         print("提示：codex 若曾用插件形态安装过 vod-devkit，请先 "
               "`codex plugin remove vod-devkit@vod-local` 避免双注册（stdio 插件 .mcp.json "
               "与本次 remote 配置同名）", file=sys.stderr)
-    print(f"已注册 Codex 远程 MCP（{url}）。token 由环境变量 VOD_MCP_TOKEN 提供：\n"
-          f"  export VOD_MCP_TOKEN=<你的 key>（写入 shell 配置或宿主 env）")
+    print(f"已注册 Codex 远程 MCP（{url}）。" + (
+        "token 由环境变量 VOD_MCP_TOKEN 提供：\n  export VOD_MCP_TOKEN=<你的 key>（写入 shell 配置或宿主 env）"
+        if token else "未带 token：提交走远程 server 侧的机器级匿名令牌（同机部署默认形态）"))
     return None

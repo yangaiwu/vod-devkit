@@ -298,10 +298,10 @@ def test_s126_scope_is_voice_collection_not_cloud_ops():
     tools = contract.get("tools", contract)
     names = list(tools) if isinstance(tools, dict) else [t["name"] for t in tools]
     assert packs.ALL_PACKS == ("core", "collect", "knowledge"), "新增能力包=范围变更，必须先拍板"
-    # 工具数 10→11：只多了 `vod_packs_configure`（会话内开关能力面本身，不新增
-    # 任何业务动作/上游调用——D-packs-configure-1）。业务面工具仍是 10 个。
-    assert len(names) == 11, f"工具面变了（{len(names)}）：新增工具需同步契约与需求文档"
-    assert "vod_packs_configure" in names
+    # 工具数 10→11（packs_configure）→12（vod_auth_ensure，D-token-machine-1）：
+    # 只增"能力面本身/身份确认"类工具，不新增任何业务动作；业务面工具仍是 10 个。
+    assert len(names) == 12, f"工具面变了（{len(names)}）：新增工具需同步契约与需求文档"
+    assert {"vod_packs_configure", "vod_auth_ensure"} <= set(names)
     assert all(n.startswith("vod_") for n in names)
     banned = ("hcloud", "koocli", "obs_", "sandbox", "region", "gateway", "openapi")
     hit = [n for n in names if any(b in n for b in banned)]

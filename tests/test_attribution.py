@@ -95,13 +95,30 @@ def test_s95_memory_reused_within_ttl():
 
 def test_s96_expired_memory_falls_back_to_binding_then_unknown():
     mem = {"product": "31", "productName": "CodeArts", "at": 1_000}
-    out = _attribute("导出还是慢", memory=mem, binding="CodeArts",
+    # 2026-11-16 A 方案：先验只在原话有自指时生效
+    out = _attribute("这个产品导出还是慢", memory=mem, binding="CodeArts",
                      ttl=attr.MEM_TTL, now=1_000 + attr.MEM_TTL + 1)
     assert out["source"] == "install_binding" and out["product"] == "31"
+    assert out["evidence"][0]["reason"] == "self-reference"
     out = _attribute("导出还是慢", memory=mem, binding=None,
                      ttl=attr.MEM_TTL, now=1_000 + attr.MEM_TTL + 1)
     assert out["source"] == "unknown" and out["product"] is None
     assert out["evidence"][0]["reason"] == "no-evidence"
+
+
+def test_s145_binding_requires_self_reference():
+    """S145-16：有安装先验但原话无自指 → 不归（转去问用户），不许无证据错归。"""
+    out = _attribute("导出太慢了，昨天还好", binding="CodeArts", now=1_000)
+    assert out["source"] == "unknown" and out["product"] is None
+    assert out["evidence"][0]["reason"] == "no-evidence"
+
+
+def test_s145_binding_used_when_user_points_at_current_product():
+    """S145-17：原话指向"当前这个产品"→ 先验成立且证据可回指（snippet 含自指词）。"""
+    out = _attribute("你们这个产品导出太慢了", binding="CodeArts", now=1_000)
+    assert out["source"] == "install_binding" and out["product"] == "31"
+    ev = out["evidence"][0]
+    assert ev["alias"] in ("你们这个", "这个产品") and "导出太慢" in ev["snippet"]
 
 
 # ---- S97：模型自报不采信（D-attrib-A 事故语义保留） ----

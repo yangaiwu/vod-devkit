@@ -13,7 +13,10 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,6 +29,11 @@ def _child_env(tmp_path):
     env["VOD_DEVKIT_SRC_ROOT"] = str(SRC)
     env["PYTHONPATH"] = str(SRC)
     env.pop("VOD_DEVKIT_MANIFEST", None)
+    # D-token-machine-1：运行期状态落机器级 state。conftest 的 autouse 把
+    # VOD_DEVKIT_HOME 指到 pytest 的 tmp（防读真机），子进程会继承它 →
+    # 写成 <tmp>/machine-state/runtime.json，而本文件的断言找 <tmp>/… → 永不出现（忙等挂死）。
+    # 这里显式钉到 tmp_path，让"落点"在本用例内可预测。
+    env["VOD_DEVKIT_HOME"] = str(tmp_path)
     return env
 
 
@@ -41,7 +49,8 @@ def _write_child(tmp_path, worker: int, count: int) -> str:
 
 
 def _runtime_file(tmp_path) -> Path:
-    return tmp_path / "vod_mcp" / "runtime.json"
+    # 与 _child_env 的 VOD_DEVKIT_HOME 同一落点（paths.runtime_json_path() = <home>/runtime.json）
+    return tmp_path / "runtime.json"
 
 
 # ── S137 跨进程不丢更新 ──────────────────────────────────
@@ -80,6 +89,9 @@ def test_s137_readers_never_see_partial_json(tmp_path):
         env=_child_env(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     bad, reads = 0, 0
     f = _runtime_file(tmp_path)
+    # 忙等必须有 deadline：落点漂移时"文件永不出现"曾经表现为整场 pytest 挂死
+    # （CPU 100% 空转，CI 上是 workflow 超时而不是红）——超时转成一次明确的 fail。
+    deadline = time.monotonic() + 90
     while writer.poll() is None or reads < 50:
         if f.exists():
             try:
@@ -91,6 +103,10 @@ def test_s137_readers_never_see_partial_json(tmp_path):
                 pass
         if bad or reads >= 2000:
             break
+        if time.monotonic() > deadline:
+            writer.kill()
+            writer.communicate()
+            pytest.fail(f"忙等超时（90s）：子进程没写出 {f}（落点漂移？）")
     writer.communicate(timeout=120)
     assert bad == 0, f"读到 {bad} 次半截 JSON（原子写失效）"
     assert reads > 0, "没读到任何一次（用例本身无效）"

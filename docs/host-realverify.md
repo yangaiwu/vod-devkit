@@ -62,7 +62,7 @@ atomcode -p "调用 MCP 工具 vod_devkit_info（只调这个），把 version �
 ## hermes
 
 ```bash
-hermes mcp test vod-devkit        # 新起进程：Connected + 8 个工具
+hermes mcp test vod-devkit        # 新起进程：Connected + 工具数按契约现场测（当前 12）
 ```
 
 坑（2026-11-12 实锤）：**运行中的 gateway 会按会话冻结 mcp_servers 快照**。改了配置后，

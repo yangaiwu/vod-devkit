@@ -716,7 +716,8 @@ dsh 归因漂移锁已按新口径改写（旧「安装期绑定」句禁止回�
 本地装技能即可用。对表 huaweicloud-devkit 的做法后确认：**他们没做这件事**——remote
 仅 README 片段（代码里 0 处 "type": "remote" 写入器），且其 AK/SK 落在服务端本机
 文件，远端没有 per-request 身份，只能同机/可信内网。我们的远程面要求 per-request
-Bearer（缺 key fail fast、不代签匿名），身份边界成立，所以这条路我们能走而他们不能。
+Bearer 优先（**2026-11-16 D-token-machine-1 修订：无 Bearer 时改为机器级匿名令牌，
+"缺 key fail fast、不代签匿名"的旧口径已废止**），身份边界成立。
 
 形态（`install --mcp-url <url> --mcp-token <token>`，或 env VOD_MCP_TOKEN）：
 - hermes：`hermes mcp add vod-devkit --url ... --auth header`，token 经
@@ -727,7 +728,9 @@ Bearer（缺 key fail fast、不代签匿名），身份边界成立，所以这
 - dsh：不走 MCP → 两种模式显式拒绝（exit 2），不是静默降级
 
 硬约束（都落成测试）：
-1. **token 必填**：远程面不代签身份，无 token 装上也提交不了 → 直接 exit 2。
+1. **token 可选**（2026-11-16 D-token-machine-1 修订；原口径"必填、缺 token exit 2"已废止）：
+   带 token → 用请求头身份并验有效；无 token → 只做连接级探活，配置不写认证，
+   提交由远程 server 的机器级匿名令牌完成（同机独立部署的默认形态）。
 2. **探活先于写入**：initialize + tools/list，断言工具面 == 契约 − REMOTE_WITHHELD；
    失败/工具面不符一律 exit 2 且零副作用（配置文件与 manifest 都不产生）。
 3. **skills-only**：MCP 已由别处注册时只装技能、不动宿主配置（manifest
@@ -1241,11 +1244,13 @@ C：新宿主 officeace/openclaw）。负责人拍板 A3/B1/C3；A3 落地前实
 - 拒写规则：形态可疑（空白/过短）、引擎可达且判拒（401/-32012）；引擎不可达只告警
   （离线装机必须能走，网络问题不是 key 问题）。
 - 明文 key 不进输出/日志/文档示例；回显一律指纹。
-- 优先级链写进文档：显式 key（auth init）> env `VOD_JAVA_API_KEY` > 匿名自动领取；
+- 优先级链写进文档（2026-11-16 更正：与 `net._live()` 实现对齐）：
+  环境变量 `VOD_JAVA_API_KEY`（最高）> runtime 里的显式 key（auth init 写入）> 匿名自动领取；
   禁令：不要把 key 写进宿主 MCP 配置 env（明文且随配置进 git）。
 
-**没做**：会话内 `auth_init` / `auth_switch`（内存态切账号）——需要 MCP 工具面新增写入口，
-与"远程面不代签身份"的既有边界要一起评审；本轮不硬塞，文档与 README 都不写成"已有"。
+**没做**：会话内 `auth_init` / `auth_switch`（内存态切账号）——需要 MCP 工具面新增写入口。
+（2026-11-16 补充：`vod_auth_ensure` 已提供"显式判 + 领匿名"的写入口，但不含切正式 key；
+切 key 仍只有 `auth init` 一条入口。）
 
 ## D-skill-teaching-1：技能读取教法=动作优先（2026-11-15）
 
@@ -1591,3 +1596,69 @@ manifest 是记账，不是生效事实。
 **验证**：改后全量 621 passed / 2 failed（`test_update_ff_pull_and_reburn`、
 `test_update_refuses_when_tracked_conflict` 在 origin/main 的干净 worktree 上也红，
 属既存问题，与本轮无关）；跑前后 manifest md5、payloads 清单、hermes config md5 三项一致。
+
+## D-token-machine-1：匿名令牌是机器级身份，不是版本级（2026-11-16 负责人拍板）
+
+**问题**：匿名令牌绑 `install_nonce`（设备锚点），非ce 存在于 `runtime.json`；而该文件落在
+`DIST_ROOT/vod_mcp/` —— 装机形态下是 `~/.vod-devkit/payloads/<版本>/vod_mcp/`。
+后果有两层：
+1. **每次升级/重装都换目录 → 换 nonce → 重领令牌**，匿名档日限额重新计，历史账本断档。
+2. 机器上实际有三份 runtime（载荷 / 仓内 `src/vod_mcp` / `packages/dsh/data`）→ 三个匿名令牌，
+   限额拆散；`probe_key` 的 `device-mismatch`（"令牌有效但非本机签发"）就是 nonce 漂移的现形。
+3. 并且没有"显式判 + 领"的工具：skill 想先确认身份再采集，只能靠首次提交副作用领取。
+
+**决定**（负责人原话："一个机器都用一个 token，我觉得可以"→ 采纳）：
+
+1. 状态目录机器级：`VOD_DEVKIT_HOME`（默认 `~/.vod-devkit/state`），`runtime.json` 落
+   `<state>/runtime.json`。跨版本、跨宿主、MCP 单独部署共用同一份。
+2. 解析优先级（**每次现读**）：`VOD_DEVKIT_HOME` > 机器级 state 已存在（存在即用）>
+   旧 `DIST_ROOT/vod_mcp/runtime.json`（首启兼容）。旧路径是兼容位，不是并行真源。
+3. 首启迁移：state 无 `runtime.json` 而旧位置有 → 复制一次（含 nonce / key / tier / 账本），
+   旧文件不删。目的是改造当天不重领、不换设备锚点。
+4. 装机把 `VOD_DEVKIT_HOME` 写进每个宿主的 MCP env（`server_env()` 单点），配置不依赖默认值。
+5. 新增 `vod_auth_ensure`（core pack）：判 + 领，幂等；显式 key 被拒时**不领**（fail fast），
+   不可达时**不领**（不把网络问题当身份问题）。`auth_status` 维持只读。
+
+**代价**：匿名档限额变成"全机共享额度" —— 某宿主用量大会让其他宿主一起撞顶。这是负责人
+明确选择的语义（比限额拆散、令牌满天飞更可解释）。另有部署边界：多容器/多副本各自一份
+state（除非共享卷，而共享卷上的 flock 不可靠，**不做**支持）。
+
+**远程面（同机独立进程）同步**（负责人 2026-11-16 澄清："远程是和插件在一台机器上，
+MCP server 独立部署"）：远程与本地是同一套效果，不是多租户隔离——
+
+1. 身份：请求头 Bearer 优先，无 Bearer 时领/复用机器级匿名令牌（旧"服务面不代签身份"
+   的 -32012 硬守卫与 `auth_ensure` 的远程拒绝一并废除）。
+2. 工具面：`REMOTE_WITHHELD` 收窄为只剩 `vod_packs_configure`；`vod_draft_voices` /
+   `vod_commit_voices` / `vod_list_submitted` 远程同样可用。
+3. 两段式放开的前置：草稿落 `owner = _session_key(client_info)`，commit 校验归属，
+   跨 clientInfo 一律 -32011（旧草稿无 owner → 兼容放行）。
+4. `vod_packs_configure` 仍不暴露：它是进程内状态，HTTP 每请求现造 server、多 agent
+   共用会互相影响——这不是"隔离"能解决的问题。
+5. **匿名代领护栏**（采纳评审 P0-2 的 A 半）：回环绑定开启代领（同机默认）；
+   非回环绑定默认关闭，需 `--allow-anon-mint` 显式开启（`net.ANON_MINT_DISABLED`）。
+   默认回环场景与本地 stdio 行为完全一致，不牺牲需求；直接暴露到非回环时
+   不会出现"任何能连端口的进程都能用本机身份提交"。
+
+**验证口径**：同机两宿主 `auth_status` 指纹相同；`payloads/0.5.9 → 0.5.10` 升级后指纹不变；
+迁移保留 `install_nonce`；`ensure` 五分支按表返回；测试跑完机器级 state 快照不变（S143 门禁第 4 项）。
+
+## D-attrib-binding-1：安装先验要有自指证据（2026-11-16 负责人拍板 A）
+
+**问题**：`--product` 写入的安装绑定是归因链第 4 级兜底（`source=install_binding`），
+命中后**不再问用户**。它与"缺产品先问一次（D-product-ask-1）"冲突：用户在 A 产品插件里
+吐槽 B 产品、原话未点出产品名时，会被先验直接归到 A —— 正是 2026-11-12 删掉
+`host_default`（"宿主产品也是一次推断，错归污染引擎幂等域"）的同一种病。
+
+**决定（A 方案）**：先验只在**原话出现自指**时生效。自指词表
+`attribution.SELF_REFERENCE`（"这个产品/这款产品/本产品/该产品/你们这个/你们的产品/
+本平台/这个平台/这个系统/你们家/你们这/咱这个/咱们这个/这插件"）。命中 → 承认先验，
+`evidence=[{alias: 自指词, snippet: 上下文, reason: self-reference}]` 可审计；
+不命中 → `source=unknown`，回到"先问用户一次"。
+
+**取舍**：不采用 B（彻底删先验）——单产品部署每次多问一句，体验代价大且 dsh 壳没有
+运行期问答通道；也不采用 C（维持无条件兜底）——无证据错归比多问一句更糟。
+自指词表只放"指向当前语境"的词，不收录泛称"产品"（太容易误命中文档类正文）。
+
+**验证**：`tests/test_attribution.py::test_s145_binding_requires_self_reference` /
+`test_s145_binding_used_when_user_points_at_current_product`；
+S96 用例同步改为"自指才归 + 无自指转 unknown"。

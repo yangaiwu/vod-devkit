@@ -25,8 +25,8 @@
 | 分发红线（key 不随包） | `bin/vod-devkit:cmd_install` `--distribution preset` | `VOD_JAVA_API_KEY` 从 env 摘除且不写宿主配置 |
 | 技能拷贝漂移 | `bin/vod-devkit:_skill_hashes/_drifted_skills`（D-drift-lock） | 安装期记录 sha256，doctor/verify 逐落点比对 |
 | 远程面护栏 | `vod_mcp/guardrails.py`（stdio 与 HTTP 共用同一判定） | 新增传输不新增策略：deny/confirm/文本规则两面一致 |
-| 远程面工具面 | `vod_mcp/packs.py:REMOTE_WITHHELD` | HTTP 面摘掉写本机状态的工具（draft/commit/list_submitted） |
-| 远程面身份 | `vod_mcp/tools.py:_REQ_KEY/_SERVER_FACE` | 身份只从请求头来，逐请求生效；缺 key 的 submit fail fast，不代签匿名令牌 |
+| 远程面工具面 | `vod_mcp/packs.py:REMOTE_WITHHELD` | 只摘 `vod_packs_configure`（进程内开关）；draft/commit/ledger 与本地一致，草稿落 `owner` 按宿主隔离（D-token-machine-1，2026-11-16） |
+| 远程面身份 | `vod_mcp/tools.py:_REQ_KEY/_SERVER_FACE` | 请求头 Bearer 优先、逐请求生效；无 Bearer 时与本地同链：领/复用机器级匿名令牌（D-token-machine-1；旧"不代签身份"口径已废除） |
 
 错误码约定（宿主/模型可据此分流）：`-32010` deny、`-32011` confirm、`-32012`
 认证（缺 key 且令牌不可得）、`-32013` 归因缺失、`-32014` 传输（非回环 http）。

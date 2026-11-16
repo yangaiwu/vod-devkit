@@ -110,7 +110,12 @@ def _install_runtime() -> tuple:
     命名空间才查得到它的提交（voiceId per-install），同一设备锚点才过引擎
     设备绑定校验（X-Vod-Device-Id=install_nonce，缺失=401 实锤）。key 只取
     用不打印。全程零提交（匿名令牌尚未领取）→ 空 key，查询端返回空行集。"""
-    p = INSTALL_DIR / "vod_mcp" / "runtime.json"
+    # D-token-machine-1：运行期状态是机器级 state；旧位置（载荷/仓根 vod_mcp/）不再写
+    try:
+        from vod_mcp import paths as _paths
+        p = _paths.runtime_json_path()
+    except Exception:  # e2e 旧环境兜底
+        p = INSTALL_DIR / "vod_mcp" / "runtime.json"
     rt = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
     base = (rt.get("java_base") or os.environ.get("VOD_JAVA_API_BASE")
             or "https://vod-dev.topxtopx.com").rstrip("/")

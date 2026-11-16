@@ -290,7 +290,10 @@ def install_remote(args, url, token):
     """
     import os
     env = os.environ.copy()
-    env["MCP_VOD_DEVKIT_API_KEY"] = token
+    # token 可选（D-token-machine-1）：没有就不注入——请求不带 Bearer，
+    # 由远程 server 用机器级匿名令牌提交（同机部署默认形态）。
+    if token:
+        env["MCP_VOD_DEVKIT_API_KEY"] = token
 
     def _yes_forever():
         # 交互问数随 hermes 版本变化（首次装=2 问，覆盖装=3 问），流式供给不数数
@@ -313,9 +316,10 @@ def install_remote(args, url, token):
         sys.exit(1)
     conf = Path(_spec()["configPath"]).parent / "vod-devkit.json"
     conf.parent.mkdir(parents=True, exist_ok=True)
-    conf.write_text(json.dumps({"name": "vod-devkit", "url": url,
-                                "headers": {"Authorization": "Bearer ${MCP_VOD_DEVKIT_API_KEY}"}},
-                               ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = {"name": "vod-devkit", "url": url}
+    if token:   # 无 token 时不写 headers：请求不带 Bearer，走服务端匿名令牌
+        payload["headers"] = {"Authorization": "Bearer ${MCP_VOD_DEVKIT_API_KEY}"}
+    conf.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"已注册 Hermes 远程 MCP（{url}；token 存 ~/.hermes/.env，配置内只留引用）")
     return conf
 

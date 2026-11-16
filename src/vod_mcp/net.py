@@ -19,6 +19,12 @@ _REQ_KEY = contextvars.ContextVar("vod_req_key", default=None)
 
 _SERVER_FACE = contextvars.ContextVar("vod_server_face", default=False)
 
+# 匿名令牌代领总开关（D-token-machine-1 安全护栏）：进程级布尔，启动期由
+# transport_remote 按绑定地址决定——非回环绑定（可能被反代/公网触达）默认关闭
+# 代领，避免"任何能连端口的进程都能用这台机的身份提交、消耗额度"。
+# 回环绑定（同机部署的默认形态）保持开启，与本地 stdio 完全一致。
+ANON_MINT_DISABLED = False
+
 
 def _live(field: str, default: str = "") -> str:
     """身份类值的**调用期**解析：env（平台注入）> runtime.json 现读 > 默认。
@@ -216,7 +222,7 @@ def probe_key(key: str | None = None, timeout: int = 8) -> dict:
                 return {"ok": False, "reason": "device-mismatch", "fingerprint": fp,
                         "note": "匿名令牌与本设备不匹配：令牌本身有效，"
                                 "在本设备重新申请令牌后可继续（POST /external/token，"
-                                "首次提交自动完成）"}
+                                "首次提交或 vod_auth_ensure 时自动完成）"}
             if not (explicit or _explicit_key()):
                 # 匿名令牌 401 ≠ 配置错误：报"过期待重领"而非"rejected"，
                 # 避免 runtime 残留过期匿名令牌时被误读为正式 key 失效
@@ -230,7 +236,7 @@ def probe_key(key: str | None = None, timeout: int = 8) -> dict:
 def _key_state() -> dict:
     return {"configured": bool(_java_key()), "fingerprint": _fingerprint(_java_key()),
             "base": _java_base(),
-            "note": "已配置" if _java_key() else "未配置（首次提交自动取匿名令牌）"}
+            "note": "已配置" if _java_key() else "未配置（首次提交或 vod_auth_ensure 时自动取匿名令牌）"}
 
 
 def _explicit_key() -> bool:
@@ -285,6 +291,8 @@ def _fetch_anon_token() -> str | None:
     D-anon-verify（2026-11-05 真机实锤）：引擎返回 ApiResponse 信封，
     顶层取 token 恒 None → 无 key 首提必 -32012，信封解析为必经路径。"""
     try:
+        if ANON_MINT_DISABLED:
+            return None      # 非回环远程面：不代领（调用方须自带 Bearer）
         out = _http("POST", _TOKEN_PATH, {}, base=_java_base(), key="", timeout=15)
         return _extract_anon_token(out)
     except ToolError:
@@ -295,7 +303,9 @@ def _acquire_anon_token_or_raise() -> str:
     """缺 key/匿名令牌失效 → 领零字段匿名令牌；端点不可用则如实报错。"""
     token = _fetch_anon_token()
     if not token:
+        hint = ("；远程面若绑定非回环地址，代领默认关闭——请带 Authorization: Bearer <key>，"
+                "或服务端以 --allow-anon-mint 显式开启" if ANON_MINT_DISABLED else "")
         raise ToolError(
             "未配置接入 key 且匿名令牌端点不可用。引导："
-            + "；".join(str(g["label"]) for g in _KEY_GUIDANCE), code=-32012)
+            + "；".join(str(g["label"]) for g in _KEY_GUIDANCE) + hint, code=-32012)
     return token

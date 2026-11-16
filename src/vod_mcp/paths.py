@@ -24,6 +24,7 @@
 `LEGACY_ALLOWED_UNTIL = "0.7.0"`，命中即 `DeprecationWarning`；到达该版本后直接硬失败
 （`tests/test_p2_structure.py` 锁住"分支只存在于允许区间"）。
 """
+import json
 import os
 import warnings
 from pathlib import Path
@@ -105,8 +106,82 @@ CONTRACT = ASSETS / "contract" / "tools.schema.json"
 POLICY = ASSETS / "safety" / "policy.json"
 HOOKS = ASSETS / "hooks"                  # 载荷/插件副本里 hooks 平铺；仓内走 integrations
 INSTALL_MANIFEST = DIST_ROOT / "install-manifest.json"
-RUNTIME_JSON = DIST_ROOT / "vod_mcp" / "runtime.json"
 BUILD_INFO = DIST_ROOT / "build-info.json"
+
+# ── 机器级运行期状态（D-token-machine-1，2026-11-16） ─────────────────────
+#
+# 为什么不在 DIST_ROOT 下：DIST_ROOT 装机形态是 ~/.vod-devkit/payloads/<版本>/，
+# 一次升级就换目录 → 换 install_nonce → 重领匿名令牌（额度重计、账本断档）。
+# 匿名令牌是**机器级身份**（设备锚点绑定），必须跨版本、跨宿主共享一份。
+#
+# 解析优先级（每次现读；D-state-read-1 的同一纪律）：
+#   ① VOD_DEVKIT_HOME 显式（装机写进各宿主 env；测试写 tmp）
+#   ② 机器级 state 已存在 → 用它（存在即用，不依赖 env 透传）
+#   ③ 旧 DIST_ROOT/vod_mcp/runtime.json（首启兼容位，不是并行真源）
+_STATE_DIRNAME = "state"
+
+
+def machine_state_home() -> Path:
+    """机器级状态目录（现读）：VOD_DEVKIT_HOME > ~/.vod-devkit/state。"""
+    env = (os.environ.get("VOD_DEVKIT_HOME") or "").strip()
+    if env:
+        return Path(env).expanduser()
+    return Path(os.path.expanduser("~")) / ".vod-devkit" / _STATE_DIRNAME
+
+
+def legacy_runtime_json() -> Path:
+    """旧位置（版本目录内）：只作兼容/迁移来源，不再作为日常真源。"""
+    return DIST_ROOT / "vod_mcp" / "runtime.json"
+
+
+def runtime_json_path() -> Path:
+    """当前生效的 runtime.json 路径（现读，长驻进程不冻结）。"""
+    env = (os.environ.get("VOD_DEVKIT_HOME") or "").strip()
+    if env:
+        return Path(env).expanduser() / "runtime.json"
+    machine = machine_state_home() / "runtime.json"
+    if machine.exists():
+        return machine
+    legacy = legacy_runtime_json()
+    return legacy if legacy.exists() else machine
+
+
+def migrate_state_once() -> dict:
+    """首启迁移：state 无 runtime 而旧位置有 → 复制一次（保留设备锚点与账本）。
+
+    为什么保留旧文件：迁移本身不该是破坏性操作；旧文件的删除留给
+    `uninstall --clean-global`（逐条打印）。
+    为什么要 `.migrated` 标记（2026-11-16 评审补强）：只看"state 无 runtime"的话，
+    用户手工清掉 state 后旧文件会**复活**（下次启动又迁回来，令牌/账本被悄悄还原）。
+    有标记即视为"这台机器已经迁过"，此后旧位置只读、不再回灌。
+    返回 {"migrated": bool, "from": str, "reason": str|None}。
+    """
+    state = machine_state_home()
+    target = state / "runtime.json"
+    marker = state / ".migrated"
+    legacy = legacy_runtime_json()
+    if marker.exists():
+        return {"migrated": False, "from": None, "reason": "already-migrated"}
+    if target.exists() or not legacy.exists():
+        return {"migrated": False, "from": None, "reason": None}
+    try:
+        state.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(legacy.read_bytes())
+        os.chmod(target, 0o600)
+        try:
+            os.chmod(state, 0o700)
+        except OSError:
+            pass
+        marker.write_text(json.dumps({"from": str(legacy), "migrated": True}) + "\n",
+                          encoding="utf-8")
+        return {"migrated": True, "from": str(legacy), "reason": None}
+    except OSError:
+        return {"migrated": False, "from": None, "reason": "io-error"}
+
+
+# 不提供模块级 RUNTIME_JSON 快照常量（D-token-machine-1 收口）：它零消费方，
+# 且违反本模块"路径类值不 import 期冻结"的纪律（D-state-read-1）——留着会被后人
+# 当合法读法用。调用方一律 runtime_json_path() / runtime_state._runtime_path()。
 
 
 def hook_script(name: str = "vod_router.py") -> Path:
@@ -128,4 +203,6 @@ def guard_script() -> Path:
 
 def describe() -> dict:
     """诊断用：把"当前是哪两个根"打出来（doctor/explain 排障时不再靠猜）。"""
-    return {"srcRoot": str(SRC_ROOT), "distRoot": str(DIST_ROOT), "assets": str(ASSETS)}
+    return {"srcRoot": str(SRC_ROOT), "distRoot": str(DIST_ROOT), "assets": str(ASSETS),
+            "stateHome": str(machine_state_home()),
+            "runtime": str(runtime_json_path())}

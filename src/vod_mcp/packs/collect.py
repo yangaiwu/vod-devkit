@@ -39,7 +39,7 @@ def _attribute_product(items: list, params: dict, client_info: dict | None = Non
       ① 用户明确回答/确认（params.product，仅问过用户后由模型填）
       ② 原话唯一且高置信提及（多产品/歧义=低置信，转去问）
       ③ 会话记忆（30 分钟滑动，进程内；跨会话不继承）
-      ④ 安装先验
+      ④ 安装先验（**仅在原话出现自指时生效**：D-product-ask-1 修订 A，2026-11-16）
     四级都拿不到（含用户明确说"不知道/随便"= params.productNotSpecified）→
     返回 source=unknown + confidence=low，由调用方抛可执行错误要求追问。
     **不做 host_default 兜底**（2026-11-12 复评删除：宿主产品也是一次推断，
@@ -415,13 +415,9 @@ def submit_voices(params: dict, client_info: dict | None = None,
         out = net._http("POST", _EXISTING_SUBMIT, body, base=net.JAVA_BASE, key=net._eff_key())
         return vid, (out.get("data") or {}).get("taskId")
 
-    # 服务面（HTTP）：身份只能来自请求头。缺 key 时 fail fast——不先打引擎再
-    # 靠 401 兜底（那会多一次无意义外呼，且引擎若宽容 200 就绕过了守卫）。
-    if net._SERVER_FACE.get() and not net._eff_key():
-        raise net.ToolError(
-            "服务面（HTTP 传输）不代签身份：请在本请求带上 Authorization: Bearer "
-            "<VOD key>（插件只搬运身份，不产生身份；落库与配额都在服务端）",
-            code=-32012)
+    # 服务面（HTTP）：身份优先取请求头 Bearer；没有就同本地一样走机器级匿名令牌
+    # （D-token-machine-1 定稿：本地/远程同一套身份语义。远程多租户若需按调用方隔离，
+    #  由调用方带 Bearer 显式给出身份；匿名是"整机一份"的低信任档）
 
     # 缺产品且用户没说不知道 → 可执行错误（先问一次），不许裸提交 UNKNOWN
     _require_product_or_ask(attr, items, client_info)
@@ -451,14 +447,6 @@ def submit_voices(params: dict, client_info: dict | None = None,
         if ex.code == 404:
             fallback = True  # 囤积端点未部署 → 落到下方 legacy 回落
         elif not net._eff_key() or ex.code == -32012:
-            if net._SERVER_FACE.get():
-                # 服务面（HTTP）：不代签身份。匿名令牌按设备锚点签发，一进程
-                # 一锚点会把配额/声量/归因全搅在一起（服务端多用户形态的
-                # 已拍板口径：formal/host key + 按请求透传）。
-                raise net.ToolError(
-                    "服务面（HTTP 传输）不代签身份：请在本请求带上 "
-                    "Authorization: Bearer <VOD key>，或改用 stdio 形态的匿名链",
-                    code=-32012)
             if net._explicit_key():
                 _raise_explicit_key_rejected(net._eff_key())
             # 缺 key/匿名令牌失效 → 零字段匿名令牌 → 落 runtime.json → 重试一次
@@ -517,10 +505,6 @@ def submit_voices(params: dict, client_info: dict | None = None,
                 voice_ids.append(vid)
                 task_ids.append(None)
             elif (not net._eff_key() or e.code == -32012) and not voice_ids:
-                if net._SERVER_FACE.get():
-                    rejected.append({"index": i, "reason":
-                        "服务面（HTTP 传输）不代签身份：请带 Authorization: Bearer <VOD key>"})
-                    continue
                 if net._explicit_key():
                     _raise_explicit_key_rejected(net._eff_key())
                 # 零字段匿名令牌：缺 key/401 → 自动取令牌 → 落 runtime.json → 重试一次
@@ -619,6 +603,11 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
         store[draft_id] = {
             "payload": payload, "payloadSha256": payload_sha,
             "tokenHash": rt._sha256(token),
+            # 草稿归属（D-token-machine-1 远程面放开两段式的前置）：
+            # 同机多个 agent 共用一个远程 server 时草稿池是共享的，
+            # 记录创建者、commit 时校验，避免"A 的草稿被 B 提交"。
+            # 旧草稿无 owner 字段 → commit 兼容放行（升级不断回合）。
+            "owner": rt._session_key(client_info),
             # D-resume-commit-1：token 明文随草稿落盘（runtime.json 0600，与 java_key
             # 同级保护）。token 的威胁模型是"防载荷改写"而非"同意凭证"——落盘不放大
             # 风险，换断回合可续：agent 回合中断后凭 draftId 即可恢复提交（此前
@@ -675,6 +664,11 @@ def commit_voices(params: dict, client_info: dict | None = None) -> dict:
         if draft is None:
             raise net.ToolError("草稿不存在或已过期（10 分钟 TTL），请重新 vod_draft_voices",
                                 code=-32011)
+        owner = draft.get("owner")
+        if owner and owner != rt._session_key(client_info):
+            raise net.ToolError(
+                "这份草稿不属于当前客户端（草稿按宿主/会话隔离：只能由创建它的那个 agent 提交）",
+                code=-32011)
         token = str(params.get("approvalToken", "")) or str(draft.get("token", ""))
         payload_sha = str(params.get("payloadSha256", "")) or str(draft["payloadSha256"])
         if draft["tokenHash"] != rt._sha256(token):

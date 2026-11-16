@@ -283,8 +283,10 @@ S3 落地后，仓内旧位置（`<repo>/vod_mcp/`、`<repo>/skills/`）不再�
   （`payload.sources`：代码取 `SRC_ROOT`，资产取 `ASSETS`，hook 取其真实位置）。
 - **npm files**：`src/vod_mcp/*` 逐文件枚举（防 `runtime.json` 入包），`src/vod_mcp/host_adapters/`
   与 `src/vod_mcp/packs/` 整目录，资产走 `assets/`，hook 走 `integrations/`。
-- **运行期状态**：`runtime.json` 不再住在包目录，落 `DIST_ROOT/vod_mcp/runtime.json`
-  （gitignore），安装器落盘前建父目录。
+- **运行期状态**：`runtime.json` 不再住在包目录，落**机器级 state**——
+  `VOD_DEVKIT_HOME`（默认 `~/.vod-devkit/state/`，0600/0700，gitignore），跨版本/跨宿主共用
+  一份设备锚点与令牌（D-token-machine-1）；旧位置 `DIST_ROOT/vod_mcp/runtime.json` 仅作首启
+  迁移来源，不再写入。
 
 ### 8.4 pip 入口修正（顺手修掉的存量缺陷）
 

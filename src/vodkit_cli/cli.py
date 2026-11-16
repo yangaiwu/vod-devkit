@@ -44,8 +44,8 @@ def main():
                     help="远程 attach 模式：宿主 MCP 配置指向该 Streamable HTTP 端点"
                          "（hermes/opencode/codex 支持；dsh 不走 MCP）")
     sp.add_argument("--mcp-token", default="",
-                    help="远程 attach 的身份（也可用 env VOD_MCP_TOKEN）：远程面不代签身份，"
-                         "缺 token 拒绝安装")
+                    help="远程 attach 的身份（也可用 env VOD_MCP_TOKEN）：默认可选——"
+                         "给了就用请求头 Bearer，不给则走远程 server 侧机器级匿名令牌")
     sp.add_argument("--mcp-config", default="",
                     help="通用宿主（--target generic）的 MCP 配置文件路径；不给则只打印可粘贴片段")
     sp.add_argument("--skills-only", action="store_true",

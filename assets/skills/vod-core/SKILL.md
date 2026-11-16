@@ -20,6 +20,7 @@ metadata:
 | 本机已提交过哪些（进度追问） | `vod_list_submitted`（本地账本口径，换机不保留）**仅 stdio 面可用**；远程面改答"本条收录状态" |
 | 插件版本/来源核验 | `vod_devkit_info`（version + commitSha） |
 | key/认证状态、引擎连通性 | `vod_auth_status`（只报指纹，不下发明文） |
+| 准备采集前确认身份（尤其 MCP 单独部署/无 key） | `vod_auth_ensure`（有可用令牌就复用，没有则由服务代理领匿名令牌；幂等，一次会话调一次） |
 | 有哪些技能、规则技能是否可用 | `vod_list_skills` |
 | 取规则技能全文（分类/评分口径） | `vod_retrieve_skill`（owner pack 被裁剪时返回恢复指引） |
 
@@ -49,3 +50,22 @@ metadata:
    不要换措辞重试。
 6. **规则口径以技能/披露内容为准**：不凭训练数据回答 VOD 分类与评分——
    vendored 文本与引擎代码同源。
+
+## 身份准备（MCP 单独部署 / 无 key）
+
+采集前要确认身份时，调 **一次** `vod_auth_ensure`（幂等，不要每次工具调用都调）：
+
+| 返回 | 处理 |
+|---|---|
+| `verified=true` | 直接继续采集；`source` 说明身份来源（`env` 显式 key / `runtime` 本机令牌 / `new-anonymous` 刚领的匿名令牌） |
+| `verified=false` + `reason=rejected` | 显式 key 被引擎拒绝：告诉用户换一把有效 key，**不要**改走匿名档掩盖配置错误 |
+| `verified=null` + `reason=unreachable` | 网络问题不是身份问题：如实说"暂时无法确认身份"，不要领新令牌 |
+
+不读环境变量、不翻 `runtime.json`/state 文件判断身份——那是服务进程的事（读也会被 hook 拦回，
+只引指纹）。匿名档额度是**整机共享**的：别的宿主用多了，这里也会提前撞上限，属于正常语义。
+
+MCP 独立部署（同机常驻 server，agent 用 HTTP 连 127.0.0.1:9528）与本地 stdio **同一套流程**：
+照样调 `vod_auth_ensure`（带 Authorization 就是请求头身份，不带就用整机匿名令牌）；
+两段式 `vod_draft_voices`/`vod_commit_voices` 与 `vod_list_submitted` 在远程面同样可用，
+但草稿只能由创建它的那个 agent 提交（按宿主隔离，串了会报"不属于当前客户端"）。
+唯一远程没有的是 `vod_packs_configure`（进程内开关）。

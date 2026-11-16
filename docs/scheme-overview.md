@@ -15,7 +15,7 @@
 vod-devkit 插件（Python 单进程薄壳，零第三方依赖）
    ├ 护栏：confirm 逐次 / 单批≤50 / 内容≤2000 / DB·凭据意图 deny
    ├ 归因三层：安装绑定 > 显式传参 > 问用户（禁止静默默认）
-   ├ 零字段令牌：无 key 首次提交自动申请（无需注册）
+   ├ 零字段令牌：无 key 时首次提交或 `vod_auth_ensure` 自动申请（无需注册），机器级一份
    └ 动态元数据：meta 拉取+24h 缓存+快照兜底+stale 标记
    ↓ Authorization: Bearer
 VOD Java backend（唯一上游：/external/voice/submit + /external/token）

@@ -238,7 +238,13 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
 
 
 def _runtime_cfg_read() -> dict:
-    p = ROOT / "vod_mcp" / "runtime.json"
+    """运行期状态现读（D-token-machine-1：单源在 paths.runtime_json_path()）。
+
+    旧实现硬读 ROOT/vod_mcp/runtime.json——那是机器级改造前的落点，继续读会让
+    "装机写 state、doctor/装机种读旧位"分叉（同一份状态两套读法，skill 明令禁止）。
+    """
+    from vod_mcp import paths as _paths
+    p = _paths.runtime_json_path()
     if p.exists():
         try:
             return json.loads(p.read_text(encoding="utf-8"))

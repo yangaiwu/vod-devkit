@@ -63,10 +63,14 @@ bin/vod-devkit install --target hermes --product <你的产品>   # 宿主任选
 # 1) 服务端：起远程面（需官方 MCP SDK；对外自建 TLS 反代）
 pip install 'vod-devkit[remote]'
 vod-devkit serve --transport remote --port 9528 --host 127.0.0.1
+# 开放到非回环地址时：匿名代领默认关闭（调用方须带 Bearer）；
+# 可信内网确需共享本机身份，再加 --allow-anon-mint
 
-# 2) agent 侧 attach（token 必填——远程面不代签匿名身份）
+# 2) agent 侧 attach（token 可选：给了用请求头身份，不给走服务端机器级匿名令牌）
 npx -y vod-devkit@latest install --target opencode \
-    --mcp-url http://<host>:9528/mcp --mcp-token <VOD key> --product <你的产品>
+    --mcp-url http://<host>:9528/mcp --product <你的产品>
+# 需要按调用方隔离身份时再加 --mcp-token <VOD key>
+# 注：--product 写的是本机 state；server 与插件同机才对该 server 的归因生效
 ```
 
 attach 前安装器会**探活**：连接（initialize）、工具面（tools/list 与契约

@@ -17,8 +17,8 @@
 
 ## 安全模型（用户应知的边界）
 
-- **令牌分档**：首次提交自动申请零字段匿名令牌（默认 30 天 / 5000 条天花板、日 500 条；引擎侧 vod.external.* 可配置），
-  存 `vod_mcp/runtime.json`（0600，gitignore）。key 指纹仅显示 sha1[:8]，明文不落日志
+- **令牌分档**：首次提交或 `vod_auth_ensure` 时自动申请零字段匿名令牌（默认 30 天 / 5000 条天花板、日 500 条；引擎侧 vod.external.* 可配置），
+  存机器级 state（`VOD_DEVKIT_HOME`，默认 `~/.vod-devkit/state/runtime.json`，0600、目录 0700、gitignore；跨版本/跨宿主一份）。key 指纹仅显示 sha1[:8]，明文不落日志
 - **传输**：非回环地址一律强制 https（-32014 拒绝 http）；Bearer 不明文过公网
 - **护栏**：写操作逐批 confirm、单批 ≤50 条、content ≤2000 逐条校验
   （超长拒该条不拒整批）；`guard_scope` 剔除反馈正文，不误杀正文内的凭据引用

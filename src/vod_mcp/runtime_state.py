@@ -23,7 +23,9 @@ _RT_LOCK = threading.RLock()
 
 
 def _runtime_path() -> Path:
-    return paths.RUNTIME_JSON
+    # D-token-machine-1：机器级 state（跨版本/跨宿主一份）；每次现读，
+    # 长驻进程不冻结（D-state-read-1 的同一条纪律：常量会把"换了 key/搬了目录"冻住）
+    return paths.runtime_json_path()
 
 
 def _runtime_cfg() -> dict:
@@ -240,6 +242,13 @@ def _ensure_first_boot(rt_path: Path | None = None) -> dict:
     自动清零伤害半径为零，拒启会把误判放大成全功能瘫痪。
     firstBootAt 首启写入，此后不再触发（防误伤正常运行中的安装）。"""
     p = rt_path or _runtime_path()
+    if rt_path is None:
+        # D-token-machine-1 首启迁移：state 无 runtime 而旧版本目录有 → 复制一次
+        # （保留 install_nonce/key/账本，改造当天不重领令牌、不换设备锚点）
+        mig = paths.migrate_state_once()
+        if mig.get("migrated"):
+            _log(f"state migrated: {mig['from']} -> {_runtime_path()}")
+            p = _runtime_path()
     if not p.exists():
         return {"action": "none"}
     try:

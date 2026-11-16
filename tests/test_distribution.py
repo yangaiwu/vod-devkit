@@ -10,6 +10,7 @@ from pathlib import Path
 
 from tests.test_installer import cli
 from tests.test_installer import env as _installer_env_fixture
+from tests.test_installer import _rt_path  # 机器级 state 落点（D-token-machine-1）
 from tests.test_installer import engine_stub as _engine_stub_fixture  # env 依赖它，须同册
 
 env = _installer_env_fixture  # pytest 夹具 re-export（赋值别名，避免 import 未用误报）
@@ -92,7 +93,7 @@ def test_verify_preset_fails_on_mixed_artifacts(env):
 def test_install_no_local_ledger_flag(env):
     cli(env, "install", "--target", "hermes", "--product", "GTD",
         "--no-local-ledger")
-    cfg = json.loads((env["repo"] / "vod_mcp" / "runtime.json").read_text())
+    cfg = json.loads(_rt_path(env).read_text())
     assert cfg["local_ledger"] is False
 
 

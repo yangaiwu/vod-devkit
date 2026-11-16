@@ -16,8 +16,9 @@ devkit 的契约（mcp-server-remote.ts + test/remote-mcp-server.test.ts 实测�
 用一个小的 ASGI 适配层把 stdlib http.server 的请求转成 scope/receive/send。
 协议处理仍然全部在 SDK 里，与 devkit 同源。
 
-身份：请求头 Authorization: Bearer <key> 逐请求注入（见 tools._REQ_KEY），
-不落盘、不进 env；插件不代签身份——缺 key 时 submit 结构化拒绝。
+身份：请求头 Authorization: Bearer *** 逐请求注入（见 tools._REQ_KEY），优先生效；
+没有 Bearer 时与本地同链——由服务端领/复用**机器级匿名令牌**提交（同机独立部署的
+默认形态，D-token-machine-1）。
 """
 import asyncio
 import json
@@ -329,10 +330,28 @@ class _Handler(BaseHTTPRequestHandler):
                                  "error": {"code": -32603, "message": str(e)}})
 
 
-def serve(host: str, port: int) -> int:
+def _apply_anon_mint_policy(host: str, allow: bool) -> bool:
+    """按绑定地址决定是否允许服务端代领匿名令牌（返回是否开启）。
+
+    回环（同机独立部署的默认形态）→ 开启，与本地 stdio 一致；
+    非回环（可能经反代/公网触达）→ 默认关闭，需 `--allow-anon-mint` 显式开启。
+    理由：服务面无内建鉴权，代领 = 任何能连端口的进程都能用本机身份提交、消耗额度。
+    """
+    from vod_mcp import net
+    enabled = (host in LOOPBACK) or bool(allow)
+    net.ANON_MINT_DISABLED = not enabled
+    return enabled
+
+
+def serve(host: str, port: int, allow_anon_mint: bool = False) -> int:
+    anon = _apply_anon_mint_policy(host, allow_anon_mint)
     if host not in LOOPBACK:
         print(f"[vod-devkit] 警告：远程 MCP 绑定非回环地址 {host}——本进程无内建鉴权，"
               "不要把它匿名暴露到公网；TLS 与身份校验应由反代承担。", file=sys.stderr)
+        if not anon:
+            print("[vod-devkit] 匿名令牌代领已关闭（非回环绑定）：调用方须带 "
+                  "Authorization: Bearer <key>；单机可信网络确需代领时加 --allow-anon-mint",
+                  file=sys.stderr)
     runtime = RemoteRuntime(host, port)
     runtime.start()
     httpd = ThreadingHTTPServer((host, port), _Handler)

@@ -43,10 +43,16 @@ def install(args, packs: str) -> Path:
 
 
 def install_remote(args, url, token):
-    """mcp.vod-devkit = {type:remote, url, enabled, headers}（headers 明文，提示权限）。"""
+    """mcp.vod-devkit = {type:remote, url, enabled, headers?}（headers 明文，提示权限）。
+
+    token 可选（D-token-machine-1）：给了就写 Authorization（调用方自带身份）；
+    没给就不写 headers——请求无 Bearer，由远程 server 用机器级匿名令牌提交。
+    """
     conf = Path(_SPEC["configPath"])
-    entry = {"type": "remote", "url": url, "enabled": True,
-             "headers": {"Authorization": f"Bearer {token}"}}
+    entry = {"type": "remote", "url": url, "enabled": True}
+    if token:
+        entry["headers"] = {"Authorization": f"Bearer {token}"}
     action = merge_json_mcp(conf, entry)
-    print(f"已写入 OpenCode 远程 MCP 配置（{action}）：{conf}（token 随配置存放，注意文件权限）")
+    suffix = "（token 随配置存放，注意文件权限）" if token else "（未带 token：走服务端匿名令牌）"
+    print(f"已写入 OpenCode 远程 MCP 配置（{action}）：{conf}{suffix}")
     return conf

@@ -436,6 +436,9 @@
     "S143": {
       "carrier": "tests/conftest.py"
     },
+    "S145": {
+      "carrier": "docs/design.md"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

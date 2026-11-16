@@ -134,6 +134,9 @@ def main():
                          "一个进程服务多个 agent）")
     ap.add_argument("--port", type=int, default=9528, help="remote 端口（默认 9528）")
     ap.add_argument("--host", default="127.0.0.1", help="remote 绑定地址（默认回环）")
+    ap.add_argument("--allow-anon-mint", action="store_true",
+                    help="非回环绑定时仍允许服务端代领匿名令牌（默认关闭；"
+                         "单机可信网络才开，见 D-token-machine-1）")
     args, _unknown = ap.parse_known_args()
 
     # VOD_PACKS 未知 id 启动即报错（D-packs-config-1，对齐 devkit 口径）：
@@ -161,7 +164,7 @@ def main():
                   "  pip install 'vod-devkit[remote]'   # 或 pip install 'mcp>=1.0'\n"
                   f"（stdio 形态不需要任何第三方依赖；导入失败：{e}）", file=sys.stderr)
             sys.exit(2)
-        sys.exit(transport_remote.serve(args.host, args.port))
+        sys.exit(transport_remote.serve(args.host, args.port, args.allow_anon_mint))
 
     for line in sys.stdin:
         line = line.strip()

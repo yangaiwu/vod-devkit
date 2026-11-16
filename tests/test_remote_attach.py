@@ -1,7 +1,7 @@
 """远程 attach 安装模式（D-attach-1）的行为锁。
 
 形态：MCP 单独部署一个 Streamable HTTP 端点，宿主只把 MCP 配置指向它 + 本地装技能。
-锁六件：①三宿主各自配置形态 ②缺 token 拒装（远程面不代签身份）③探活先于写入
+锁六件：①三宿主各自配置形态 ②无 token 也能装（走服务端机器级匿名令牌；带 token 才写认证）③探活先于写入
 （失败零副作用）④工具面不符拒装 ⑤skills-only 不动 MCP 配置 ⑥卸载只摘托管条目
 （opencode.json 里用户自己的键必须原样保留）。
 """
@@ -20,10 +20,18 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 TOKEN = "tenant-key-A"
 
-# 远程面工具集（契约 - REMOTE_WITHHELD）
-REMOTE_TOOLS = ["vod_submit_voices", "vod_devkit_info", "vod_auth_status",
-                "vod_list_skills", "vod_retrieve_skill", "vod_check_update",
-                "vod_search_products"]
+# 远程面工具集 = 契约全集 - REMOTE_WITHHELD（按真源动态算，别再手抄——
+# 手抄清单在 S145 放开 draft/commit/ledger 时立刻与实现脱节，测试报的是"装不上"）
+def _remote_tools() -> list:
+    import sys
+    sys.path.insert(0, str(ROOT / "src"))
+    from vod_mcp import packs
+    contract = json.loads((ROOT / "assets" / "contract" / "tools.schema.json")
+                          .read_text(encoding="utf-8"))
+    return sorted(set(contract["tools"]) - set(packs.REMOTE_WITHHELD))
+
+
+REMOTE_TOOLS = _remote_tools()
 
 
 class _Mcp(BaseHTTPRequestHandler):
@@ -45,7 +53,9 @@ class _Mcp(BaseHTTPRequestHandler):
 
     def do_POST(self):
         auth = self.headers.get("authorization") or ""
-        if auth != f"Bearer {TOKEN}":
+        # 无 Authorization 允许握手（模拟"同机匿名档"的远程面：D-token-machine-1）；
+        # 带了但不匹配 → 401（坏 token 必须被发现）
+        if auth and auth != f"Bearer {TOKEN}":
             self._json(401, {"error": "unauthorized"})
             return
         msg = json.loads(self.rfile.read(int(self.headers.get("content-length") or 0)) or b"{}")
@@ -105,7 +115,8 @@ def env(tmp_path):
     repo = tmp_path / "repo"
     shutil.copytree(ROOT, repo, dirs_exist_ok=True, ignore=shutil.ignore_patterns(
         ".git", "__pycache__", "node_modules", ".smoke", "*.tgz", "runtime.json",
-        "install-manifest.json", ".e2e-nightly.log", ".e2e-behavior-nightly.log"))
+        "install-manifest.json", ".e2e-nightly.log", ".e2e-behavior-nightly.log",
+        ".mypy_cache", ".pytest_cache", ".ruff_cache"))
     e = os.environ.copy()
     e["HOME"] = str(home)
     e["PATH"] = str(stub) + os.pathsep + e["PATH"]
@@ -165,11 +176,15 @@ def test_codex_remote_uses_bearer_env_var(env, remote_server):
 
 # ---- 拒装路径（都要零副作用） ----
 
-def test_missing_token_exits2(env, remote_server):
+def test_missing_token_installs_with_anonymous_token(env, remote_server):
+    """D-token-machine-1：远程 attach 的 token 从必填改为可选——不带 token 时
+    配置里不写 Authorization，提交由远程 server 用机器级匿名令牌完成。"""
     r = cli(env, "install", "--target", "opencode", "--mcp-url", remote_server["url"])
-    assert r.returncode == 2
-    assert "必须提供 --mcp-token" in r.stderr
-    assert not (env["home"] / ".config/opencode/opencode.json").exists()
+    assert r.returncode == 0, r.stderr
+    conf = json.loads((env["home"] / ".config/opencode/opencode.json").read_text(encoding="utf-8"))
+    entry = conf["mcp"]["vod-devkit"]
+    assert entry["url"] == remote_server["url"]
+    assert "headers" not in entry, "无 token 时不得写 Authorization（走服务端匿名令牌）"
 
 
 def test_probe_failure_exits2_before_writing(env):

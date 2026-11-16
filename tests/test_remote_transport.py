@@ -44,7 +44,11 @@ class _Engine(BaseHTTPRequestHandler):
                                  "body": json.loads(self.rfile.read(
                                      int(self.headers.get("content-length") or 0)) or b"{}")})
         if self.path.endswith("/external/token"):
-            self._json(200, {"code": 200, "data": {"token": "anon-should-not-happen"}})
+            self._json(200, {"code": 200, "data": {"token": "anon-remote-token-1"}})
+            return
+        if not self.headers.get("authorization"):
+            # 真引擎口径：无身份 401（-32012）→ 客户端走匿名领取链后重试
+            self._json(401, {"code": -32012, "message": "API Key 无效或已失效"})
             return
         self._json(200, {"code": 200, "voiceIds": ["ext2_test_1"]})
 
@@ -107,14 +111,17 @@ def test_initialize_and_instructions_withhold_host_path(remote):
     assert "skillRoot" in text or "本机路径" in text, "必须明说不给服务器本机路径"
 
 
-def test_tool_face_withholds_local_state_writers(remote):
+def test_tool_face_withholds_only_packs_switch(remote):
+    """D-token-machine-1：远程面=同机独立进程，与本地同面；只摘 packs_configure
+    （进程内状态，HTTP 每请求现造 server、多 agent 共用会互相影响）。"""
     _init(remote["url"])
     st, _h, raw = _post(remote["url"], {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     assert st == 200
     names = {t["name"] for t in json.loads(raw)["result"]["tools"]}
-    assert "vod_submit_voices" in names, "submit 属引擎 API 调用，服务面保留"
-    assert {"vod_draft_voices", "vod_commit_voices", "vod_list_submitted"} & names == set(), \
-        "写本机状态（草稿/账本）的工具必须摘掉（devkit remoteSurface 语义）"
+    assert "vod_submit_voices" in names
+    assert {"vod_draft_voices", "vod_commit_voices", "vod_list_submitted"} <= names, \
+        "两段式与本机账本在远程面同样可用（草稿已按宿主隔离）"
+    assert "vod_packs_configure" not in names, "进程内开关不从远程暴露"
     assert {"vod_list_skills", "vod_retrieve_skill"} <= names
 
 
@@ -141,10 +148,11 @@ def test_bad_json_400(remote):
 
 
 def test_withheld_tool_is_refused_even_if_called(remote):
+    """被摘掉的工具直接调用也必须拒（摘除不是只藏描述）。"""
     _init(remote["url"])
     st, _h, raw = _post(remote["url"], {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-                                        "params": {"name": "vod_draft_voices",
-                                                   "arguments": {"voices": [{"content": "x"}]}}})
+                                        "params": {"name": "vod_packs_configure",
+                                                   "arguments": {}}})
     result = json.loads(raw)["result"]
     assert result["isError"] is True
     assert "[remote]" in result["content"][0]["text"]
@@ -160,19 +168,24 @@ def test_retrieve_skill_omits_host_path_on_remote(remote):
     assert "path" not in payload, "远程面不发布服务器本机路径"
 
 
-def test_submit_without_key_is_refused_and_never_fetches_anonymous_token(remote):
+def test_submit_without_key_uses_machine_anonymous_token_on_remote(remote):
+    """D-token-machine-1：远程面无 Bearer 时与本地同效果——领机器级匿名令牌并提交。
+
+    旧语义是"服务面不代签身份"（-32012 拒绝）。负责人 2026-11-16 拍板：本地/远程同一套
+    身份语义，远程也要能匿名发送。多租户要按调用方隔离就各带 Bearer（见下一条用例）。
+    """
     _init(remote["url"])
     st, _h, raw = _post(remote["url"], {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
                                         "params": {"name": "vod_submit_voices",
                                                    "arguments": {"confirmed": True,
                                                                  "voices": [{"content": "导出太慢了"}]}}})
     result = json.loads(raw)["result"]
-    assert result["isError"] is True
-    text = result["content"][0]["text"]
-    assert "-32012" in text and "不代签身份" in text
+    assert result["isError"] is False, result
     paths = [s["path"] for s in remote["engine"].seen]
-    assert not any("external/token" in p for p in paths), \
-        "服务面绝不代签匿名令牌（设备锚点会被整站共用）"
+    assert any("external/token" in p for p in paths), "无身份时应领匿名令牌"
+    submits = [s for s in remote["engine"].seen if not s["path"].endswith("/external/token")]
+    assert submits and submits[-1]["auth"] == "Bearer anon-remote-token-1", \
+        "领取后的匿名令牌要用于本次提交"
 
 
 def test_submit_forwards_per_request_key_to_engine(remote):
