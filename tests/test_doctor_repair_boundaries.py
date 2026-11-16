@@ -346,6 +346,52 @@ def test_p1_status_target_dsh_lists_all_profiles(tmp_path, monkeypatch, capsys):
 
 
 # ── P4：外部标量必须写成合法 YAML 标量（含冒号/井号的值不许破坏文件）──────────
+# ── P1 读侧（2026-11-16 评审）：写侧加引号后，block_facts 必须原值读回 ──────────
+def test_p4_scalars_roundtrip_through_block_facts(tmp_path):
+    """写→读 roundtrip：含空格/冒号/井号/中文的外部标量必须逐字读回。
+
+    旧实锤：`_patch_block` 已把 product 写成 JSON 双引号（`product: "AI 开发者空间"`），
+    而 `block_facts` 的读侧正则还是 `(\\S+)` → 只捕获到 `"AI`，去引号逻辑在捕获之后救不回来
+    → product=None。真实名录 103 项里 22 项含空格：doctor 对这些产品永不报 product 漂移，
+    自愈补缺口时还会用安装期值静默回写（破坏 R1"不重置定制"）。
+    同病字段不只 product：command/cwd/PYTHONPATH/VOD_DEVKIT_HOME/uiBase/apiBase/VOD_PACKS。
+    """
+    cases = [
+        ("AI 开发者空间", "https://vod-dev.topxtopx.com", "core,collect"),
+        ("A: B", "https://e/#x", "core"),
+        ("码道 #1", "https://e/#x", "core,collect"),
+        ("ModelArts", "https://e", "core,collect"),
+    ]
+    for product, base, packs in cases:
+        block = _dsh._patch_block(
+            SimpleNamespace(product=product, java_api_base=base),
+            "0.2.1-rc.5", tmp_path, packs,
+            python_exe="/x/py thon3", state_home="/s tate")
+        f = _dsh.block_facts(block)
+        assert f["product"] == product, (product, f["product"], block)
+        assert f["apibase"] == base, (base, f["apibase"])
+        assert f["uibase"] == base, (base, f["uibase"])
+        assert f["packs"] == packs, (packs, f["packs"])
+        assert f["command"] == "/x/py thon3", (f["command"],)
+        assert f["state_home"] == "/s tate", (f["state_home"],)
+
+
+def test_block_facts_reads_legacy_unquoted_scalars():
+    """老装机（P4 之前的裸标量）仍按原值读——读侧兼容两形态，不许只认引号。"""
+    text = ("# vod-devkit DSH integration start\n"
+            "- insert:\n"
+            "    - id: vod-devkit\n"
+            "      config:\n"
+            "        product: ModelArts\n"
+            "        apiBase: https://vod-dev.topxtopx.com\n"
+            "        VOD_PACKS: core,collect\n"
+            "# vod-devkit DSH integration end\n")
+    f = _dsh.block_facts(text)
+    assert f["product"] == "ModelArts", f
+    assert f["apibase"] == "https://vod-dev.topxtopx.com"
+    assert f["packs"] == "core,collect"
+
+
 def test_p4_patch_scalars_survive_yaml_parse(tmp_path):
     import yaml
     block = _dsh._patch_block(SimpleNamespace(product="A: B", java_api_base="https://e/#x"),
