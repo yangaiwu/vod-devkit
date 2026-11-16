@@ -436,3 +436,10 @@
 
 - 7574e3c docs(dsh): 接入手册按 0.5.11 实现重写（两种形态 / 托管块 / 身份两套账本）
 
+
+## v0.5.13（2026-11-16）
+
+- fd804b0 fix(query/prune): 门禁边界 + basetemp 判据 + 壳 add 超时 + prune 文档（评审 a/b/c/d）
+- 4d60d67 fix(release): 发版前必须无未提交改动 + 补交 0.5.12 漏掉的源码（D1/D2/D3/D4）
+- e9e525b feat(prune): 显式清载荷 + 产品校验复用 state 令牌（D3/D6）
+
