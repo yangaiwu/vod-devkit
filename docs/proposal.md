@@ -1633,3 +1633,17 @@ hermes config / **机器级 state**）任一漂移 → `[S143] 测试写到了�
 | S149-4 | `--refresh-product-catalog` | 绕过缓存强制重拉 |
 | S149-5 | `VOD_PRODUCT_CATALOG_TTL=0` | 等于禁用缓存 |
 | S149-6 | `VOD_SKIP_PRODUCT_CHECK=1` | 直接放行且零外呼（巡检路径） |
+
+
+## 巡检探针自证（S150，D-matrix-probe-1，2026-11-16 真机实锤）
+
+**背景**：巡检进程被钉了 `VOD_DEVKIT_DIST_ROOT`，`_probe` 继承后载荷 server 的 provenance
+读的是**仓根** `build-info.json` → 载荷 0.5.11 自述 0.5.14，8 个非 dsh 宿主假 PASS。
+
+**修法**：子进程 env pop 三个根变量（entry 显式声明才保留）+ 新增载荷文件自证判据。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S150-1 | entry 指向旧载荷 | 即使巡检进程被钉仓根，也必须 DRIFT 且报文含"载荷版本 0.5.11" |
+| S150-2 | 载荷版本读取 | 从 entry 的 `vod_mcp/server.py` 反推载荷目录读 `build-info.json`；没有则 None |
+| S150-3 | 单用 skip 不生效 | 只设 `VOD_SKIP_PRODUCT_CHECK=1`（无 `VOD_MATRIX=1`）仍走校验并拒绝（S149 边界）|

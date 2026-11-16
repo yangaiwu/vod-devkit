@@ -139,10 +139,24 @@ def _catalog_cache_path():
     return _paths.machine_state_home() / "product-catalog.json"
 
 
+def _ttl_seconds() -> float:
+    """名录缓存 TTL（秒）。配错（如 `7d`）按默认 7 天并告警——不许因为一个 env 值
+    把安装整个打断（真机实锤：VOD_PRODUCT_CATALOG_TTL=7d 直接抛 ValueError traceback）。"""
+    raw = os.environ.get("VOD_PRODUCT_CATALOG_TTL")
+    if raw is None or not str(raw).strip():
+        return 7 * 86400
+    try:
+        return float(str(raw).strip())
+    except ValueError:
+        print(f"[vod-devkit] VOD_PRODUCT_CATALOG_TTL={raw!r} 不是秒数，按默认 7 天处理"
+              "（示例：604800 = 7 天，0 = 禁用缓存）", file=sys.stderr)
+        return 7 * 86400
+
+
 def _read_catalog_cache(base: str):
     """命中返回 (catalog, age_secs)，否则 None。TTL 可用 VOD_PRODUCT_CATALOG_TTL 覆盖（秒）。"""
     import time
-    ttl = float(os.environ.get("VOD_PRODUCT_CATALOG_TTL") or 7 * 86400)
+    ttl = _ttl_seconds()
     if ttl <= 0:
         return None
     p = _catalog_cache_path()
@@ -162,15 +176,28 @@ def _read_catalog_cache(base: str):
 
 
 def _write_catalog_cache(base: str, catalog: list) -> None:
+    """原子写（tmp → os.replace，0600）：与 state 其它写入口同款纪律，
+    并发读到半截会当 miss（可接受，但不要留下半文件）。"""
     import time
     p = _catalog_cache_path()
+    tmp = p.with_name(p.name + ".tmp")
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"base": str(base), "at": time.time(), "catalog": catalog},
-                                ensure_ascii=False), encoding="utf-8")
-        os.chmod(p, 0o600)
+        tmp.write_text(json.dumps({"base": str(base), "at": time.time(), "catalog": catalog},
+                                  ensure_ascii=False), encoding="utf-8")
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError as e:  # noqa: BLE001  权限设不上要能看见（缓存里有产品名录，不算密钥）
+            print(f"[vod-devkit] 产品名录缓存权限设置失败（{e}），继续使用", file=sys.stderr)
+        os.replace(tmp, p)
     except OSError:
         pass                  # 缓存写不进不是安装的失败条件
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 def _validate_product_or_exit(product: str, base: str, refresh: bool = False) -> bool:
@@ -248,9 +275,11 @@ def _validate_product_or_exit(product: str, base: str, refresh: bool = False) ->
             cat = data if isinstance(data, list) else None
         return cat
 
-    if os.environ.get("VOD_SKIP_PRODUCT_CHECK") == "1":
-        print("[vod-devkit] 跳过产品校验（VOD_SKIP_PRODUCT_CHECK=1：巡检/离线场景；"
-              "归因名单在装机时已验过）", file=sys.stderr)
+    # 只认巡检内部注入：必须**同时**有 VOD_MATRIX=1。这行 env 若被从审计日志里抄去单用，
+    # 就等于绕过 D-product-id-2 的"宁可不装不可装错"，装出一台产品归属未验证的机器。
+    if os.environ.get("VOD_SKIP_PRODUCT_CHECK") == "1" and os.environ.get("VOD_MATRIX") == "1":
+        print("[vod-devkit] 跳过产品校验（巡检内部注入：VOD_MATRIX=1 + "
+              "VOD_SKIP_PRODUCT_CHECK=1；归因名单在装机时已验过）", file=sys.stderr)
         return True
 
     catalog, unauthorized, rate_limited, last_exc = None, False, False, None
@@ -320,7 +349,9 @@ def _validate_product_or_exit(product: str, base: str, refresh: bool = False) ->
         print(f"[vod-devkit] --product '{product}' 不在产品名录（t_vod_product），拒绝安装。\n"
               "  归因前提无效=内置采集技能/分类/透传全部空转且用户无感知（归因错误比报错更糟）。\n"
               f"  权威名单：GET {api_prefix}/external/products（共 {len(catalog)} 项），"
-              f"示例：{sample} …",
+              f"示例：{sample} …\n"
+              "  提示：若该产品刚上线（本地名录缓存可能还是 7 天前的），"
+              "加 --refresh-product-catalog 重拉后再试。",
               file=sys.stderr)
         sys.exit(2)
     return True

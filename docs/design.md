@@ -1258,3 +1258,17 @@ productCatalog 的 state 缓存（TTL + 强制刷新开关）。
 自动设）——巡检验装载面，不重验归因名单。
 
 用例承载：`tests/test_install_product_auth.py`（S147 / S149）。
+
+## 巡检探针自证（D-matrix-probe-1，2026-11-16）
+
+巡检/矩阵的 `_probe` 必须让**被装的那份载荷**自证，而不是让巡检进程的根变量决定它读谁的
+`build-info.json`：
+
+1. 子进程 env pop `VOD_DEVKIT_{SRC,DIST}_ROOT` / `VOD_DEVKIT_ROOT`（entry 显式声明才保留）；
+2. 第二判据 = 载荷文件自证：entry 指向的 `vod_mcp/server.py` 所在载荷目录的
+   `build-info.json` 版本必须 == 期望构建版本（文件不受 env 影响）；
+3. 报文必带"载荷版本 / 期望版本 / entry argv"，一眼能审。
+
+真机复验：修前 `9 PASS`（假绿）→ 修后 `0 PASS / 9 DRIFT`（载荷与壳 0.5.11 vs 构建 0.5.14）。
+
+用例承载：`tests/test_host_matrix.py`（S150）。

@@ -216,11 +216,49 @@ def test_s149_ttl_env_disables_cache(monkeypatch):
 
 
 def test_s149_skip_product_check_env(monkeypatch, capsys):
-    """巡检路径：VOD_SKIP_PRODUCT_CHECK=1 直接放行，一次外呼都不发。"""
+    """巡检路径：VOD_MATRIX=1 + VOD_SKIP_PRODUCT_CHECK=1 才直接放行，零外呼。"""
     monkeypatch.setenv("VOD_SKIP_PRODUCT_CHECK", "1")
+    monkeypatch.setenv("VOD_MATRIX", "1")
     called = []
     monkeypatch.setattr("urllib.request.urlopen",
                         lambda *a, **k: called.append(1) or _Resp({}))
     assert remote._validate_product_or_exit("CodeArts", "https://engine") is True
     assert not called
     assert "跳过产品校验" in capsys.readouterr().err
+
+
+def test_s149_skip_env_alone_does_not_bypass_hard_gate(monkeypatch):
+    """只抄 VOD_SKIP_PRODUCT_CHECK=1（不带 VOD_MATRIX）不得绕过产品硬校验 ——
+    否则审计日志里那行 env 被单用，就等于装出一台产品归属未验证的机器。"""
+    monkeypatch.setenv("VOD_SKIP_PRODUCT_CHECK", "1")
+    calls = {"meta": 0, "mint": 0}
+    empty = _Resp({"data": {"productCatalog": []}})
+    monkeypatch.setattr("urllib.request.urlopen", _handler([empty, empty], calls))
+    with pytest.raises(SystemExit) as e:
+        remote._validate_product_or_exit("CodeArts", "https://engine")
+    assert e.value.code == 2, "单用 skip 环境变量必须仍然走校验并拒绝"
+    assert calls["meta"] >= 1
+
+
+def test_s149_bad_ttl_warns_and_falls_back(monkeypatch, capsys):
+    """坏 TTL（如 7d）不许把安装打断：按默认 7 天并告警（真机实锤曾抛 ValueError）。"""
+    monkeypatch.setenv("VOD_PRODUCT_CATALOG_TTL", "7d")
+    _seed_cache("https://engine", [{"id": "1", "name": "CodeArts"}])
+    called = []
+    monkeypatch.setattr("urllib.request.urlopen",
+                        lambda *a, **k: called.append(1) or _Resp({}))
+    assert remote._validate_product_or_exit("CodeArts", "https://engine") is True
+    assert not called, "TTL 配错应按 7 天默认 → 缓存仍命中"
+    assert "不是秒数" in capsys.readouterr().err
+
+
+def test_s149_unknown_product_points_at_refresh_flag(monkeypatch, capsys):
+    """名录里没有该产品时，文案必须给 --refresh-product-catalog 出路（7 天旧缓存会挡住新上线的产品）。"""
+    calls = {"meta": 0, "mint": 0}
+    ok = _Resp({"data": {"productCatalog": [{"id": "1", "name": "Other"}]}})
+    monkeypatch.setattr("urllib.request.urlopen", _handler([ok], calls))
+    with pytest.raises(SystemExit) as e:
+        remote._validate_product_or_exit("CodeArts", "https://engine")
+    assert e.value.code == 2
+    err_out = capsys.readouterr().err
+    assert "--refresh-product-catalog" in err_out, err_out

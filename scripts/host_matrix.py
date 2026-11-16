@@ -157,10 +157,23 @@ def _run_install(env, host, extra=()):
     # 巡检是"装载面"验收，不是归因验收：产品名在装机时已验过，这里跳过产品校验。
     # 不跳的话每次巡检 = 9 次隔离装 = 9 枚匿名令牌签发，直接把引擎限流打满
     #（真机实锤 100/日、60/小时两档，整批装机被挡）。
-    e = {**env, "VOD_SKIP_PRODUCT_CHECK": "1"}
+    e = {**env, "VOD_SKIP_PRODUCT_CHECK": "1", "VOD_MATRIX": "1"}
     r = subprocess.run([sys.executable, str(BIN), "install", "--target", host, *extra],
                        capture_output=True, text=True, env=e, timeout=300)
     return r
+
+
+def _payload_version(argv: list):
+    """entry 指向的载荷目录里的 build-info 版本（载荷自证，不看 server 自述）。"""
+    for a in argv:
+        if str(a).endswith("vod_mcp/server.py"):
+            bi = Path(str(a)).parent.parent / "build-info.json"
+            if bi.is_file():
+                try:
+                    return json.loads(bi.read_text(encoding="utf-8")).get("version")
+                except (OSError, ValueError):
+                    return None
+    return None
 
 
 def _probe(entry: dict, expect_version: str) -> tuple:
@@ -181,8 +194,22 @@ def _probe(entry: dict, expect_version: str) -> tuple:
     gone = [a for a in argv[1:] if a.endswith(".py") and not os.path.exists(a)]
     if gone:
         return False, f"入口文件不存在：{gone[0]}{tail}"
+    # 载荷自证（第二判据，比 server 自述更硬）：entry 指向的载荷目录里 build-info.json
+    # 的版本必须就是期望版本。server 自述会被 env（VOD_DEVKIT_DIST_ROOT）影响而读成
+    # 仓根版本，文件版本不会——这是"巡检假绿"暴露后补的独立证据。
+    pv = _payload_version(argv)
+    if pv and expect_version and pv != expect_version:
+        return False, f"载荷版本 {pv} ≠ 期望 {expect_version}{tail}"
     env = os.environ.copy()
-    env.update({k: str(v) for k, v in (entry.get("env") or entry.get("environment") or {}).items()})
+    entry_env = {k: str(v) for k, v in (entry.get("env") or entry.get("environment") or {}).items()}
+    # 巡检子进程必须让"被装的那份载荷"自证，不能继承本进程为跑 CLI 钉的根：
+    # VOD_DEVKIT_DIST_ROOT 会让载荷 server 的 provenance 去读**仓根** build-info.json，
+    # 于是 0.5.11 的载荷被报成 0.5.14（真机实锤：干净 env 自述 0.5.11，带仓根 0.5.14）。
+    # 这正是"巡检假绿"的地基：不 pop 掉，矩阵永远发现不了载荷落后。
+    for _k in ("VOD_DEVKIT_SRC_ROOT", "VOD_DEVKIT_DIST_ROOT", "VOD_DEVKIT_ROOT"):
+        if _k not in entry_env:
+            env.pop(_k, None)
+    env.update(entry_env)
     try:
         proc = subprocess.Popen(argv, stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,

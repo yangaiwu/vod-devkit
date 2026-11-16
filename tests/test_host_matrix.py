@@ -221,3 +221,37 @@ def test_s146_audit_dsh_reports_mcp_mode_only_when_shell_stops_registering(tmp_p
     _dsh_profile(tmp_path, mcp=False, register_tools=True, shell_ver="0.5.10")
     state, msg = m.audit_host("dsh", "0.5.10", home=tmp_path)
     assert "降级" in msg, f"降级形态必须在报文里写清；实际 {state}: {msg}"
+
+
+def test_s150_probe_rejects_entry_pointing_at_old_payload(tmp_path, monkeypatch):
+    """巡检假绿地基（S150）：entry 指向旧载荷 → 必须 DRIFT。
+
+    实测根因：`_pin_roots()` 把 VOD_DEVKIT_SRC_ROOT/DIST_ROOT 钉在进程 env，
+    `_probe` 又 os.environ.copy() 继承，于是载荷 server 的 provenance 去读**仓根**
+    build-info.json —— 0.5.11 的载荷自述 0.5.14，8 个非 dsh 宿主全部假 PASS。
+    本用例固定两条判据：① 子进程不继承仓根变量；② 载荷目录的 build-info 版本
+    必须等于期望版本（文件自证，不受 env 影响）。
+    """
+    m = _load_matrix()
+    monkeypatch.setenv("VOD_DEVKIT_DIST_ROOT", str(ROOT))       # 模拟被钉住的巡检进程
+    monkeypatch.setenv("VOD_DEVKIT_SRC_ROOT", str(ROOT / "src"))
+    old = tmp_path / "payloads" / "0.5.11"
+    (old / "vod_mcp").mkdir(parents=True)
+    (old / "build-info.json").write_text(json.dumps({"version": "0.5.11", "commitSha": "deadbeef"}),
+                                         encoding="utf-8")
+    server = old / "vod_mcp" / "server.py"
+    server.write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n", encoding="utf-8")
+    ok, msg = m._probe({"command": sys.executable, "args": [str(server)], "env": {}}, "0.5.14")
+    assert not ok, f"载荷 0.5.11 而期望 0.5.14 必须 DRIFT，实际 ok={ok}: {msg}"
+    assert "载荷版本 0.5.11" in msg, msg
+
+
+def test_s150_payload_version_helper_reads_payload_build_info(tmp_path):
+    m = _load_matrix()
+    p = tmp_path / "p" / "0.5.11" / "vod_mcp"
+    p.mkdir(parents=True)
+    (p / "server.py").write_text("", encoding="utf-8")
+    (tmp_path / "p" / "0.5.11" / "build-info.json").write_text(
+        json.dumps({"version": "0.5.11"}), encoding="utf-8")
+    assert m._payload_version(["/usr/bin/python3", str(p / "server.py")]) == "0.5.11"
+    assert m._payload_version(["/usr/bin/python3"]) is None

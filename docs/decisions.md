@@ -1737,3 +1737,31 @@ POST /external/token → 429  同 IP 每小时限 60 次
 **验证**：`tests/test_install_product_auth.py`（6 条：401 一次重试过 / 401 两次报鉴权异常且
 不许说"不可达" / 网络异常重试后报不可达 / 空目录单独文案 / 复用则不新签且 device 配对 /
 429 不重试）。
+
+**落地追加（S149，同日）**：名录落 `<state>/product-catalog.json`（base 键控 + 7 天 TTL +
+`--refresh-product-catalog` 强刷；写走 tmp→`os.replace` + 0600，坏 TTL 按默认并告警；
+"不在名录"文案给 `--refresh-product-catalog` 出路）；巡检走 `VOD_MATRIX=1` +
+`VOD_SKIP_PRODUCT_CHECK=1` **双开关**才跳过校验（单用 skip 不得绕过
+D-product-id-2 的硬校验——那行 env 被从审计日志抄去单用就会装出产品归属未验证的机器）。
+
+## D-matrix-probe-1：巡检探针必须让"被装的那份载荷"自证（2026-11-16 真机实锤）
+
+**缺陷**：`host_matrix._pin_roots()` 把 `VOD_DEVKIT_SRC_ROOT`/`VOD_DEVKIT_DIST_ROOT` 钉在
+巡检进程 env，`_probe` 又 `os.environ.copy()` 继承 → 载荷 server 的 `provenance._ROOT`
+（= `paths.ROOT`，受 `VOD_DEVKIT_DIST_ROOT` 影响）去读**仓根** `build-info.json`：
+
+```
+载荷 0.5.11 目录 + 干净 env            → vod_devkit_info 自述 0.5.11 / 6c42fa79
+同一个载荷 + VOD_DEVKIT_DIST_ROOT=仓根  → 自述 0.5.14 / 170bbd65
+```
+于是 8 个非 dsh 宿主**必然 PASS**（"9 PASS"里这部分不成立），巡检失去发现"载荷落后/指向
+旧副本"的能力——正是它存在的理由。
+
+**修法**：
+1. `_probe` 子进程 env pop 掉三个根变量（除非 entry 的 env 显式声明）；
+2. 新增**载荷文件自证**判据：读 entry 指向载荷目录的 `build-info.json`，版本必须 == 期望；
+   文件不受 env 影响，比 server 自述硬；
+3. 真机复验：修前 9 PASS → 修后 `0 PASS / 9 DRIFT`（载荷 0.5.11 / 壳 0.5.11 vs 构建 0.5.14）。
+
+**验证**：`tests/test_host_matrix.py::test_s150_probe_rejects_entry_pointing_at_old_payload`
+（entry 指向旧载荷 + 进程被钉仓根 → 必须 DRIFT）与 `test_s150_payload_version_helper...`（S150）。
