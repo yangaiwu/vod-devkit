@@ -691,13 +691,19 @@ def main():
     results = {}
     if a.audit:
         for h in hosts:
+            if EXPECT.get(h, {}).get("skip"):
+                results[h] = "SKIP"
+                print(f"[{h}] SKIP: {EXPECT[h]['skip']}")
+                continue
             state, msg = audit_host(h, version)
             results[h] = state
             print(f"[{h}] {state}: {msg}")
         drift = [h for h, s in results.items() if s == "DRIFT"]
         missing = [h for h, s in results.items() if s == "NOT_INSTALLED"]
-        print(f"\n巡检：{len(results) - len(drift) - len(missing)} PASS / {len(drift)} DRIFT / "
-              f"{len(missing)} NOT_INSTALLED（构建 {version}）")
+        skipped = [h for h, s in results.items() if s == "SKIP"]
+        print(f"\n巡检：{len(results) - len(drift) - len(missing) - len(skipped)} PASS / "
+              f"{len(drift)} DRIFT / {len(missing)} NOT_INSTALLED / {len(skipped)} SKIP"
+              f"（构建 {version}）")
         if drift:
             print("DRIFT：" + "、".join(drift) + " → 重跑 install --target <host>")
         sys.exit(1 if drift else 0)
