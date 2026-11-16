@@ -454,3 +454,8 @@
 
 - 6ce9752 fix(matrix): 巡检不再假绿 + S149 边界（a/b/c/d）（D-matrix-probe-1 / S150）
 
+
+## v0.5.16（2026-11-16）
+
+- 34d05ee fix(doctor): 自愈不再切断/降级 dsh 托管块（D-doctor-repair-1 / S151）
+
