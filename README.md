@@ -230,6 +230,12 @@ npx -y vod-devkit@latest uninstall
   `dsh-vod-devkit`（npm 同名），配置幂等写进 profile 的 `cordis.patch.yml`
 - **dsh 壳不走 MCP**：`--mcp-url` / `--skills-only` 对它显式报错；远程面模式不覆盖 dsh
 - 卸载会摘插件并从 patch 移除本插件的 config 块，不删其它插件段
+- **dsh 壳只到"半套"（支持矩阵里的显式差异，不是 bug）**：工具面 6 个
+  （submit / list_submitted / info / list_skills / retrieve_skill / check_update，
+  没有 MCP 侧的 search_products / auth_status / auth_ensure / draft / commit / packs_configure），
+  并且**不共享机器级 state**（它有自己的 `packages/dsh/data/runtime.json` 与 cap 200 环形账本，
+  与 MCP 侧 `<state>/runtime.json` 是两份设备锚点）。跨语言共用锁 + 字段契约对齐后才可能合并，
+  本轮记为待办；需要完全一致的匿名身份/账本时用 MCP 宿主。
 
 ## 其它 MCP 宿主（通用层）
 

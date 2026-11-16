@@ -218,6 +218,17 @@ def cmd_doctor(args=None):
             problems.append("install-manifest 与 build-info 的 commitSHA 不一致")
         if mf.get("mcpConfig") and not Path(mf["mcpConfig"]).exists():
             problems.append("MCP 配置文件缺失")
+        # D-token-machine-1（R4）：state 与旧位并存 = "静默不迁"要可见。
+        # 非破坏（迁移只在 target 不存在时做），但旧账本/锚点没并进来，排障时得知道。
+        try:
+            from vod_mcp import paths as _paths
+            st = _paths.machine_state_home() / "runtime.json"
+            lg = _paths.legacy_runtime_json()
+            if st.exists() and lg.exists():
+                print(f"[doctor] 注意：机器级 state 与旧位并存（旧位 {lg} 已不再写入、"
+                      "未并入 state；确认无用后可手工清理）")
+        except Exception:  # noqa: BLE001  诊断不应因该项失败而中断
+            pass
         if mf.get("transport") == "remote" and mf.get("mcpUrl"):
             url = mf["mcpUrl"]
             token = (os.environ.get("VOD_MCP_TOKEN")

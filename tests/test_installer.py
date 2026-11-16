@@ -1014,3 +1014,37 @@ def test_multi_host_installs_are_recorded_and_uninstalled(env):
     assert "vod-devkit" not in (json.loads(ca.read_text(encoding="utf-8")).get("mcp") or {})
     assert not (env["home"] / ".vod-devkit" / "payloads").exists() or \
         not any((env["home"] / ".vod-devkit" / "payloads").iterdir()), "载荷副本要清掉"
+
+
+# ---- R1（评审补强）：--clean-global 不得删还在用的共享 state ----
+
+def test_uninstall_clean_global_keeps_state_when_other_hosts_remain(env):
+    """卸 hermes + --clean-global，opencode 仍装着 → 机器级 state 必须保留。
+
+    state 是同机共享的设备锚点/令牌：删了剩余宿主下次首启换新 install_nonce，
+    历史提交在新设备命名空间下查不到、匿名额度重计。
+    """
+    assert cli(env, "install", "--target", "hermes", "--product", "CodeArts").returncode == 0
+    assert cli(env, "install", "--target", "opencode", "--product", "CodeArts").returncode == 0
+    rt = _rt_path(env)
+    assert rt.exists(), "装机应把绑定写进机器级 state"
+    cfg = json.loads(rt.read_text(encoding="utf-8"))
+    cfg["install_nonce"] = "deadbeef"
+    rt.write_text(json.dumps(cfg), encoding="utf-8")
+
+    r = cli(env, "uninstall", "--target", "hermes", "--clean-global")
+    assert r.returncode == 0, r.stderr
+    assert rt.exists(), "--clean-global 不得删其它宿主还在用的共享 state"
+    assert json.loads(rt.read_text(encoding="utf-8"))["install_nonce"] == "deadbeef"
+    assert "保留 state" in r.stdout, "要逐条打印保留原因（可审计）"
+
+
+def test_uninstall_clean_global_removes_state_for_last_host(env):
+    """卸最后一个宿主时 state 必须真被清掉（保护不等于不清理）。"""
+    assert cli(env, "install", "--target", "hermes", "--product", "CodeArts").returncode == 0
+    rt = _rt_path(env)
+    assert rt.exists()
+    r = cli(env, "uninstall", "--target", "hermes", "--clean-global")
+    assert r.returncode == 0, r.stderr
+    assert not rt.exists(), "最后一个宿主卸载后 state 应被回收"
+    assert "removed state" in r.stdout

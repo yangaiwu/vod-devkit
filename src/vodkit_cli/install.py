@@ -284,6 +284,10 @@ def cmd_install(args):
                       file=sys.stderr)
                 sys.exit(2)
             print(f"远程面探活通过：{len(names)} 个工具（{', '.join(sorted(names))}）")
+            if not token:
+                # 评审 B 半（P0-2）：必须说清"没给 token = 共享本机身份"
+                print("[vod-devkit] 未提供 token：本机所有 agent 将共享同一枚机器级匿名令牌"
+                      "（同一设备锚点、额度共用；要按 agent 隔离请带 --mcp-token）")
         mcp_conf = None if skills_only else adapter.install_remote(args, remote_url, token)
         extra_dirs = _install_skills(target, packs, args,
                                      (getattr(args, "dsh_profile", "") or "").strip() or None)

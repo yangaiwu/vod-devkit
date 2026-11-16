@@ -201,10 +201,13 @@ def _cleanup_install_row(row: dict, skill_hashes: dict | None = None,
                 print("removed vod-devkit config block:", patch_path)
 
 
-def _clean_global(rows: list) -> None:
+def _clean_global(rows: list, remaining: list | None = None) -> None:
     """清外部残留（对齐 devkit `--clean-global`）：载荷残留 + npx 缓存里的旧副本。
 
     纪律：只删"认得的东西"，逐条打印；在用载荷、仓内源码、宿主配置一律不碰。
+    `remaining` = 卸载后仍装着的其它宿主行：非空时**机器级 state 必须保留**
+    （它是同机共享的设备锚点/令牌，删了会让剩余宿主下次首启换新 nonce = 新设备，
+    历史提交查不到、匿名额度重计）。这条与载荷的 `in_use` 同形，不是特例。
     """
     from vod_mcp import payload as _payload
     from vod_mcp import paths as _paths
@@ -215,16 +218,19 @@ def _clean_global(rows: list) -> None:
         shutil.rmtree(res, ignore_errors=True)
         print("removed payload residue:", res)
     # D-token-machine-1：机器级 state（跨版本/跨宿主共享的那一份）。
-    # 只删我们认得的两个文件名（state 目录由本插件独占，但按"删认得的东西"纪律列名）。
     state = _paths.machine_state_home()
-    for name in ("runtime.json", "runtime.json.lock", ".migrated"):
-        f = state / name
-        if f.is_file():
-            f.unlink()
-            print("removed state:", f)
-    if state.is_dir() and not any(state.iterdir()):
-        state.rmdir()
-        print("removed empty:", state)
+    if remaining:
+        users = ", ".join(r.get("target", "?") for r in remaining)
+        print(f"保留 state：{state}（仍有宿主在用：{users}）——同机共享设备锚点/令牌")
+    else:
+        for name in ("runtime.json", "runtime.json.lock", ".migrated"):
+            f = state / name
+            if f.is_file():
+                f.unlink()
+                print("removed state:", f)
+        if state.is_dir() and not any(state.iterdir()):
+            state.rmdir()
+            print("removed empty:", state)
     root = Path.home() / ".vod-devkit"
     if root.is_dir() and not any(root.iterdir()):
         root.rmdir()
@@ -301,4 +307,4 @@ def cmd_uninstall(args=None):
         p.unlink()
         print("removed:", p)
     if clean_global:
-        _clean_global(rows)
+        _clean_global(rows, remaining)
