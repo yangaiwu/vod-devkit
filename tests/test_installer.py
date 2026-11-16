@@ -463,6 +463,11 @@ def test_golden_status_and_preset_update_refusal(env):
     # 避免 golden 因切分支而红——门禁的失败必须落在真问题上（P1 门禁收口同一条理由）。
     assert d["source"]["ref"] == _head_branch(env), d["source"]
     d["source"]["ref"] = "<REF>"
+    # reachable / released 同样是**环境值**（检出里有没有 .git、sha 是否在分支/tag 上）：
+    # 钩子跑隔离仓时与本地不同，锁死会让"换个检出就红"（同类坑：ref 曾锁环境）。
+    for k in ("reachable", "released"):
+        assert isinstance(d["source"].get(k), bool), d["source"]
+        d["source"][k] = f"<{k.upper()}>"
     actual = json.dumps(d, ensure_ascii=False, indent=2)
     _assert_golden("status", actual)
     cli(env, "install", "--target", "hermes", "--product", "CodeArts",
