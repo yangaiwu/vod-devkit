@@ -1307,3 +1307,5 @@ doctor 的 dsh patch 自愈只做一件事：让文件回到**安装器该写的
   uninstall 只摘对应的那份块。
 - `prune --payloads` 的"在用"集合 = `installs[].payloadDir` ∪ `~/.dsh/profiles/*/cordis.patch.yml`
   的 args 指向的载荷根——版本错位时另一个 profile 仍在用的载荷不会被当孤儿删掉。
+- `--audit` 逐 profile 判，并读 manifest 的 `dshPatch.mcpClient` 区分"MCP 块被清"（DRIFT）
+  与"合法降级"（PASS）；降级分支只做配置面判据，不冒充 L3 拉起。

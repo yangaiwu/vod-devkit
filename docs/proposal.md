@@ -1691,6 +1691,8 @@ doctor 只自愈最后装的那个、uninstall 只摘一个块、`prune` 的"在
 |---|---|---|
 | S153-1 | 账本行键 | 行键 = `(target, dshProfile)`；两个 profile 两行，同 profile 重装仍覆盖 |
 | S153-2 | prune 在用集合 | `prune --payloads` 的"在用"同时扫 `~/.dsh/profiles/*/cordis.patch.yml` 里 args 指向的载荷 |
+| S153-3 | 巡检逐 profile | `--audit` 的 dsh 段对每个 profile 各判一次，报文带 profile 名；任一非 PASS 即 DRIFT |
+| S153-4 | 块被清 ≠ 合法降级 | 安装期记录有 `dshPatch.mcpClient`、patch 里却无 `- id: vod-devkit-mcp` → DRIFT（12→6 退化）；记录为空的才是合法降级 PASS |
 
 
 ## 错误码解释表与 raise 点一致（S154，D-explain-codes-1，2026-11-16 通读漏面）

@@ -462,7 +462,31 @@ def _codex_effective_mcp(home: Path) -> tuple:
     return (markets[0] if markets else None), None, False
 
 
-def _audit_dsh_profile(patch: Path, entry: dict, expect_version: str) -> tuple:
+def _dsh_manifest_mcp(home: Path) -> dict:
+    """manifest 里每个 dsh profile 的安装期 mcpClient（S153-4）。
+
+    为什么必须读：宿主"本来就没 mcp-client"（合法降级 6 工具）与"MCP 块被清掉"
+    （12→6 退化）在 patch 文本上长得一模一样；只有安装期记录能区分。
+    没记录的机器（老账本）回退"降级 PASS"，并在报文里明说按配置面判。
+    """
+    import os as _os
+    p = Path(_os.environ.get("VOD_DEVKIT_MANIFEST") or (home / "install-manifest.json"))
+    if not p.is_file():
+        return {}
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    out = {}
+    for r in (d.get("installs") or []):
+        if r.get("target") != "dsh":
+            continue
+        out[r.get("dshProfile") or ""] = (r.get("dshPatch") or {}).get("mcpClient")
+    return out
+
+
+def _audit_dsh_profile(patch: Path, entry: dict, expect_version: str,
+                       want_mcp: bool | None = None) -> tuple:
     """单个 dsh profile 的巡检（S153-3）。判据与原实现一致，只是按 profile 隔离。"""
     text = patch.read_text(encoding="utf-8", errors="replace")
     mcp_mode = "- id: vod-devkit-mcp" in text
@@ -483,9 +507,14 @@ def _audit_dsh_profile(patch: Path, entry: dict, expect_version: str) -> tuple:
             return "DRIFT", (f"MCP 模式，但 profile 里壳 {shell_ver} ≠ 期望 {expect_version}"
                              "（dsh plugin add 未钉版本，升级装的是旧壳）")
         return "PASS", f"MCP 模式（工具面 mcp__vod-devkit__*，壳只留 UI，壳 {shell_ver or '未知'}）"
+    if want_mcp:
+        # S153-4：安装期记录说这台机器有 mcp-client，patch 里却没有 mcp 块——这正是
+        # decisions 里记的事故形态（MCP 模式 PASS 静默退化成"降级 PASS"，12→6 工具）。
+        return "DRIFT", ("MCP 块被清（安装期记录有 mcp-client，patch 里没有 "
+                         "- id: vod-devkit-mcp）→ 工具面 12→6，重跑 install 恢复")
     ok, msg = _probe(entry, expect_version) if entry else (True, "降级：壳自注册（patch 存在）")
     return (("PASS" if ok else "DRIFT"),
-            msg + "；降级形态：壳自注册 6 工具（无 mcp-client）")
+            msg + "；降级形态：壳自注册 6 工具（无 mcp-client，按配置面判）")
 
 
 def audit_host(host: str, expect_version: str, home: Path | None = None) -> tuple:
@@ -547,7 +576,9 @@ def audit_host(host: str, expect_version: str, home: Path | None = None) -> tupl
         # S153-3：dsh 的多 profile 是独立安装对象，巡检必须逐个判——只判 hit[0] 会把
         # "web 的 MCP 块被清掉、headless 完好" 报成 PASS（1 PASS，看不出判的哪个 profile）。
         # 报文一律带 profile 名；任一 profile 非 PASS 即整体 DRIFT。
-        results = [(p.parent.name,) + _audit_dsh_profile(p, entry or {}, expect_version)
+        rec = _dsh_manifest_mcp(home)      # 安装期记录：区分"合法降级"与"MCP 块被清"（S153-4）
+        results = [(p.parent.name,) + _audit_dsh_profile(p, entry or {}, expect_version,
+                                                         rec.get(p.parent.name))
                    for p in hit]
         bad = [(n, m) for n, v, m in results if v != "PASS"]
         if bad:

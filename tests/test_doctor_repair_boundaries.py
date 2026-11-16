@@ -277,3 +277,38 @@ def test_s153_dsh_audit_checks_every_profile(tmp_path):
     verdict2, msg2 = hm.audit_host("dsh", "0.5.16", home=tmp_path)
     assert verdict2 == "PASS", msg2
     assert "[web]" in msg2 and "[headless]" in msg2, f"PASS 报文也要逐个列出：{msg2}"
+
+
+# ── S153-4（R2b）"MCP 块被清"≠"合法降级"：只有安装期记录能区分 ─────────────
+def _mk_shell_only(home, prof):
+    d = home / ".dsh" / "profiles" / prof
+    (d / "node_modules" / "dsh-vod-devkit").mkdir(parents=True, exist_ok=True)
+    (d / "node_modules" / "dsh-vod-devkit" / "package.json").write_text(
+        json.dumps({"version": "0.5.16"}), encoding="utf-8")
+    (d / "cordis.patch.yml").write_text(
+        "- insert:\n    - id: vod-devkit\n      name: dsh-vod-devkit\n      config:\n"
+        "        product: CodeArts\n", encoding="utf-8")
+
+
+def test_s153_dsh_audit_flags_cleared_mcp_block(tmp_path, monkeypatch):
+    hm = _load_host_matrix()
+    monkeypatch.setenv("VOD_DEVKIT_MANIFEST", str(tmp_path / "install-manifest.json"))
+    _mk_shell_only(tmp_path, "web")               # MCP 块被清（只剩壳块）
+    _mk_profile(tmp_path, "headless", good=True)  # 完好
+    manifest = {"installs": [
+        {"target": "dsh", "dshProfile": "web",
+         "dshPatch": {"mcpClient": "0.2.1-rc.5"}},
+        {"target": "dsh", "dshProfile": "headless",
+         "dshPatch": {"mcpClient": "0.2.1-rc.5"}},
+    ]}
+    (tmp_path / "install-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    verdict, msg = hm.audit_host("dsh", "0.5.16", home=tmp_path)
+    assert verdict == "DRIFT", f"安装期记录有 mcp-client 却被清成降级，仍报 PASS：{msg}"
+    assert "[web]" in msg and "MCP 块被清" in msg, msg
+
+    # 对照：安装期记录就是降级（没 mcp-client）→ 合法降级，PASS（并按配置面判）
+    manifest["installs"][0]["dshPatch"] = {"mcpClient": None}
+    (tmp_path / "install-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    verdict2, msg2 = hm.audit_host("dsh", "0.5.16", home=tmp_path)
+    assert verdict2 == "PASS", f"合法降级被误判 DRIFT：{msg2}"
+    assert "降级" in msg2, msg2

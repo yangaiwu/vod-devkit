@@ -253,6 +253,11 @@ npx -y vod-devkit@latest uninstall
 
 ### DeepSeek Harness (dsh)
 
+> **每个 profile 是独立安装对象**：`install --target dsh` 一次只处理一个 profile（账本按
+> `(target, profile)` 记账）。机器上有 web / headless 等多个 profile 时，升级要**各跑一次**
+> `install --target dsh --profile <名>`；漏跑的 profile 会留在旧版本（或 MCP 块被清后退化成
+> 只注册壳自带的工具面），`doctor` / `host_matrix.py --audit` 会逐 profile 报出来。
+
 ```bash
 npx -y vod-devkit@latest install --target dsh --profile <profile名>
 # 重启 dsh 后：验证 / 更新 / 卸载

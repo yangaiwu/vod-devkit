@@ -1829,6 +1829,10 @@ args 列表项形如 `- /root/.vod-devkit/payloads/<v>/vod_mcp/server.py`，被�
 - `payload.prune_candidates()` 与 `uninstall` 的 `in_use` 同时扫 `~/.dsh/profiles/*/cordis.patch.yml`
   的 args 指向的载荷根（配置面也算在用）；
 - doctor 遍历账本里所有 dsh 行，逐 profile 自愈。
+- `host_matrix.py --audit` 的 dsh 段逐 profile 判，并读 manifest 的 `dshPatch.mcpClient`：
+  记录有 mcp-client 而 patch 无 `- id: vod-devkit-mcp` = **MCP 块被清（12→6 退化）→ DRIFT**；
+  记录为空才是合法降级（PASS，报文注明"按配置面判"）。没有这条判据时，两种形态在 patch 文本上
+  完全一样，巡检会把事故报成"降级 PASS"。
 
 **代价**：status/roster 的输出多一行（多 profile 机器上）；in-use 集合多一次目录扫描。
 
