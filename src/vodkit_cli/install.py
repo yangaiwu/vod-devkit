@@ -93,6 +93,15 @@ def detect_targets() -> list:
 
 
 def cmd_install(args):
+    # P1（2026-11-16 评审）：账本坏了必须在**任何副作用之前**退出。
+    # 旧顺序是先写 build-info → stage 载荷 → 写宿主配置 → 最后写账本才炸，
+    # 留下"宿主已指向 vod-devkit、账本里却没有这行"的半装状态：
+    # uninstall 报"没有该宿主的安装记录"、doctor 看不见、prune 不知道它在用。
+    try:
+        common._read_manifest(strict=True)
+    except common.ManifestCorrupt as e:
+        print(f"[vod-devkit] {e}", file=sys.stderr)
+        sys.exit(2)
     from vod_mcp import DEFAULT_JAVA_BASE
     if not args.java_api_base:
         # 优先级：--java-api-base > env VOD_JAVA_API_BASE > DEFAULT_JAVA_BASE
@@ -317,8 +326,12 @@ def cmd_install(args):
     extra_dirs = _install_skills(target, packs, args,
                                  (getattr(args, "dsh_profile", "") or "").strip() or None)
 
-    common._write_install_manifest(args, target, packs, bound_product, mcp_conf,
-                            extra_dirs, payload_dir=payload_dir)
+    try:
+        common._write_install_manifest(args, target, packs, bound_product, mcp_conf,
+                                       extra_dirs, payload_dir=payload_dir)
+    except common.ManifestCorrupt as e:   # 预检之后仍坏（并发写坏/磁盘问题）：友好退出
+        print(f"[vod-devkit] {e}", file=sys.stderr)
+        sys.exit(2)
 
 
 def _stage_payload():

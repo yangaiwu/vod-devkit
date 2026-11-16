@@ -4,6 +4,7 @@
 路径字面量）；新增 Hermes 特定逻辑只改本模块。
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -15,14 +16,78 @@ from vod_mcp.host_adapters.base import server_env, server_entry
 
 HOST = "hermes"
 SUPPORTS_REMOTE = True
+def _hermes_home() -> Path | None:
+    """HERMES_HOME 显式给定时就是宿主根（hermes CLI 只认它，不认 HOME）。"""
+    env = (os.environ.get("HERMES_HOME") or "").strip()
+    return Path(env).expanduser() if env else None
+
+
+def _cli_env() -> dict:
+    """给 hermes CLI 子进程的环境：显式带上 HERMES_HOME（否则它按真实家目录写）。"""
+    env = dict(os.environ)
+    root = _hermes_home()
+    if root:
+        env["HERMES_HOME"] = str(root)
+    return env
+
+
+def _guard_isolated_home() -> None:
+    """HOME 被改而 HERMES_HOME 未设 → 拒绝安装（hermes CLI 仍会写真实家目录）。
+
+    2026-11-16 评审实锤：用 HOME=<tmp> 装 hermes 验证隔离路径时，JSON 落在 tmp，
+    但 `hermes mcp add` / `config set plugins.enabled` 把**真实** ~/.hermes/config.yaml
+    改成了 probe 路径（args 指 probe 载荷、VOD_DEVKIT_HOME 指 probe state）。
+    隔离跑法的正确姿势是同时设 HERMES_HOME=<tmp>/.hermes（host_matrix 一直这么做）。
+    """
+    if (os.environ.get("HERMES_HOME") or "").strip():
+        return
+    home = (os.environ.get("HOME") or "").strip()
+    if not home:
+        return
+    try:
+        import pwd
+        real = pwd.getpwuid(os.getuid()).pw_dir
+    except Exception:      # noqa: BLE001  平台没有 pwd 就不猜
+        return
+    try:
+        same = Path(home).expanduser().resolve() == Path(real).resolve()
+    except OSError:
+        return
+    if not same:
+        print("[vod-devkit] 拒绝安装 hermes：HOME 已被改到隔离目录但未设 HERMES_HOME"
+              "（hermes CLI 不认 HOME，会写真实 ~/.hermes/config.yaml）。"
+              "隔离跑法：HERMES_HOME=<隔离目录>/.hermes install --target hermes",
+              file=sys.stderr)
+        sys.exit(2)
+
+
 def _spec() -> dict:
     """调用期现读：host.json 的 ~ 必须在调用期按当前 HOME 解析。
 
     2026-11-12 实锤：模块 import 期求值 _MCP_DIR 后，测试里 monkeypatch HOME
     写不到隔离目录，直接把真实 ~/.hermes/mcp/vod-devkit.json 覆盖成了桩值
     （command=/x/vod_mcp/server.py）——真机 doctor 当场读到坏条目。
+
+    2026-11-16 补：设了 HERMES_HOME 时，spec 里所有 ~/.hermes 前缀重定向到它
+    （安装面与 hermes CLI 的落点必须同一处，否则 JSON 与 config.yaml 分裂）。
     """
-    return host_specs.load("hermes")
+    spec = host_specs.load("hermes")
+    root = _hermes_home()
+    if root:
+        for key in ("config", "mcpConfigFile", "profileConfig", "skillsDir",
+                    "configPath"):
+            val = str(spec.get(key) or "")
+            parts = Path(val).parts if val else ()
+            if ".hermes" in parts:
+                spec[key] = str(root.joinpath(*parts[parts.index(".hermes") + 1:]))
+        if spec.get("managedPaths"):
+            out = []
+            for pth in spec["managedPaths"]:
+                parts = Path(str(pth)).parts
+                out.append(str(root.joinpath(*parts[parts.index(".hermes") + 1:]))
+                           if ".hermes" in parts else pth)
+            spec["managedPaths"] = out
+    return spec
 
 
 def skills_dir(args):
@@ -216,7 +281,7 @@ def remove_legacy_plugin() -> str:
         removed.append(f"目录 {d}")
     if shutil.which("hermes"):
         r = subprocess.run(["hermes", "config", "get", "plugins.enabled"],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60, env=_cli_env())
         names = []
         for line in (r.stdout or "").splitlines():
             line = line.strip()
@@ -227,7 +292,8 @@ def remove_legacy_plugin() -> str:
         if LEGACY_PLUGIN in names:
             keep = [n for n in names if n and n != LEGACY_PLUGIN]
             rr = subprocess.run(["hermes", "config", "set", "plugins.enabled",
-                                 json.dumps(keep)], capture_output=True, text=True, timeout=60)
+                                 json.dumps(keep)], capture_output=True, text=True, timeout=60,
+                                env=_cli_env())
             if rr.returncode == 0:
                 removed.append("plugins.enabled 条目")
     return "；".join(removed)
@@ -235,6 +301,7 @@ def remove_legacy_plugin() -> str:
 
 def install(args, packs: str) -> Path:
     """Hermes：官方途径 hermes mcp add（config.yaml mcp_servers）。"""
+    _guard_isolated_home()
     conf = Path(_spec()["configPath"]).parent / "vod-devkit.json"
     conf.parent.mkdir(parents=True, exist_ok=True)
     conf.write_text(json.dumps({
@@ -250,7 +317,7 @@ def install(args, packs: str) -> Path:
         r = subprocess.run(
             ["hermes", "mcp", "add", "vod-devkit", "--command", sys.executable,
              *["--env"] + env_args, "--args", server_entry()],
-            input="y\ny\n", capture_output=True, text=True)
+            input="y\ny\n", capture_output=True, text=True, env=_cli_env())
     else:
         r = None
         print(f"提示：未找到 hermes CLI（PATH），已写出配置片段：{conf}\n"
@@ -276,6 +343,7 @@ def install(args, packs: str) -> Path:
 
 
 def install_remote(args, url, token):
+    _guard_isolated_home()
     """hermes mcp add --url：token 经 env 注入，配置里只留 ${MCP_VOD_DEVKIT_API_KEY} 引用。
 
     B1（2026-11-13 真机实锤）：hermes mcp add 对已存在条目的交互链是三问
@@ -302,8 +370,8 @@ def install_remote(args, url, token):
 
     r = subprocess.run(
         ["hermes", "mcp", "add", "vod-devkit", "--url", url, "--auth", "header"],
-        input="".join(_yes_forever()), capture_output=True, text=True, env=env,
-        timeout=180)
+        input="".join(_yes_forever()), capture_output=True, text=True,
+        env={**env, **_cli_env()}, timeout=180)
     # 防静默：读回 config.yaml 断言远程条目在（Cancelled 会 rc=0 但不落配置）
     registered = _hermes_registration_is_remote(url)
     if r.returncode != 0 or not registered:

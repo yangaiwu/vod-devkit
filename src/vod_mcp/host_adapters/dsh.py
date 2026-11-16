@@ -384,7 +384,7 @@ def block_facts(text: str) -> dict:
         "register_tools_false": bool(re.search(r"^\s*registerTools:\s*false\s*$", joined,
                                                re.MULTILINE)),
         "command": scalar("command"),
-        "server_py": first(r"^\s*-\s*(/\S+/vod_mcp/server\.py)\s*$"),
+        "server_py": first(r'^\s*-\s*"?([^"\n]+/vod_mcp/server\.py)"?\s*$'),
         "cwd": scalar("cwd"),
         "pythonpath": scalar("PYTHONPATH"),
         "state_home": scalar("VOD_DEVKIT_HOME"),

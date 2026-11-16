@@ -1879,3 +1879,46 @@ known 且三要素齐全，并单独锁 `-32011` 不许写成"名录"。
 
 **代价**：patch 文本形态变化（外部标量多一对引号）——相关断言与 golden 同批更新；
 老 patch 不受影响（读取侧两种形态都接受）。
+
+## D-state-integrity-1：账本原子写/坏账本拒写、载荷在用单一入口、读侧标量 roundtrip（2026-11-16 评审 P1/P2/P4/P5 + 隔离 HOME）
+
+**缺陷（全部实测）**：
+
+1. **账本可半截**：manifest / 卸载 / `packs --apply` / 宿主 MCP 配置四处是裸 `write_text`
+   （中断或磁盘满即半截 JSON）；而 `_read_manifest()` 解析失败静默返回 `{}`，下一次 install
+   只写自己那一行 → 其它安装行全丢（doctor 只看到一台、uninstall 摘不到、prune 的在用集合空）。
+   两个缺陷串起来就是"账本莫名只剩一个宿主"的成因链。
+2. **坏账本时 install 半装**：入口不预检账本 → 载荷已 stage、宿主配置已写，最后写账本才抛
+   `ManifestCorrupt` 并打裸 traceback（RC=1）→ 宿主已指向我们、账本没有这行。
+3. **"在用载荷"两套读法**：doctor 只按账本 `installs[].payloadDir` 算，prune/uninstall 还扫
+   dsh 各 profile 的 patch。构造现场（patch 指 0.5.19、账本指 0.5.20）：doctor 报
+   "未被任何安装行引用 ['0.5.19']"，prune 判定它在用——照 doctor 的建议删 = 该 profile 白屏。
+4. **读侧没全改**：`block_facts` 的标量读取用非空白捕获，写侧已统一 JSON 双引号 →
+   `product: "AI 开发者空间"` 读回 `None`（名录 103 项里 22 项含空格）；`server_py` 同类。
+5. **hermes 不认隔离 HOME**：`HOME=<tmp>` 时装 hermes，JSON 落 tmp，但 `hermes mcp add` /
+   `config set` 把**真实** `~/.hermes/config.yaml` 改成 probe 路径（hermes CLI 只认
+   `HERMES_HOME`）。数字矩阵侧修过（设了 HERMES_HOME），adapter 侧没有。
+
+**修法（不变量）**：
+
+- 写：`paths.atomic_write_text`（同目录 tmp → fsync → chmod → `os.replace`，失败保留旧内容）；
+  账本 / 卸载 / packs / 宿主 MCP 配置四处统一走它。
+- 读：`_read_manifest(strict=False)` 是只读面（退回空账本 + stderr 告警），
+  `strict=True` 在解析失败/顶层非对象时抛 `ManifestCorrupt`；install/uninstall/packs 三条
+  **写路径**一律 strict，且 install 在**任何副作用之前**预检（失败 exit 2 + 还原指引）。
+- 在用：`payload.in_use_payloads(rows)` = 账本 `payloadDir` ∪ dsh 各 profile patch；
+  prune / uninstall `--clean-global` / doctor 全部走它，doctor 的"可清理"直接取
+  `prune_candidates`（同一判定）。
+- 读回：标量一律「JSON 双引号优先、裸标量兼容」；`server_py` 兼容引号形态。
+- hermes：路径统一经 `HERMES_HOME`（设了就把 spec 里 `~/.hermes` 前缀整体重定向），
+  CLI 子进程显式带 `HERMES_HOME`；`HOME` 被改而 `HERMES_HOME` 未设 → 拒绝安装（exit 2），
+  不静默写真实家目录。
+
+**代价**：账本写盘多一次 fsync（毫秒级）；`HOME` 隔离跑 hermes 必须显式 `HERMES_HOME`
+（host_matrix 早已这样）；读侧多一个 JSON decode 分支。
+
+**验证**：`tests/test_manifest_integrity.py`（坏账本抛错/只读告警/原子写失败保留旧内容/0600）、
+`tests/test_payload_in_use.py`（patch 引用算在用/doctor 同一入口/当前版本不清理）、
+`tests/test_install_preflight.py`（真实 CLI：坏账本零副作用 exit 2 无裸栈、正常路径不受影响、
+隔离 HOME 拒写真实 hermes 配置、含空格载荷路径读回）、
+`tests/test_doctor_repair_boundaries.py::test_p4_scalars_roundtrip_through_block_facts`。

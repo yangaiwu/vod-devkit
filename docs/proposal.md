@@ -1705,3 +1705,17 @@ doctor 只自愈最后装的那个、uninstall 只摘一个块、`prune` 的"在
 |---|---|---|
 | S154-1 | 覆盖 | 代码里出现的 `code=-320XX` 全集 ⊆ explain 表，`known=true` 且三要素（层/原因/动作）齐全 |
 | S154-2 | 语义 | `-32011` 的原因必须落在"草稿/审批令牌"，不得再出现"名录" |
+
+## 状态完整性：账本/载荷在用/读侧标量（S155，D-state-integrity-1，2026-11-16 评审）
+
+**背景**：三条评审缺陷同属"状态没有单一真源"——账本可半截且坏账本会被空账本覆盖、
+"在用载荷"有两套读法（doctor 会建议删掉仍在用的那份）、托管块写侧加引号后读侧没跟
+（含空格产品名读回 None）。另修 hermes 不认隔离 `HOME`（会把真实 `config.yaml` 改成探针路径）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S155-1 | 账本写入 | 所有账本写点走 `atomic_write_text`；`os.replace` 失败时旧文件逐字节完好、不留 `*.tmp` |
+| S155-2 | 坏账本 | 写路径 strict 读抛 `ManifestCorrupt`；install 在任何副作用前退出（exit 2、无裸栈、宿主配置与载荷均未写） |
+| S155-3 | 在用载荷 | `in_use_payloads` = 账本 ∪ dsh patch；doctor 的"可清理"必须等于 `prune_candidates` 的输出 |
+| S155-4 | 读侧 roundtrip | 含空格/冒号/井号/中文的标量与 `server_py` 路径写→读逐字相等；裸标量老装机仍可读 |
+| S155-5 | hermes 隔离 | `HOME` 改动而 `HERMES_HOME` 未设 → 拒绝安装；设了 `HERMES_HOME` → 全部落点（含 CLI 写入）都在该根下 |
