@@ -426,3 +426,8 @@
 - 7df5ffb docs+refactor(copies): 需求/设计补 S103-S110，生成器与门禁收敛到单一真源
 - a2d9836 fix(release): build-info 指纹断言接受发版提交（prepack 重跑 sync 后 sha 前移一格）
 
+
+## v0.5.11（2026-11-16）
+
+- 36495cd fix(dsh): 壳安装钉版本 + 巡检看真判据（0.5.10 真机实锤）
+
