@@ -263,7 +263,7 @@ npx -y vod-devkit@latest doctor
   `mcp unset`（卸载），写后读回自证 command/args。
 - 技能装到它的个人技能根 `~/.agents/skills`（`openclaw skills list` 里 source=agents-skills-personal）；
   `~/.openclaw/skills` 是 OpenClaw 自己的 managed 根，不往里写。
-- 真机验证（2026-11-16，openclaw 2026.11.4 / Node 24.19 / aarch64 Linux）：`mcp probe` 10 工具；
+- 真机验证（2026-11-16，openclaw 2026.11.4 / Node 24.19 / aarch64 Linux）：`mcp probe` 报出的工具面与契约一致；
   `openclaw agent --local` 会话真调 `vod-devkit__vod_devkit_info`（版本=构建版本）；
   会话内 `vod-devkit__vod_submit_voices` 提交成功（accepted=1，voiceId 由引擎下发）。
 - 坑：`npm i -g openclaw` 可能跑完 exit 0 却没落 `/usr/local/bin/openclaw`（本机实锤：只剩临时软链、
