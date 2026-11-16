@@ -176,7 +176,10 @@ TAG_COMMIT=$(git rev-parse "v$BUMP")
 # 打包前把 provenance 钉成**tag 里的那份**：prepack 会跑 sync_plugin，若按当前 HEAD
 # 重烧，tarball 代码指纹就变成"打包时的 HEAD"——并发会话/发版后补的 docs 提交会让它
 # 既不是 tag^ 也不是 tag，终态断言只能拒发（2026-11-16 v0.5.27 实锤）。
-git checkout "v$BUMP" -- build-info.json plugins/vod-devkit/build-info.json
+# 注意：plugins/vod-devkit/ 只有 .codex-plugin/plugin.json 与 .mcp.json 入库，包内
+# build-info 是生成物（git 不认识它）——只从 tag 取根那份，再拷给插件副本。
+git checkout "v$BUMP" -- build-info.json
+cp -f build-info.json plugins/vod-devkit/build-info.json
 VOD_DEVKIT_NO_BUILD_INFO=1 npm pack --silent >/dev/null
 BI_SHA=$(tar xzOf "$TGZ" package/plugins/vod-devkit/build-info.json | grep -o '"commitSha": "[0-9a-f]*"' | head -1 | grep -o '[0-9a-f]\{7,\}')
 # v0.5.9 起 prepack 会重跑 sync（副本零提交），于是 build-info 的 sha 变成发版提交
