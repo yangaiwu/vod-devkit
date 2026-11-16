@@ -1922,3 +1922,31 @@ known 且三要素齐全，并单独锁 `-32011` 不许写成"名录"。
 `tests/test_install_preflight.py`（真实 CLI：坏账本零副作用 exit 2 无裸栈、正常路径不受影响、
 隔离 HOME 拒写真实 hermes 配置、含空格载荷路径读回）、
 `tests/test_doctor_repair_boundaries.py::test_p4_scalars_roundtrip_through_block_facts`。
+
+## D-host-3：新增 OpenClaw 一等宿主 + OfficeAce 桌面端登记（2026-11-16）
+
+**背景**：用户要求"OfficeAce 和 OpenClaw 本地安装后完成验证"。OpenClaw 在本机可装可验；
+OfficeAce 是桌面端（Windows 10/11、macOS 13+、HarmonyOS 6.1+，官方无 Linux 包，npm 五个候选名全 404），
+本机属「无对象」。此前两者只能走 `--target generic` 手写配置，安装不入账（doctor/audit/prune 看不见）。
+
+**OpenClaw（已真机闭环）**：
+- 注册表 `~/.openclaw/openclaw.json` 的 `mcp.servers.<name>`；该文件是 JSON5（可带注释）。
+- **不读不写该文件**：所有变更经 `openclaw mcp add`（新装 + 探活）/ `mcp set <name> <json>`（更新）/
+  `mcp unset <name>`（卸载）；写后用 `mcp show --json` 读回自证 command/args（注意：show 会把 env
+  值打码为 `__OPENCLAW_REDACTED__`，**不能拿它拉 server**）。
+- 技能落点 `~/.agents/skills`（个人技能根）；`~/.openclaw/skills` 是宿主 managed 根，不写。
+- 巡检 `host_matrix --audit` 走 `mcp probe --json` 的 launch 拉起 server 自证版本，env 从安装期账本取。
+- 真机证据：probe 10 工具；`agent --local` 会话真调 `vod-devkit__vod_devkit_info`；会话内提交
+  `accepted=1`、voiceId 由引擎下发；`skills list` 四个 vod-* 技能 ready。
+
+**OfficeAce（登记形态，未真机验证）**：
+- 非 Windows 直接拒绝（exit 2）；Windows 侧：`OFFICE_CLAW_CONFIG_ROOT` → 注册表 InstallDir →
+  `%LOCALAPPDATA%/Programs/OfficeAce`，落 `<InstallDir>/data/mcp-connectors.sqlite` 的
+  `mcp_connectors` 行；写前整份备份、事务写、读回校验、失败回滚；只认已存在的表（不建 schema）。
+
+**代价**：两个宿主各多一个适配器与一组门禁；OpenClaw 装机依赖宿主 CLI（缺 CLI 直接 exit 2，
+不做"直接写文件"的兜底）；OfficeAce 的 sqlite 写入在真 Windows 机上仍需一次人工复验。
+
+**验证**：`tests/test_openclaw_officeace_hosts.py`（假 CLI 锁"只经 CLI 写 + 配置字节不变"、
+无 CLI 拒绝；非 Windows 拒绝；sqlite 幂等 upsert 保留 owner_user_id、只删自己、不建表、rollback
+路径在 install 里）、`tests/test_hosts_spec.py`（宿主集合）、`tests/test_host_adapters.py`（契约）。

@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_every_integration_has_a_valid_spec():
     assert set(hosts.hosts()) == {"hermes", "opencode", "codeartsdoer", "codeartswork",
                                   "codex", "codex-desktop", "dsh", "workbuddy",
-                                  "atomcode"}
+                                  "atomcode", "openclaw", "officeace"}
     for h in hosts.hosts():
         spec = hosts.load(h, "web")
         assert spec["id"] == h

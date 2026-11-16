@@ -176,7 +176,7 @@ def cmd_install(args):
         g = [(h["id"], h["config"]) for h in generic_host.detect_known()]
         hint = ("\n  探测到通用 MCP 宿主：" + "；".join(f"{i}（{c}）" for i, c in g)
                 if g else "")
-        print(f"不支持目标: {target}（可选 hermes|opencode|codeartsdoer|codeartswork|codex|codex-desktop|dsh|workbuddy|atomcode|generic|auto）{hint}\n"
+        print(f"不支持目标: {target}（可选 hermes|opencode|codeartsdoer|codeartswork|codex|codex-desktop|dsh|workbuddy|atomcode|openclaw|officeace|generic|auto）{hint}\n"
               "  通用宿主：install --target generic --mcp-config <配置文件>",
               file=sys.stderr)
         sys.exit(2)

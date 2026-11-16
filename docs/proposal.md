@@ -1719,3 +1719,17 @@ doctor 只自愈最后装的那个、uninstall 只摘一个块、`prune` 的"在
 | S155-3 | 在用载荷 | `in_use_payloads` = 账本 ∪ dsh patch；doctor 的"可清理"必须等于 `prune_candidates` 的输出 |
 | S155-4 | 读侧 roundtrip | 含空格/冒号/井号/中文的标量与 `server_py` 路径写→读逐字相等；裸标量老装机仍可读 |
 | S155-5 | hermes 隔离 | `HOME` 改动而 `HERMES_HOME` 未设 → 拒绝安装；设了 `HERMES_HOME` → 全部落点（含 CLI 写入）都在该根下 |
+
+## 新增 OpenClaw 宿主与 OfficeAce 桌面端登记（S156，D-host-3，2026-11-16）
+
+**背景**：OpenClaw 本机可装可验（npm 包 + `mcp` 注册表 + `agent --local`）；OfficeAce 官方只发
+Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此前只能手写配置，装机不入账。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S156-1 | OpenClaw 写入面 | 适配器源码不出现对 `openclaw.json` 的 `write_text`/`merge_mcp_servers`/`atomic_write_text`；安装只调 `mcp add`/`set`，卸载只调 `mcp unset` |
+| S156-2 | OpenClaw 隔离性 | 假 CLI 全链路：配置文件字节不变（JSON5 注释不被吃）；无 CLI 时 exit 2 |
+| S156-3 | OpenClaw 巡检 | `host_matrix --audit` 经 `mcp probe` 的 launch 拉起 server 自证版本（env 从账本取，不用被打码的 `show`） |
+| S156-4 | OfficeAce 平台门 | 非 Windows `install --target officeace` exit 2 且零写入 |
+| S156-5 | OfficeAce 行域 | upsert 幂等、保留已有 `owner_user_id`、uninstall 只删 `name=vod-devkit`、表不存在时报错不建表 |
+| S156-6 | 注册表一致性 | 两个新宿主都在 `hosts.hosts()` 与适配器 REGISTRY 里，host.json 具备 configPath/skillsDir |

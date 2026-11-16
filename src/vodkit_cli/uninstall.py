@@ -122,6 +122,12 @@ def _cleanup_install_row(row: dict, skill_hashes: dict | None = None,
         from vod_mcp.host_adapters import codex_desktop as _cd
         _cd.uninstall()
         return
+    # openclaw：注册表在 JSON5 配置里（可能带注释），只许经它自己的 CLI 摘条目；
+    # officeace：条目在宿主 sqlite（schema 不是我们的），只许删自己那几行。
+    if target in ("openclaw", "officeace"):
+        from vod_mcp.host_adapters import get as _get
+        _get(target).uninstall()
+        return
     mf = dict(row)
     mf["skillHashes"] = skill_hashes or {}
     # ① 技能：落点真源是 skillInstalls（按 host 匹配），且**共享落点不许摘**——

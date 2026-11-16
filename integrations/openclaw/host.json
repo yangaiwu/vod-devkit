@@ -1,0 +1,11 @@
+{
+  "id": "openclaw",
+  "cli": "openclaw",
+  "detect": {
+    "cli": "openclaw",
+    "path": "~/.openclaw"
+  },
+  "config": "~/.openclaw/openclaw.json",
+  "skillsDir": "~/.agents/skills",
+  "notes": "OpenClaw（npm i -g openclaw）的 MCP 注册表在 ~/.openclaw/openclaw.json 的 mcp.servers.<name>。该文件是 JSON5（可能含注释），安装器**不直接读写**，一律经 openclaw CLI：mcp add（新装，带探活）/ mcp set（更新，JSON 对象）/ mcp unset（卸载）。技能落点是它的个人技能根 ~/.agents/skills（managed 根 ~/.openclaw/skills 是它自己的，别往里写）。真机验证（2026-11-16，本机 aarch64 Linux，openclaw 2026.11.4 / node 24.19）：mcp add 落 mcp.servers.vod-devkit；mcp probe 报 10 工具；agent --local 会话真调 vod-devkit__vod_devkit_info 返回 0.5.23/44088f12；会话内 vod-devkit__vod_submit_voices 提交得 voiceId VDPL202611160007 accepted=1；skills list 四个 vod-* 技能 ready（来源 agents-skills-personal）。注意 npm 装完可能不落 /usr/local/bin/openclaw（本机实锤：只留临时软链 + node_modules 缺依赖），装完先 openclaw --version 自检。"
+}

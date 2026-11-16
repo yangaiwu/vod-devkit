@@ -24,7 +24,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("install")
     sp.add_argument("--target", default="auto",
-                    help="hermes|opencode|codeartsdoer|codeartswork|codex|codex-desktop|dsh|workbuddy|atomcode|generic|all|auto"
+                    help="hermes|opencode|codeartsdoer|codeartswork|codex|codex-desktop|dsh|workbuddy|atomcode|openclaw|officeace|generic|all|auto"
                          "（all=所有探测到的宿主，缺 CLI 的跳过；默认探测）")
     sp.add_argument("--preset", default="collect", choices=list(common.PRESETS),
                     help="collect=对外默认（采集者）；full=内部全量")

@@ -30,7 +30,7 @@
 |---|---|---|
 | Node | >= 18 | `npx` 引导器；dsh 宿主请按其官方要求（Node 24.9+） |
 | Python | >= 3.10 | 安装器与 MCP server；可用 `VOD_PYTHON` 指定解释器 |
-| 宿主 | hermes / opencode / codeartsdoer / codeartswork / codex / codex-desktop / dsh / workbuddy / atomcode 任一（另支持 claude-code / cursor / windsurf / cline 等走 `--target generic`） | 用 `--target auto` 探测，或显式指定 |
+| 宿主 | hermes / opencode / codeartsdoer / codeartswork / codex / codex-desktop / dsh / workbuddy / atomcode / openclaw 任一（OfficeAce 为桌面端，仅 Windows 可接）（另支持 claude-code / cursor / windsurf / cline 等走 `--target generic`） | 用 `--target auto` 探测，或显式指定 |
 | 网络 | 可达你的 VOD 引擎 | 缺省 `https://vod-dev.topxtopx.com`，可 `--java-api-base` 覆盖 |
 
 远程面额外需要官方 MCP SDK：`pip install 'vod-devkit[remote]'`（stdio 形态零第三方依赖）。
@@ -250,6 +250,39 @@ npx -y vod-devkit@latest uninstall
 - 配置根可由 `ATOMCODE_HOME` 覆盖（默认 `~/.atomcode`），落点 `mcp.json` 的
   `mcpServers.vod-devkit`；技能装到 `<home>/skills`
 - 不装宿主的 `hooks.json` 遥测 hook（本插件不引入遥测）
+
+### OpenClaw（openclaw）
+
+```bash
+npx -y vod-devkit@latest install --target openclaw      # 更新=幂等重装
+npx -y vod-devkit@latest doctor
+```
+
+- 落点：`~/.openclaw/openclaw.json` 的 `mcp.servers.vod-devkit`。**该文件是 JSON5（可能带注释），
+  安装器不直读也不直写**：一律经 `openclaw mcp add`（新装，带探活）/ `mcp set`（更新）/
+  `mcp unset`（卸载），写后读回自证 command/args。
+- 技能装到它的个人技能根 `~/.agents/skills`（`openclaw skills list` 里 source=agents-skills-personal）；
+  `~/.openclaw/skills` 是 OpenClaw 自己的 managed 根，不往里写。
+- 真机验证（2026-11-16，openclaw 2026.11.4 / Node 24.19 / aarch64 Linux）：`mcp probe` 10 工具；
+  `openclaw agent --local` 会话真调 `vod-devkit__vod_devkit_info`（版本=构建版本）；
+  会话内 `vod-devkit__vod_submit_voices` 提交成功（accepted=1，voiceId 由引擎下发）。
+- 坑：`npm i -g openclaw` 可能跑完 exit 0 却没落 `/usr/local/bin/openclaw`（本机实锤：只剩临时软链、
+  node_modules 缺依赖）——装完先 `openclaw --version` 自检，必要时 `ln -sf ../lib/node_modules/openclaw/openclaw.mjs /usr/local/bin/openclaw`。
+
+### 果办 OfficeAce（officeace，桌面端）
+
+```bash
+npx -y vod-devkit@latest install --target officeace      # 仅 Windows 有意义
+```
+
+- 无 Linux 包（官方只发 Windows 10/11、macOS 13+、HarmonyOS；npm 侧也无 CLI 包），
+  **非 Windows 平台安装器直接拒绝**（exit 2），不做"看着装了"的假动作。
+- 落点不是 JSON 而是它的 sqlite：`<InstallDir>/data/mcp-connectors.sqlite` 的 `mcp_connectors` 行
+  （type=custom / transport=stdio / name=vod-devkit）；InstallDir 依次取
+  `OFFICE_CLAW_CONFIG_ROOT` → `HKCU\SOFTWARE\OfficeAce\OfficeAce` 的 InstallDir → `%LOCALAPPDATA%/Programs/OfficeAce`。
+- 写库前整份备份、事务写、写后读回校验，失败回滚；不建表不改 schema（schema 不是我们的）。
+- **未真机验证**（本机无对象）：形态按参照实现（huaweicloud-devkit officeace-registry.ts）对齐，
+  门禁只锁"非 Windows 拒绝 + sqlite 行域（幂等/只删自己/不建表）+ 回滚"。
 
 ### DeepSeek Harness (dsh)
 
@@ -494,7 +527,7 @@ MIT（见 LICENSE.txt）。第三方素材见 NOTICE。
 vod-devkit doctor                 # 分层报告：环境/载荷/配置/技能/网络/插件，每条给动作
 vod-devkit explain -32010         # 解释一条错误码/错误文案：层 + 原因 + 动作
 vod-devkit detect --path .        # 只读识别项目语言/框架/构建（不写任何文件）
-python3 scripts/host_matrix.py    # 9 宿主安装矩阵：装→断言→拉起 server→卸→验干净
+python3 scripts/host_matrix.py    # 9 宿主安装矩阵：装→断言→拉起 server→卸→验干净（openclaw 仅有 --audit 巡检，矩阵装机待补）
 ```
 
 矩阵 PASS 的**含义边界**（2026-11-16 收窄，别读成"宿主装得上"）：沙箱里的宿主 CLI 一律用

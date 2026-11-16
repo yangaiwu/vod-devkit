@@ -21,6 +21,7 @@
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -62,6 +63,8 @@ EXPECT = {
     "codex-desktop": {"config": ".agents/plugins/marketplace.json", "entry": ("plugins", None)},
     "codex": {"cli": "codex", "config": None, "entry": None},
     "dsh": {"cli": "dsh", "profile": "web", "config": None, "entry": None},
+    # openclaw：注册表在 JSON5 配置里，读侧只认它的 CLI（probe --json），不解析文件
+    "openclaw": {"cli": "openclaw", "config": None, "entry": None},
 }
 
 # 卸载后必须仍然存在的用户内容：host → (文件, 断言函数)
@@ -462,21 +465,15 @@ def _codex_effective_mcp(home: Path) -> tuple:
     return (markets[0] if markets else None), None, False
 
 
-def _dsh_manifest_mcp(home: Path) -> dict:
-    """manifest 里每个 dsh profile 的安装期 mcpClient（S153-4）。
+def _raw_manifest(home: Path) -> dict:
+    """安装期账本原文（候选顺序：VOD_DEVKIT_MANIFEST → 安装根(ROOT) → home）。读不到返回 {}。
 
-    为什么必须读：宿主"本来就没 mcp-client"（合法降级 6 工具）与"MCP 块被清掉"
-    （12→6 退化）在 patch 文本上长得一模一样；只有安装期记录能区分。
-
-    读取顺序（真机实测，2026-11-16）：VOD_DEVKIT_MANIFEST → **安装根(ROOT)**/install-manifest.json
-    → home/install-manifest.json。真机上 manifest 落在仓根（common.manifest_path()），
-    只读 home/… 会返回 {}，判据静默失效（真机假绿，隔离用例却因设了 env 而绿）。
+    真机实测（2026-11-16）：manifest 落在仓根（common.manifest_path()），只读 home/…
+    会返回 {}，判据静默失效（真机假绿，隔离用例却因设了 env 而绿）。
+    显式指定 env 时**只认它**：文件不在 = 没有账本；回退 ROOT 会让隔离测试读到真机账本。
     """
-    import os as _os
-    env_p = _os.environ.get("VOD_DEVKIT_MANIFEST")
+    env_p = os.environ.get("VOD_DEVKIT_MANIFEST")
     if env_p:
-        # 显式指定就**只认它**：文件不在 = 没有账本（{}）。回退到 ROOT 会让"隔离测试"
-        # 读到真机 manifest（S146 ④ 被误判成"MCP 块被清"的现场）。
         cands = [Path(env_p)]
     else:
         cands = [ROOT / "install-manifest.json", home / "install-manifest.json"]
@@ -489,8 +486,17 @@ def _dsh_manifest_mcp(home: Path) -> dict:
         d = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _dsh_manifest_mcp(home: Path) -> dict:
+    """manifest 里每个 dsh profile 的安装期 mcpClient（S153-4）。
+
+    为什么必须读：宿主"本来就没 mcp-client"（合法降级 6 工具）与"MCP 块被清掉"
+    （12→6 退化）在 patch 文本上长得一模一样；只有安装期记录能区分。
+    """
     out = {}
-    for r in (d.get("installs") or []):
+    for r in (_raw_manifest(home).get("installs") or []):
         if r.get("target") != "dsh":
             continue
         out[r.get("dshProfile") or ""] = (r.get("dshPatch") or {}).get("mcpClient")
@@ -529,6 +535,50 @@ def _audit_dsh_profile(patch: Path, entry: dict, expect_version: str,
             msg + "；降级形态：壳自注册 6 工具（无 mcp-client，按配置面判）")
 
 
+def _audit_openclaw(home: Path, expect_version: str) -> tuple:
+    """OpenClaw：只读巡检走它自己的注册表（mcp probe --json），不解析 JSON5 配置。
+
+    为什么不用"读 openclaw.json 找 mcp.servers"：该文件是 JSON5（可能带注释），
+    json.loads 会整份失败；而且用户可能用 `openclaw --profile` 另存一份状态。
+    probe 的输出里带 launch（真实 command+args），直接拿它拉一次 server 自证版本。
+    """
+    cli = shutil.which("openclaw")
+    if not cli:
+        return "NOT_INSTALLED", "无 openclaw CLI"
+    try:
+        r = subprocess.run([cli, "mcp", "probe", "vod-devkit", "--json"],
+                           capture_output=True, text=True, timeout=90)
+    except Exception as e:      # noqa: BLE001
+        return "DRIFT", f"probe 失败：{e}"
+    if r.returncode != 0:
+        return "NOT_INSTALLED", f"注册表里没有 vod-devkit（{(r.stderr or r.stdout).strip()[-140:]}）"
+    raw = r.stdout or ""
+    try:
+        data = json.loads(raw[raw.find("{"):])
+    except Exception:      # noqa: BLE001
+        return "DRIFT", f"probe 输出不是 JSON：{raw[-160:]}"
+    srv = ((data.get("servers") or {}).get("vod-devkit") or {})
+    launch = str(srv.get("launch") or "")
+    if not launch:
+        return "DRIFT", "probe 未给出 launch（注册表条目缺 command/args）"
+    parts = shlex.split(launch)
+    entry = {"command": parts[0], "args": parts[1:]}
+    # env 不在 probe 的 launch 里，而 `openclaw mcp show --json` 会把 env 值**打码**
+    # （实测 __OPENCLAW_REDACTED__，拿它拉 server 必挂）。所以 env 从安装期账本取
+    # ——与其它宿主"读宿主配置里的 env"同一个语义来源。
+    row = next((r for r in (_raw_manifest(home).get("installs") or [])
+                if r.get("target") == "openclaw"), {})
+    env = {}
+    if row.get("packs"):
+        env["VOD_PACKS"] = str(row["packs"])
+    if row.get("apiBase"):
+        env["VOD_JAVA_API_BASE"] = str(row["apiBase"])
+    if env:
+        entry["env"] = env
+    ok, msg = _probe(entry, expect_version)
+    return ("PASS" if ok else "DRIFT"), f"{msg}（openclaw 注册表 {srv.get('tools')} 工具）"
+
+
 def audit_host(host: str, expect_version: str, home: Path | None = None) -> tuple:
     """只读巡检**真实机器**上的安装（不写任何文件）：条目在不在、入口存不存在、
     自证版本是否等于构建版本。返回 PASS / DRIFT / NOT_INSTALLED。
@@ -538,6 +588,8 @@ def audit_host(host: str, expect_version: str, home: Path | None = None) -> tupl
     """
     home = Path.home() if home is None else home
     spec = EXPECT[host]
+    if host == "openclaw":
+        return _audit_openclaw(home, expect_version)
     conf = home / spec["config"] if spec.get("config") else None
     entry = None
     if conf is not None:

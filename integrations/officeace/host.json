@@ -1,0 +1,10 @@
+{
+  "id": "officeace",
+  "cli": "",
+  "detect": {
+    "path": "~/.office-claw"
+  },
+  "config": "~/.office-claw/capabilities.json",
+  "skillsDir": "~/.office-claw/skills",
+  "notes": "果办 OfficeAce 是桌面端（Windows 10/11、macOS 13+、HarmonyOS 6.1+，官方无 Linux 包，npm 侧也无 CLI 包）——本机 aarch64 Linux 属「无对象」，未真机验证。真实落点不在 HOME 下：<InstallDir>/.office-claw（InstallDir 来自 HKCU\\SOFTWARE\\OfficeAce\\OfficeAce 的 InstallDir，或 %LOCALAPPDATA%\\Programs\\OfficeAce），MCP 条目写 <InstallDir>/data/mcp-connectors.sqlite 的 mcp_connectors 表（type=custom / transport=stdio / name=vod-devkit），技能落 <capabilities-dir>/skills。host.json 里的 ~ 路径只是「本机探测不出对象」的保守占位；真实解析在适配器 officeace.py（Windows 注册表 → LOCALAPPDATA → OFFICE_CLAW_CONFIG_ROOT 环境变量）。"
+}
