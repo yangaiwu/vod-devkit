@@ -1766,3 +1766,15 @@ Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此�
 |---|---|---|
 | S158-1 | 根 build-info 记 v^（≠ 安装提交） | doctor 仍 OK，不报 commitSHA 不一致 |
 | S158-2 | 载荷 build-info ≠ manifest | 必须报「载荷 build-info 的 commitSHA 不一致」（退化回读根即红） |
+
+## hermes spec 重定向按前缀而非分量名（S159，D-hermes-reroot-1，2026-11-16 真机实锤）
+
+**背景**：`_spec()` 把 `~/.hermes/...` 重定向到 `HERMES_HOME` 时用 `parts.index(".hermes")`
+取路径里**第一个** `.hermes` 分量。隔离 HOME 落在 `<tmp>/.hermes/cache/...` 下时命中外层
+缓存目录，configPath 被拼成 `<HERMES_HOME>/cache/.../home/.hermes/config.yaml` —— 安装器写到
+鬼路径，`host_matrix` 报「配置未落盘」（矩阵抓到的，本机真实 HOME 不触发）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S159-1 | HOME 含 `.hermes` 分量 + 设 HERMES_HOME | configPath == `<HERMES_HOME>/mcp/vod-devkit.json`，不得自我嵌套 |
+| S159-2 | 落点不在 `HOME/.hermes` 之下 | 原样保留，不许被重定向（防改写别人钉的路径） |

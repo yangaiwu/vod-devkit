@@ -87,3 +87,44 @@ def test_hermes_install_without_cli_degrades_instead_of_crashing(monkeypatch, tm
     cfg = tmp_path / ".hermes" / "config.yaml"
     assert hermes.HOOK_MARK in cfg.read_text(encoding="utf-8")
     assert hermes.remove_legacy_plugin() == "" or "plugins.enabled" not in hermes.remove_legacy_plugin()
+
+
+def test_s159_hermes_spec_reroot_when_home_contains_dot_hermes(monkeypatch, tmp_path):
+    """S159：隔离 HOME 落在含 `.hermes` 分量的路径下时，spec 重定向不得自我嵌套。
+
+    实机（2026-11-16 host_matrix）：HOME=`<tmp>/.hermes/cache/.../home` 时，
+    `_spec()` 用 `parts.index(".hermes")` 取路径里**第一个** `.hermes` 分量——
+    命中的是外层 Hermes 缓存那层，于是 configPath 被拼成
+    `<HERMES_HOME>/cache/.../home/.hermes/config.yaml`：安装器写到鬼路径，
+    矩阵报「配置未落盘：.hermes/mcp/vod-devkit.json」（用户机器 HOME 正常时不触发，
+    所以只在隔离/容器形态暴露）。
+    判据：重定向后必须等于 `<HERMES_HOME>/mcp/vod-devkit.json`。
+    """
+    import os
+
+    from vod_mcp.host_adapters import hermes
+
+    home = tmp_path / ".hermes" / "cache" / "scratch" / "home"
+    home.mkdir(parents=True)
+    hh = home / ".hermes"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("HERMES_HOME", str(hh))
+    spec = hermes._spec()
+    assert Path(spec["configPath"]) == hh / "mcp" / "vod-devkit.json", spec["configPath"]
+    assert str(home) not in str(spec["configPath"]).replace(str(hh), "", 1)
+    assert os.environ["HERMES_HOME"] == str(hh)
+
+
+def test_s159_hermes_spec_reroot_leaves_foreign_paths_alone(monkeypatch, tmp_path):
+    """S159 反向锁：不在 `HOME/.hermes` 之下的路径不许被重定向（防重写别人钉的落点）。"""
+    from vod_mcp.host_adapters import hermes
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "elsewhere"))
+    foreign = "/opt/custom/hermes/mcp.json"
+    monkeypatch.setattr(hermes.host_specs, "load",
+                        lambda _h: {"configPath": foreign, "skillsDir": str(home / ".hermes" / "skills")})
+    spec = hermes._spec()
+    assert spec["configPath"] == foreign
