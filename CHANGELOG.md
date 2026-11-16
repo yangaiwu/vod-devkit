@@ -525,3 +525,9 @@
 - 9a0902f docs(readme): 去掉手写的工具计数（门禁要求对外文档不写会漂移的数字）
 - 73192df feat(hosts): 新增 OpenClaw 一等宿主 + OfficeAce 桌面端登记（D-host-3 / S156）
 
+
+## v0.5.25（2026-11-16）
+
+- 05c7040 test: 修掉 hermes 隔离用例的重复定义与未用变量（质量门 pyflakes/pytest 拦下的两处）
+- a79a5a5 fix(hosts): 收口评审 P1-P6 与 hermes 隔离旧账（0.5.25 前一批）
+
