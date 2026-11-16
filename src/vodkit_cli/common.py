@@ -191,6 +191,39 @@ def _read_manifest(*, strict: bool = False) -> dict:
         return {}
 
 
+def install_rows(manifest: dict) -> list:
+    """账本里的全部安装行（**唯一读法**，S160 / D-single-entry-1）。
+
+    - 新版：`manifest["installs"]`（一个宿主/profile 一行，D-installs-1 / D-installs-profile-1）
+    - 老账本：顶层即单行；只有带 `target` 才算，空 manifest / `installs: []` 一律返回 `[]`
+
+    为什么必须单入口：这条读法曾在 doctor / prune / packs / uninstall 各写一份，而且
+    uninstall 那份无条件回落 `[mf]`——空 manifest 会被当成"有安装"，卸载链据此去动配置。
+    """
+    rows = manifest.get("installs")
+    if rows:
+        return list(rows)
+    return [manifest] if manifest.get("target") else []
+
+
+def row_view(manifest: dict, row: dict) -> dict:
+    """合并视图：顶层键是最近一次安装，行内**非 None** 字段覆盖之（S160）。
+
+    把行里显式的 None 也照抄上去会把顶层已知值擦掉（字段缺失 ≠ 该字段为 None）。
+    """
+    view = dict(manifest)
+    for k, v in (row or {}).items():
+        if v is not None:
+            view[k] = v
+    return view
+
+
+def latest_row(manifest: dict) -> dict:
+    """最近一次安装的行（`_install_rows` 按 installedAt 排序，故取末条）；空账本返回 `{}`。"""
+    rows = install_rows(manifest)
+    return rows[-1] if rows else {}
+
+
 def _install_rows(prev: dict, row: dict) -> list:
     """按 (target, dshProfile) 去重的安装行（D-installs-1 / S153）：一个 manifest 记全部宿主安装。
 

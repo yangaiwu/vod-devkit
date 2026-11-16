@@ -308,7 +308,7 @@ def cmd_uninstall(args=None):
     except common.ManifestCorrupt as e:
         print(f"[vod-devkit] {e}", file=sys.stderr)
         sys.exit(2)
-    all_rows = mf.get("installs") or [mf]   # 老 manifest（无 installs[]）退化为单条
+    all_rows = common.install_rows(mf)
     rows = [r for r in all_rows if not target or r.get("target") == target]
     if not rows:
         print(f"没有该宿主的安装记录：{target}"

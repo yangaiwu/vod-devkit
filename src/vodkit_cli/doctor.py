@@ -21,7 +21,7 @@ def cmd_status(args=None):
         sys.exit(1)
     if target:
         mf = json.loads(p.read_text(encoding="utf-8"))
-        rows = mf.get("installs") or ([mf] if mf.get("target") else [])
+        rows = common.install_rows(mf)
         # P1（2026-11-16）：dsh 的多 profile 是独立安装行，`--target dsh` 必须全部列出——
         # 只取第一条会让 headless（或 web）在用户视野里"不存在"。
         hits = [r for r in rows if r.get("target") == target]
@@ -300,7 +300,7 @@ def cmd_doctor(args=None):
         problems.append("无 install-manifest.json（未 install？）")
     else:
         mf = json.loads(p.read_text(encoding="utf-8"))
-        rows = mf.get("installs") or ([mf] if mf.get("target") else [])
+        rows = common.install_rows(mf)
         if rows:
             row_names = ", ".join(r.get("target", "?") for r in rows)
             if target:
@@ -309,7 +309,7 @@ def cmd_doctor(args=None):
                     problems.append(f"没有该宿主的安装记录：{target}（现有：{row_names}）")
                 else:
                     # --target：把该行的字段覆盖到视图上，检查按这一行走
-                    mf = {**mf, **{k: v for k, v in hit.items() if v is not None}}
+                    mf = common.row_view(mf, hit)
                     print(f"[doctor] 检查安装行：{target}")
             elif len(rows) > 1:
                 # 缺省视图=最近一次安装（顶层字段即最后一次写入）；多行只在末尾列出，
@@ -322,7 +322,7 @@ def cmd_doctor(args=None):
         if not dsh_rows and mf.get("target") == "dsh" and mf.get("dshProfile"):
             dsh_rows = [mf]
         for row in dsh_rows:
-            view = {**mf, **{k: v for k, v in row.items() if v is not None}}
+            view = common.row_view(mf, row)
             patched = _repair_dsh_patch_block(view)
             if patched:
                 print(f"[doctor] 已补 dsh patch 形态缺口（profile={row.get('dshProfile')}）："
@@ -356,7 +356,7 @@ def cmd_doctor(args=None):
         try:
             from vod_mcp import payload as _payload
             raw = json.loads(p.read_text(encoding="utf-8"))
-            all_rows = raw.get("installs") or ([raw] if raw.get("target") else [])
+            all_rows = common.install_rows(raw)
             used = _payload.in_use_payloads(all_rows)
             labels: dict[str, list[str]] = {}
             for r in all_rows:
@@ -542,8 +542,7 @@ def cmd_verify(_args):
         # S158：完整性取**载荷** build-info（仓根那份是 tracked 的发版快照，发版后
         # 与安装提交天然不等；拿它比会把正常装机报成混装）
         mfv = json.loads(p.read_text(encoding="utf-8"))
-        rows = mfv.get("installs") or [mfv]
-        view = {**mfv, **{k: v for k, v in (rows[-1] or {}).items() if v is not None}}
+        view = common.row_view(mfv, common.latest_row(mfv))
         problem = _provenance_problem(view)
         if problem:
             print(f"FAIL: {problem}（安装产物被篡改/混装）")

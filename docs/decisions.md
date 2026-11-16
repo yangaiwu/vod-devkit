@@ -2046,3 +2046,31 @@ commitSha。根这份是 tracked 文件，release 按 tag 口径写 `v^`（relea
 S159-2（落点不在 `HOME/.hermes` 下 → 原样保留）；`host_matrix` 从 9 PASS/1 FAIL
 回到 10 PASS/1 SKIP；真机备片按 config.yaml 恢复并复验（doctor OK、audit PASS、
 config.yaml mtime 未变）。
+
+## D-single-entry-1：共享语义收敛到单一入口（安装行 / 行视图 / hermes 落点）（2026-11-16 评审）
+
+**缺陷（都是"同一语义多份实现"自己分叉，不是某处写错）**：
+
+1. **安装行读法的四份实现**：doctor（status / doctor / 可清理报告）、prune、packs、uninstall
+   各写一遍 `manifest.get("installs") or ([manifest] if … else [])`。其中 uninstall 那份是
+   `or [mf]`（无条件回落）——空 manifest 会被当成"有安装"，卸载链据此去动宿主配置。
+2. **行视图（非 None 覆盖）三份**：doctor 的 `--target` 分支、dsh 自愈循环、verify 的 preset 分支。
+3. **hermes 落点判据两份且结论相反**：`_cli_env()` 用「root 不在真实家目录之下」认隔离 root，
+   `_spec()` 用「root 在 HOME 之下」。对 `HERMES_HOME=/tmp/shared` 前者认、后者不认 →
+   CLI 写 /tmp/shared、文件写 `<HOME>/.hermes`，就是 0.5.25 修过的分裂形态又长回来。
+
+**决定**：
+
+- `common.install_rows()` / `row_view()` / `latest_row()` 三个读面，全部调用点改用它；
+  **反向锁**：`src/` 除 `common.py` 外出现「整份 manifest 顶替安装行」即红（`or []` 合法）。
+- hermes 侧 `_home_state()`（HOME/真实家目录/是否隔离）与 `_effective_hermes_home()`
+  成为唯一判据，`_spec()` / `_cli_env()` / `_guard_isolated_home()` 共用。
+  语义定死：真实 HOME 直接认 HERMES_HOME；隔离 HOME 下**只认位于该 HOME 之内**的值。
+
+**代价 / 已知行为变更**：`HERMES_HOME` 指向"隔离 HOME 之外、又不在真实家目录下"（如
+`/tmp/shared`）时，现在两边都跟随 HOME（旧实现 CLI 会认它）。这是把分裂消掉的方向，
+矩阵的 `<HOME>/.hermes` 形态不受影响；显式共享 state 的跑法本来就被 `_cli_env()` 判为
+"不猜用户意图"。
+
+**验证**：S160-1..4（读面语义 + 反散落门禁）与 S161-1..3（落点三态）；`host_matrix` 与
+`test_installer` / `test_hermes_hooks` / `test_distribution` 全量仍绿。

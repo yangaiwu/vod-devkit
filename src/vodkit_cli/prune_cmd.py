@@ -38,7 +38,7 @@ def _rows() -> list:
         mf = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
-    return mf.get("installs") or ([mf] if mf.get("target") else [])
+    return common.install_rows(mf)
 
 
 def cmd_prune(args) -> int:

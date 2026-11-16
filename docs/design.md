@@ -1338,3 +1338,19 @@ doctor 的 dsh patch 自愈只做一件事：让文件回到**安装器该写的
 为什么不用「路径里有没有 `.hermes` 分量」：HOME 自身可能落在含该分量的路径里
 （`<tmp>/.hermes/cache/...`），按分量搜索会命中外层并产生自我嵌套（2026-11-16 矩阵实锤）。
 与 `_cli_env()` 保持同源——隔离时 CLI 与文件写入的落点都跟随 HOME。
+
+## 共享语义的单一入口（D-single-entry-1，2026-11-16）
+
+三处「同一语义」只允许一个实现，其余消费者调它：
+
+| 语义 | 唯一入口 | 曾经的重复 | 铁律 |
+|---|---|---|---|
+| 账本里的安装行 | `common.install_rows(mf)` | doctor ×3 / prune / packs / uninstall | 空 manifest 返回 `[]`；老账本（顶层有 `target`）退化为单行 |
+| 行视图（顶层 + 行覆盖） | `common.row_view(mf, row)` | doctor ×2 / verify | 行内 None **不覆盖**顶层；不改入参 |
+| 最近一次安装行 | `common.latest_row(mf)` | verify | 取 `install_rows()` 末条，空账本 `{}` |
+| hermes 落点判定 | `hermes._home_state()` / `_effective_hermes_home()` | `_cli_env` / `_spec` / `_guard` | 隔离 HOME 下只认位于该 HOME 之内的 HERMES_HOME；CLI 与文件写入同源 |
+
+为什么这是"合理性"问题而不是风格问题：多份实现的判据会**各自演化**。实测已出现两种分叉——
+uninstall 的安装行读法少了 `target` 判据（空账本被当有安装），hermes 的落点判据给出相反结论
+（CLI 与文件写到两处）。门禁形态取"禁止第二套实现"（`tests/test_common_single_entry.py` 扫源），
+而不是逐个调用点补断言——后者只能锁住当时想到的那几处。

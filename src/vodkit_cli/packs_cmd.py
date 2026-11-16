@@ -25,7 +25,7 @@ def _rows() -> list:
     if not p.exists():
         return []
     mf = json.loads(p.read_text(encoding="utf-8"))
-    return mf.get("installs") or ([mf] if mf.get("target") else [])
+    return common.install_rows(mf)
 
 
 def _filter(rows: list, target: str) -> list:
