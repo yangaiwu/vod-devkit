@@ -487,6 +487,21 @@
     "S161": {
       "carrier": "tests/test_host_adapters.py"
     },
+    "S162": {
+      "carrier": "docs/design.md"
+    },
+    "S163": {
+      "carrier": "docs/design.md"
+    },
+    "S164": {
+      "carrier": "docs/design.md"
+    },
+    "S165": {
+      "carrier": "docs/design.md"
+    },
+    "S166": {
+      "carrier": "tests/test_review_r2.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

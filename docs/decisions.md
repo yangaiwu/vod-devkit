@@ -2074,3 +2074,36 @@ config.yaml mtime 未变）。
 
 **验证**：S160-1..4（读面语义 + 反散落门禁）与 S161-1..3（落点三态）；`host_matrix` 与
 `test_installer` / `test_hermes_hooks` / `test_distribution` 全量仍绿。
+
+## D-review-r2-1：落点不变量、门禁口径、provenance 严格性（2026-11-16 评审第二轮）
+
+**缺陷（均实测，基于 v0.5.28 与 d49f424）**：
+
+1. **不变量缺失**：S159/S161 落地的是分场景用例，没断言"文件落点根 == CLI 落点根"。
+2. **门禁给自己打分**：`test_build_info_root_and_plugin_copy_agree` 要求根/包内 commitSha 逐字
+   相等；而 conftest 的 session 夹具调 `sync_plugin.sync()`，把**两份**都写成当前 HEAD。
+   于是常规跑绿、`VOD_DEVKIT_NO_BUILD_INFO=1`（host_matrix 恒设、CI 先 sync 再 pytest）必红
+   （实测 root=9e6182d vs pkg=d49f424）——同一提交的结果依赖执行顺序。
+3. **provenance 两个假绿面**：`_provenance_problem()` 在两处 build-info 都读不到时 `return None`；
+   verify 的 preset 分支只取 `installs[-1]`，多安装行时只判最后一条。
+4. **子进程无超时**：`hermes mcp add`（本地面）无 timeout，远程面同一调用有 180s；空/异常
+   `HERMES_HOME` 下 CLI 会自举依赖挂住，`install --target all` 卡在最后一台。
+5. **死守卫**：`_guard_isolated_home()` 每个分支只 `return`（docstring 说"做一次可见性说明"
+   却无任何输出），保留会让后来人以为还有一道守卫。
+
+**决定**：
+
+- 落点判据的不变量写成用例（S162，参数化 env 组合直接断言等式），而不是继续加分场景；
+- 测试期 sync **不许**写 tracked 根（`sync(write_build_info=False)`），门禁口径改为
+  「version 三方相等 + commitSha ∈ {v^, v, HEAD}」——与 `release.sh` 已采用的集合口径一致；
+- provenance 读不到即报「无法核验」；preset 分支遍历 `install_rows()` 的每一行并在报文里带 target；
+- `hermes mcp add` 加 `_CLI_TIMEOUT`（60s，模块常量便于用例压到 1s），`TimeoutExpired` 走
+  「已写 JSON 片段 + 打印手工指引」同一降级分支；
+- 删除 `_guard_isolated_home()` 与其两个调用点。
+
+**代价**：门禁对 commitSha 的判断从"逐字相等"放宽为集合包含——放宽的是**开发态与发布态的区别**
+（根记 v^、包内记发版提交是既有口径），version 与 package.json 的三方相等仍然是硬断言，
+0.4.2 那类"版本号停在五个发版周期"仍会红。
+
+**验证**：S162（5 组 env 等式）、S163-1（sync 前后根字节不变）、S163-2（口径集合）、
+S164-1/2、S165（桩 CLI sleep 5 + timeout 1 → <3.5s 返回且片段在）、S166（源码扫描）。

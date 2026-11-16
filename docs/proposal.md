@@ -1797,3 +1797,25 @@ Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此�
 | S161-1 | 隔离 HOME + HERMES_HOME 在该 HOME 之外 | 文件落点与 CLI 落点**都**跟随 `<HOME>/.hermes` |
 | S161-2 | 隔离 HOME + HERMES_HOME 在其内 | 两边都认该 root（矩阵形态） |
 | S161-3 | 真实 HOME | HERMES_HOME 照旧生效（不引入新的忽略规则） |
+
+## 评审第二轮：落点不变量 / 门禁口径 / provenance 严格性（S162-S166，D-review-r2-1，2026-11-16 评审）
+
+**背景**（真机评审实测，基于 v0.5.28）：
+
+1. S159 只锁了分场景，没锁**不变量**——新 env 组合仍可能让 `_spec()` 与 `_cli_env()` 分叉；
+2. 结构门禁 `test_build_info_root_and_plugin_copy_agree` 在正常发版现场必红（`NO_BUILD_INFO=1`
+   下实测 root=9e6182d(v^) vs pkg=HEAD），根因是测试期 sync 会写 tracked 根，门禁在给自己打分；
+3. `_provenance_problem()` 有两处假绿：两处 build-info 都读不到时返回 None（等于放行）；
+   verify 的 preset 分支只判 `installs[-1]`；
+4. hermes 的 `hermes mcp add` 子进程没有 timeout（远程面有 180s），空/异常 HERMES_HOME 下会挂住；
+5. `_guard_isolated_home()` 已是纯 no-op（每分支只 return、无输出）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S162 | 落点不变量 | 任意 env 组合下 `Path(spec["configPath"]).parent.parent == Path(_cli_env()["HERMES_HOME"])`（隔离/真实 HOME × HERMES_HOME 在外/在内/未设，5 组） |
+| S163-1 | 测试不写 tracked 根 | `sync(write_build_info=False)` 前后根 build-info 字节不变 |
+| S163-2 | 门禁口径 | 根/包内 **version** 必须相等且等于 package.json；commitSha 允许 {v^, v, HEAD}（与 release.sh 口径一致），不再要求两份逐字相等 |
+| S164-1 | 不可核验必须报 | 载荷与仓根都读不到 build-info → 报「无法核验 provenance」，不许 OK |
+| S164-2 | preset 遍历全行 | 多安装行时逐行判，破坏**第一行**也必须报（报文带 target） |
+| S165 | 子进程超时 | `hermes mcp add` 受 `_CLI_TIMEOUT`（默认 60s）约束；超时后仍保住 JSON 片段并打印降级指引 |
+| S166 | 删死守卫 | 源码不再出现 `_guard_isolated_home`；落点安全性由 `_effective_hermes_home()` 保证 |
