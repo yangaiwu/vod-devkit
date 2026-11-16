@@ -531,3 +531,8 @@
 - 05c7040 test: 修掉 hermes 隔离用例的重复定义与未用变量（质量门 pyflakes/pytest 拦下的两处）
 - a79a5a5 fix(hosts): 收口评审 P1-P6 与 hermes 隔离旧账（0.5.25 前一批）
 
+
+## v0.5.26（2026-11-16）
+
+- c4d142f fix(audit): 桌面端宿主在巡检里报 SKIP 而不是 NOT_INSTALLED
+
