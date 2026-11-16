@@ -457,6 +457,12 @@
     "S151": {
       "carrier": "docs/design.md"
     },
+    "S152": {
+      "carrier": "tests/test_doctor_repair_boundaries.py"
+    },
+    "S153": {
+      "carrier": "tests/test_doctor_repair_boundaries.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

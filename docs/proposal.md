@@ -1658,3 +1658,35 @@ hermes config / **机器级 state**）任一漂移 → `[S143] 测试写到了�
 |---|---|---|
 | S151-1 | 降级形态 + 环境有 mcp-client | 自愈后必须**同时**有 `- id: vod-devkit-mcp` 与壳 `registerTools: false` |
 | S151-2 | 幂等 | 形态已正确（期望块文本在场）时再调自愈 → 返回 None 且不改写 |
+
+
+## doctor 自愈的结构化判据（S152，D-doctor-repair-2，2026-11-16 评审实锤）
+
+**背景**：S151 的判据是「安装器整块文本 == patch 现有文本」，而块内嵌 `sys.executable` /
+`machine_state_home()` / `payloadDir`，全按**当前 doctor 进程**求值。四条静默改写（探针复现）：
+换解释器改 `command`、手工 `uiBase=/dsh` 被写回 `apiBase`、PATH 无 `dsh` 时删 MCP 块退回 6 工具、
+manifest 缺 `payloadDir` 时写成相对入口。
+
+**口径**：`manifest.installs[].dshPatch` 记录安装期真源（command / stateHome / mcpClient），
+自愈只补**形态缺口**（缺 MCP 块 / 缺壳块 / 壳未 `registerTools:false`），字段差异只报告，
+环境不可判定不动字节。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S152-1 | 解释器 | 块内 `command` 等于安装期记录时，自愈不改写（不换成"跑 doctor 的那个 python"）|
+| S152-2 | 手工定制 | `uiBase: /dsh` 等字段差异只报告，字节不变 |
+| S152-3 | PATH 无 dsh | 有安装期 `mcpClient` 记录时保持 MCP 块，不降级为 6 工具 |
+| S152-4 | 缺 payloadDir | 不动字节（入口无法判定），打印重装指引 |
+| S152-5 | 形态缺口 | 真缺 MCP 块时仍必须补（S151 行为不回退）|
+
+
+## dsh 多 profile 的账本与"在用"集合（S153，D-installs-profile-1，2026-11-16 评审实锤）
+
+**背景**：`_install_rows` 只按 `target` 去重，dsh 的 web / headless 两个 profile 互相顶掉：
+doctor 只自愈最后装的那个、uninstall 只摘一个块、`prune` 的"在用"集合丢掉另一个 profile
+仍在用的载荷（版本一错位就删掉 → 宿主下次启动白屏）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S153-1 | 账本行键 | 行键 = `(target, dshProfile)`；两个 profile 两行，同 profile 重装仍覆盖 |
+| S153-2 | prune 在用集合 | `prune --payloads` 的"在用"同时扫 `~/.dsh/profiles/*/cordis.patch.yml` 里 args 指向的载荷 |
