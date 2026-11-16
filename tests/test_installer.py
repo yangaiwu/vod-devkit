@@ -1056,3 +1056,19 @@ def test_uninstall_clean_global_removes_state_for_last_host(env):
     assert r.returncode == 0, r.stderr
     assert not rt.exists(), "最后一个宿主卸载后 state 应被回收"
     assert "removed state" in r.stdout
+
+
+def test_source_reachable_helper():
+    """R10：安装期提交可达性标记（dangling 对象要能被审计看见）。
+
+    amend 改写历史后，manifest/payload 里的 commitSha 会变成孤儿；这里只锁判据本身
+    （只取本地引用面，不联网），集成面由 status golden 的 `reachable` 字段覆盖。
+    """
+    import subprocess
+
+    from vodkit_cli import common
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=common.ROOT,
+                          capture_output=True, text=True).stdout.strip()
+    assert common._source_reachable(head) is True
+    assert common._source_reachable("0" * 40) is False
+    assert common._source_reachable("") is False

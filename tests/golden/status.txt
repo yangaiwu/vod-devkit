@@ -4,7 +4,8 @@
     "type": "git",
     "remote": "<ORIGIN>",
     "ref": "<REF>",
-    "commitSha": "<SHA>"
+    "commitSha": "<SHA>",
+    "reachable": true
   },
   "target": "hermes",
   "transport": "stdio",

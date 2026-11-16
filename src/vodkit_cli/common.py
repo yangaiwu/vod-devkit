@@ -196,6 +196,30 @@ def _dsh_install_snapshot(target):
         return None
 
 
+def _source_reachable(sha: str) -> bool:
+    """安装期提交是否可达（R10）：本地对象存在且被某个分支/远端引用包含。
+
+    动机（2026-11-16 实测）：amend 改写历史后，install-manifest 与载荷 build-info 里的
+    commitSha 会变成 dangling 对象（`git branch -a --contains` 为空、远端 0 命中）——
+    doctor 直接报"manifest 与 build-info 不一致"，审计/回滚时也找不到"载荷代表哪个提交"。
+
+    这里只做**标记与告警**，不阻断安装：离线机器 / 干净检出都可能查不到远端引用，
+    阻断会让"$ git archive 出来的包"装不上。判据只取本地引用面（不联网）。
+    """
+    if not sha:
+        return False
+    try:
+        r = subprocess.run(["git", "rev-parse", "--verify", f"{sha}^{{commit}}"],
+                           cwd=ROOT, capture_output=True, text=True, timeout=10)
+        if r.returncode != 0:
+            return False
+        r2 = subprocess.run(["git", "branch", "-a", "--contains", sha],
+                            cwd=ROOT, capture_output=True, text=True, timeout=10)
+        return bool((r2.stdout or "").strip())
+    except Exception:  # noqa: BLE001  没有 git / 超时 → 当作不可判定（不误报）
+        return False
+
+
 def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
                             extra_dirs, transport: str = "stdio",
                             mcp_url: str = "", payload_dir=None) -> None:
@@ -207,7 +231,10 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
         "source": {"type": "git", "remote": bi["sourceRemote"],
                    "ref": subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
                                          cwd=ROOT, capture_output=True, text=True).stdout.strip(),
-                   "commitSha": bi["commitSha"]},
+                   "commitSha": bi["commitSha"],
+                   # R10：提交不可达（amend 后的 dangling 对象）要能被审计看见，而不是
+                   # 只在 doctor 里表现为"manifest 与 build-info 不一致"。
+                   "reachable": _source_reachable(bi["commitSha"])},
         "target": target,
         # 传输形态（D-attach-1）：stdio=宿主本机拉起进程；remote=指向单独部署的
         # 远程端点；skills-only=只装技能（MCP 由别处注册）
@@ -249,6 +276,10 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
     manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
                                encoding="utf-8")
     print("installed:", json.dumps(manifest, ensure_ascii=False, indent=2))
+    if manifest["source"].get("reachable") is False:
+        print(f"[vod-devkit] 警告：安装期提交 {str(manifest['source'].get('commitSha'))[:12]} "
+              "不可达（不在任何分支上：amend 改写历史 / 未推送）——manifest 已记 "
+              "source.reachable=false。发版提交定稿后重装一次即可消除。", file=sys.stderr)
     missing = [k for k in ("VOD_JAVA_API_KEY",) if
                not os.environ.get(k) and not _runtime_cfg_read().get("java_key")]
     if missing and transport == "stdio":

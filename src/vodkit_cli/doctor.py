@@ -287,6 +287,9 @@ def cmd_doctor(args=None):
         bi = json.loads((common.ROOT / "build-info.json").read_text(encoding="utf-8"))
         if mf["source"]["commitSha"] != bi.get("commitSha"):
             problems.append("install-manifest 与 build-info 的 commitSHA 不一致")
+        # R10：`source.reachable` 只入库供审计（status/manifest 原文可查），**不 FAIL**——
+        # 干净检出 / 隔离克隆里 build-info 的 sha 天然不在本仓分支上（实测：remote 用例误伤）。
+        # 真正的处置是发版定稿后重装，install 侧已有 warning。
         if mf.get("mcpConfig") and not Path(mf["mcpConfig"]).exists():
             problems.append("MCP 配置文件缺失")
         # D-token-machine-1（R4）：state 与旧位并存 = "静默不迁"要可见。
