@@ -536,13 +536,3 @@
 
 - c4d142f fix(audit): 桌面端宿主在巡检里报 SKIP 而不是 NOT_INSTALLED
 
-
-## v0.5.27（2026-11-16）
-
-- 6b5de2c Revert "release: v0.5.27"
-- 850a2ac fix(release): 打包前把 provenance 钉成 tag 内容，杜绝 tarball 指纹随 HEAD 漂移
-- 1b077e5 docs(scheme): 一页纸校准到现行（11 宿主/工具名/归因链/名录 7 天 TTL/囤积端点/里程碑）
-- 08cb362 release: v0.5.27
-- e132b3a docs(adr): D-gate-mypy-1 + S157（类型门禁进发版、OfficeAce sqlite 快照、OpenClaw 兜底判据）
-- 9308bd6 docs+fix: 全系统文档刷新 + mypy 门禁/OfficeAce 快照/OpenClaw 兜底
-
