@@ -1102,3 +1102,48 @@ def test_released_helper_without_git(tmp_path, monkeypatch):
     from vodkit_cli import common
     monkeypatch.setattr(common, "ROOT", tmp_path)     # 模拟 npx/tarball 形态（无 .git）
     assert common._released("deadbeef" * 5) is None
+
+
+def test_s158_doctor_provenance_reads_payload_not_repo_root(env):
+    """S158-1：doctor 的 provenance 判据取「载荷 build-info」，不取仓根 tracked 那份。
+
+    为什么不是根：根 `build-info.json` 是 tracked 文件，release 按 tag 口径把它写成
+    v^（release 提交只 bump 版本，不重烧根文件），而 install 会按 HEAD 重烧 ——
+    「工作树干净」与「根 commitSha == manifest」永远互斥（2026-11-16 真机实锤：
+    `git checkout -- build-info.json` 后 doctor 立刻报 commitSHA 不一致）。
+    载荷那份是 install 与 manifest 同一次写入的真源，且不受工作树 git 状态影响。
+    反方向由 S158-2 锁（载荷被换掉必须红），防「改成只读载荷」后判据失效。
+    """
+    cli(env, "install", "--target", "hermes", "--product", "CodeArts")
+    repo = env["repo"]
+    root = repo / "build-info.json"
+    bi = json.loads(root.read_text())
+    bi["commitSha"] = "0" * 40          # 模拟发版现场：根记 v^，不是安装提交
+    root.write_text(json.dumps(bi, ensure_ascii=False))
+    r = cli(env, "doctor")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "commitSHA 不一致" not in r.stdout
+
+
+def test_s158_doctor_flags_payload_provenance_drift(env, tmp_path, monkeypatch):
+    """S158-2（反向锁）：判据读的是**载荷**那份——载荷与 manifest 不同必须报。
+
+    为什么走 helper 而不走命令面：载荷被改写会先被 doctor 的完整性检查抓住
+    （实测报文「载荷文件被改：build-info.json」），那条绿灯在旧代码上也会红，
+    锁不住 provenance 判据。这里直接构造「根 == manifest、载荷 != manifest」：
+    判据一旦退化回读根，就返回 None 而本用例失败。
+    """
+    from vodkit_cli import common, doctor
+
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    (payload / "build-info.json").write_text(
+        json.dumps({"version": "9.9.9", "commitSha": "1" * 40}), encoding="utf-8")
+    root = tmp_path / "rootrepo"
+    root.mkdir()
+    (root / "build-info.json").write_text(
+        json.dumps({"version": "9.9.9", "commitSha": "2" * 40}), encoding="utf-8")
+    monkeypatch.setattr(common, "ROOT", root)
+    mf = {"source": {"commitSha": "2" * 40}, "payloadDir": str(payload)}
+    problem = doctor._provenance_problem(mf)
+    assert problem and "载荷 build-info" in problem, problem

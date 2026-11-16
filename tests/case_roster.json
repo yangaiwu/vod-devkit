@@ -475,6 +475,9 @@
     "S157": {
       "carrier": null
     },
+    "S158": {
+      "carrier": "tests/test_installer.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

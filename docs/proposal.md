@@ -1754,3 +1754,15 @@ Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此�
 | S157-3 | 回滚 | 失败时用快照 backup 回在线库，回滚后条目恢复、行数一致（不覆盖文件） |
 | S157-4 | 备份保留 | 超期快照被清理（默认 7 天），同秒多次不互覆盖（名含 pid） |
 | S157-5 | 兜底触发 | OpenClaw 卸载兜底只看"条目是否仍在"，错误文案变化不影响行为 |
+
+## doctor provenance 判据改读载荷（S158，D-doctor-provenance-1，2026-11-16 真机实锤）
+
+**背景**：`doctor` 用仓根 `build-info.json`（tracked 文件）比对 manifest 的 commitSha，
+而 release 按 tag 口径把根那份写成 `v^`、`install` 却按 HEAD 重烧；两者在发版后的真机上
+永远不相等 → 「工作树干净」与「doctor OK」互斥（实测 `git checkout -- build-info.json`
+后 doctor 立刻 FAIL）。载荷里的那份是 install 与 manifest 同一次写入的真源。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S158-1 | 根 build-info 记 v^（≠ 安装提交） | doctor 仍 OK，不报 commitSHA 不一致 |
+| S158-2 | 载荷 build-info ≠ manifest | 必须报「载荷 build-info 的 commitSHA 不一致」（退化回读根即红） |
