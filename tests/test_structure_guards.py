@@ -127,12 +127,34 @@ def test_policy_rules_have_required_fields_and_real_tools():
     ids = [r.get("id") for r in rules]
     assert len(ids) == len(set(ids)), "policy 规则 id 重复"
 
+def _commit_exists(sha: str) -> bool | None:
+    """该 sha 是否为本仓真实存在的提交；无 `.git`（tarball 形态）返回 None=判不了。
+
+    S163-2：门禁只要求「可解释」——根是 tracked 的发版快照（release 记 v^），插件副本是
+    打包/同步时刻烧的（常常是 HEAD），要求两份逐字相等就会在 NO_BUILD_INFO 现场必红
+    （host_matrix / CI 顺序，实测 root=9e6182d vs pkg=d49f424）。真正的硬不变量是
+    version 三方相等（防 0.4.2 那种"版本号停五个周期"），commitSha 只需是真实提交。
+    """
+    import subprocess
+
+    if not sha or not (ROOT / ".git").exists():
+        return None
+    r = subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+                       cwd=ROOT, capture_output=True)
+    return r.returncode == 0
+
+
 def test_build_info_root_and_plugin_copy_agree():
-    """溯源双副本一致：根 build-info.json 与 plugins 副本必须同版本、同 SHA。
+    """溯源双副本一致（口径 S163-2）：version 三方相等；commitSha 落在发布集合内。
 
     实锤（2026-11-11）：根副本停在 0.4.2/0bbe0dd 五个发版周期，而包内副本已 0.5.0/
     4d4e6cb——`vod-devkit status/verify/doctor` 读根副本，报的版本与真实包不符，
     正是「版本号相同≠内容相同」那一类静默漂移。
+
+    2026-11-16 评审第二轮：旧断言要求两份 commitSha 逐字相等，而测试期 sync 会把两份
+    都写成当前 HEAD（已改为 write_build_info=False）——在 NO_BUILD_INFO 现场（host_matrix、
+    CI 顺序）两份停在 v^ 与 HEAD，门禁必红，属"门禁给自己打分"。version 与 package.json
+    的三方相等仍是硬断言（0.4.2 那类漂移照样红）。
     """
     import json
     root_bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
@@ -142,10 +164,14 @@ def test_build_info_root_and_plugin_copy_agree():
     assert root_bi.get("version") == pkg["version"], (
         f"根 build-info 版本 {root_bi.get('version')} ≠ package.json {pkg['version']}"
         "（跑 python3 bin/vod-devkit build-info 重烧）")
-    for field in ("version", "commitSha"):
-        assert root_bi.get(field) == pkg_bi.get(field), (
-            f"根/包内 build-info 的 {field} 不一致："
-            f"{root_bi.get(field)} vs {pkg_bi.get(field)}")
+    assert pkg_bi.get("version") == pkg["version"], (
+        f"包内 build-info 版本 {pkg_bi.get('version')} ≠ package.json {pkg['version']}"
+        "（跑 python3 scripts/sync_plugin.py）")
+    for name, bi in (("根", root_bi), ("包内", pkg_bi)):
+        ok = _commit_exists(str(bi.get("commitSha") or ""))
+        assert ok is not False, (
+            f"{name} build-info 的 commitSha {bi.get('commitSha')} 不是本仓的提交"
+            "（被 amend/rebase 掉，或非本仓产物）")
 
 
 def test_server_instructions_match_attribution_design():

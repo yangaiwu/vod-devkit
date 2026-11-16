@@ -72,17 +72,12 @@ def _remove_managed_mcp_entry(target: str, path: Path) -> None:
 
 
 def _hermes_cli_unsafe() -> bool:
-    """隔离跑（HOME 改了）时 hermes CLI 会写真实家目录 → 卸载路径跳过它，只做文件面清理。
+    """恒 False：CLI 落点已与文件落点同源（`_effective_hermes_home()`），不需要在卸载路径跳过它。
 
-    与安装路径不同：安装是"拒绝执行"（宁可不装），卸载是"跳过 CLI + 打印指引"
-    （配置条目摘不掉的残留有指引可循，而写坏真实 config.yaml 是不可接受的破坏）。
+    历史：这里曾靠一个后来退化成 no-op 的守卫抛 SystemExit 来"跳过 CLI"，try/except 于是成了
+    死代码；同时 `_cli_env()` 已保证隔离 HOME 下 CLI 写 `<HOME>/.hermes` 而不是真实家目录
+    （S161/S166）。保留空壳会让后来人以为还有一道守卫。
     """
-    try:
-        from vod_mcp.host_adapters import hermes as _h
-        _h._guard_isolated_home()
-    except SystemExit:
-        print("skip（隔离 HOME：hermes CLI 会写真实家目录，已跳过 CLI 摘除）", file=sys.stderr)
-        return True
     return False
 
 

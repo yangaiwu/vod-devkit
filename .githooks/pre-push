@@ -8,7 +8,7 @@ echo "[pre-push] lint..."
 echo "[pre-push] pytest..."
 "$PY" -m pytest tests/ -q || { echo "[pre-push] FAIL: 测试未过，禁止推送"; exit 1; }
 echo "[pre-push] 双副本一致性（生成物同步 + 内容一致 + 副本零提交）..."
-"$PY" scripts/sync_plugin.py >/dev/null || { echo "[pre-push] FAIL: sync_plugin 失败"; exit 1; }
+"$PY" scripts/sync_plugin.py --no-build-info >/dev/null || { echo "[pre-push] FAIL: sync_plugin 失败"; exit 1; }
 "$PY" scripts/verify_copies.py || { echo "[pre-push] FAIL: 双副本漂移——重跑 scripts/sync_plugin.py 后重试"; exit 1; }
 echo "[pre-push] dsh 壳测试（归因对账/回执守卫/UI 全局）..."
 if command -v node >/dev/null 2>&1 && [ -d packages/dsh/node_modules ]; then

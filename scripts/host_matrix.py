@@ -681,7 +681,7 @@ def main():
     # （import 生成器本身，PAIRS/忽略规则与门禁同源）。
     sys.path.insert(0, str(ROOT / "scripts"))
     import sync_plugin
-    sync_plugin.sync(ROOT, quiet=True)
+    sync_plugin.sync(ROOT, quiet=True, write_build_info=False)
     build = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
     version = str(build.get("version"))
     hosts = a.host or list(EXPECT)

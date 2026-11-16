@@ -60,8 +60,14 @@ def _git(args: list[str], root: Path) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
-def sync(root: Path = ROOT, quiet: bool = False) -> dict:
-    """整目录覆盖生成副本 + 烧录两处 build-info（幂等）。返回 build-info 内容。"""
+def sync(root: Path = ROOT, quiet: bool = False, write_build_info: bool = True) -> dict:
+    """整目录覆盖生成副本 + 烧录两处 build-info（幂等）。返回 build-info 内容。
+
+    `write_build_info=False`（S163-1）：只同步目录，不动两份 build-info。
+    测试期的 conftest 夹具必须用这个形态——旧写法把 tracked 的根 build-info 重烧成当前 HEAD，
+    于是 `test_build_info_root_and_plugin_copy_agree` 在给自己刚改过的文件打分：
+    常规跑绿、`VOD_DEVKIT_NO_BUILD_INFO=1`（host_matrix / CI 顺序）必红。
+    """
     for src_rel, dst_rel in PAIRS + EXTRA_PAIRS:
         src, dst = root / src_rel, root / dst_rel
         if not src.is_dir():
@@ -77,14 +83,20 @@ def sync(root: Path = ROOT, quiet: bool = False) -> dict:
     bi = {"version": version, "commitSha": sha,
           "builtAt": datetime.datetime.now().isoformat(timespec="seconds"),
           "sourceRemote": remote or None}
-    if os.environ.get("VOD_DEVKIT_NO_BUILD_INFO"):
-        # 打包/隔离跑法：保留现有 build-info（npm prepack 会跑本函数，若按当前 HEAD
+    if os.environ.get("VOD_DEVKIT_NO_BUILD_INFO") or not write_build_info:
+        # 打包/隔离跑法/测试期：保留现有 build-info（npm prepack 会跑本函数，若按当前 HEAD
         # 重烧，tarball 的代码指纹就不再等于 tag，与 release.sh 的终态断言冲突——
-        # 2026-11-16 实锤：v0.5.27 因此被拒发）。
+        # 2026-11-16 实锤：v0.5.27 因此被拒发）。S163-1：测试期也走这条，不许改 tracked 根。
         if not quiet:
-            print("build-info：跳过重烧（VOD_DEVKIT_NO_BUILD_INFO）")
+            print("build-info：跳过重烧（VOD_DEVKIT_NO_BUILD_INFO / write_build_info=False）")
         bi = json.loads((root / "build-info.json").read_text(encoding="utf-8")) \
             if (root / "build-info.json").is_file() else bi
+        # 插件副本是生成物（不入 git）：只在**缺失**时按现有根内容补一份，
+        # 否则副本自包含类用例会直接 FileNotFoundError（S163-1 的边界）。
+        pkg_rel = "plugins/vod-devkit/build-info.json"
+        if not (root / pkg_rel).is_file():
+            (root / pkg_rel).write_text(
+                json.dumps(bi, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return bi
     for rel in BUILD_INFO:
         (root / rel).write_text(json.dumps(bi, ensure_ascii=False, indent=2) + "\n",
@@ -98,9 +110,11 @@ def sync(root: Path = ROOT, quiet: bool = False) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--quiet", action="store_true", help="不打印（npm prepack 用）")
+    ap.add_argument("--no-build-info", action="store_true",
+                    help="只同步副本，不重烧 build-info（门禁/pre-push 用：不许动 tracked 根）")
     ap.add_argument("--root", default=str(ROOT))
     args = ap.parse_args(argv)
-    sync(Path(args.root), quiet=args.quiet)
+    sync(Path(args.root), quiet=args.quiet, write_build_info=not args.no_build_info)
     return 0
 
 

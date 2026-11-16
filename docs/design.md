@@ -1361,7 +1361,7 @@ uninstall 的安装行读法少了 `target` 判据（空账本被当有安装）
 |---|---|---|
 | 文件落点根 ≡ CLI 落点根 | `hermes._spec()["configPath"].parent.parent == hermes._cli_env()["HERMES_HOME"]`（未设时按 `<HOME>/.hermes` 解释） | S162，参数化 5 组 env，断言等式而非抽样 |
 | 测试不写被断言的 tracked 文件 | `sync(write_build_info=False)`；根 build-info 只在发版/显式 build-info 时重烧 | S163-1，比较 sync 前后字节 |
-| 溯源口径 | version：根 == 包内 == package.json；commitSha ∈ {v^, v, HEAD}（开发态 vs 发布态） | S163-2 |
+| 溯源口径 | version：根 == 包内 == package.json；commitSha 须为本仓真实提交（不锁单值） | S163-2 |
 | 不可核验 ≠ 通过 | 载荷与仓根都无 build-info → 「无法核验 provenance」 | S164-1 |
 | preset 完整性覆盖全行 | 逐 `install_rows()` 行判，报文带 target | S164-2 |
 | 外部 CLI 调用必须有超时 | `_CLI_TIMEOUT`（默认 60s），超时走降级分支 | S165 |

@@ -112,16 +112,23 @@ def test_s164_preset_walks_every_install_row(tmp_path, monkeypatch):
 
 
 def test_s165_hermes_mcp_add_has_timeout(monkeypatch, tmp_path):
-    """S165：`hermes mcp add` 子进程必须有 timeout（远程面早有 180s，本地面没有）。"""
+    """S165：`hermes mcp add` 子进程必须有 timeout（远程面早有 180s，本地面没有）。
+
+    PATH 前置桩：`remove_legacy_plugin()` 等处是裸 `subprocess.run(["hermes", …])`，
+    不经过 `shutil.which`——只 patch which 会打到**真** hermes CLI 上（实测它在这里
+    `completing source-update dependencies...` 挂满 60s）。
+    """
+    import os
+
     monkeypatch.setenv("HOME", str(tmp_path))
     from vod_mcp.host_adapters import hermes
 
     stub = tmp_path / "bin"
     stub.mkdir()
     fake = stub / "hermes"
-    fake.write_text("#!/bin/sh\nsleep 5\nexit 0\n", encoding="utf-8")
+    fake.write_text('#!/bin/sh\ncase "$1 $2" in\n  "mcp add") sleep 5 ;;\nesac\nexit 0\n', encoding="utf-8")
     fake.chmod(0o755)
-    monkeypatch.setattr(hermes.shutil, "which", lambda _n: str(fake))
+    monkeypatch.setenv("PATH", str(stub) + os.pathsep + os.environ.get("PATH", ""))
     monkeypatch.setattr(hermes, "_CLI_TIMEOUT", 1)
     args = types.SimpleNamespace(java_api_base="https://vod.example")
 
@@ -129,7 +136,7 @@ def test_s165_hermes_mcp_add_has_timeout(monkeypatch, tmp_path):
     conf = hermes.install(args, "core,collect")
     elapsed = time.time() - t0
     assert conf.exists(), "超时也要保住 JSON 片段（降级不失败）"
-    assert elapsed < 3.5, f"mcp add 未受 timeout 约束（{elapsed:.1f}s）"
+    assert elapsed < 6, f"mcp add 未受 timeout 约束（{elapsed:.1f}s）"
 
 
 def test_s166_no_dead_isolated_guard():

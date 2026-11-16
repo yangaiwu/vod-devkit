@@ -92,18 +92,6 @@ def _cli_env() -> dict:
     return env
 
 
-def _guard_isolated_home() -> None:
-    """保留调用点（install/install_remote）。安全性已由 `_cli_env()` 的落点重定向保证：
-    隔离 HOME 时 CLI 一律写 `<HOME>/.hermes`，继承来的 HERMES_HOME 不会把写入带回真实家目录。
-    这里只做一次可见性说明，不再拒绝（拒绝会让所有隔离跑法只能被迫改环境）。
-    """
-    _home, real, isolated = _home_state()
-    if not isolated or real is None:
-        return
-    if (os.environ.get("HERMES_HOME") or "").strip():
-        return          # 说明由 _cli_env 打（只在真正重定向时打，避免噪声）
-
-
 def _spec() -> dict:
     """调用期现读：host.json 的 ~ 必须在调用期按当前 HOME 解析。
 
@@ -161,6 +149,11 @@ GUARD_TIMEOUT = 5
 
 def _profile_config() -> Path:
     return Path(_spec()["profileConfig"])
+
+
+# 外部 CLI 子进程的上限（S165）。远程面本来就是 180s；本地面此前没有，空/异常
+# HERMES_HOME 下 hermes CLI 会自举依赖挂住，install --target all 卡在最后一台。
+_CLI_TIMEOUT = 60
 
 
 def _hook_script() -> Path:
@@ -354,7 +347,6 @@ def remove_legacy_plugin() -> str:
 
 def install(args, packs: str) -> Path:
     """Hermes：官方途径 hermes mcp add（config.yaml mcp_servers）。"""
-    _guard_isolated_home()
     conf = Path(_spec()["configPath"]).parent / "vod-devkit.json"
     conf.parent.mkdir(parents=True, exist_ok=True)
     conf.write_text(json.dumps({
@@ -367,10 +359,17 @@ def install(args, packs: str) -> Path:
     # 无 CLI 时不裸 exec（FileNotFoundError 会打崩 install）：JSON 已落盘，
     # 用户可手工并入 config.yaml —— 缺 CLI 是降级，不是失败。
     if shutil.which("hermes"):
-        r = subprocess.run(
-            ["hermes", "mcp", "add", "vod-devkit", "--command", sys.executable,
-             *["--env"] + env_args, "--args", server_entry()],
-            input="y\ny\n", capture_output=True, text=True, env=_cli_env())
+        try:
+            r = subprocess.run(
+                ["hermes", "mcp", "add", "vod-devkit", "--command", sys.executable,
+                 *["--env"] + env_args, "--args", server_entry()],
+                input="y\ny\n", capture_output=True, text=True, env=_cli_env(),
+                timeout=_CLI_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            r = None
+            print(f"[vod-devkit] hermes mcp add 超时（{_CLI_TIMEOUT}s）：已写出配置片段 {conf}\n"
+                  "      可手工执行 `hermes mcp add vod-devkit --command …`（逐问回答 y），"
+                  "或把该 JSON 并入 config.yaml 的 mcp_servers", file=sys.stderr)
     else:
         r = None
         print(f"提示：未找到 hermes CLI（PATH），已写出配置片段：{conf}\n"
@@ -396,7 +395,6 @@ def install(args, packs: str) -> Path:
 
 
 def install_remote(args, url, token):
-    _guard_isolated_home()
     """hermes mcp add --url：token 经 env 注入，配置里只留 ${MCP_VOD_DEVKIT_API_KEY} 引用。
 
     B1（2026-11-13 真机实锤）：hermes mcp add 对已存在条目的交互链是三问

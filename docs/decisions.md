@@ -2095,7 +2095,8 @@ config.yaml mtime 未变）。
 
 - 落点判据的不变量写成用例（S162，参数化 env 组合直接断言等式），而不是继续加分场景；
 - 测试期 sync **不许**写 tracked 根（`sync(write_build_info=False)`），门禁口径改为
-  「version 三方相等 + commitSha ∈ {v^, v, HEAD}」——与 `release.sh` 已采用的集合口径一致；
+  「version 三方相等 + commitSha 须为本仓真实提交」——根记 v^、包内记打包时刻是既有口径，
+  逐字相等不是真不变量；`git cat-file -e` 判可解释，`version` 三方相等继续防 0.4.2 那类漂移；
 - provenance 读不到即报「无法核验」；preset 分支遍历 `install_rows()` 的每一行并在报文里带 target；
 - `hermes mcp add` 加 `_CLI_TIMEOUT`（60s，模块常量便于用例压到 1s），`TimeoutExpired` 走
   「已写 JSON 片段 + 打印手工指引」同一降级分支；

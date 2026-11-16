@@ -1814,7 +1814,7 @@ Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此�
 |---|---|---|
 | S162 | 落点不变量 | 任意 env 组合下 `Path(spec["configPath"]).parent.parent == Path(_cli_env()["HERMES_HOME"])`（隔离/真实 HOME × HERMES_HOME 在外/在内/未设，5 组） |
 | S163-1 | 测试不写 tracked 根 | `sync(write_build_info=False)` 前后根 build-info 字节不变 |
-| S163-2 | 门禁口径 | 根/包内 **version** 必须相等且等于 package.json；commitSha 允许 {v^, v, HEAD}（与 release.sh 口径一致），不再要求两份逐字相等 |
+| S163-2 | 门禁口径 | 根/包内 **version** 必须相等且等于 package.json；commitSha 只要求「是本仓真实提交」（可解释），不再要求两份逐字相等、也不锁 v^/v 单值 |
 | S164-1 | 不可核验必须报 | 载荷与仓根都读不到 build-info → 报「无法核验 provenance」，不许 OK |
 | S164-2 | preset 遍历全行 | 多安装行时逐行判，破坏**第一行**也必须报（报文带 target） |
 | S165 | 子进程超时 | `hermes mcp add` 受 `_CLI_TIMEOUT`（默认 60s）约束；超时后仍保住 JSON 片段并打印降级指引 |

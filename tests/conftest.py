@@ -30,7 +30,7 @@ def _sync_plugin_copy():
     sys.path.insert(0, str(root / "scripts"))
     import sync_plugin
 
-    sync_plugin.sync(root, quiet=True)
+    sync_plugin.sync(root, quiet=True, write_build_info=False)
     yield
 
 

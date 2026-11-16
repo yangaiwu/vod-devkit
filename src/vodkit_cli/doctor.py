@@ -199,7 +199,27 @@ def _provenance_problem(mf: dict) -> str | None:
         if installed != bi.get("commitSha"):
             return f"install-manifest 与{where} build-info 的 commitSHA 不一致"
         return None
-    return None
+    # S164-1：读不到 ≠ 通过。旧实现在这里 `return None`，等于「没有 provenance 也 OK」——
+    # 载荷被删、仓根被清（npx 之外的干净检出）时 doctor/verify 会静默报成功。
+    return "无法核验 provenance（载荷与仓根都没有可读的 build-info）"
+
+
+def _preset_provenance_problems(mf: dict) -> list:
+    """preset 完整性：**逐行**判 manifest 与该行载荷是否同源（S164-2）。
+
+    为什么必须遍历：旧实现只判 `installs[-1]`，多安装行时前几行的载荷被换掉也报 OK。
+    报文带 target（dsh 再带 profile），一眼能看出是哪一台。
+    """
+    problems = []
+    for row in common.install_rows(mf):
+        view = common.row_view(mf, row)
+        problem = _provenance_problem(view)
+        if problem:
+            who = row.get("target") or "?"
+            if row.get("dshProfile"):
+                who = f"{who}:{row.get('dshProfile')}"
+            problems.append(f"{who}: {problem}")
+    return problems
 
 
 def _render_problems(problems) -> str:
@@ -542,10 +562,9 @@ def cmd_verify(_args):
         # S158：完整性取**载荷** build-info（仓根那份是 tracked 的发版快照，发版后
         # 与安装提交天然不等；拿它比会把正常装机报成混装）
         mfv = json.loads(p.read_text(encoding="utf-8"))
-        view = common.row_view(mfv, common.latest_row(mfv))
-        problem = _provenance_problem(view)
-        if problem:
-            print(f"FAIL: {problem}（安装产物被篡改/混装）")
+        problems = _preset_provenance_problems(mfv)
+        if problems:
+            print("FAIL: " + "；".join(problems) + "（安装产物被篡改/混装）")
             sys.exit(1)
         print("verify: OK（preset 本地完整性；源端比对 unchecked）")
         return
