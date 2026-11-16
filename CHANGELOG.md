@@ -536,9 +536,3 @@
 
 - c4d142f fix(audit): 桌面端宿主在巡检里报 SKIP 而不是 NOT_INSTALLED
 
-
-## v0.5.27（2026-11-16）
-
-- e132b3a docs(adr): D-gate-mypy-1 + S157（类型门禁进发版、OfficeAce sqlite 快照、OpenClaw 兜底判据）
-- 9308bd6 docs+fix: 全系统文档刷新 + mypy 门禁/OfficeAce 快照/OpenClaw 兜底
-
