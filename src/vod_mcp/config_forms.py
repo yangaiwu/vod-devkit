@@ -23,6 +23,17 @@ _HEADER = re.compile(r"^\[([^\[\]]+)\]$")
 _MAPPING_ROOT = re.compile(r"^[A-Za-z_][\w.\-]*\s*:")
 _DSH_ID = "- id: vod-devkit"
 
+# 托管块标记（D-dsh-mcp-b-1）：B 模式下一次写两条 insert 子项（mcp-client + 壳），
+# 用注释行包裹整块 → 幂等替换、卸载只摘自己，且不与无标记的旧形态混淆。
+_DSH_MARK_START = "# vod-devkit DSH integration start"
+_DSH_MARK_END = "# vod-devkit DSH integration end"
+
+
+def _is_dsh_id_line(stripped: str) -> bool:
+    """精确匹配 `- id: vod-devkit`（前缀匹配会把 `- id: vod-devkit-mcp` 也算进来 →
+    classify 判成"多个块"直接 refuse，托管块就永远写不进去）。"""
+    return stripped == _DSH_ID or stripped.startswith(_DSH_ID + " ")
+
 
 class Refused(Exception):
     """文件形态不在已知集合内：调用方必须原样放弃修改（字节不变）。"""
@@ -124,7 +135,7 @@ def classify_dsh_patch(lines: list) -> tuple:
         return "refuse", f"根节点是 flow 集合（{root[:20]}），本插件只写块数组"
     if _MAPPING_ROOT.match(root):
         return "refuse", f"根节点是映射（{root[:20]}），不是本插件写的顶层数组"
-    if sum(1 for ln in lines if ln.strip().startswith(_DSH_ID)) > 1:
+    if sum(1 for ln in lines if _is_dsh_id_line(ln.strip())) > 1:
         return "refuse", "出现多个 `- id: vod-devkit` 块（无法判定哪一份是活的）"
     return "ok", ""
 
@@ -132,13 +143,18 @@ def classify_dsh_patch(lines: list) -> tuple:
 def find_dsh_block(lines: list) -> tuple:
     """定位 vod-devkit 块的 (start, end)；不存在返回 (None, None)。
 
-    块边界=下一顶层元素行（`- ` 开头）或 EOF。嵌套铁律（真机实锤）：
-    dsh 只认缩进在 `- insert:` 之下的块——命中行带缩进时 start 向上归并到
-    该组头，整组替换；历史平铺形态按原语义顶格替换。install 的幂等 upsert
-    与 uninstall 的摘除共用本边界语义（单一实现，防两处扫描规则漂移）。
+    优先按**托管块标记**定位（D-dsh-mcp-b-1：B 模式下块内含 mcp-client 与壳两条子项，
+    只有标记能划出完整边界）；无标记时回落到旧形态扫描（`- id: vod-devkit`，
+    兼容已装机实例）。块边界=下一顶层元素行（`- ` 开头）或 EOF。
     """
     for i, ln in enumerate(lines):
-        if ln.strip().startswith(_DSH_ID):
+        if ln.strip() == _DSH_MARK_START:
+            for j in range(i + 1, len(lines)):
+                if lines[j].strip() == _DSH_MARK_END:
+                    return i, j + 1
+            return i, len(lines)      # 只有 start（半坏态）：整段到 EOF，由 upsert 重写
+    for i, ln in enumerate(lines):
+        if _is_dsh_id_line(ln.strip()):
             start = i
             if ln[:1] == " ":  # 嵌套形态：向上归并组头
                 for k in range(i - 1, -1, -1):

@@ -1,7 +1,18 @@
-"""DeepSeek Harness (dsh) 宿主适配：壳包 dsh-vod-devkit + profile patch upsert。
+"""DeepSeek Harness (dsh) 宿主适配：壳包 dsh-vod-devkit + profile patch 托管块。
 
-dsh 壳不走 MCP（工具/UI 都由壳进程提供）→ SUPPORTS_REMOTE=False。
+D-dsh-mcp-b-1（2026-11-16，参照 huaweicloud-devkit 的成熟做法）：dsh 本体自带
+`@deepseek-ai/dsh-mcp-client`，可把 python MCP server 挂成宿主工具（工具名
+`mcp__vod-devkit__vod_*`，12 个工具 / 机器级 state / 两段式全在）。所以：
+
+  ① 有 mcp-client → patch 里写**两条** insert 子项：mcp-client（工具面）+ 壳（只剩 UI 半，
+     config 里 registerTools=false），整块用注释标记包裹（幂等替换、卸载只摘自己）；
+  ② 无 mcp-client（版本门槛）→ 只写壳块（6 工具，降级形态，registerTools 缺省 true）。
+
+MCP 模式暂只做 stdio；mcp-client 也支持 streamable-http（本机实测通），
+SUPPORTS_REMOTE 仍是 False —— 远程 attach 单独一轮开，避免一次改两处语义。
 """
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -12,6 +23,94 @@ from vod_mcp import hosts as host_specs
 
 HOST = "dsh"
 SUPPORTS_REMOTE = False
+
+
+def _dsh_root(dsh_cli: str) -> Path:
+    """dsh 本体的安装根（`<root>/lib/...` 形态）；mcp-client 装在它的 node_modules 里，
+    profile 的 node_modules 里没有——版本门槛必须按这个根探。"""
+    return Path(os.path.realpath(dsh_cli)).parent.parent
+
+
+def _mcp_client_version(dsh_root: Path) -> str | None:
+    pkg = dsh_root / "node_modules" / "@deepseek-ai" / "dsh-mcp-client" / "package.json"
+    if not pkg.is_file():
+        return None
+    try:
+        return json.loads(pkg.read_text(encoding="utf-8")).get("version") or "unknown"
+    except Exception:  # noqa: BLE001  坏包按不可用处理，降级而不是崩
+        return None
+
+
+def _ensure_mcp_client(dsh_cli: str, profile: str) -> str | None:
+    """缺 mcp-client 时用 dsh 自己的安装通道补（参照物同做法）；可用 env 跳过。"""
+    root = _dsh_root(dsh_cli)
+    ver = _mcp_client_version(root)
+    if ver:
+        return ver
+    if os.environ.get("VOD_DSH_SKIP_MCP_CLIENT_ADD") == "1":
+        print("[vod-devkit] 跳过 mcp-client 自装（VOD_DSH_SKIP_MCP_CLIENT_ADD=1）→ 降级为壳工具面",
+              file=sys.stderr)
+        return None
+    r = subprocess.run([dsh_cli, "plugin", "--profile", profile, "add",
+                        "@deepseek-ai/dsh-mcp-client"],
+                       capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        print("[vod-devkit] mcp-client 自装失败（降级为壳工具面）："
+              f"{(r.stderr or r.stdout).strip()[-200:]}", file=sys.stderr)
+        return None
+    ver = _mcp_client_version(root)
+    if ver:
+        print(f"已装 @deepseek-ai/dsh-mcp-client@{ver}（工具面走 MCP，12 工具）")
+    return ver
+
+
+def _patch_block(args, mcp_ver: str | None, payload: Path, packs: str) -> str:
+    """生成托管块：标记包裹 + 两条（或一条）insert 子项，全部缩进在 `- insert:` 下。
+
+    嵌套铁律（真机实锤）：块必须缩进在 `- insert:` 之下——平铺会被 dsh 组合层丢弃，
+    插件掉出组合树（banner/工具/UI 全消失）。壳的 `name:` 行必须保留（绑定 UI 半）。
+    """
+    from vod_mcp import config_forms as cf
+    from vod_mcp import paths as _paths
+
+    prod_yaml = args.product or "''"   # schema 是 z.string()：YAML null 会校验失败
+    shell_cfg = [
+        f"        product: {prod_yaml}",
+        f"        apiBase: {args.java_api_base}",
+        f"        uiBase: {args.java_api_base}",   # 浏览器半直连引擎（D-uiBase-direct）
+        # headless 无审批通道：dsh 原生 ask 门禁会永久阻断写工具（四宿主实锤）。
+        # 同意确认由 SKILL 话术层承担；web 端要硬门禁按 profile 覆盖回 true。
+        "        confirmWrites: false",
+    ]
+    shell = ["    - id: vod-devkit", "      name: dsh-vod-devkit", "      config:"] + shell_cfg
+    if not mcp_ver:
+        return "\n".join([cf._DSH_MARK_START, "- insert:"] + shell + [cf._DSH_MARK_END])
+
+    # B 模式：壳只留 UI 半（工具面交给 mcp-client，避免双注册/双 submit）
+    shell_cfg.insert(0, "        registerTools: false")
+    shell = ["    - id: vod-devkit", "      name: dsh-vod-devkit", "      config:"] + shell_cfg
+    mcp = [
+        "    - id: vod-devkit-mcp",
+        "      name: '@deepseek-ai/dsh-mcp-client'",
+        "      config:",
+        "        serverName: vod-devkit",     # 工具名 = mcp__vod-devkit__vod_*
+        "        transport: stdio",
+        # stdio 形态零第三方依赖：用安装器自己的解释器即可（不抄显示层路径）
+        f"        command: {sys.executable}",
+        "        args:",
+        f"          - {payload / 'vod_mcp' / 'server.py'}",
+        "        env:",
+        # mcp-client 只给「清洗过的父环境 + 显式 env」：凭据形状的变量会被丢掉，
+        # 所以状态根/引擎地址/packs 必须显式传；key 故意不传（走机器级匿名令牌）。
+        f"          PYTHONPATH: {payload}",
+        f"          VOD_DEVKIT_HOME: {_paths.machine_state_home()}",
+        f"          VOD_JAVA_API_BASE: {args.java_api_base}",
+        f"          VOD_PACKS: {packs}",
+        f"        cwd: {payload}",
+        "        toolCallTimeoutMs: 30000",
+        "        failOnStartupError: false",
+    ]
+    return "\n".join([cf._DSH_MARK_START, "- insert:"] + mcp + shell + [cf._DSH_MARK_END])
 
 
 def skills_dir(args):
@@ -61,19 +160,15 @@ def install(args, packs: str) -> Path:
     # 形态被 dsh 组合层丢弃，插件掉出组合树（banner/工具/UI 全消失）。
     # 归因先验（D-attrib-B）：--product 可选；空值时写 '' 而非空值
     # （dsh 壳 config schema 是 z.string().default('')，YAML null 会校验失败）
-    prod_yaml = args.product or "''"
-    block = ("- insert:\n"
-             "    - id: vod-devkit\n"
-             "      name: dsh-vod-devkit\n"
-             "      config:\n"
-             f"        product: {prod_yaml}\n"
-             f"        apiBase: {args.java_api_base}\n"
-             f"        uiBase: {args.java_api_base}\n"  # D-uiBase-direct：浏览器半直连引擎
-             "        # headless 无审批通道：原生 ask 门禁会永久阻断写工具（四宿主实测实锤：\n"
-             "        # requires approval, but no approval channel）。同意确认由 SKILL 话术层\n"
-             "        # 承担（draft→用户确认→commit / 明确指令直发），web 端如需硬门禁按\n"
-             "        # profile 覆盖回 true。\n"
-             "        confirmWrites: false\n")
+    # D-dsh-mcp-b-1：B 模式判定——dsh 本体有没有 mcp-client（缺则尝试用 dsh 自己的
+    # 安装通道补，补不上就降级成壳工具面）。块本身见 _patch_block。
+    mcp_ver = _ensure_mcp_client(dsh, profile)
+    from vod_mcp.host_adapters import base as _base
+    payload = _base.payload_dir()
+    if not payload:                      # 直调（测试/手工）没 stage：用分发根兜底
+        from vod_mcp import paths as _paths
+        payload = _paths.DIST_ROOT
+    block = _patch_block(args, mcp_ver, Path(payload), packs)
     try:
         written = upsert_patch(patch, block)
     except Exception as e:
@@ -82,13 +177,15 @@ def install(args, packs: str) -> Path:
         # 与真实 IO 失败——两者的处置动作不同，文案必须能分辨。
         print(f"[vod-devkit] 插件已装入 profile={profile}，但配置写入失败"
               f"（{e.__class__.__name__}: {e}；该文件未被改动）。请手动把下段并入 {patch}"
-              f"（顶层 YAML 数组元素，已有 - id: vod-devkit 段则原位替换）：\n"
+              f"（托管块：标记行 + `- insert:` 段，已有同标记块则整块原位替换）：\n"
               f"{block}", file=sys.stderr)
         sys.exit(1)
+    mode = (f"MCP（mcp-client@{mcp_ver}，工具面 12 个，壳只留 UI）" if mcp_ver
+            else "壳自注册（降级：6 工具）")
     if written:
-        print(f"已写入归因/引擎配置（幂等 upsert）：{patch}")
+        print(f"已写入 dsh 托管块（{mode}）：{patch}")
     else:
-        print(f"配置未变化（幂等跳过）：{patch}")
+        print(f"配置未变化（幂等跳过，{mode}）：{patch}")
     return patch
 
 
@@ -171,6 +268,7 @@ def remove_patch_block(patch: Path) -> bool:
 
 
 def install_remote(args, url, token):
-    print("[vod-devkit] dsh 壳不走 MCP，不支持远程 attach；请用本地形态："
+    print("[vod-devkit] dsh 本轮只支持本地形态（MCP stdio）；远程 attach 待下一轮开"
+          "（dsh-mcp-client 支持 streamable-http，本机已实测）。请用："
           "install --target dsh --profile <name>", file=sys.stderr)
     sys.exit(2)

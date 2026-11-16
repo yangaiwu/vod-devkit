@@ -1553,3 +1553,30 @@ hermes config / **机器级 state**）任一漂移 → `[S143] 测试写到了�
 | S145-17 | 自指时先验成立 | 原话「你们这个产品导出太慢了」→ `source=install_binding`、`product=31`、`evidence=[{reason:self-reference, alias, snippet}]` 可回指 |
 | S145-18 | 代领护栏随绑定地址 | 回环 → 允许代领；非回环无开关 → 关闭（`net.ANON_MINT_DISABLED=True`）；非回环 + `--allow-anon-mint` → 开启 |
 | S145-19 | 禁用态不外呼 | `ANON_MINT_DISABLED=True` 时 `_fetch_anon_token()` 返回 None 且**一次引擎请求都不发**（不是"发了再失败"） |
+
+
+## dsh B 模式：工具面走 MCP client，壳只留 UI（S146，D-dsh-mcp-b-1，2026-11-16）
+
+**背景（参照物实读 + 本机实测）**：dsh 本体自带 `@deepseek-ai/dsh-mcp-client`
+（0.2.1-rc.5，stdio + streamable-http），可把 python MCP server 挂成宿主工具
+（`mcp__vod-devkit__vod_*`）。huaweicloud-devkit 走的就是这条路，且用托管块写 profile patch。
+本仓现状是 JS 壳自注册 6 工具 + 另一份 `data/runtime.json` 账本 → 同一插件两套工具面/两份身份。
+
+**修法**：
+1. 版本门槛按 **dsh 本体** `node_modules` 探（profile 里没有该模块）；缺则自装
+   （`dsh plugin add @deepseek-ai/dsh-mcp-client`，env `VOD_DSH_SKIP_MCP_CLIENT_ADD=1` 可跳过）。
+2. profile patch 改**托管块**：`# vod-devkit DSH integration start/end` 包裹，
+   有 client → 两条 insert（mcp-client + 壳`registerTools:false`）；无 client → 只壳块（降级）。
+3. 幂等/卸载语义：重复安装只有一份块；卸载只摘自己那块。
+4. **卸载不再整文件删 patch**（共享文件，用户/其它插件也写 insert 块——旧路径实锤会连坐）。
+5. SKILL 补"dsh 工具名带 `mcp__vod-devkit__` 前缀，以 tools/list 实际名为准"。
+
+**边界**：只做 stdio（`SUPPORTS_REMOTE` 仍 False）；UI 半（`client.jsx` 浏览器直连引擎）不随之统一。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S146-1 | 有 client → 双 insert | patch 含托管标记、`id: vod-devkit-mcp` 与 `id: vod-devkit`、壳 `registerTools: false`、env 三键（HOME/BASE/PACKS）都在；stdout 报 `MCP（mcp-client@…` |
+| S146-2 | 缺 client → 降级 | 无 mcp 块、无 `registerTools` 键（缺省 true）、stdout 报 `壳自注册（降级：6 工具）` |
+| S146-3 | 幂等 | 连装两次：文件逐字节相同、标记与 mcp 块各 1 处 |
+| S146-4 | 卸载只摘自己 | 用户追加的 `someone-else` 块保留、托管块消失、patch 文件本身仍在 |
+| S146-5 | id 精确匹配 | `- id: vod-devkit-mcp` 不被当成 `vod-devkit`（否则 classify refuse，托管块写不进去） |

@@ -69,3 +69,14 @@ MCP 独立部署（同机常驻 server，agent 用 HTTP 连 127.0.0.1:9528）与
 两段式 `vod_draft_voices`/`vod_commit_voices` 与 `vod_list_submitted` 在远程面同样可用，
 但草稿只能由创建它的那个 agent 提交（按宿主隔离，串了会报"不属于当前客户端"）。
 唯一远程没有的是 `vod_packs_configure`（进程内开关）。
+
+## 宿主差异：dsh 的工具名带前缀
+
+- dsh（装了 `@deepseek-ai/dsh-mcp-client` 的版本）**工具由 MCP 承载**，注册名是
+  `mcp__vod-devkit__vod_search_products` / `mcp__vod-devkit__vod_auth_ensure` /
+  `mcp__vod-devkit__vod_submit_voices` …（能力面与其它宿主一致）。
+- 没有 mcp-client 的降级形态，工具由 dsh 壳自注册，只有 6 个**短名**
+  （vod_submit_voices / vod_list_submitted / vod_devkit_info / vod_list_skills /
+  vod_retrieve_skill / vod_check_update），没有 ensure / draft / commit。
+- 调用前**以宿主 tools/list 里的实际名字为准**；两种形态的采集纪律、同意前置、原话逐字
+  完全相同，只是名字前缀不同。

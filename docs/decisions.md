@@ -1662,3 +1662,28 @@ MCP server 独立部署"）：远程与本地是同一套效果，不是多租�
 **验证**：`tests/test_attribution.py::test_s145_binding_requires_self_reference` /
 `test_s145_binding_used_when_user_points_at_current_product`；
 S96 用例同步改为"自指才归 + 无自指转 unknown"。
+
+## D-dsh-mcp-b-1：dsh 工具面走 MCP client，壳只留 UI（2026-11-16 负责人拍板 B）
+
+**背景**：参照物 huaweicloud-devkit 在 dsh 上不做专用 JS 工具插件，用 dsh 本体的
+`@deepseek-ai/dsh-mcp-client` 把 MCP server 挂成宿主工具（工具名 `mcp__<server>__<tool>`），
+profile patch 用托管块（start/end 标记 + 幂等 + 卸载只摘自己）。本机实测（0.2.1-rc.5）：
+stdio 与 streamable-http 两条传输都通，模型能真调 `mcp__vod-devkit__vod_devkit_info`。
+
+**决定（B 模式）**：
+1. 有 mcp-client → 托管块里写两条 insert：mcp-client（工具面，12 工具 / 机器级 state /
+   两段式 / ensure）+ 壳（`registerTools: false`，只留浏览器 UI 半）。
+2. 无 mcp-client（版本门槛按 **dsh 本体** node_modules 探）→ 只写壳块（6 工具，降级），
+   缺模块时用 `dsh plugin add` 自装，`VOD_DSH_SKIP_MCP_CLIENT_ADD=1` 可跳过。
+3. **壳必须停止注册工具**（`registerTools=false`）：MCP 与壳同时注册 = 两个 submit、
+   两套账本/令牌，用户可能重复提交。默认值保留 true（向后兼容旧 config / 降级形态）。
+4. **卸载不得整文件删 `cordis.patch.yml`**：它是共享文件（用户与其它插件都往里写 insert 块）。
+   本轮用例实锤旧路径会整份删除、连坐别人的块；改为只摘托管块。
+5. SKILL 补指法：dsh 下工具名带 `mcp__vod-devkit__` 前缀，以 tools/list 实际名为准。
+
+**代价/边界**：多一个 python 子进程、工具名变长；MCP 模式本轮只做 stdio
+（`SUPPORTS_REMOTE` 仍 False，client 支持 streamable-http 但远程 attach 单独一轮）；
+**UI 半不统一**——`client.jsx` 仍是浏览器直连引擎，agent 工具面与 UI 提交是两条链。
+
+**验证**：`tests/test_dsh_mcp_mode.py`（S146-1..5：双 insert / 降级 / 幂等 / 卸载只摘自己 /
+id 精确匹配）；真机取证用 `vod-devkit-verification` 技能的 `scripts/dsh-mcp-probe.py`。

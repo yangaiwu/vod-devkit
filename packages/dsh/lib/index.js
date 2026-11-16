@@ -43,6 +43,10 @@ export const Config = z.object({
     apiKey: z.string().default('').volatile().role('secret'),
     product: z.string().default('').volatile(),
     confirmWrites: z.boolean().default(true).volatile(),
+    // D-dsh-mcp-b-1：B 模式（MCP client 承载工具面）时壳只留 UI 半。
+    // 默认 true 保向后兼容（旧 config 无此键 = 仍注册 6 个工具 = 降级形态）；
+    // 安装器在 MCP 模式（dsh 本体带 @deepseek-ai/dsh-mcp-client）下显式写 false。
+    registerTools: z.boolean().default(true).volatile(),
     timeoutSec: z.number().default(30).volatile(),
     receiptGuard: z.string().default('report').volatile(), // D-rguard-1：off|report|enforce，默认 report（零危害只标注）
 });
@@ -565,6 +569,9 @@ export function apply(ctx, config) {
         key: readCfg(config?.apiKey, '') || '',
         product: readCfg(config?.product, '') || '',
         confirmWrites: readCfg(config?.confirmWrites, true) !== false,
+        // D-dsh-mcp-b-1：工具面开关。缺省 true（老 config / 降级形态照旧自注册）；
+        // MCP 模式下安装器写 false，壳只留 UI 半（否则两个 submit 并存）。
+        registerTools: readCfg(config?.registerTools, true) !== false,
         timeoutSec: readCfg(config?.timeoutSec, 30),
         receiptGuard: RG_MODES.includes(readCfg(config?.receiptGuard, 'report'))
             ? readCfg(config?.receiptGuard, 'report') : 'report',
@@ -936,7 +943,11 @@ export function apply(ctx, config) {
         },
     ];
 
-    for (const t of tools) ctx.tools.register(t);
+    // D-dsh-mcp-b-1：工具面两条路——① MCP client 挂 python server（12 工具、机器级 state、
+    // 两段式/ensure 全在）；② 壳自注册（6 工具，mcp-client 缺失或显式关闭时的降级形态）。
+    // registerTools=false 时壳只提供 UI 半（浏览器按钮），不再注册任何工具。
+    const registerShellTools = cfg().registerTools !== false;
+    if (registerShellTools) for (const t of tools) ctx.tools.register(t);
 
     // 写操作确认：dsh 审批通道（web 端弹确认框），拒绝则不执行
     if (typeof ctx.on === 'function') {
@@ -958,7 +969,12 @@ export function apply(ctx, config) {
         }
     }
 
-    console.log(`[dsh-vod-devkit] Registered ${tools.length} tools, apiBase=${cfg().base}` +
-        (cfg().key ? ', key=set' : ', key=none (auto anonymous-token on first submit)') +
-        (cfg().product ? `, product=${cfg().product}` : ', product=unset (must be set or passed per call)'));
+    if (registerShellTools) {
+        console.log(`[dsh-vod-devkit] Registered ${tools.length} tools, apiBase=${cfg().base}` +
+            (cfg().key ? ', key=set' : ', key=none (auto anonymous-token on first submit)') +
+            (cfg().product ? `, product=${cfg().product}` : ', product=unset (must be set or passed per call)'));
+    } else {
+        console.log(`[dsh-vod-devkit] UI only（registerTools=false）：工具面由 MCP client 提供`
+            + `（serverName=vod-devkit，工具名 mcp__vod-devkit__vod_*），apiBase=${cfg().base}`);
+    }
 }

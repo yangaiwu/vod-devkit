@@ -262,7 +262,8 @@ def cmd_install(args):
     skills_only = bool(getattr(args, "skills_only", False))
     if remote_url or skills_only:
         if not getattr(adapter, "SUPPORTS_REMOTE", False):
-            what = "dsh 壳不走 MCP" if target == "dsh" else f"{target} 不走 MCP"
+            what = ("dsh 本轮只支持本地形态（远程 attach 待开）" if target == "dsh"
+                    else f"{target} 不走 MCP")
             print(f"[vod-devkit] {what}，不支持 --mcp-url / --skills-only\n"
                   f"  {target} 请用本地形态：install --target {target} "
                   + ("--profile <name>" if target == "dsh" else ""),

@@ -159,12 +159,17 @@ def _cleanup_install_row(row: dict, skill_hashes: dict | None = None,
         path_s = None
     if path_s:  # codex 等宿主 mcpConfig 可为 None（P0-3：无托管配置文件）
         path = Path(path_s)
+        # dsh 的 profile cordis.patch.yml 是**共享文件**（用户与其它插件也往里写 insert
+        # 块）——整文件删会把别人的内容一起删掉（本轮 B 模式用例实锤：卸载后文件消失）。
+        # 托管块的摘除由下方 dsh 段（remove_patch_block）完成，这里只打印不改字节。
+        if target == "dsh":
+            print(f"skip（dsh profile patch 是共享文件，只摘托管块）：{path}")
         # 深审 P0-3（破坏性路径一票否决）：共享用户配置永不整文件删除
         #（config.toml/opencode.json/codearts_cli.json/.claude.json 里有用户自己的
         # provider、其它 server）。JSON 合并型宿主一律走"摘条目"，与文件名无关——
         # codearts_cli.json 第一版没进 _SHARED_CONFIG_NAMES，卸载把整份配置删了（实锤）。
-        if target in ("opencode", "codeartsdoer", "codeartswork", "generic",
-                      "workbuddy", "atomcode") or path.name in _SHARED_CONFIG_NAMES:
+        elif target in ("opencode", "codeartsdoer", "codeartswork", "generic",
+                        "workbuddy", "atomcode") or path.name in _SHARED_CONFIG_NAMES:
             print(f"skip（用户配置文件，uninstall 只摘托管条目）：{path}")
             _remove_managed_mcp_entry(target, path)
         elif path.exists():

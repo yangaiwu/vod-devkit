@@ -212,7 +212,7 @@ def test_dsh_rejects_remote_mode(env, remote_server):
     r = cli(env, "install", "--target", "dsh", "--profile", "web",
             "--mcp-url", remote_server["url"], "--mcp-token", TOKEN)
     assert r.returncode == 2
-    assert "dsh 壳不走 MCP" in r.stderr
+    assert "dsh 本轮只支持本地形态" in r.stderr
 
 
 # ---- skills-only ----
