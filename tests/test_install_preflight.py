@@ -89,14 +89,9 @@ def test_hermes_isolated_home_never_writes_real_config(tmp_path):
     home.mkdir()
     real_conf = Path(os.path.expanduser("~")) / ".hermes" / "config.yaml"
     before = real_conf.read_bytes() if real_conf.exists() else None
-    r = _run(["install", "--target", "hermes"], home, extra=_shim_cli(home))
-    out = (r.stdout or "") + (r.stderr or "")
+    _run(["install", "--target", "hermes"], home, extra=_shim_cli(home))
     after = real_conf.read_bytes() if real_conf.exists() else None
     assert before == after, "隔离跑的 install 改到了真实 ~/.hermes/config.yaml"
-
-
-def test_hermes_isolated_home_ignores_inherited_real_hermes_home(tmp_path):
-    """网关派生的 env 恒带 HERMES_HOME=/root/.hermes：隔离跑也不许照它写真机配置。"""
 
 
 def test_server_py_path_with_space_is_read_back(tmp_path):
@@ -121,4 +116,5 @@ def test_hermes_isolated_home_ignores_inherited_real_hermes_home(tmp_path):
     r = _run(["install", "--target", "hermes"], home,
              extra={**_shim_cli(home), "HERMES_HOME": str(real)})
     after = (real / "config.yaml").read_bytes() if (real / "config.yaml").exists() else None
+    assert r.returncode in (0, 2), (r.stdout or "") + (r.stderr or "")
     assert before == after, f"隔离跑照 HERMES_HOME 写到了真实家目录：{r.stderr[-300:]}"
