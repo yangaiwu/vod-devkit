@@ -182,3 +182,42 @@ def test_s142_audit_codex_uses_enabled_marketplace_not_sorted_last(tmp_path, mon
     state, msg = m.audit_host("codex", "9.9.9", home=tmp_path)
     # stub 恒回 9.9.9，唯一能区分"读了哪份"的信号必须在报文里说出市场名
     assert "personal" in msg, f"巡检没说清 codex 实际生效的市场（报文={msg!r}）——排序取最后一份会报 vod-local 假绿"
+
+
+def _dsh_profile(home: Path, *, mcp: bool, register_tools: bool, shell_ver: str) -> None:
+    prof = home / ".dsh" / "profiles" / "web"
+    prof.mkdir(parents=True, exist_ok=True)
+    lines = ["- insert:"]
+    if mcp:
+        lines += ["    - id: vod-devkit-mcp", "      name: '@deepseek-ai/dsh-mcp-client'"]
+    lines += ["    - id: vod-devkit", "      config:"]
+    if register_tools is False:
+        lines.append("        registerTools: false")
+    (prof / "cordis.patch.yml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if shell_ver:
+        pkg = prof / "node_modules" / "dsh-vod-devkit"
+        pkg.mkdir(parents=True, exist_ok=True)
+        (pkg / "package.json").write_text(json.dumps({"version": shell_ver}), encoding="utf-8")
+
+
+def test_s146_audit_dsh_reports_mcp_mode_only_when_shell_stops_registering(tmp_path):
+    """D-dsh-mcp-b-1：dsh 巡检必须看"双块 + 壳不注册"，否则半坏态（patch 写了
+    registerTools:false 而 profile 里壳还是旧版本、字段根本不存在）会报假 PASS。"""
+    m = _load_matrix()
+    # ① 完整 B 模式
+    _dsh_profile(tmp_path, mcp=True, register_tools=False, shell_ver="0.5.10")
+    state, msg = m.audit_host("dsh", "0.5.10", home=tmp_path)
+    assert state == "PASS", f"完整 B 模式必须 PASS；实际 {state}: {msg}"
+    assert "MCP 模式" in msg and "壳只留 UI" in msg, msg
+    # ② 有 mcp 块但壳仍注册 → 双 submit
+    _dsh_profile(tmp_path, mcp=True, register_tools=True, shell_ver="0.5.10")
+    state, msg = m.audit_host("dsh", "0.5.10", home=tmp_path)
+    assert state == "DRIFT" and "双 submit" in msg, f"壳未关注册必须 DRIFT；实际 {state}: {msg}"
+    # ③ 壳版本没升（add 未钉版本的真机实锤）
+    _dsh_profile(tmp_path, mcp=True, register_tools=False, shell_ver="0.5.9")
+    state, msg = m.audit_host("dsh", "0.5.10", home=tmp_path)
+    assert state == "DRIFT" and "0.5.9" in msg, f"壳旧版本必须 DRIFT；实际 {state}: {msg}"
+    # ④ 无 mcp-client → 降级形态，壳自注册（不是 FAIL）
+    _dsh_profile(tmp_path, mcp=False, register_tools=True, shell_ver="0.5.10")
+    state, msg = m.audit_host("dsh", "0.5.10", home=tmp_path)
+    assert "降级" in msg, f"降级形态必须在报文里写清；实际 {state}: {msg}"

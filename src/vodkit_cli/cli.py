@@ -42,7 +42,7 @@ def main():
                     help="dsh 专用：profile 名（--target dsh 时必填）")
     sp.add_argument("--mcp-url", default="",
                     help="远程 attach 模式：宿主 MCP 配置指向该 Streamable HTTP 端点"
-                         "（hermes/opencode/codex 支持；dsh 不走 MCP）")
+                         "（hermes/opencode/codex 支持；dsh 本轮只支持本地形态：工具面走 MCP stdio，远程 attach 待开）")
     sp.add_argument("--mcp-token", default="",
                     help="远程 attach 的身份（也可用 env VOD_MCP_TOKEN）：默认可选——"
                          "给了就用请求头 Bearer，不给则走远程 server 侧机器级匿名令牌")

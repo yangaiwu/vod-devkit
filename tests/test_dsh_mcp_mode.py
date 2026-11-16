@@ -84,6 +84,18 @@ def test_dsh_degrades_to_shell_tools_without_mcp_client(env):
     assert "壳自注册（降级：6 工具）" in r.stdout
 
 
+def test_dsh_plugin_add_pins_installer_version(env):
+    """`dsh plugin add` 必须钉死到安装器版本：profile 的 package.json 是精确版本，
+    不带版本的 add 会被 pnpm 当成"已满足"跳过 → 升级时装到旧壳（真机 0.5.10 实锤：
+    patch 写了 registerTools:false，壳里根本没这个字段，工具面静默双注册）。"""
+    _dsh_stub(env)
+    assert cli(env, "install", "--target", "dsh", "--profile", "web",
+               "--product", "CodeArts").returncode == 0
+    calls = (env["stub"].parent / "dsh-calls.log").read_text(encoding="utf-8")
+    from vod_mcp import __version__
+    assert f"add dsh-vod-devkit@{__version__}" in calls, calls
+
+
 def test_dsh_managed_block_is_idempotent(env):
     _fake_dsh_root(env)
     assert cli(env, "install", "--target", "dsh", "--profile", "web",

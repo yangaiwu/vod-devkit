@@ -481,9 +481,32 @@ def audit_host(host: str, expect_version: str, home: Path | None = None) -> tupl
                if "- id: vod-devkit" in p.read_text(encoding="utf-8", errors="replace")]
         if not hit:
             return "NOT_INSTALLED", "dsh profile patch 里没有 vod-devkit 块"
+        # D-dsh-mcp-b-1：B 模式下工具面由 mcp-client 承载，壳只留 UI。判据必须是
+        # **双块都在 + 壳显式关掉注册**——只看 `- id: vod-devkit` 会把"写完托管块但
+        # 壳版本没升、registerTools 字段不存在"的半坏态报成 PASS（0.5.10 真机实锤）。
+        text = hit[0].read_text(encoding="utf-8", errors="replace")
+        mcp_mode = "- id: vod-devkit-mcp" in text
+        shell_off = "registerTools: false" in text
+        shell_ver = ""
+        pkg = hit[0].parent / "node_modules" / "dsh-vod-devkit" / "package.json"
+        if pkg.exists():
+            try:
+                shell_ver = json.loads(pkg.read_text(encoding="utf-8")).get("version") or ""
+            except Exception:      # noqa: BLE001  坏包按未知处理，不掩盖 patch 事实
+                shell_ver = ""
+        if mcp_mode:
+            if not shell_off:
+                return "DRIFT", "有 mcp-client 块但壳仍注册工具（registerTools 未写 false）→ 双 submit"
+            if not pkg.exists():
+                return "DRIFT", "MCP 模式但 profile 里没装 dsh-vod-devkit（dsh plugin add 未生效）"
+            if expect_version and shell_ver and shell_ver != expect_version:
+                return "DRIFT", (f"MCP 模式，但 profile 里壳 {shell_ver} ≠ 期望 {expect_version}"
+                                 "（dsh plugin add 未钉版本，升级装的是旧壳）")
+            return "PASS", f"MCP 模式（工具面 mcp__vod-devkit__*，壳只留 UI，壳 {shell_ver or '未知'}）"
         cmd = entry or {}
-        ok, msg = _probe(cmd, expect_version) if cmd else (True, "patch 存在（壳自证跳过）")
-        return ("PASS" if ok else "DRIFT"), msg
+        ok, msg = _probe(cmd, expect_version) if cmd else (True, "降级：壳自注册（patch 存在）")
+        return (("PASS" if ok else "DRIFT"),
+                msg + "；降级形态：壳自注册 6 工具（无 mcp-client）")
     if not entry:
         return "NOT_INSTALLED", "无条目"
     ok, msg = _probe(entry, expect_version)

@@ -143,14 +143,27 @@ def install(args, packs: str) -> Path:
         print("[vod-devkit] 未找到 dsh CLI（PATH），拒绝安装（宁可不装不可装错）。"
               "前置：npm i -g @deepseek-ai/dsh（需 pnpm）", file=sys.stderr)
         sys.exit(2)
-    r = subprocess.run([dsh, "plugin", "--profile", profile,
-                        "add", "dsh-vod-devkit"],
+    # 版本必须钉死到本次安装器版本：profile 的 package.json 里是精确版本
+    # （`"dsh-vod-devkit": "0.5.9"`），不带版本的 `add dsh-vod-devkit` 会被 pnpm
+    # 当成"已满足"直接跳过 —— 真机实锤：0.5.10 装完 profile 里仍是 0.5.9，
+    # patch 已写 registerTools:false 而壳里根本没这个字段，工具面静默双注册。
+    # 带版本失败（本地开发/离线/registry 未传播）才回落不带版本。
+    from vod_mcp import __version__ as _ver
+    pkg = f"dsh-vod-devkit@{_ver}"
+    r = subprocess.run([dsh, "plugin", "--profile", profile, "add", pkg],
                        capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        print(f"[vod-devkit] dsh plugin add {pkg} 失败，回落不钉版本："
+              f"{(r.stderr or r.stdout).strip()[-200:]}", file=sys.stderr)
+        r = subprocess.run([dsh, "plugin", "--profile", profile,
+                            "add", "dsh-vod-devkit"],
+                           capture_output=True, text=True, timeout=300)
     if r.returncode != 0:
         print(f"[vod-devkit] dsh plugin add 失败：{(r.stderr or r.stdout).strip()[-300:]}",
               file=sys.stderr)
         sys.exit(1)
-    print(f"已安装 dsh 插件 dsh-vod-devkit（profile={profile}，dsh plugin list 可见）")
+    print(f"已安装 dsh 插件 dsh-vod-devkit（profile={profile}，目标版本 {_ver}，"
+          "dsh plugin list 可见）")
 
     patch = Path(host_specs.load("dsh", profile)["configPath"])
     # name 行必须保留：cordis.patch.yml 的 insert 块靠 name 绑定 client 半
