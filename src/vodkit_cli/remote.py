@@ -129,7 +129,51 @@ def _remote_reachable(url: str, timeout: int = 6) -> bool:
         return False
 
 
-def _validate_product_or_exit(product: str, base: str) -> bool:
+def _catalog_cache_path():
+    """产品名录缓存落在机器级 state 目录（与令牌同域，0600）。
+
+    为什么缓存：产品名校验每跑一次就要一枚匿名令牌，而引擎对"同网络当日/同 IP 每小时"
+    的**签发次数**限流（真机撞到 100/日、60/小时）。名录 7 天不变的东西不该每次去问引擎。
+    """
+    from vod_mcp import paths as _paths
+    return _paths.machine_state_home() / "product-catalog.json"
+
+
+def _read_catalog_cache(base: str):
+    """命中返回 (catalog, age_secs)，否则 None。TTL 可用 VOD_PRODUCT_CATALOG_TTL 覆盖（秒）。"""
+    import time
+    ttl = float(os.environ.get("VOD_PRODUCT_CATALOG_TTL") or 7 * 86400)
+    if ttl <= 0:
+        return None
+    p = _catalog_cache_path()
+    if not p.is_file():
+        return None
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if str(d.get("base") or "") != str(base):
+        return None           # 换了引擎地址 → 缓存作废
+    age = time.time() - float(d.get("at") or 0)
+    if age > ttl:
+        return None
+    cat = d.get("catalog")
+    return (cat, age) if isinstance(cat, list) and cat else None
+
+
+def _write_catalog_cache(base: str, catalog: list) -> None:
+    import time
+    p = _catalog_cache_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"base": str(base), "at": time.time(), "catalog": catalog},
+                                ensure_ascii=False), encoding="utf-8")
+        os.chmod(p, 0o600)
+    except OSError:
+        pass                  # 缓存写不进不是安装的失败条件
+
+
+def _validate_product_or_exit(product: str, base: str, refresh: bool = False) -> bool:
     """D-product-id-2：安装期产品硬校验（B 案，2026-11-05 拍板）。
     --product 命中 meta productCatalog（名字大小写不敏感或 id 精确）才放行；
     未命中/目录不可达一律拒绝安装并给可执行引导（宁可不装不可装错）。
@@ -204,10 +248,25 @@ def _validate_product_or_exit(product: str, base: str) -> bool:
             cat = data if isinstance(data, list) else None
         return cat
 
+    if os.environ.get("VOD_SKIP_PRODUCT_CHECK") == "1":
+        print("[vod-devkit] 跳过产品校验（VOD_SKIP_PRODUCT_CHECK=1：巡检/离线场景；"
+              "归因名单在装机时已验过）", file=sys.stderr)
+        return True
+
     catalog, unauthorized, rate_limited, last_exc = None, False, False, None
+    if not refresh:
+        cached = _read_catalog_cache(base)
+        if cached:
+            catalog = cached[0]
+            print(f"[vod-devkit] 产品校验：命中本地缓存（{cached[1] / 3600:.1f} 小时前拉取，"
+                  "未请求引擎；要强刷用 --refresh-product-catalog）")
     for attempt in (1, 2):
+        if catalog is not None:      # 缓存命中：本地比对即可，不打引擎
+            break
         try:
             catalog = _catalog_once()
+            if catalog:
+                _write_catalog_cache(base, catalog)
             last_exc = None
             break
         except urllib.error.HTTPError as e:

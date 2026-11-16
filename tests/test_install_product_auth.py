@@ -150,3 +150,77 @@ def test_429_reports_rate_limit_and_stops_retrying(monkeypatch, capsys):
     err_out = capsys.readouterr().err
     assert "429" in err_out and "限流" in err_out, err_out
     assert calls["mint"] == 1, f"429 后不得继续重试签发；实际尝试 {calls['mint']} 次"
+
+
+# ── S149：产品名录缓存（把"每次校验都要一枚令牌"降到"7 天一枚"）──────
+
+def _seed_cache(base, catalog, age_secs=0.0):
+    import time
+    p = remote._catalog_cache_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"base": base, "at": time.time() - age_secs, "catalog": catalog}),
+                 encoding="utf-8")
+
+
+def test_s149_cache_hit_skips_engine(monkeypatch, capsys):
+    _seed_cache("https://engine", [{"id": "1", "name": "CodeArts"}])
+    called = []
+
+    def handler(req, timeout=None):
+        called.append(getattr(req, "full_url", ""))
+        return _Resp({})
+
+    monkeypatch.setattr("urllib.request.urlopen", handler)
+    assert remote._validate_product_or_exit("CodeArts", "https://engine") is True
+    assert not called, "缓存命中不得请求引擎（每请求一次就烧一枚匿名令牌）"
+    assert "命中本地缓存" in capsys.readouterr().out
+
+
+def test_s149_cache_expired_refetches_and_rewrites(monkeypatch):
+    _seed_cache("https://engine", [{"id": "1", "name": "Stale"}], age_secs=8 * 86400)
+    calls = {"meta": 0, "mint": 0}
+    ok = _Resp({"data": {"productCatalog": [{"id": "1", "name": "CodeArts"}]}})
+    monkeypatch.setattr("urllib.request.urlopen", _handler([ok], calls))
+    assert remote._validate_product_or_exit("CodeArts", "https://engine") is True
+    assert calls["meta"] == 1, "TTL 过期必须重拉"
+    fresh = json.loads(remote._catalog_cache_path().read_text(encoding="utf-8"))
+    assert fresh["catalog"][0]["name"] == "CodeArts", "重拉后必须刷新缓存"
+
+
+def test_s149_cache_keyed_by_engine_base(monkeypatch):
+    _seed_cache("https://other-engine", [{"id": "1", "name": "CodeArts"}])
+    calls = {"meta": 0, "mint": 0}
+    ok = _Resp({"data": {"productCatalog": [{"id": "1", "name": "CodeArts"}]}})
+    monkeypatch.setattr("urllib.request.urlopen", _handler([ok], calls))
+    assert remote._validate_product_or_exit("CodeArts", "https://engine") is True
+    assert calls["meta"] == 1, "换了引擎地址，旧缓存必须作废"
+
+
+def test_s149_refresh_flag_ignores_cache(monkeypatch):
+    _seed_cache("https://engine", [{"id": "1", "name": "CodeArts"}])
+    calls = {"meta": 0, "mint": 0}
+    ok = _Resp({"data": {"productCatalog": [{"id": "1", "name": "CodeArts"}]}})
+    monkeypatch.setattr("urllib.request.urlopen", _handler([ok], calls))
+    assert remote._validate_product_or_exit("CodeArts", "https://engine", refresh=True) is True
+    assert calls["meta"] == 1, "--refresh-product-catalog 必须绕过缓存"
+
+
+def test_s149_ttl_env_disables_cache(monkeypatch):
+    _seed_cache("https://engine", [{"id": "1", "name": "CodeArts"}])
+    monkeypatch.setenv("VOD_PRODUCT_CATALOG_TTL", "0")
+    calls = {"meta": 0, "mint": 0}
+    ok = _Resp({"data": {"productCatalog": [{"id": "1", "name": "CodeArts"}]}})
+    monkeypatch.setattr("urllib.request.urlopen", _handler([ok], calls))
+    assert remote._validate_product_or_exit("CodeArts", "https://engine") is True
+    assert calls["meta"] == 1, "TTL=0 等于禁用缓存"
+
+
+def test_s149_skip_product_check_env(monkeypatch, capsys):
+    """巡检路径：VOD_SKIP_PRODUCT_CHECK=1 直接放行，一次外呼都不发。"""
+    monkeypatch.setenv("VOD_SKIP_PRODUCT_CHECK", "1")
+    called = []
+    monkeypatch.setattr("urllib.request.urlopen",
+                        lambda *a, **k: called.append(1) or _Resp({}))
+    assert remote._validate_product_or_exit("CodeArts", "https://engine") is True
+    assert not called
+    assert "跳过产品校验" in capsys.readouterr().err

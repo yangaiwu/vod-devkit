@@ -154,8 +154,12 @@ def _sandbox_host_cli(home: Path, name: str) -> str:
 
 
 def _run_install(env, host, extra=()):
+    # 巡检是"装载面"验收，不是归因验收：产品名在装机时已验过，这里跳过产品校验。
+    # 不跳的话每次巡检 = 9 次隔离装 = 9 枚匿名令牌签发，直接把引擎限流打满
+    #（真机实锤 100/日、60/小时两档，整批装机被挡）。
+    e = {**env, "VOD_SKIP_PRODUCT_CHECK": "1"}
     r = subprocess.run([sys.executable, str(BIN), "install", "--target", host, *extra],
-                       capture_output=True, text=True, env=env, timeout=300)
+                       capture_output=True, text=True, env=e, timeout=300)
     return r
 
 

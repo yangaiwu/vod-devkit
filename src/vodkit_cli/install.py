@@ -216,7 +216,8 @@ def cmd_install(args):
     # 猜测同源纪律）。插件提交链的 name 兼容通道不受影响（那是老版本插件兼容，
     # 不是安装期放行理由）。
     if args.product:  # 可选先验：给了就校验，不给不拦装（D-attrib-B）
-        remote._validate_product_or_exit(args.product, args.java_api_base)
+        remote._validate_product_or_exit(args.product, args.java_api_base,
+                                         refresh=bool(getattr(args, "refresh_product_catalog", False)))
     # D-key-guard-2 红线：preset（产品分发）形态下 key 禁止随包——环境变量里的
     # key 不透传给宿主配置（客户机一律走匿名令牌自领），并当场告警
     distribution = args.distribution

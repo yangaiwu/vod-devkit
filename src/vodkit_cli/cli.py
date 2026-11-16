@@ -53,6 +53,8 @@ def main():
                     help="只装技能，不动宿主 MCP 配置（MCP 已由别处/手工注册时用）")
     sp.add_argument("--no-local-ledger", action="store_true",
                     help="关闭本地提交账本（企业数据驻留要求；vod_list_submitted 将不可用）")
+    sp.add_argument("--refresh-product-catalog", action="store_true",
+                    help="强制向引擎重拉产品名录（默认命中 state 里 7 天内的缓存，省令牌配额）")
     sp.set_defaults(fn=install.cmd_install)
     for name, fn in (("status", doctor.cmd_status), ("doctor", doctor.cmd_doctor),
                      ("verify", doctor.cmd_verify), ("update", update.cmd_update),

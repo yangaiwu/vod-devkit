@@ -1611,3 +1611,25 @@ hermes config / **机器级 state**）任一漂移 → `[S143] 测试写到了�
 | S148-5 | 无候选 | 只剩在用版本时报"没有可清理"且 exit 0 |
 | S148-6 | 不碰 state | 删除后 `state/runtime.json` 仍在 |
 | S148-7 | 候选集合 | `prune_candidates()` 只含旧版本，不含在用/当前/手工目录 |
+
+
+## 产品名录缓存与巡检跳过校验（S149，D-token-reuse-1 后继，2026-11-16）
+
+**背景**：S147 只做到"装机复用 state 令牌"，`host_matrix --audit` 每次隔离装 9 个宿主（各自
+独立 HOME → 各自一枚令牌）仍是最大放大器。名录 7 天不变，不该每跑一次巡检就问一次引擎。
+
+**修法**：
+1. 校验成功的名录落 `<state>/product-catalog.json`（0600，含 base + at + catalog）；
+   `VOD_PRODUCT_CATALOG_TTL`（秒，默认 7 天，0=禁用）；换引擎地址即作废；
+   `install --refresh-product-catalog` 强制重拉；
+2. 巡检路径用 `VOD_SKIP_PRODUCT_CHECK=1`（`host_matrix._run_install` 自动设）跳过校验——
+   巡检验的是装载面，归因名单在装机时已验过。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S149-1 | 缓存命中 | 一次外呼都不发，输出"命中本地缓存" |
+| S149-2 | TTL 过期 | 重拉引擎并刷新缓存 |
+| S149-3 | 换了引擎地址 | 旧缓存作废（按 base 键控） |
+| S149-4 | `--refresh-product-catalog` | 绕过缓存强制重拉 |
+| S149-5 | `VOD_PRODUCT_CATALOG_TTL=0` | 等于禁用缓存 |
+| S149-6 | `VOD_SKIP_PRODUCT_CHECK=1` | 直接放行且零外呼（巡检路径） |

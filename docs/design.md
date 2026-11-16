@@ -1253,4 +1253,8 @@ install 覆盖当前版本、**从不删旧版本**。清理只有一条路：�
 遗留：`host_matrix --audit` 每次隔离装 9 宿主 = 9 枚签发，是最大放大器；下一轮做
 productCatalog 的 state 缓存（TTL + 强制刷新开关）。
 
-用例承载：`tests/test_install_product_auth.py`（S147）。
+**已落地（S149）**：校验成功的名录落 `<state>/product-catalog.json`（base 键控 + 7 天 TTL +
+`--refresh-product-catalog` 强刷）；巡检走 `VOD_SKIP_PRODUCT_CHECK=1`（`host_matrix._run_install`
+自动设）——巡检验装载面，不重验归因名单。
+
+用例承载：`tests/test_install_product_auth.py`（S147 / S149）。
