@@ -19,7 +19,6 @@
 import json
 import os
 import platform
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -176,6 +175,52 @@ def remove_rows(db_path: Path) -> int:
         db.close()
 
 
+def _snapshot(db_path: Path) -> Path:
+    """用 sqlite 自己的 backup API 做一致性快照（不许 copyfile）。
+
+    2026-11-16 评审：宿主（桌面端）可能正开着这个库，WAL 里还有未落盘事务——
+    文件复制拿到的是残缺/过期副本，回滚时等于拿坏副本盖掉宿主数据库。
+    backup() 走 sqlite 的在线备份协议，拿到的是事务一致快照；备份名带时分秒+pid，
+    并清理同前缀的老备份（默认保留 7 天，避免每装一次堆一份）。
+    """
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = db_path.with_name(f"{db_path.name}.vod-devkit-{stamp}-{os.getpid()}.bak")
+    src = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        dst = sqlite3.connect(str(dest))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    _prune_snapshots(db_path)
+    return dest
+
+
+def _prune_snapshots(db_path: Path, days: int = 7) -> None:
+    cutoff = datetime.now().timestamp() - days * 86400
+    for old in db_path.parent.glob(f"{db_path.name}.vod-devkit-*.bak"):
+        try:
+            if old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            pass
+
+
+def _restore(snapshot: Path, db_path: Path) -> None:
+    """回滚也走 sqlite：把快照**写回**在线库（而不是覆盖文件），WAL/-shm 由 sqlite 处理。"""
+    snap = sqlite3.connect(f"file:{snapshot}?mode=ro", uri=True)
+    try:
+        live = sqlite3.connect(str(db_path))
+        try:
+            snap.backup(live)
+        finally:
+            live.close()
+    finally:
+        snap.close()
+
+
 def _readback(db_path: Path) -> tuple | None:
     db = sqlite3.connect(str(db_path))
     try:
@@ -206,20 +251,20 @@ def install(args, packs):
         print(f"[vod-devkit] OfficeAce 连接器库不存在：{db_path}（先启动一次 OfficeAce）",
               file=sys.stderr)
         sys.exit(2)
-    backup = db_path.with_suffix(db_path.suffix + f".bak-{int(datetime.now().timestamp())}")
-    shutil.copyfile(db_path, backup)
-    entry = {"command": sys.executable, "args": [server_entry()],
-             "env": server_env(args, packs)}
-    row = connector_row(entry["command"], entry["args"], entry["env"])
+    backup = _snapshot(db_path)
+    command: str = sys.executable
+    entry_args: list = [server_entry()]
+    entry_env: dict = dict(server_env(args, packs))
+    row = connector_row(command, entry_args, entry_env)
     try:
         action = upsert_row(db_path, row)
         got = _readback(db_path)
-        want = (entry["command"], json.dumps(entry["args"], ensure_ascii=False))
-        if not got or got[0] != want[0] or json.loads(got[1]) != entry["args"]:
+        if not got or got[0] != command or json.loads(got[1]) != entry_args:
             raise RuntimeError(f"写后读回不一致：{got}")
-    except Exception as e:      # noqa: BLE001  任何失败都回滚到备份，绝不半写
-        shutil.copyfile(backup, db_path)
-        print(f"[vod-devkit] OfficeAce 写入失败，已回滚（备份 {backup}）：{e}", file=sys.stderr)
+    except Exception as e:      # noqa: BLE001  任何失败都回滚到快照，绝不半写
+        _restore(backup, db_path)
+        print(f"[vod-devkit] OfficeAce 写入失败，已用 sqlite 快照回滚（{backup.name}）：{e}",
+              file=sys.stderr)
         sys.exit(2)
     print(f"已{'更新' if action == 'updated' else '写入'} OfficeAce 连接器："
           f"{db_path}（name={NAME}，备份 {backup.name}；重启 OfficeAce 生效）")
@@ -241,8 +286,7 @@ def uninstall() -> bool:
     if not db_path.exists():
         print(f"skip（连接器库不存在）：{db_path}", file=sys.stderr)
         return False
-    backup = db_path.with_suffix(db_path.suffix + f".bak-{int(datetime.now().timestamp())}")
-    shutil.copyfile(db_path, backup)
+    backup = _snapshot(db_path)
     n = remove_rows(db_path)
-    print(f"removed OfficeAce connector rows: {n}（备份 {backup.name}）")
+    print(f"removed OfficeAce connector rows: {n}（快照 {backup.name}）")
     return n > 0

@@ -171,7 +171,24 @@ def uninstall() -> bool:
         print("removed OpenClaw MCP entry:", (r.stdout or r.stderr or "").strip()[-120:])
         return True
     msg = ((r.stderr or "") + (r.stdout or ""))
-    if "size-drop" in msg:
+    # 兜底触发条件不看**错误文案**（openclaw 改文案就静默退化成"只给指引"）；
+    # 只看事实：条目还在不在。还在 + 配置是严格 JSON → 外科摘除（JSON5 会在函数内拒绝）。
+    if _entry_present(cli):
         return _surgical_remove(_config_path())
     print("skip（OpenClaw 条目未摘除）：" + msg.strip()[-160:], file=sys.stderr)
     return False
+
+
+def _entry_present(cli: str) -> bool:
+    """条目是否仍在注册表里：先问 CLI（show），CLI 不可判定时退回配置文件文本。"""
+    try:
+        r = subprocess.run([cli, "mcp", "show", NAME, "--json"],
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode == 0:
+            return True
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        return f'"{NAME}"' in _config_path().read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False

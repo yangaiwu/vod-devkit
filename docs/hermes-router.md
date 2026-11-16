@@ -41,7 +41,9 @@ plugins.enabled 是显式同意门（第三方代码默认不运行），需手�
 
 - 注入仍是给模型的指令，不改变模型服从性天花板——提交侧硬保障仍是
   方案 A 回显 + 护栏 confirmed=false 拒绝
-- 仅 Hermes 宿主可装（pre_llm_call 是 Hermes 插件面）；opencode/codex
+- 仅 Hermes 宿主可装（pre_llm_call 是 Hermes 插件面）；2026-11-16 新增的 openclaw / officeace 同样没有这条面
+  （openclaw 只有 `mcp.servers` 注册表；officeace 是桌面端 sqlite 连接器），不要指望路由注入。
+- opencode/codex
   的对应能力待各宿主钩子面调研（opencode 有 plugin 体系待查）
 
 ## 多宿主对表（2026-11-06，opencode/codex/dsh 是否需要同款路由）

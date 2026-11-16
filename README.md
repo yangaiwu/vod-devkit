@@ -30,7 +30,7 @@
 |---|---|---|
 | Node | >= 18 | `npx` 引导器；dsh 宿主请按其官方要求（Node 24.9+） |
 | Python | >= 3.10 | 安装器与 MCP server；可用 `VOD_PYTHON` 指定解释器 |
-| 宿主 | hermes / opencode / codeartsdoer / codeartswork / codex / codex-desktop / dsh / workbuddy / atomcode / openclaw 任一（OfficeAce 为桌面端，仅 Windows 可接）（另支持 claude-code / cursor / windsurf / cline 等走 `--target generic`） | 用 `--target auto` 探测，或显式指定 |
+| 宿主 | hermes / opencode / codeartsdoer / codeartswork / codex / codex-desktop / dsh / workbuddy / atomcode / openclaw / officeace 任一（officeace 为桌面端，仅 Windows 上有安装面）（另支持 claude-code / cursor / windsurf / cline 等走 `--target generic`） | 用 `--target auto` 探测，或显式指定 |
 | 网络 | 可达你的 VOD 引擎 | 缺省 `https://vod-dev.topxtopx.com`，可 `--java-api-base` 覆盖 |
 
 远程面额外需要官方 MCP SDK：`pip install 'vod-devkit[remote]'`（stdio 形态零第三方依赖）。
@@ -280,7 +280,7 @@ npx -y vod-devkit@latest install --target officeace      # 仅 Windows 有意义
 - 落点不是 JSON 而是它的 sqlite：`<InstallDir>/data/mcp-connectors.sqlite` 的 `mcp_connectors` 行
   （type=custom / transport=stdio / name=vod-devkit）；InstallDir 依次取
   `OFFICE_CLAW_CONFIG_ROOT` → `HKCU\SOFTWARE\OfficeAce\OfficeAce` 的 InstallDir → `%LOCALAPPDATA%/Programs/OfficeAce`。
-- 写库前整份备份、事务写、写后读回校验，失败回滚；不建表不改 schema（schema 不是我们的）。
+- 写库前用 **sqlite 一致性快照**（`backup()` 在线备份，不是复制文件——远处桌面端可能开着库、WAL 里有未落盘事务）、事务写、写后读回校验；失败用快照回滚；不建表不改 schema（schema 不是我们的）；快照按天保留 7 天。
 - **未真机验证**（本机无对象）：形态按参照实现（huaweicloud-devkit officeace-registry.ts）对齐，
   门禁只锁"非 Windows 拒绝 + sqlite 行域（幂等/只删自己/不建表）+ 回滚"。
 
@@ -302,14 +302,16 @@ npx -y vod-devkit@latest uninstall
 
 - `--profile` 必填（profile 名 = `ls ~/.dsh/profiles` 的目录名）；装的是壳包
   `dsh-vod-devkit`（npm 同名），配置幂等写进 profile 的 `cordis.patch.yml`
-- **dsh 壳不走 MCP**：`--mcp-url` / `--skills-only` 对它显式报错；远程面模式不覆盖 dsh
+- **形态自动选择（0.5.10 起）**：dsh 本体有 `@deepseek-ai/dsh-mcp-client` 时，托管块写两条
+  insert —— MCP stdio（工具名 `mcp__vod-devkit__vod_*`）+ 壳 `registerTools: false`（只留 UI 半）；
+  缺依赖时安装器尝试 `dsh plugin add` 自装（`VOD_DSH_SKIP_MCP_CLIENT_ADD=1` 可跳过），
+  仍补不上就降级为壳自带的采集面。判断形态只看 banner/工具计数这类**运行态自述**，不看 patch 缩进。
+- `--mcp-url` / `--skills-only` 对 dsh 显式报错（远程 attach 仍未开）；远程面模式不覆盖 dsh
 - 卸载会摘插件并从 patch 移除本插件的 config 块，不删其它插件段
-- **dsh 壳只到"半套"（支持矩阵里的显式差异，不是 bug）**：工具面 6 个
-  （submit / list_submitted / info / list_skills / retrieve_skill / check_update，
-  没有 MCP 侧的 search_products / auth_status / auth_ensure / draft / commit / packs_configure），
-  并且**不共享机器级 state**（它有自己的 `packages/dsh/data/runtime.json` 与 cap 200 环形账本，
-  与 MCP 侧 `<state>/runtime.json` 是两份设备锚点）。跨语言共用锁 + 字段契约对齐后才可能合并，
-  本轮记为待办；需要完全一致的匿名身份/账本时用 MCP 宿主。
+- **降级形态（MCP 块拉不起来）才是"半套"**：只剩壳自带的采集面（submit / list_submitted / info /
+  list_skills / retrieve_skill / check_update，没有 MCP 侧的 search_products / auth_* / draft / commit / packs_configure），
+  并且**不共享机器级 state**（它有自己的
+  `packages/dsh/data/runtime.json` 与 cap 200 环形账本）。MCP 形态下工具面与身份/账本与其它宿主一致。
 
 ## 其它 MCP 宿主（通用层）
 
@@ -408,6 +410,9 @@ npx -y vod-devkit@latest install --target codex    --mcp-url https://<网关>/mc
 | vod_list_submitted | collect | 只读 | 本机提交账本（cap 200）——agent 替用户对账进度 |
 | vod_devkit_info | core | 只读 | 版本 / commitSHA / 宿主 clientInfo |
 | vod_auth_status | core | 只读 | key 指纹化自检 + 三步引导（无 key 可跑） |
+| vod_auth_ensure | core | 写（身份） | 判定 + 领取匿名令牌（幂等；唯一有副作用的认证工具） |
+| vod_search_products | core | 只读 | 名录检索（含主键 ID）：问用户"是哪个产品"前给候选 |
+| vod_packs_configure | core | 写（会话内） | 会话内开关能力包；**远程面不提供**（进程内状态，多 agent 会互相影响） |
 | vod_check_update | core | 只读 | registry latest（24h 缓存 / 失败静默）；只提醒不升级 |
 | vod_list_skills / vod_retrieve_skill | knowledge | 只读 | 领域规则技能披露（pack 裁剪即拒绝并给恢复命令） |
 
@@ -527,7 +532,7 @@ MIT（见 LICENSE.txt）。第三方素材见 NOTICE。
 vod-devkit doctor                 # 分层报告：环境/载荷/配置/技能/网络/插件，每条给动作
 vod-devkit explain -32010         # 解释一条错误码/错误文案：层 + 原因 + 动作
 vod-devkit detect --path .        # 只读识别项目语言/框架/构建（不写任何文件）
-python3 scripts/host_matrix.py    # 9 宿主安装矩阵：装→断言→拉起 server→卸→验干净（openclaw 仅有 --audit 巡检，矩阵装机待补）
+python3 scripts/host_matrix.py    # 全宿主安装矩阵：装→断言→拉起 server→卸→验干净（桌面端宿主在本机 SKIP；真实机器用 --audit）
 ```
 
 矩阵 PASS 的**含义边界**（2026-11-16 收窄，别读成"宿主装得上"）：沙箱里的宿主 CLI 一律用

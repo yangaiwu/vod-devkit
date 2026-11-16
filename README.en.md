@@ -25,7 +25,7 @@ Three rules that matter more than the skeleton:
 |---|---|---|
 | Node | >= 18 | `npx` bootstrap; the dsh host needs Node 24.9+ per its own docs |
 | Python | >= 3.10 | installer + MCP server; point `VOD_PYTHON` at an interpreter if needed |
-| Host | hermes / opencode / codeartsdoer / codex / dsh | `--target auto` probes, or name one explicitly |
+| Host | hermes / opencode / codeartsdoer / codeartswork / codex / codex-desktop / dsh / workbuddy / atomcode / openclaw / officeace | `--target auto` probes, or name one explicitly (officeace is Windows-only) |
 | Network | reachable VOD engine | defaults to `https://vod-dev.topxtopx.com`, override with `--java-api-base` |
 
 The remote face additionally needs the official MCP SDK:
@@ -124,8 +124,11 @@ npx -y vod-devkit@latest install --target dsh --profile <name>
 ```
 
 `--profile` is required; installs the `dsh-vod-devkit` shell package and writes a
-profile `cordis.patch.yml` override. The dsh shell does not speak MCP:
-`--mcp-url` / `--skills-only` exit 2.
+profile `cordis.patch.yml` override. Since 0.5.10 the installer picks the MCP form
+when `@deepseek-ai/dsh-mcp-client` is present (two insert blocks: MCP stdio +
+shell `registerTools: false`, UI only); otherwise it falls back to the shell's own
+reduced tool surface. Remote attach is still unsupported: `--mcp-url` /
+`--skills-only` exit 2.
 
 ## Other MCP hosts (generic layer)
 
@@ -162,7 +165,8 @@ pip install 'vod-devkit[remote]'
 vod-devkit serve --transport remote --port 9528 --host 127.0.0.1   # put TLS/identity in front
 ```
 
-Attach a host (token required — the remote face never mints anonymous identity):
+Attach a host (token optional — without a Bearer the server uses the machine-level
+anonymous token it mints/keeps itself, same as the local face):
 
 ```bash
 npx -y vod-devkit@latest install --target hermes   --mcp-url https://<gateway>/mcp --mcp-token <key>
@@ -177,8 +181,9 @@ remote face; the engine decides: `rejected` = invalid API key → refuse
 install; `device-mismatch` = anonymous token bound to another device (the
 token itself is fine) → allow, re-minted automatically on first submit; engine
 unreachable → allow — a network problem is not a key problem). The
-remote face withholds machine-local tools (`vod_draft_voices`,
-`vod_commit_voices`, `vod_list_submitted`) — a shared process has no "local".
+the remote face withholds exactly one tool, `vod_packs_configure` (in-process
+pack switch; a shared HTTP server would let one agent change another's surface).
+Draft/commit/ledger are available remotely (drafts are owner-scoped).
 There is no built-in auth: bind to loopback and front it with TLS + identity.
 
 ## Telemetry and data
@@ -201,6 +206,9 @@ There is no built-in auth: bind to loopback and front it with TLS + identity.
 | vod_list_submitted | collect | read | local ledger (cap 200) |
 | vod_devkit_info | core | read | version / commitSHA / host clientInfo |
 | vod_auth_status | core | read | fingerprint self-check + 3-step guidance |
+| vod_auth_ensure | core | write (identity) | decide + mint the anonymous token (idempotent) |
+| vod_search_products | core | read | catalog lookup with IDs (candidates before asking the user) |
+| vod_packs_configure | core | write (session) | in-session pack switch; not exposed on the remote face |
 | vod_check_update | core | read | npm latest (24h cache, silent on failure); never self-upgrades |
 | vod_list_skills / vod_retrieve_skill | knowledge | read | rule-skill disclosure (pack filtering refuses with a fix hint) |
 

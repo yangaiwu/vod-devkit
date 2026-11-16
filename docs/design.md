@@ -16,7 +16,7 @@ vod-devkit（可分发插件包，目录随本设计落仓）
 ├── bin/vod-devkit            # 安装器 CLI
 ├── vod_mcp/                  # MCP server（stdio，薄壳；双后端出口见下）
 │   ├── server.py             # 工具注册与调度（握手时记录 clientInfo）
-│   ├── tools.py              # 5 个工具 → api.py 调用链
+│   ├── tools.py              # 工具注册与调度（契约唯一事实源 assets/contract/tools.schema.json）
 │   ├── packs.py              # VOD_PACKS 裁剪：core/workflow/kb
 │   └── provenance.py         # build-info 读取 + 宿主身份（clientInfo）
 ├── build-info.json           # 构建时烧录（git commitSHA/version/time）
@@ -210,13 +210,13 @@ B 自助注册制（会把人跑掉，否决为入门方案）→ **C 零字段�
 分治——I/O 型偏 TS、数据/ML 封装型偏 Python，MCP 协议使插件层语言
 切换成本趋近改配置（窄腰解耦），故语言决策重量低、可逆。
 
-按工具性质如实判定：本插件 5 个工具全部为 HTTP 转发（I/O 型），名义
+按工具性质如实判定：本插件的工具面全部为 HTTP 转发（I/O 型），名义
 默认落在 TS 一侧——此判定写明，不回避。仍选 Python 的依据（按权重排序）：
 
 1. 宿主 hook 层：首个消费者 Hermes 的 hook 机制是 .py；壳与 hook 同仓
    同语言，维护面减半（devkit 同款纪律：hook 语言跟宿主走）
 2. 团队与仓库现状：VOD 仓 49 个 Python 模块+pytest+venv；TS 壳=第二套
-   工具链+第二套 CI，为一个 5 工具的薄壳不成立
+   工具链+第二套 CI，为一个薄壳不成立
 3. 决策重量低且可逆（MCP 窄腰）：此处选"顺手的"而非"名义默认的"是
    理性排序；真要换，适配壳层逐个换不影响契约与宿主配置
 
@@ -251,8 +251,10 @@ dsh 宿主不识 MCP，只认自家 cordis 插件协议——故以独立薄壳�
 结构：
 - dsh/package.json：peerDeps=cordis/dsh-tools/schemastery（均 npm 公网），
   `dsh.bundle.patch` 指向 cordis.patch.yml
-- packages/dsh/lib/index.js：cordis 插件入口（name/inject=['tools']/Config/apply），
-  注册 3 工具：vod_submit_voices / vod_list_submitted / vod_devkit_info
+- packages/dsh/lib/index.js：cordis 插件入口（name/inject=['tools']/Config/apply）。
+  **当前是 B 模式（0.5.10 起）**：壳只留 UI 半（`registerTools: false`），工具面由
+  `@deepseek-ai/dsh-mcp-client` 的 MCP stdio 提供；缺该依赖时降级为壳自带的采集面
+  （工具名 `mcp__vod-devkit__vod_*` 才是常态，壳自述工具名只出现在降级形态）
 - dsh/cordis.patch.yml：bundle 激活声明（insert 条目）
 - 审批：ctx.on('tools/pre-execute') 对 submit 返回 kind:'ask'（dsh 原生
   审批通道，web 端弹卡片）——对应 MCP 形态的 confirmed 语义
@@ -277,7 +279,7 @@ PRODUCT_MAP 硬编码需随引擎 VodExternalProducts 手工同步——D-dsh-3�
 3. dsh-tools 强校验 output={schema,render} 双字段，缺 render 即 TypeError
 4. 引擎 product 枚举大小写敏感且 400 无错误体（S13，根治在引擎侧）
 
-冒烟验证链（.smoke/ 不入库）：mock ctx 加载→3 工具注册→审批门禁
+冒烟验证链（.smoke/ 不入库）：mock ctx 加载→壳工具面注册（降级形态；B 模式走 MCP）→审批门禁
 （ask/passthrough）→真实提交（taskId=425/426）→账本回读；另有真机
 web 会话端到端（S12，taskId=427）。
 
@@ -947,7 +949,8 @@ cache 内 .mcp.json 被改写成 `python3` 绝对路径 + `payloads/0.5.9/vod_mc
   原样保留；首改落 `.bak`。
 - 写后读回：与 codex 改写同一条纪律——写成功 ≠ 落盘就是我们要的；不一致抛错。
 - `core` 强制包含：禁 core 等于关掉元数据/安全面，跟 devkit 同口径。
-- 不可写 JSON 的宿主（dsh 的 cordis.patch.yml、codex-desktop 的 marketplace）**明确报
+- 不可直写配置的宿主（dsh 的 cordis.patch.yml、codex-desktop 的 marketplace、
+  openclaw 的 JSON5 `openclaw.json`——只能经 `openclaw mcp add/set/unset`）**明确报
   "需重跑 install"**，不打印成功。
 
 卸载语义（`uninstall --target` / `--clean-global`）：
@@ -1088,7 +1091,7 @@ doctor 此前对出站面是盲的：key 探针只在配了 key 时跑，没 key
 
 ## 凭据作用域：一台机器一个匿名令牌（D-token-machine-1，2026-11-16 负责人拍板）
 
-**结论**：匿名令牌是**机器级**身份，不是版本级、不是宿主级。同一台机器上，9 个宿主、跨版本升级、
+**结论**：匿名令牌是**机器级**身份，不是版本级、不是宿主级。同一台机器上，全部已装宿主（含多 profile 的 dsh）、跨版本升级、
 MCP 单独部署，都共用 `<state>/runtime.json` 里的同一个 `install_nonce` 与同一枚匿名令牌。
 
 **为什么改**（两处实测隐患）：
@@ -1250,7 +1253,7 @@ install 覆盖当前版本、**从不删旧版本**。清理只有一条路：�
 异常（可能集群令牌不同步）"；`429` **立即停**并报"签发被限流"；网络异常重试一次后报"不可达"；
 目录空单独一档（指向 T7i 部署）。
 
-遗留：`host_matrix --audit` 每次隔离装 9 宿主 = 9 枚签发，是最大放大器；下一轮做
+遗留：`host_matrix --audit` 每次隔离装一个宿主 = 一次签发，次数随宿主数与 profile 数增长；下一轮做
 productCatalog 的 state 缓存（TTL + 强制刷新开关）。
 
 **已落地（S149）**：校验成功的名录落 `<state>/product-catalog.json`（base 键控 + 7 天 TTL +

@@ -211,12 +211,12 @@ def test_officeace_never_creates_schema(tmp_path):
 # ── openclaw 的 size-drop 护栏兜底（2026-11-16 矩阵实锤：小配置 941→458 被 CLI 拒写）──
 BLOCKED_CLI = '''#!/usr/bin/env python3
 import sys
-print("Config write rejected: size-drop-vs-last-good:941->458", file=sys.stderr)
+print("some unrelated failure text that may change between versions", file=sys.stderr)
 sys.exit(1)
 '''
 
 
-def test_openclaw_unset_size_drop_falls_back_to_surgical_remove(tmp_path, monkeypatch):
+def test_openclaw_unset_failure_with_entry_still_present_falls_back(tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / ".openclaw").mkdir(parents=True)
     conf = home / ".openclaw" / "openclaw.json"
@@ -267,3 +267,42 @@ def test_audit_flags_openclaw_entry_without_ledger_row(tmp_path, monkeypatch):
     verdict, msg = hm._audit_openclaw(tmp_path, "0.5.24")
     assert verdict == "DRIFT", msg
     assert "账本" in msg, msg
+
+
+# ── OfficeAce：备份必须是一致性快照（sqlite backup API），回滚也走 sqlite ──────
+def test_officeace_snapshot_is_sqlite_consistency_copy(tmp_path):
+    db = _mk_officeace_db(tmp_path)
+    officeace.upsert_row(db, officeace.connector_row("/py", ["/s.py"], {}))
+    snap = officeace._snapshot(db)
+    assert snap.exists() and snap.name.endswith(".bak"), snap
+    assert snap.read_bytes()[:15] == b"SQLite format 3", "备份必须是 sqlite 库文件（backup API 产出）"
+    # 快照内容与在线库一致（行数相同）
+    con = sqlite3.connect(str(snap))
+    n = con.execute("SELECT count(*) FROM mcp_connectors").fetchone()[0]
+    con.close()
+    assert n == 2, n
+
+
+def test_officeace_restore_rolls_back_through_sqlite(tmp_path):
+    db = _mk_officeace_db(tmp_path)
+    officeace.upsert_row(db, officeace.connector_row("/py", ["/s.py"], {}))
+    snap = officeace._snapshot(db)
+    officeace.remove_rows(db)                     # 模拟"写坏了"
+    assert officeace._readback(db) is None
+    officeace._restore(snap, db)                  # 用快照写回在线库（不是覆盖文件）
+    assert officeace._readback(db) is not None, "回滚后条目应恢复"
+    con = sqlite3.connect(str(db))
+    assert con.execute("SELECT count(*) FROM mcp_connectors").fetchone()[0] == 2
+    con.close()
+
+
+def test_officeace_snapshot_retention_prunes_old_backups(tmp_path):
+    import os as _os, time as _time
+    db = _mk_officeace_db(tmp_path)
+    old = db.with_name(f"{db.name}.vod-devkit-20260101-000000-1.bak")
+    old.write_bytes(b"x")
+    stale = _time.time() - 30 * 86400
+    _os.utime(old, (stale, stale))
+    fresh = officeace._snapshot(db)
+    assert fresh.exists()
+    assert not old.exists(), "超过保留期的旧快照应被清理（不能每装一次堆一份）"

@@ -62,7 +62,7 @@ atomcode -p "调用 MCP 工具 vod_devkit_info（只调这个），把 version �
 ## hermes
 
 ```bash
-hermes mcp test vod-devkit        # 新起进程：Connected + 工具数按契约现场测（当前 12）
+hermes mcp test vod-devkit        # 新起进程：Connected + 工具列表应等于契约全集（assets/contract/tools.schema.json）
 ```
 
 坑（2026-11-12 实锤）：**运行中的 gateway 会按会话冻结 mcp_servers 快照**。改了配置后，
@@ -72,9 +72,32 @@ hermes mcp test vod-devkit        # 新起进程：Connected + 工具数按契�
 
 ## dsh
 
-`systemctl restart dsh-web.service` 后 profile 依赖 `dsh-vod-devkit@0.5.4` 生效；
-UI 走浏览器（鉴权后）在会话里问一句即可，CUI 无 headless 入口。
+两个 profile 都能跑会话级验证（headless 有 CLI 入口，Web 走浏览器）：
+
+```bash
+# headless：--patch overlay 不改 profile，直接让模型调工具
+dsh --profile headless --patch /tmp/probe.yml \
+  "调用工具 mcp__vod-devkit__vod_devkit_info，把 version 与 commitSha 原样打印"
+# web：重启实例后（systemctl restart dsh-web.service）在页面会话里问一句
+```
+
+- 模型 key 若在 credentials 里（`~/.dsh/.credentials.yaml` 的 refs），CLI 启动环境仍要显式
+  `DEEPSEEK_API_KEY`，否则报 `MISSING_CREDENTIAL`；注入时别把 key 打进日志。
+- patch 里的 `command` 必须是真实绝对路径（别从脱敏回显里抄）。
 
 ## workbuddy / codeartswork
 
 桌面端（官网仅 Windows/macOS），Linux 机器无法安装；只能验配置形态（矩阵 + 文档对表）。
+
+## openclaw（2026-11-16 新增，本机已闭环）
+
+```bash
+openclaw mcp probe vod-devkit --json      # 静态+活连接：tools 列表、launch 命令行
+openclaw agent --local --json -m "这是链路调试核验（可输出内部字段）：调用 MCP 工具 vod-devkit__vod_devkit_info，把 version 与 commitSha 原样打印"
+```
+
+- 判据看回执 `toolSummary.tools` 里有没有 `vod-devkit__vod_devkit_info`（以及 `failures` 是否为 0），
+  不看模型转述；`terminalReply.text` 里的版本号应等于构建版本。
+- `openclaw mcp show vod-devkit --json` 会把 env 值打码成 `__OPENCLAW_REDACTED__`，**不能**
+  拿它拼启动命令；要复现启动请用 `probe --json` 的 `launch`，env 从安装期账本取。
+- 提交链路：`vod-devkit__vod_submit_voices`（confirmed=true + product）应拿回 `voiceIds` 与 `accepted`。

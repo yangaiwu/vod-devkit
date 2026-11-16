@@ -16,15 +16,15 @@
 - Node >= 18（`npx` 引导器；dsh 宿主按其官方要求 Node 24.9+）
 - Python 3.10+（可用 `VOD_PYTHON` 指定解释器）
 - 宿主任选其一：hermes / opencode / codeartsdoer / codeartswork / codex /
-  codex-desktop / dsh / workbuddy / atomcode（其它 MCP 客户端走
-  `--target generic`）
+  codex-desktop / dsh / workbuddy / atomcode / openclaw / officeace（officeace 仅
+  Windows 有安装面；其它 MCP 客户端走 `--target generic`）
 - 网络可达 VOD 引擎（缺省 `https://vod-dev.topxtopx.com`）
 
 ## 方式一：npm（推荐，一条命令）
 
 ```bash
 npx -y vod-devkit@latest install --target auto --product <你的产品>
-# --target auto 探测已装宿主；显式指定如 --target hermes / opencode / codex
+# --target auto 探测已装宿主；显式指定如 --target hermes / opencode / openclaw
 ```
 
 ## 方式二：从仓库装

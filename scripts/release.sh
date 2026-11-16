@@ -5,7 +5,7 @@
 #   版本落点表驱动：EXTRA_FILES 声明全部附加版本落点（加落点只改表——
 #   __init__/契约曾静默滞留旧版本的实锤教训）；落点用正则整行替换（非子串
 #   replace），替换后逐点硬断言兜底。
-#   质量门：pyflakes+pytest 全绿才发。
+#   质量门：pyflakes+mypy+pytest 全绿才发（mypy 2026-11-16 补：此前只本地跑，CI 红着发了三个版本）。
 # 用法：scripts/release.sh [patch|minor|major|auto] [--dry-run]
 set -e
 cd "$(dirname "$0")/.."
@@ -44,7 +44,10 @@ echo "版本: $CUR → $BUMP"
 # 质量门：发版前必须全绿（同 pre-push）
 PY=$(ls /root/.hermes/tools/python-3.14.7*/bin/python3 2>/dev/null || command -v python3)
 export PYTHONPATH="/root/.hermes/cache/scratch/pylibs:$PYTHONPATH"
-"$PY" -m pyflakes src/vod_mcp/*.py src/vodkit_cli/*.py tests/*.py && "$PY" -m pytest tests/ -q || { echo "FAIL: 质量门未过，拒绝发版"; exit 1; }
+"$PY" -m pyflakes src/vod_mcp/*.py src/vodkit_cli/*.py tests/*.py \
+  && "$PY" -m mypy \
+  && "$PY" -m pytest tests/ -q \
+  || { echo "FAIL: 质量门未过（pyflakes / mypy / pytest），拒绝发版"; exit 1; }
 
 # 旧解释器语法门（B4 实锤）：pyflakes/pytest 跑在 3.14 上测不出 ≤3.11 的语法错
 # （f-string 表达式内反斜杠 PEP 701 前禁止）。用固定旧解释器逐文件 py_compile，

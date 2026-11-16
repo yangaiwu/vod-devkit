@@ -119,7 +119,7 @@ package.json pyproject.toml
 |---|---|---|---|---|
 | S1（已完成） | 落结构契约 + 根目录预算门禁 + README 对齐 | 文档 + 1 条用例 | 零（不改运行路径） | `test_s129_*` 绿；README 结构节与本文一致 |
 | S2（已完成 2026-11-15） | `contract/ safety/ skills/ hooks/` → `src/`；**发布布局不变** | `paths.py` 增 `ASSETS`（仓内=src/，载荷/插件副本=根）、`sync_plugin.PAIRS`、`payload.sources`、`rules_provenance` 与 `registry_reconcile` 的路径解析、`package.json files`、约 16 处测试路径 | 中（路径是公共契约） | 全量 pytest 全绿；临时 HOME 装机实测载荷仍是 `skills/contract/safety/hooks` 平铺（50 文件）；hook 仍注册；doctor OK |
-| S3（已完成 2026-11-15） | `vod_mcp/ vodkit_cli/` → `src/`，资产 → `assets/`，hook → `integrations/hermes/hooks/`，`dsh/` → `packages/dsh/` | `bin/vod-devkit`、`npm/cli.js`、`server_entry()`、载荷入口、CI、约 45 处测试路径 | 高（装机入口路径变了） | 全量 pytest 绿（54 文件）；`host_matrix` 9 宿主 8 PASS/1 已修；载荷仍平铺 `vod_mcp/skills/contract/safety/hooks` |
+| S3（已完成 2026-11-15） | `vod_mcp/ vodkit_cli/` → `src/`，资产 → `assets/`，hook → `integrations/hermes/hooks/`，`dsh/` → `packages/dsh/` | `bin/vod-devkit`、`npm/cli.js`、`server_entry()`、载荷入口、CI、约 45 处测试路径 | 高（装机入口路径变了） | 全量 pytest 绿（54 文件）；`host_matrix`（当时 9 宿主）8 PASS/1 已修；载荷仍平铺 `vod_mcp/skills/contract/safety/hooks` |
 | S4 | 运行期状态收进 `~/.vod-devkit/state/`（状态跟机器不跟副本） | `paths.RUNTIME_JSON`、迁移一次、doctor 提示 | 中（语义变更，需负责人拍板） | key/账本升版不重置；旧副本自动迁移 |
 
 S2/S3 的顺序不能反：先让"共享资产有唯一落点"，再动"运行时入口路径"——否则一次改动

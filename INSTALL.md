@@ -16,9 +16,12 @@ INSTALL.md 结构：每宿主一节（前置条件 → 安装 → 验证 → 常
 npx --yes vod-devkit install --target opencode --product codearts
 ```
 
-- `--target`：`hermes` | `opencode` | `codeartsdoer` | `codex` | `dsh` | `generic` | `auto`
-  （auto=探测已装宿主，0/1/N 个时提示；generic=任意 MCP 宿主，配 `--mcp-config <文件>`）
-- `--product`：必填，采集反馈默认归属的产品（`--help` 内含权威名单；归因错误比报错糟，故 fail fast）
+- `--target`：`hermes` | `opencode` | `codeartsdoer` | `codeartswork` | `codex` |
+  `codex-desktop` | `dsh` | `workbuddy` | `atomcode` | `openclaw` | `officeace`(仅 Windows) |
+  `generic` | `all` | `auto`（auto=探测已装宿主，0/1/N 个时提示；all=装到所有探测到的宿主，
+  缺 CLI 的跳过；generic=任意 MCP 宿主，配 `--mcp-config <文件>`）
+- `--product`：**可选先验**，采集反馈的默认归属产品（给了就必须命中名录，否则 fail fast；
+  不给则运行期按"用户明确回答 → 原话唯一命中 → 会话记忆 → 安装先验"归因，都没有就拒绝提交）
 - `--java-api-base`：VOD 平台地址（缺省 `https://vod-dev.topxtopx.com`；本机同机部署可用 `http://127.0.0.1:<port>`——传输守卫只拦"非回环明文 http"）
 - `--distribution preset`：产品随 agent 分发形态（禁 key 随包/禁自更新/客户机首启重生成状态；自装运维不要用）
 - 不传 key = 匿名档（推荐）：首次提交自动签发零字段匿名令牌，无 key 配置、无凭据托管。legacy 共用 key 已随 VOD-KEY 上线进入兼容收尾（引擎 `external.legacy.enabled=false` 即关闭），自装场景不应也不会再拿到它——装了即匿名档。

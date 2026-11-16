@@ -3,7 +3,7 @@
 适用：给 DeepSeek Harness（dsh）接入 VOD 用户反馈采集插件。装完后一个 dsh profile 里有**两半**：
 浏览器「反馈」按钮（UI 半）+ agent 工具面（工具半）。
 
-版本：dsh-vod-devkit 0.5.16（配套 vod-devkit 0.5.16）
+版本：`dsh-vod-devkit` 与 `vod-devkit` **同版本号**发布；下文命令里的 `<ver>` 请用当前最新发布版本（`npm view vod-devkit version`）
 实测环境：dsh 0.2.1-rc.5、`@deepseek-ai/dsh-mcp-client` 0.2.1-rc.5、Node ≥ 18、Linux/macOS
 
 ---
@@ -14,8 +14,8 @@ dsh 本体自带 MCP client，所以工具面有两条路，装载时自动选�
 
 | 形态 | 触发条件 | agent 看到的工具 | 壳做什么 |
 |---|---|---|---|
-| **MCP 模式（默认）** | dsh 本体 `node_modules/@deepseek-ai/dsh-mcp-client` 存在 | `mcp__vod-devkit__vod_*`，**12 个**（含 draft/commit、auth_ensure） | 只留 UI，`registerTools: false`，不注册任何工具 |
-| **降级形态** | 没有 mcp-client（版本旧/自装被跳过） | 壳自注册的 **6 个短名**（vod_submit_voices、vod_list_submitted、vod_devkit_info、vod_list_skills、vod_retrieve_skill、vod_check_update） | 工具面由壳提供 |
+| **MCP 模式（默认）** | dsh 本体 `node_modules/@deepseek-ai/dsh-mcp-client` 存在 | `mcp__vod-devkit__vod_*`，工具面 = 契约全集（含 draft/commit、auth_ensure） | 只留 UI，`registerTools: false`，不注册任何工具 |
+| **降级形态** | 没有 mcp-client（版本旧/自装被跳过） | 壳自注册的短名采集面（vod_submit_voices、vod_list_submitted、vod_devkit_info、vod_list_skills、vod_retrieve_skill、vod_check_update） | 工具面由壳提供 |
 
 - MCP 模式下 agent 侧与 hermes/opencode/codex **完全同一条链**：机器级 state（`~/.vod-devkit/state/runtime.json`）、
   两段式 draft→commit、`vod_auth_ensure`、packs 裁剪。
@@ -43,7 +43,7 @@ dsh 本体自带 MCP client，所以工具面有两条路，装载时自动选�
 ### A. 官方安装器（推荐）
 
 ```
-npx vod-devkit@0.5.16 install --target dsh --profile web \
+npx vod-devkit@<ver> install --target dsh --profile web \
   --product CodeArts \
   --java-api-base https://vod-dev.topxtopx.com
 ```
@@ -52,7 +52,7 @@ npx vod-devkit@0.5.16 install --target dsh --profile web \
 
 安装器依次做四件事：
 
-1. `dsh plugin --profile web add dsh-vod-devkit@0.5.16`（**版本是钉死的**——profile 的
+1. `dsh plugin --profile web add dsh-vod-devkit@<ver>`（**版本是钉死的**——profile 的
    `package.json` 是精确版本，不带版本的 add 会被 pnpm 判"已满足"而跳过，升级后跑的还是旧壳）；
 2. 探测 dsh 本体有没有 `@deepseek-ai/dsh-mcp-client`；缺则
    `dsh plugin --profile web add @deepseek-ai/dsh-mcp-client` 自装
@@ -71,8 +71,8 @@ bash /opt/vod-install/vod-install.sh web   # 或从 http://<分发机>/vod-insta
 ### C. 手工安装
 
 ```
-dsh plugin --profile web add dsh-vod-devkit@0.5.16
-dsh plugin --profile web add @deepseek-ai/dsh-mcp-client      # 想要 12 工具面就必须有它
+dsh plugin --profile web add dsh-vod-devkit@<ver>
+dsh plugin --profile web add @deepseek-ai/dsh-mcp-client      # 想要完整工具面就必须有它
 ```
 然后按 §三 写配置。
 
@@ -92,13 +92,13 @@ dsh plugin --profile web add @deepseek-ai/dsh-mcp-client      # 想要 12 工具
         transport: stdio
         command: /path/to/python3              # 安装器写自身解释器（stdio 零第三方依赖）
         args:
-          - /root/.vod-devkit/payloads/0.5.16/vod_mcp/server.py
+          - /root/.vod-devkit/payloads/<ver>/vod_mcp/server.py
         env:
-          PYTHONPATH: /root/.vod-devkit/payloads/0.5.16
+          PYTHONPATH: /root/.vod-devkit/payloads/<ver>
           VOD_DEVKIT_HOME: /root/.vod-devkit/state
           VOD_JAVA_API_BASE: https://vod-dev.topxtopx.com
           VOD_PACKS: core,collect
-        cwd: /root/.vod-devkit/payloads/0.5.16
+        cwd: /root/.vod-devkit/payloads/<ver>
         toolCallTimeoutMs: 30000
         failOnStartupError: false
     - id: vod-devkit
@@ -113,7 +113,7 @@ dsh plugin --profile web add @deepseek-ai/dsh-mcp-client      # 想要 12 工具
 ```
 
 **降级形态**（无 mcp-client）——同一托管块里只留第二个子项，且**不写** `registerTools`
-（缺省 true = 壳照常注册 6 工具）。
+（缺省 true = 壳照常注册自带的采集面）。
 
 四条硬规则（都踩过）：
 
@@ -149,7 +149,7 @@ dsh --profile headless "调用 MCP 工具 mcp__vod-devkit__vod_devkit_info，把
 server 日志（`/tmp/vod_mcp_server.log` 里 `started pid=… argv=[...server.py]`）才是证据。
 
 宿主矩阵巡检（多宿主机器上用）：`python3 scripts/host_matrix.py --audit`，
-dsh 那条应报 `MCP 模式（工具面 mcp__vod-devkit__*，壳只留 UI，壳 0.5.16）`。
+dsh 那条应报 `MCP 模式（工具面 mcp__vod-devkit__*，壳只留 UI，壳=<ver>）`。
 
 ## 五、公网部署（nginx 反代）补充配置
 
@@ -189,7 +189,7 @@ location /dsh/rest/ {
 ## 六、身份与账本：两半各一份（重要，别混）
 
 - **agent 侧（工具面）**：身份与账本在 `<VOD_DEVKIT_HOME>/runtime.json`
-  （默认 `~/.vod-devkit/state/runtime.json`），**机器级**——同机 9 个宿主、跨版本升级、
+  （默认 `~/.vod-devkit/state/runtime.json`），**机器级**——同机全部已装宿主、跨版本升级、
   MCP 单独部署共用同一枚匿名令牌与同一条账本。
 - **浏览器侧（UI 半）**：`packages/dsh/lib/client.js` 自带设备锚点
   （`localStorage: vod_dshui_device` + `X-Vod-Device-Id` 头）与自己的 token（`/external/token`），
@@ -203,14 +203,14 @@ location /dsh/rest/ {
 
 | 症状 | 原因 | 处理 |
 |---|---|---|
-| banner 打 `Registered 6 tools` 但你以为该是 12 | 走了降级形态（没 mcp-client） | `dsh plugin --profile web add @deepseek-ai/dsh-mcp-client` 后重启 |
+| banner 打 `Registered N tools`（壳自带采集面） 但你以为该是 12 | 走了降级形态（没 mcp-client） | `dsh plugin --profile web add @deepseek-ai/dsh-mcp-client` 后重启 |
 | banner 打 `UI only…` 但模型调不到 `mcp__vod-devkit__*` | MCP 块没生效 / 载荷路径不存在 | 按 §三 核对 command/args，`ls` 一下 payload 里的 server.py |
-| grep 到 `registerTools: false` 但壳仍 `Registered 6 tools` | profile 里壳是旧版本（没有该字段） | `dsh plugin --profile web add dsh-vod-devkit@0.5.16` 显式钉版本 |
+| grep 到 `registerTools: false` 但壳仍 `Registered N tools`（壳自带采集面） | profile 里壳是旧版本（没有该字段） | `dsh plugin --profile web add dsh-vod-devkit@<ver>` 显式钉版本 |
 | 页面有 dsh 界面但无「反馈」按钮 | ① `name` 行缺失；② 装机副本旧；③ Host 不在 trusted-host | `dsh plugin list` 看版本；重装后重启 |
 | 提交报「已暂存本机稍后重试」 | uiBase 缺失/不可达，浏览器请求落到 dsh 同源 404 | 按 §五 配同源通道或绝对 uiBase |
 | console 报 CORS blocked | 跨域直连引擎，引擎白名单不含该 Origin | 用 §五 同源反代 |
 | 重启后页面一直 `connection lost` / `ws failed` | 旧页面会话 cookie 随重启失效 | 用新 URL 重开页面 |
-| 装了新版但跑的还是旧壳 | profile 依赖 specifier 钉在旧版本 | 用带 `@<版本>` 的 `dsh plugin add` 重装（0.5.16 起安装器已钉版本） |
+| 装了新版但跑的还是旧壳 | profile 依赖 specifier 钉在旧版本 | 用带 `@<版本>` 的 `dsh plugin add` 重装（安装器早已钉版本） |
 
 ## 八、升级 / 卸载
 
@@ -223,7 +223,7 @@ dsh plugin --profile web add dsh-vod-devkit@<新版本>
 npx vod-devkit@<新版本> install --target dsh --profile web --product CodeArts
 ```
 
-卸载（0.5.16 起 `uninstall` 会正确摘块）：
+卸载（`uninstall` 会正确摘托管块）：
 ```
 npx vod-devkit uninstall --target dsh
 # 或手工：dsh plugin --profile web remove dsh-vod-devkit
@@ -234,7 +234,7 @@ npx vod-devkit uninstall --target dsh
 
 ## 九、交付物清单
 
-- npm 包：`dsh-vod-devkit@0.5.16`（壳：UI 半 + 降级工具半）、`vod-devkit@0.5.16`（安装器 + MCP server 半）
+- npm 包：`dsh-vod-devkit@<ver>`（壳：UI 半 + 降级工具半）、`vod-devkit@<ver>`（安装器 + MCP server 半），两者同版本号
 - 技能文件：`vod-core` / `vod-feedback-collect` / `vod-problem-classification-rules` / `vod-scoring-rules`
   （安装器落 `~/.dsh/skills`）
 - 支持渠道：VOD 运营；引擎接口变更需双方对账（外部 API 三个端点见 §一）

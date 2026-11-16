@@ -1523,7 +1523,7 @@ subprocess`；巡检 1 PASS / 8 DRIFT（清一色"server 无响应"）；`~/.vod
    并发语义写死：两宿主同时 ensure 可能各领一枚（最后写入者生效）；状态写本身事务化
    （RLock + flock + tmp→replace + 0600），只可能重复领取，不会丢更新或写坏文件。
 4. **装机注入 + 回收 + 隔离**：`host_adapters/base.server_env()` 统一写
-   `VOD_DEVKIT_HOME` 进各宿主 env（9 宿主一致，不依赖默认值）；`uninstall --clean-global`
+   `VOD_DEVKIT_HOME` 进各宿主 env（全部已装宿主一致，不依赖默认值）；`uninstall --clean-global`
    逐条打印后回收 state；`tests/conftest.py` 把 `VOD_DEVKIT_HOME` 显式指向 tmp，S143
    session 门禁增加第 4 项（`state` 目录清单 + runtime md5）。
 
@@ -1585,7 +1585,7 @@ hermes config / **机器级 state**）任一漂移 → `[S143] 测试写到了�
 
 ## 安装期产品校验：凭据复用与限流分层（S147，D-token-reuse-1，2026-11-16）
 
-**背景**：校验每次新签匿名令牌 → 密集发版（重装 9 宿主 + 巡检 9 次隔离装）把引擎限流打满
+**背景**：校验每次新签匿名令牌 → 密集发版（重装全部宿主 + 每次巡检各一次隔离装）把引擎限流打满
 （`同网络当日 100` 后放宽到 1000，仍撞 `同 IP 每小时 60`），整批装机被挡；旧文案"不可达"
 把人往网络上带。
 
@@ -1616,7 +1616,7 @@ hermes config / **机器级 state**）任一漂移 → `[S143] 测试写到了�
 
 ## 产品名录缓存与巡检跳过校验（S149，D-token-reuse-1 后继，2026-11-16）
 
-**背景**：S147 只做到"装机复用 state 令牌"，`host_matrix --audit` 每次隔离装 9 个宿主（各自
+**背景**：S147 只做到"装机复用 state 令牌"，`host_matrix --audit` 每次巡检对每个宿主各做一次隔离装（各自
 独立 HOME → 各自一枚令牌）仍是最大放大器。名录 7 天不变，不该每跑一次巡检就问一次引擎。
 
 **修法**：
