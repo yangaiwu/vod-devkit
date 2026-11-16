@@ -1219,3 +1219,38 @@ mcp-client 0.2.1-rc.5，stdio 与 streamable-http 两条传输都通；server �
 引擎（自己领令牌、自己提交），agent 工具面与 UI 提交是两条链。
 
 用例承载：`tests/test_dsh_mcp_mode.py`（S146）。
+
+## 载荷生命周期与显式清理（D-prune-payloads-1，2026-11-16）
+
+载荷是"宿主入口指向的稳定副本"（`~/.vod-devkit/payloads/<ver>/`），与 npx 缓存解耦；每次
+install 覆盖当前版本、**从不删旧版本**。清理只有一条路：显式 `prune --payloads`。
+
+| 阶段 | 行为 |
+|---|---|
+| install | stage 当前版本；不删任何旧版本（删错=某宿主配置指向的 `server.py` 消失） |
+| doctor | 报 `载荷：在用 X(宿主…)；未被任何安装行引用 [Y, Z]（不自动删…）` |
+| prune (dry-run) | 列 版本/大小/路径 + 总量，不动盘 |
+| prune --apply | 删除清单（**只认带 `payload.json` 的 stage 产物**，保留当前版本与在用版本，`--keep N`），交互 y/N / 非 tty 需 `--yes` |
+| uninstall --clean-global | 复用同一实现（`payload.prune_candidates` + `remove_payloads`） |
+
+不变量：只删载荷目录；机器级 state（令牌/账本/`.migrated`）一律不碰。
+
+用例承载：`tests/test_prune_payloads.py`（S148）。
+
+## 安装期产品校验的凭据复用（D-token-reuse-1，2026-11-16 真机实锤）
+
+产品硬校验需要一枚匿名令牌，而引擎对"同网络当日 / 同 IP 每小时"的**签发次数**限流
+（真机撞到 100/日、60/小时，整批装机被挡）。所以校验链的取令牌顺序是：
+
+1. `VOD_JAVA_API_KEY`（正式 key，不占匿名配额）；
+2. `<state>` 里已有的匿名令牌 + 它的 `install_nonce` 作 device（**配对**，S1 设备绑定）；
+3. 都没有才新签一枚。
+
+失败分档（文案必须可区分，否则排错方向会错）：`401` 换锚点重领重试一次 → 仍 401 报"鉴权
+异常（可能集群令牌不同步）"；`429` **立即停**并报"签发被限流"；网络异常重试一次后报"不可达"；
+目录空单独一档（指向 T7i 部署）。
+
+遗留：`host_matrix --audit` 每次隔离装 9 宿主 = 9 枚签发，是最大放大器；下一轮做
+productCatalog 的 state 缓存（TTL + 强制刷新开关）。
+
+用例承载：`tests/test_install_product_auth.py`（S147）。

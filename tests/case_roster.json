@@ -442,6 +442,12 @@
     "S146": {
       "carrier": "docs/design.md"
     },
+    "S147": {
+      "carrier": "docs/design.md"
+    },
+    "S148": {
+      "carrier": "docs/design.md"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

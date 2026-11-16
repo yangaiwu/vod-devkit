@@ -1687,3 +1687,53 @@ stdio 与 streamable-http 两条传输都通，模型能真调 `mcp__vod-devkit_
 
 **验证**：`tests/test_dsh_mcp_mode.py`（S146-1..5：双 insert / 降级 / 幂等 / 卸载只摘自己 /
 id 精确匹配）；真机取证用 `vod-devkit-verification` 技能的 `scripts/dsh-mcp-probe.py`。
+
+## D-prune-payloads-1：旧载荷只报不删，清理走显式 `prune`（2026-11-16 负责人定案）
+
+**背景**：每升一版在 `~/.vod-devkit/payloads/<ver>/` 落一份载荷（宿主入口指向它）。install
+从不清理（只有 `uninstall --clean-global` 才动），真机上并存 0.5.9/0.5.10/0.5.11 —— 占盘，
+更要紧的是"当前跑哪份"要靠人猜。
+
+**决定**：
+- `install` **永不隐式删**（安装时删用户文件不可回滚、误删风险高、用户没预期）；
+- 新增显式命令 `prune --payloads`：默认 **dry-run**（只打印 版本/大小/路径 + 总量）；
+  `--apply` 才删，交互式再问 y/N，**非 tty 必须 `--yes`** 否则 exit 2；
+- **只删清单内**：`payloads/<ver>/` 且带 `payload.json`（`stage()` 落的那种）；没有该文件的
+  手工目录/残留一律不碰，绝不按 glob 删目录；
+- **保留**：当前版本 + 任何安装行 `payloadDir` 指向的版本；`--keep N` 额外保留最新 N 份；
+- **只删载荷**，机器级 state（令牌/账本）不动；单条失败记录后继续，最后非零退出；
+- `uninstall --clean-global` 复用同一实现（`payload.prune_candidates/remove_payloads`）。
+
+**为什么不只挂 uninstall**：很多机器只升级不卸载，旧载荷永远留着。
+
+**代价**：多一个要学的命令；靠 `doctor` 的载荷行（在用 X；未被引用 [Y]）降低认知成本。
+
+**验证**：`tests/test_prune_payloads.py`（7 条：dry-run 不删 / 非 tty 拒绝 / 只删旧 /
+keep 保护 / 无候选 / state 不动 / 候选集合）；真机 dry-run 输出 `可清理 2 份 1.1MB`。
+
+## D-token-reuse-1：安装期校验复用 state 令牌 + 限流分层文案（2026-11-16 真机实锤）
+
+**背景**：产品硬校验（D-product-id-2）每次都要一枚匿名令牌，而它**每次新签**，从不复用
+`<state>` 里已有的。密集发版（每版都重装 9 宿主 + 巡检 9 次隔离装）把引擎限流打满：
+
+```
+POST /external/token → 429  同网络当日限 100 次（后来放宽到 1000，但仍撞）
+POST /external/token → 429  同 IP 每小时限 60 次
+```
+后果是整批装机被"产品校验失败"挡下，而旧文案写"不可达"，把人往网络上带（实际踩过）。
+
+**决定**：
+1. 校验前先读机器级 state 的匿名令牌（`token_tier=anonymous`），命中就复用它，**device 用
+   state 的 `install_nonce`**（S1 设备绑定要求令牌与设备配对），不再新签；
+2. 401 换设备锚点重领一次再试（偶发"签发实例与校验实例不同步"能自愈）；
+3. **429 立即停**（重试只会更糟）+ 专属文案：说清是"同网络/同 IP 的签发次数上限"，
+   处置写正式 key / 明日再试 / 找运营调整限流；
+4. 真网络异常仍报"不可达"并重试一次；空目录单独一档文案（指向 T7i 版本）。
+
+**遗留（未修，下一轮）**：`host_matrix --audit` 每次隔离装 9 个宿主 = 9 枚令牌，是最大的
+放大器；建议把已校验过的 productCatalog 落 state 缓存（TTL + `--refresh-product-catalog`），
+巡检命中缓存就不再打引擎。
+
+**验证**：`tests/test_install_product_auth.py`（6 条：401 一次重试过 / 401 两次报鉴权异常且
+不许说"不可达" / 网络异常重试后报不可达 / 空目录单独文案 / 复用则不新签且 device 配对 /
+429 不重试）。

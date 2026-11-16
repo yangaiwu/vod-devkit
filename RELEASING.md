@@ -30,6 +30,11 @@ plugins/vod-devkit/.codex-plugin/plugin.json / plugins/vod-devkit/build-info.jso
 
 - 提交信息遵循 conventional commits（feat/fix/…，破坏性加 `!`）——bump 自动推导依赖它
 - 质量门红了禁止发版；`--dry-run` 可单独验质量门
+- **发版前业务代码必须已提交**：`release.sh` 的显式提交清单只覆盖版本号/生成物/CHANGELOG，
+  不含 `src/`、`tests/`。工作区还有未提交业务文件时，tag 会缺这些代码而 npm tarball 是从
+  工作区打的 → **包与 tag 不一致**（v0.5.12 实锤：tag 里 `grep _dsh_effective` 为 0，
+  而 0.5.12 包里是有的）。脚本已在 release commit 之后加硬断言，有未提交改动直接 FAIL；
+  看到这条 FAIL 就是"先 commit 再发版"，别去改清单。
 - npm 首发或换 token：见 docs/decisions.md 分发三件套节（staging 两段式）
 
 ## 双仓：GitCode 主仓，GitHub 只读镜像
