@@ -91,12 +91,17 @@ def sync(root: Path = ROOT, quiet: bool = False, write_build_info: bool = True) 
             print("build-info：跳过重烧（VOD_DEVKIT_NO_BUILD_INFO / write_build_info=False）")
         bi = json.loads((root / "build-info.json").read_text(encoding="utf-8")) \
             if (root / "build-info.json").is_file() else bi
-        # 插件副本是生成物（不入 git）：只在**缺失**时按现有根内容补一份，
-        # 否则副本自包含类用例会直接 FileNotFoundError（S163-1 的边界）。
+        # 插件副本是生成物（不入 git）：只在**缺失**时补一份。补的时候必须按**当前 HEAD**
+        # 烧，不能拿根那份顶替——根是发版快照（v^），拿它写副本会让副本把自己标成 v^ 而
+        # 代码是 HEAD，结构门禁查不出（sha 确实真实），provenance 语义却错（S169）。
         pkg_rel = "plugins/vod-devkit/build-info.json"
         if not (root / pkg_rel).is_file():
-            (root / pkg_rel).write_text(
-                json.dumps(bi, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            head = _git(["rev-parse", "HEAD"], root) or bi.get("commitSha")
+            fresh = {**bi, "commitSha": head}
+            dst = root / pkg_rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text(json.dumps(fresh, ensure_ascii=False, indent=2) + "\n",
+                           encoding="utf-8")
         return bi
     for rel in BUILD_INFO:
         (root / rel).write_text(json.dumps(bi, ensure_ascii=False, indent=2) + "\n",

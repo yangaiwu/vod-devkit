@@ -49,24 +49,33 @@ def _home_state() -> tuple[Path | None, Path | None, bool]:
 
 
 def _effective_hermes_home() -> Path | None:
-    """生效的 HERMES_HOME：真实 HOME 直接认；隔离 HOME 下只认**位于该 HOME 之内**的。
+    """生效的 HERMES_HOME：真实 HOME 直接认；隔离 HOME 下按三支判（S161/S168）。
 
-    为什么是"之内"而不是"不在真实家目录之下"：网关派生的 env 恒带
-    `HERMES_HOME=/root/.hermes`（真实家目录），按后者会把隔离安装写回真机；而
-    `/tmp/shared` 这类"既不在隔离 HOME 内、也不在真实家目录下"的值，旧判据会认它，
-    导致 CLI 与文件写入分家。显式钉在隔离 HOME 之内（矩阵的 `<HOME>/.hermes`）才可信。
+    1) 位于**当前隔离 HOME 之内** → 认：矩阵/显式钉根（`<HOME>/.hermes` 或自定义子目录）；
+    2) 位于**真实家目录**之下（且不在隔离 HOME 内）→ 忽略：网关派生的
+       `HERMES_HOME=/root/.hermes` 就是这一支，照它写会把隔离安装带回真机；
+    3) 其余 → 认：容器形态 `HOME=/app` + `HERMES_HOME=/data/hermes`（挂载卷）属显式运维
+       配置，忽略它会把配置与技能写进镜像层、重建即丢（S168 评审实锤）。
+    CLI 与文件两个落点都只读这一个判据，所以任一支下两边都同源。
     """
     root = _hermes_home()
     if root is None:
         return None
-    home, _real, isolated = _home_state()
+    home, real, isolated = _home_state()
     if not isolated or home is None:
         return root
     try:
         root.resolve().relative_to(home)
+        return root                                  # 1) 隔离根内
     except (OSError, ValueError):
-        return None
-    return root
+        pass
+    if real is not None:
+        try:
+            root.resolve().relative_to(real)
+            return None                              # 2) 真实家目录派生（泄漏面）
+        except (OSError, ValueError):
+            pass
+    return root                                      # 3) 显式运维配置（容器挂载卷等）
 
 
 def _cli_env() -> dict:
