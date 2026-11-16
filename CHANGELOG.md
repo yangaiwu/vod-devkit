@@ -503,3 +503,8 @@
 - a34dbc7 test(installer): status golden 归一化 reachable/released（环境值，别锁检出）
 - db6e98e fix(dsh,cli): 托管块标量加引号 + status/doctor --target 多 profile 全列（P1/P4/P5）
 
+
+## v0.5.21（2026-11-16）
+
+- 533bf62 fix(文案): 远程面与工具契约的归因口径跟上 D-product-ask-1（缺产品先问、不知道就不提交）
+
