@@ -8,6 +8,11 @@
 
 门禁意思：**audit 认为装好的宿主，status 不得报 missing/unsupported**。这里用两种
 非 MCP 落点的读法钉住它——形态判定错了，这几条会红。
+
+覆盖边界（评审 a 项，2026-11-16 明确）：这是**单元级形态断言**，直接调
+`packs_cmd._read_effective()` + 合成配置，挡得住"某种落点的读法退化"，
+挡不住"audit 新增了宿主而 status 没跟上"这类两面分叉——那需要真跑一次
+`status` 与 `audit` 并比对输出，属于集成门禁的范围，此处不覆盖。
 """
 import json
 

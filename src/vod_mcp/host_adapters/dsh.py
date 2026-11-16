@@ -167,13 +167,13 @@ def install(args, packs: str) -> Path:
     from vod_mcp import __version__ as _ver
     pkg = f"dsh-vod-devkit@{_ver}"
     r = subprocess.run([dsh, "plugin", "--profile", profile, "add", pkg],
-                       capture_output=True, text=True, timeout=300)
+                       capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
         print(f"[vod-devkit] dsh plugin add {pkg} 失败，回落不钉版本："
               f"{(r.stderr or r.stdout).strip()[-200:]}", file=sys.stderr)
         r = subprocess.run([dsh, "plugin", "--profile", profile,
                             "add", "dsh-vod-devkit"],
-                           capture_output=True, text=True, timeout=300)
+                           capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
         print(f"[vod-devkit] dsh plugin add 失败：{(r.stderr or r.stdout).strip()[-300:]}",
               file=sys.stderr)

@@ -82,7 +82,23 @@ npx -y vod-devkit@latest uninstall --target codex --clean-global   # 并清载�
 npx -y vod-devkit@latest auth status                     # 引擎地址 + 凭据指纹 + 档位（key / 匿名令牌）
 npx -y vod-devkit@latest auth init --key <k>             # 校验并显示指纹（缺省不写盘）
 npx -y vod-devkit@latest auth init --key <k> --apply     # 写 runtime.json（唯一入口，0600）
+npx -y vod-devkit@latest prune --payloads                # 列出可清旧载荷（默认 dry-run，不删）
+npx -y vod-devkit@latest prune --payloads --apply --yes  # 真删（保留当前版本与在用的版本）
 ```
+
+### 旧载荷清理（prune）
+
+每升一版会在 `~/.vod-devkit/payloads/<版本>/` 落一份载荷（宿主入口指向它，与 npx 缓存解耦）。
+旧版本**不会自动删**——install 永不隐式删用户文件（删错=某宿主配置指向的 `server.py` 消失）。
+要收空间用显式命令：
+
+- **只清清单内**：`payloads/<版本>/` 且带 `payload.json`（安装器 `stage()` 落的）；
+  没有该文件的手工目录与残留一律不在此列，绝不按 glob 删目录；
+- **保留**：当前版本 + 任何安装行 `payloadDir` 在用的版本；`--keep N` 额外保留最新 N 份；
+- **默认 dry-run**（打印 版本/大小/路径 + 总量）；`--apply` 才删，交互式再问 y/N，
+  非 tty 必须 `--yes`，否则拒绝执行（exit 2）；
+- **只删载荷**，不碰机器级 state（令牌/账本）；单条删除失败记录后继续，最后非零退出；
+- 拿不准先看 `doctor` 的 `[doctor] 载荷：在用 …；未被任何安装行引用 […]` 那一行。
 
 凭据优先级：显式 key（`auth init` 写入）> 环境变量 `VOD_JAVA_API_KEY`（平台/CI 注入）
 > 匿名令牌自动领取（设备绑定）。**换 key 不需要重启宿主会话**：插件在每次调用引擎前现读

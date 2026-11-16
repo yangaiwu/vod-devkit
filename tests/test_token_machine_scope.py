@@ -223,12 +223,19 @@ def test_s145_clean_global_reclaims_state(tmp_path, monkeypatch):
     assert not state.exists()
 
 
-def test_s145_tests_do_not_touch_machine_state():
-    """S145-10：门禁第 4 项的用例侧自检——测试进程的 state 必须落在 tmp。"""
-    resolved = paths.machine_state_home()
+def test_s145_tests_do_not_touch_machine_state(tmp_path):
+    """S145-10：门禁第 4 项的用例侧自检——测试进程的 state 必须落在**本次 tmp**。
+
+    不许用环境字面量判（`"/tmp"`、目录名里含 `"pytest"`）：`--basetemp` 一换就假红，
+    与"golden 不许锁环境值"是同一类问题（真机实锤：换成 .../pt-run 就红，而隔离本身
+    是好的）。判据改成 pytest 注入的 tmp_path + fixture 显式设置的 VOD_DEVKIT_HOME。
+    """
+    resolved = Path(paths.machine_state_home())
     real = Path(os.path.expanduser("~")) / ".vod-devkit" / "state"
     assert resolved != real, f"测试读到了真机 state：{resolved}"
-    assert "pytest" in str(resolved) or str(resolved).startswith("/tmp"), resolved
+    assert resolved.is_relative_to(tmp_path), f"state 不在本次 tmp 下：{resolved}（tmp={tmp_path}）"
+    assert str(os.environ.get("VOD_DEVKIT_HOME") or "") == str(resolved), (
+        "conftest 必须显式把 VOD_DEVKIT_HOME 指到 tmp——靠默认值派生不算隔离")
 
 
 def test_s145_anon_mint_policy_follows_binding(monkeypatch):
