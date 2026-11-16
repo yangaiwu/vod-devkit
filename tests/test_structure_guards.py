@@ -151,10 +151,39 @@ def test_build_info_root_and_plugin_copy_agree():
 def test_server_instructions_match_attribution_design():
     """真机实锤的文案漂移锁：D-attrib-B 改成运行期字面解析后，server 的
     instructions 仍写着"归因由安装绑定完成"——宿主会照这句话去绑定安装期的
-    product，等于把已推翻的语义重新说给模型听。"""
-    text = (ROOT / "src" / "vod_mcp" / "server.py").read_text(encoding="utf-8")
-    assert "安装绑定完成" not in text
-    assert "必须问用户一次" in text and "禁止询问用户" not in text
+    product，等于把已推翻的语义重新说给模型听。
+
+    2026-11-16 扩到全部"说给模型听"的面：远程面 REMOTE_INSTRUCTIONS 与工具契约
+    description 当时仍是 D-attrib-B 旧口径（"禁止询问用户"），而实现已经按
+    D-product-ask-1 以 -32010 要模型先问一次——只锁 server.py 一个文件的用例漏掉了它们。
+    """
+    surfaces = (
+        "src/vod_mcp/server.py",
+        "src/vod_mcp/remote_app.py",
+        "assets/contract/tools.schema.json",
+    )
+    for rel in surfaces:
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        assert "安装绑定完成" not in text, f"{rel} 的归因口径退回旧语义"
+        assert "禁止询问用户" not in text, (
+            f"{rel} 写着「禁止询问用户」——与 D-product-ask-1（缺产品先 -32010 拒绝、"
+            "要求模型问用户一次）冲突，远程宿主里的模型会据此不问并自行编造产品")
+        assert "问用户一次" in text, f"{rel} 缺少「缺产品必须先问一次」的正面规则"
+
+
+def test_remote_instructions_match_withheld_tools():
+    """远程面的工具面自述必须与 REMOTE_WITHHELD 一致：只有进程内开关被摘。
+
+    实锤（2026-11-16）：远程文案当时写着"写本机状态的工具（草稿/本地账本）不在本面
+    提供"，而 tools/list 实测 11 个工具里 draft/commit/list_submitted 全在——模型
+    会以为没有账本/草稿能力，用户问"我提交过哪些"时直接回"没有这个功能"。
+    """
+    from vod_mcp import packs
+    text = (ROOT / "src" / "vod_mcp" / "remote_app.py").read_text(encoding="utf-8")
+    assert "不在本面提供" not in text, (
+        "远程面只摘 vod_packs_configure，不得声称其它工具缺失")
+    for name in packs.REMOTE_WITHHELD:
+        assert name in text, f"远程 instructions 没说明摘除了 {name}"
 
 
 # ── S129 目录结构契约（根预算 / 运行期状态零跟踪）───────────
