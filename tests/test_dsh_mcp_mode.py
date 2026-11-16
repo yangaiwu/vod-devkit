@@ -180,7 +180,11 @@ def test_s151_doctor_repair_keeps_mcp_mode(env, monkeypatch):
     from vodkit_cli import doctor as _doc
     mf = {"dshProfile": "web", "product": "CodeArts", "apiBase": "https://e",
           "payloadDir": str(env["home"] / ".vod-devkit" / "payloads" / "0.5.15"),
-          "packs": "core,collect"}
+          "packs": "core,collect",
+          # S152/R3 起：无安装期记录一律不动字节（老账本只提示重装）。
+          # 这条用例测"缺口→补形态"，所以按真实安装后的账本形态给记录。
+          "dshPatch": {"command": __import__("sys").executable,
+                       "stateHome": "/tmp/st", "mcpClient": "0.2.1-rc.5"}}
     fixed = _doc._repair_dsh_patch_block(mf)
     assert fixed, "形态与环境不符时必须自愈"
     text = patch.read_text(encoding="utf-8")

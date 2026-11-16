@@ -268,6 +268,9 @@ def cmd_version(_args):
     if not rows:
         print("未安装（无 install-manifest；先 install --target <agent>）")
         return
+    # S153 起账本也记 dsh 行（(target, dshProfile) 各一行）；这里统一交给下面的
+    # profile 探测面显示，否则同一 profile 会打两遍（真机 4 行 dsh）。
+    rows = [r for r in rows if r.get("target") != "dsh"]
     for row in rows:
         target = row.get("target", "?")
         inst = row.get("version") or row.get("source", {}).get("version") or "?"
@@ -279,7 +282,7 @@ def cmd_version(_args):
         eff_s = ",".join(eff) if eff else "—"
         print(f"  {target:14s} 已装 {inst:8s} {verdict}")
         print(f"  {'':14s} 生效 packs: {eff_s}   [{state}] {note}")
-    # dsh 不在账本里（profile 依赖承载）→ 单独只读探测，别让全局视图漏掉它
+    # dsh 的显示面统一走 profile 探测（账本行由它覆盖，避免同一 profile 显示两遍）
     for drow in _dsh_rows():
         _dsh_version_line(drow, cur)
 
@@ -325,7 +328,7 @@ def _write_packs(row: dict, new_packs: tuple, apply: bool) -> tuple:
 def cmd_packs(args):
     action = getattr(args, "packs_action", "status")
     target = getattr(args, "target", "") or ""
-    rows = _filter(_rows(), target)
+    rows = [r for r in _filter(_rows(), target) if r.get("target") != "dsh"]
     dsh = _dsh_filter(_dsh_rows(), target)
     if not rows and not dsh:
         print("未安装（无 install-manifest）" if not _rows() else f"没有该宿主的安装记录：{target}")

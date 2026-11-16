@@ -36,8 +36,9 @@ npx --yes vod-devkit install --target opencode --mcp-url http://<host>:9528/mcp 
     --mcp-token <VOD key> --product codearts
 ```
 
-- `--mcp-token` 必填：远程面身份**只从请求头 Bearer 走**；无 Bearer 时与本地同链领/复用
-  机器级匿名令牌（D-token-machine-1；旧"不代签匿名单层"口径已废除）。hermes/codex 的 token 落 env 引用，opencode
+- `--mcp-token` **可选**：远程面身份只从请求头 Bearer 走；不传时与本地同链领/复用
+  机器级匿名令牌（D-token-machine-1；旧"不代签匿名单层"口径已废除），此时安装期只做连接级探活。
+  传了则按 key 真伪探活（fail fast）。hermes/codex 的 token 落 env 引用，opencode
   明文入配置（注意文件权限）。dsh 不走 MCP，此模式显式拒绝。
 - **token 探活**（安装期 fail fast）：attach 前探活三步——连接（initialize）、
   工具面（tools/list 必须等于契约 − 远程面裁剪集）、**key 真伪**（经远程面真调

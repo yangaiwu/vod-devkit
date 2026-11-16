@@ -206,3 +206,74 @@ def test_s152_field_diffs_are_report_only():
     assert any("入口=" in d for d in diffs)
     # 无安装期记录 / 无 payloadDir → 不产出差异（不许凭猜判 drift）
     assert _doc._dsh_field_diffs(facts, {}, "") == []
+
+
+# ── S152-6（R1）形态缺口不许吃掉手工定制：重建要吸收 facts 里已有的值 ─────────
+def test_s152_gap_repair_preserves_manual_fields(env, monkeypatch):
+    _fake_dsh_root(env)
+    monkeypatch.setenv("HOME", str(env["home"]))
+    monkeypatch.setenv("PATH", str(env["stub"]) + ":/usr/bin:/bin")
+    mf = _mf(env, dshPatch={"command": __import__("sys").executable,
+                            "stateHome": "/tmp/st", "mcpClient": "0.2.1-rc.5"})
+    p = _patch_path(env)
+    # E 场景：壳未关注册（形态缺口）+ 手工 uiBase=/dsh（公网反代定制）
+    p.write_text(_block(mf).replace("        uiBase: https://e", "        uiBase: /dsh")
+                 .replace("        registerTools: false\n", ""), encoding="utf-8")
+    before = p.read_text(encoding="utf-8")
+    assert "uiBase: /dsh" in before and "registerTools: false" not in before
+    fixed = _doc._repair_dsh_patch_block(mf)
+    assert fixed, "形态缺口必须补（壳未关注册）"
+    after = p.read_text(encoding="utf-8")
+    assert "registerTools: false" in after, after
+    assert "uiBase: /dsh" in after, f"补缺口时把手工 uiBase 重置了：{after}"
+
+
+# ── S152-7（R3）无安装期记录一律不动字节（老账本只提示重装）──────────────────
+def test_s152_no_snapshot_never_rewrites(env, monkeypatch):
+    _fake_dsh_root(env)
+    monkeypatch.setenv("HOME", str(env["home"]))
+    monkeypatch.setenv("PATH", str(env["stub"]) + ":/usr/bin:/bin")
+    mf = _mf(env)                     # 故意不给 dshPatch（老账本形态）
+    p = _patch_path(env)
+    p.write_text(_block(mf).replace("        registerTools: false\n", ""), encoding="utf-8")
+    before = p.read_text(encoding="utf-8")
+    assert _doc._repair_dsh_patch_block(mf) is None
+    assert p.read_text(encoding="utf-8") == before
+
+
+# ── S153-3（R2）巡检必须逐个 profile 判，且报文带 profile 名 ─────────────────
+def _load_host_matrix():
+    import importlib.util
+    from pathlib import Path as _P
+    path = _P(__file__).resolve().parent.parent / "scripts" / "host_matrix.py"
+    spec = importlib.util.spec_from_file_location("hm_audit_probe", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _mk_profile(home, prof, good: bool):
+    d = home / ".dsh" / "profiles" / prof
+    pkg = d / "node_modules" / "dsh-vod-devkit"
+    pkg.mkdir(parents=True, exist_ok=True)
+    (pkg / "package.json").write_text(json.dumps({"version": "0.5.16"}), encoding="utf-8")
+    mcp = ("    - id: vod-devkit-mcp\n      name: '@deepseek-ai/dsh-mcp-client'\n"
+           "      config:\n        serverName: vod-devkit\n")
+    shell = ("    - id: vod-devkit\n      name: dsh-vod-devkit\n      config:\n"
+             + ("        registerTools: false\n" if good else "")
+             + "        product: CodeArts\n")
+    (d / "cordis.patch.yml").write_text("- insert:\n" + mcp + shell, encoding="utf-8")
+
+
+def test_s153_dsh_audit_checks_every_profile(tmp_path):
+    hm = _load_host_matrix()
+    _mk_profile(tmp_path, "web", good=False)      # 有 mcp 块但壳未关注册 → 纸面 DRIFT
+    _mk_profile(tmp_path, "headless", good=True)
+    verdict, msg = hm.audit_host("dsh", "0.5.16", home=tmp_path)
+    assert verdict == "DRIFT", f"web 坏了却报 PASS：{verdict} {msg}"
+    assert "[web]" in msg, f"报文没点名是哪个 profile：{msg}"
+
+    _mk_profile(tmp_path, "web", good=True)
+    verdict2, msg2 = hm.audit_host("dsh", "0.5.16", home=tmp_path)
+    assert verdict2 == "PASS", msg2
+    assert "[web]" in msg2 and "[headless]" in msg2, f"PASS 报文也要逐个列出：{msg2}"

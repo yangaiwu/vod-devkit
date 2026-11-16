@@ -1833,3 +1833,23 @@ args 列表项形如 `- /root/.vod-devkit/payloads/<v>/vod_mcp/server.py`，被�
 **代价**：status/roster 的输出多一行（多 profile 机器上）；in-use 集合多一次目录扫描。
 
 **验证**：`tests/test_doctor_repair_boundaries.py`（S153-1 行键、S153-2 prune 扫 patch）。
+
+## D-explain-codes-1：错误码解释表必须与 raise 点一致（2026-11-16 通读漏面）
+
+**缺陷**：`explain` 面与代码分叉，且没有任何门禁：
+
+1. `-32011` 的原因写成"产品不在名录里"——真实语义是**草稿/审批令牌不符**
+   （collect.py:666-679：draft 过期、approvalToken 不匹配、草稿不属于当前客户端）；
+2. `-32012`（net.py:181/310 令牌不可用）、`-32014`（net.py:159 非 https 且非回环）、
+   `-32015`（packs/core.py:84 PackRefused 安全门禁）、`-32001`（net.py:184 上游不可达）
+   在代码里 raise，表里全部"未收录"；
+3. 上一轮（ff92e5f）把文档里的错误码清单改对了，这张命令面没跟——正是"通读"漏掉的第 N 面。
+
+**修法**：表补全上述五条（原因取自 raise 点的真实语义）；新增门禁
+`tests/test_explain_codes.py`：扫 `src/vod_mcp/**/*.py` 的 `code=-320XX` 全集，断言每个都
+known 且三要素齐全，并单独锁 `-32011` 不许写成"名录"。
+
+**代价**：新增一个跨文件扫描用例（慢 <1s）；以后新增错误码必须同批补表，否则门禁红。
+
+**验证**：`tests/test_explain_codes.py::test_s154_every_raised_code_is_explained` /
+`..._known_codes_are_self_consistent` / `..._32011_is_draft_token_mismatch_not_catalog`。

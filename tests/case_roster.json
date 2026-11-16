@@ -463,6 +463,9 @@
     "S153": {
       "carrier": "tests/test_doctor_repair_boundaries.py"
     },
+    "S154": {
+      "carrier": "tests/test_explain_codes.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

@@ -82,7 +82,8 @@ def _ensure_mcp_client(dsh_cli: str, profile: str) -> str | None:
 
 def _patch_block(args, mcp_ver: str | None, payload: Path, packs: str,
                  python_exe: str | None = None,
-                 state_home: str | None = None) -> str:
+                 state_home: str | None = None,
+                 ui_base: str | None = None) -> str:
     """生成托管块：标记包裹 + 两条（或一条）insert 子项，全部缩进在 `- insert:` 下。
 
     嵌套铁律（真机实锤）：块必须缩进在 `- insert:` 之下——平铺会被 dsh 组合层丢弃，
@@ -102,7 +103,7 @@ def _patch_block(args, mcp_ver: str | None, payload: Path, packs: str,
     shell_cfg = [
         f"        product: {prod_yaml}",
         f"        apiBase: {args.java_api_base}",
-        f"        uiBase: {args.java_api_base}",   # 浏览器半直连引擎（D-uiBase-direct）
+        f"        uiBase: {ui_base or args.java_api_base}",   # 浏览器半直连引擎（D-uiBase-direct）
         # headless 无审批通道：dsh 原生 ask 门禁会永久阻断写工具（四宿主实锤）。
         # 同意确认由 SKILL 话术层承担；web 端要硬门禁按 profile 覆盖回 true。
         "        confirmWrites: false",
@@ -224,6 +225,10 @@ def install(args, packs: str) -> Path:
         print(f"已写入 dsh 托管块（{mode}）：{patch}")
     else:
         print(f"配置未变化（幂等跳过，{mode}）：{patch}")
+    # R4（2026-11-16）：dsh 的每个 profile 是独立安装对象（账本按 (target, profile) 记行），
+    # 其余 profile 不会被这次安装带到——老机器/新机器都容易漏，这里直接给下一步命令。
+    print(f"提示：dsh 的其它 profile 需要各跑一次 install（例：install --target dsh "
+          f"--profile <name>）；本次只处理 profile={profile}")
     return patch
 
 
@@ -350,7 +355,7 @@ def block_facts(text: str) -> dict:
     }
 
 
-def install_snapshot(profile: str | None = None) -> dict:
+def install_snapshot() -> dict:
     """安装期真源（落进 manifest 行，doctor 只跟它比）：解释器 / state 根 / mcp-client 版本。"""
     from vod_mcp import paths as _paths
 

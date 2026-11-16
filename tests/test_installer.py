@@ -810,7 +810,11 @@ def test_doctor_repairs_dsh_patch_block(monkeypatch, tmp_path):
           "product": "VOD", "apiBase": "http://127.0.0.1:18080",
           # S152 起：没有 payloadDir 的自愈一律不动字节（入口无法判定），
           # 这条用例测的是"形态缺口→重建"，所以必须给安装期载荷路径。
-          "payloadDir": str(tmp_path / "payloads" / "0.5.16")}
+          "payloadDir": str(tmp_path / "payloads" / "0.5.16"),
+          # S152/R3：无安装期记录时 doctor 一律不动字节（只提示重装），
+          # 这条用例测的是"形态缺口 → 重建"，所以给真实安装后的记录。
+          "dshPatch": {"command": __import__("sys").executable,
+                       "stateHome": "/tmp/st", "mcpClient": "0.2.1-rc.5"}}
     (tmp_path / "payloads" / "0.5.16" / "vod_mcp").mkdir(parents=True, exist_ok=True)
 
     # ① 块缺失（dsh 运行时序列化冲掉的实锤形态）→ 重建

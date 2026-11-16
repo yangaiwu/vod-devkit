@@ -462,6 +462,32 @@ def _codex_effective_mcp(home: Path) -> tuple:
     return (markets[0] if markets else None), None, False
 
 
+def _audit_dsh_profile(patch: Path, entry: dict, expect_version: str) -> tuple:
+    """单个 dsh profile 的巡检（S153-3）。判据与原实现一致，只是按 profile 隔离。"""
+    text = patch.read_text(encoding="utf-8", errors="replace")
+    mcp_mode = "- id: vod-devkit-mcp" in text
+    shell_off = "registerTools: false" in text
+    shell_ver = ""
+    pkg = patch.parent / "node_modules" / "dsh-vod-devkit" / "package.json"
+    if pkg.exists():
+        try:
+            shell_ver = json.loads(pkg.read_text(encoding="utf-8")).get("version") or ""
+        except Exception:      # noqa: BLE001  坏包按未知处理，不掩盖 patch 事实
+            shell_ver = ""
+    if mcp_mode:
+        if not shell_off:
+            return "DRIFT", "有 mcp-client 块但壳仍注册工具（registerTools 未写 false）→ 双 submit"
+        if not pkg.exists():
+            return "DRIFT", "MCP 模式但 profile 里没装 dsh-vod-devkit（dsh plugin add 未生效）"
+        if expect_version and shell_ver and shell_ver != expect_version:
+            return "DRIFT", (f"MCP 模式，但 profile 里壳 {shell_ver} ≠ 期望 {expect_version}"
+                             "（dsh plugin add 未钉版本，升级装的是旧壳）")
+        return "PASS", f"MCP 模式（工具面 mcp__vod-devkit__*，壳只留 UI，壳 {shell_ver or '未知'}）"
+    ok, msg = _probe(entry, expect_version) if entry else (True, "降级：壳自注册（patch 存在）")
+    return (("PASS" if ok else "DRIFT"),
+            msg + "；降级形态：壳自注册 6 工具（无 mcp-client）")
+
+
 def audit_host(host: str, expect_version: str, home: Path | None = None) -> tuple:
     """只读巡检**真实机器**上的安装（不写任何文件）：条目在不在、入口存不存在、
     自证版本是否等于构建版本。返回 PASS / DRIFT / NOT_INSTALLED。
@@ -518,32 +544,15 @@ def audit_host(host: str, expect_version: str, home: Path | None = None) -> tupl
                if "- id: vod-devkit" in p.read_text(encoding="utf-8", errors="replace")]
         if not hit:
             return "NOT_INSTALLED", "dsh profile patch 里没有 vod-devkit 块"
-        # D-dsh-mcp-b-1：B 模式下工具面由 mcp-client 承载，壳只留 UI。判据必须是
-        # **双块都在 + 壳显式关掉注册**——只看 `- id: vod-devkit` 会把"写完托管块但
-        # 壳版本没升、registerTools 字段不存在"的半坏态报成 PASS（0.5.10 真机实锤）。
-        text = hit[0].read_text(encoding="utf-8", errors="replace")
-        mcp_mode = "- id: vod-devkit-mcp" in text
-        shell_off = "registerTools: false" in text
-        shell_ver = ""
-        pkg = hit[0].parent / "node_modules" / "dsh-vod-devkit" / "package.json"
-        if pkg.exists():
-            try:
-                shell_ver = json.loads(pkg.read_text(encoding="utf-8")).get("version") or ""
-            except Exception:      # noqa: BLE001  坏包按未知处理，不掩盖 patch 事实
-                shell_ver = ""
-        if mcp_mode:
-            if not shell_off:
-                return "DRIFT", "有 mcp-client 块但壳仍注册工具（registerTools 未写 false）→ 双 submit"
-            if not pkg.exists():
-                return "DRIFT", "MCP 模式但 profile 里没装 dsh-vod-devkit（dsh plugin add 未生效）"
-            if expect_version and shell_ver and shell_ver != expect_version:
-                return "DRIFT", (f"MCP 模式，但 profile 里壳 {shell_ver} ≠ 期望 {expect_version}"
-                                 "（dsh plugin add 未钉版本，升级装的是旧壳）")
-            return "PASS", f"MCP 模式（工具面 mcp__vod-devkit__*，壳只留 UI，壳 {shell_ver or '未知'}）"
-        cmd = entry or {}
-        ok, msg = _probe(cmd, expect_version) if cmd else (True, "降级：壳自注册（patch 存在）")
-        return (("PASS" if ok else "DRIFT"),
-                msg + "；降级形态：壳自注册 6 工具（无 mcp-client）")
+        # S153-3：dsh 的多 profile 是独立安装对象，巡检必须逐个判——只判 hit[0] 会把
+        # "web 的 MCP 块被清掉、headless 完好" 报成 PASS（1 PASS，看不出判的哪个 profile）。
+        # 报文一律带 profile 名；任一 profile 非 PASS 即整体 DRIFT。
+        results = [(p.parent.name,) + _audit_dsh_profile(p, entry or {}, expect_version)
+                   for p in hit]
+        bad = [(n, m) for n, v, m in results if v != "PASS"]
+        if bad:
+            return "DRIFT", "；".join(f"[{n}] {m}" for n, m in bad)
+        return "PASS", "；".join(f"[{n}] {m}" for n, _v, m in results)
     if not entry:
         return "NOT_INSTALLED", "无条目"
     ok, msg = _probe(entry, expect_version)

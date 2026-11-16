@@ -459,3 +459,20 @@
 
 - 34d05ee fix(doctor): 自愈不再切断/降级 dsh 托管块（D-doctor-repair-1 / S151）
 
+
+
+## 未发版（v0.5.16 之后的修复，待 release bump）
+
+- fix(doctor): 自愈判据改结构化不变量 + 安装期真源（D-doctor-repair-2 / S152）——
+  不再因解释器/state 根/环境差异静默改写；缺 MCP 块才补，字段差异只报告，无安装期记录不动字节
+- fix(doctor): 形态缺口重建时吸收 patch 里已有的定制值（手工 uiBase=/dsh 不再被重置）（S152-6）
+- feat(install): manifest 行新增 `dshPatch = {command, stateHome, mcpClient}` 作为自愈唯一真源
+- fix(installs): 账本行键改 `(target, dshProfile)`；doctor 逐 profile 自愈；prune/uninstall 的
+  在用集合同时扫 `~/.dsh/profiles/*/cordis.patch.yml`（D-installs-profile-1 / S153）
+- fix(matrix): `--audit` 的 dsh 段逐个 profile 判定，报文带 profile 名（S153-3）
+- fix(explain): 错误码表补 `-32012/-32014/-32015/-32001` 并改正 `-32011`（草稿/令牌不符）
+  + 新门禁"代码 raise 的码 ⊆ explain 表"（D-explain-codes-1 / S154）
+- fix(cli): `version` / `packs status` 的 dsh 行不再重复显示（账本行与 profile 探测行同源）
+- docs: 全系统通读清理过期描述（-32013 已废除、installs 行键、payload 在用集合、远程身份口径、
+  dsh 手册版本号）；INSTALL 的 `--mcp-token` 改为"可选"（与代码一致）
+- chore: P3 mypy 两条清零、P5 base 尾斜杠归一、P6 名录缓存 tmp 名唯一化

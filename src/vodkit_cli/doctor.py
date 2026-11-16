@@ -69,6 +69,11 @@ def _dsh_field_diffs(facts: dict, snap: dict, payload_s: str) -> list[str]:
         want = str(Path(payload_s) / "vod_mcp" / "server.py")
         if facts["server_py"] != want:
             diffs.append(f"入口={facts['server_py']}（安装期 {want}）")
+        # cwd / PYTHONPATH 同样指向载荷根：漂移会让 server 找不到包（import 失败）
+        if facts.get("cwd") and facts["cwd"] != payload_s:
+            diffs.append(f"cwd={facts['cwd']}（安装期 {payload_s}）")
+        if facts.get("pythonpath") and facts["pythonpath"] != payload_s:
+            diffs.append(f"PYTHONPATH={facts['pythonpath']}（安装期 {payload_s}）")
     return diffs
 
 
@@ -105,14 +110,7 @@ def _repair_dsh_patch_block(mf: dict) -> str | None:
     facts = _dsh.block_facts(text)
     snap = mf.get("dshPatch") or {}
     payload_s = str(mf.get("payloadDir") or "").strip()
-    # 形态判据：manifest 记录优先；只有老 manifest 没有记录时才回退当前环境探测。
-    # 回退只用于"补形态缺口"，绝不会因为环境不同去改已有块。
-    env_fallback = "mcpClient" not in snap
-    want_mcp_ver = snap.get("mcpClient")
-    if env_fallback:
-        cli = shutil.which("dsh")
-        want_mcp_ver = _dsh._mcp_client_version(_dsh._dsh_root(cli)) if cli else None
-    want_mcp = bool(want_mcp_ver)
+    want_mcp = bool(snap.get("mcpClient"))
 
     gap = _dsh_form_gap(facts, want_mcp)
     if not gap:
@@ -123,18 +121,31 @@ def _repair_dsh_patch_block(mf: dict) -> str | None:
                   + "\n  - ".join(diffs), file=sys.stderr)
         return None
 
+    # R3（口径已定，2026-11-16）：无安装期记录（老账本）**一律不动字节**。
+    # 按当前环境重建会把 VOD_DEVKIT_HOME / command 写成"跑 doctor 的那个进程"的派生值
+    # （探针 G 实测）。老机器只提示重装一次，重装即固化真源。
+    if "mcpClient" not in snap:
+        print(f"[doctor] dsh patch 有形态缺口（{gap}），但 manifest 无安装期记录（老账本）"
+              "——不动字节。请重装一次以固化真源："
+              f"install --target dsh --profile {prof}", file=sys.stderr)
+        return None
+
     if not payload_s:
         print("[doctor] dsh patch 需要补块，但 manifest 缺 payloadDir（老账本）——"
               "不动字节。请重装以生成安装期真源："
               f"install --target dsh --profile {prof}", file=sys.stderr)
         return None
 
-    args = SimpleNamespace(product=mf.get("product") or "",
-                           java_api_base=mf.get("apiBase") or "")
-    expected = _dsh._patch_block(args, want_mcp_ver, Path(payload_s),
-                                 str(mf.get("packs") or "core"),
+    # R1：重建时**吸收 patch 里已有的定制值**（uiBase/product/apiBase/packs）——缺口
+    # 只允许补缺的那几行，不许顺手把用户的定制重置回安装期默认（探针 E 实测：壳未关注册
+    # 时整块重建把手工 uiBase=/dsh 回写成 apiBase，公网反代 CORS 复发）。
+    args = SimpleNamespace(product=facts["product"] or mf.get("product") or "",
+                           java_api_base=facts["apibase"] or mf.get("apiBase") or "")
+    expected = _dsh._patch_block(args, snap.get("mcpClient"), Path(payload_s),
+                                 facts["packs"] or str(mf.get("packs") or "core"),
                                  python_exe=snap.get("command"),
-                                 state_home=snap.get("stateHome"))
+                                 state_home=snap.get("stateHome"),
+                                 ui_base=facts["uibase"])
     try:
         # upsert 按托管标记划界（标记优先），不靠 "- " 猜边界：mcp 块的 args 列表项
         # 形如 "- /root/.../server.py"，旧实现会把块从中间切断，留下残块（0.5.15 实锤）。
@@ -145,9 +156,6 @@ def _repair_dsh_patch_block(mf: dict) -> str | None:
               f"（本插件的块在 `# vod-devkit DSH integration start/end` 之间）：{patch}",
               file=sys.stderr)
         return None
-    if env_fallback:
-        print(f"[doctor] dsh patch 已按**当前环境**补{gap}（manifest 无安装期记录，"
-              f"建议重装以固化真源：install --target dsh --profile {prof}）", file=sys.stderr)
     return str(patch)
 
 
