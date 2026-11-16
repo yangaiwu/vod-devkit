@@ -481,6 +481,12 @@
     "S159": {
       "carrier": "tests/test_host_adapters.py"
     },
+    "S160": {
+      "carrier": "tests/test_common_single_entry.py"
+    },
+    "S161": {
+      "carrier": "tests/test_host_adapters.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

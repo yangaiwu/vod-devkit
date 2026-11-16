@@ -128,3 +128,49 @@ def test_s159_hermes_spec_reroot_leaves_foreign_paths_alone(monkeypatch, tmp_pat
                         lambda _h: {"configPath": foreign, "skillsDir": str(home / ".hermes" / "skills")})
     spec = hermes._spec()
     assert spec["configPath"] == foreign
+
+
+def test_s161_hermes_landing_judged_once(monkeypatch, tmp_path):
+    """S161：CLI 落点与文件落点必须由同一判据决定（隔离 HOME 下只认位于该 HOME 之内的 HERMES_HOME）。
+
+    实机背景：`_cli_env()` 曾用「root 不在真实家目录之下」判"隔离 root"，
+    `_spec()` 用「root 在 HOME 之下」。两条判据对 `HERMES_HOME=/tmp/shared` 给出**相反**结论：
+    CLI 认为自己写 /tmp/shared，文件却写在 `<HOME>/.hermes` —— 正是 0.5.25 修过的分裂形态。
+    收敛后两边都跟随 HOME（并在 stderr 说明忽略），显式钉在隔离 HOME 之内的才认。
+    """
+    from vod_mcp.host_adapters import hermes
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "shared"))   # 隔离 HOME 之外
+    spec = hermes._spec()
+    assert Path(spec["configPath"]) == home / ".hermes" / "mcp" / "vod-devkit.json"
+    env = hermes._cli_env()
+    assert env["HERMES_HOME"] == str(home / ".hermes")
+
+
+def test_s161_hermes_landing_accepts_root_inside_isolated_home(monkeypatch, tmp_path):
+    """S161 正向：显式钉在该隔离 HOME 之内的 HERMES_HOME 两边都认（矩阵形态）。"""
+    from vod_mcp.host_adapters import hermes
+
+    home = tmp_path / "home"
+    hh = home / "state-hermes"
+    hh.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("HERMES_HOME", str(hh))
+    assert Path(hermes._spec()["configPath"]) == hh / "mcp" / "vod-devkit.json"
+    assert hermes._cli_env()["HERMES_HOME"] == str(hh)
+
+
+def test_s161_hermes_landing_respects_root_on_real_home(monkeypatch, tmp_path):
+    """S161 真实 HOME：HERMES_HOME 照旧生效（不引入新的忽略规则）。"""
+    from vod_mcp.host_adapters import hermes
+
+    real = hermes._real_home()
+    if real is None:                       # 平台无 pwd：本机不适用
+        return
+    monkeypatch.setenv("HOME", str(real))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "rh"))
+    assert Path(hermes._spec()["configPath"]) == tmp_path / "rh" / "mcp" / "vod-devkit.json"
+    assert hermes._cli_env()["HERMES_HOME"] == str(tmp_path / "rh")

@@ -22,3 +22,6 @@ plugins/vod-devkit/contract/
 plugins/vod-devkit/safety/
 plugins/vod-devkit/build-info.json
 src/*.egg-info/
+
+# codeartsdoer CLI 在 cwd 生成的项目级目录（L3 真调副产物）
+.codeartsdoer/

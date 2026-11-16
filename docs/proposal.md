@@ -1778,3 +1778,22 @@ Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此�
 |---|---|---|
 | S159-1 | HOME 含 `.hermes` 分量 + 设 HERMES_HOME | configPath == `<HERMES_HOME>/mcp/vod-devkit.json`，不得自我嵌套 |
 | S159-2 | 落点不在 `HOME/.hermes` 之下 | 原样保留，不许被重定向（防改写别人钉的路径） |
+
+## 共享语义收敛到单一入口（S160/S161，D-single-entry-1，2026-11-16 评审）
+
+**背景**：两处「同一语义多份实现」已经分叉——①安装行读法
+`manifest.get("installs") or ([manifest] if … else [])` 在 doctor / prune / packs / uninstall
+各写一份，且 uninstall 那份无条件回落 `[mf]`（空 manifest 会被当成"有安装"）；行视图（非 None
+覆盖）在 doctor 的两处与 verify 又各拼一遍。②hermes 落点判据两份：`_cli_env()` 用「root 不在
+真实家目录之下」、`_spec()` 用「root 在 HOME 之下」，对 `HERMES_HOME=/tmp/shared` 给出相反结论
+（CLI 写 /tmp/shared、文件写 `<HOME>/.hermes`，即 0.5.25 修过的分裂形态）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S160-1 | 账本两种形态 | 新版取 `installs[]`；老账本（顶层有 target）退化为单行；空/无 target 返回 `[]`；`installs: []` 不回落顶层 |
+| S160-2 | 行视图 | 行内非 None 字段覆盖顶层；None 不覆盖；不改入参 |
+| S160-3 | 最新行 | 取 `install_rows()` 最后一条；空账本返回 `{}` |
+| S160-4 | 反散落门禁 | `src/` 除 `common.py` 外不许再出现「整份 manifest 顶替安装行」（`or []` 形态合法） |
+| S161-1 | 隔离 HOME + HERMES_HOME 在该 HOME 之外 | 文件落点与 CLI 落点**都**跟随 `<HOME>/.hermes` |
+| S161-2 | 隔离 HOME + HERMES_HOME 在其内 | 两边都认该 root（矩阵形态） |
+| S161-3 | 真实 HOME | HERMES_HOME 照旧生效（不引入新的忽略规则） |
