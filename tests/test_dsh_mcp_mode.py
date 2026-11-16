@@ -152,15 +152,22 @@ def test_dsh_skips_mcp_install_when_registry_unreachable(env):
 
 
 def test_doctor_reports_unreferenced_payloads(env):
-    """载荷并存要可见：旧版本目录留在盘上，doctor 报出来并明确"不自动删"。"""
+    """载荷并存要可见：旧版本载荷（有 payload.json）留在盘上，doctor 报出来并明确不自动删。
+
+    P2（2026-11-16 评审）后口径变了：「在用/可清理」与 prune 走同一入口
+    （payload.in_use_payloads：账本 ∪ dsh 各 profile patch），所以报的是「可清理」
+    而不是旧文案「未被任何安装行引用」——后者会漏掉 patch 仍在用的载荷。
+    """
     _dsh_stub(env)
     assert cli(env, "install", "--target", "dsh", "--profile", "web",
                "--product", "CodeArts").returncode == 0
     pdir = env["home"] / ".vod-devkit" / "payloads"
     (pdir / "0.0.1").mkdir(parents=True, exist_ok=True)
+    (pdir / "0.0.1" / "payload.json").write_text('{"version":"0.0.1","files":{}}',
+                                                 encoding="utf-8")
     r = cli(env, "doctor")
     out = (r.stdout or "") + (r.stderr or "")
-    assert "未被任何安装行引用" in out and "0.0.1" in out, out
+    assert "可清理" in out and "0.0.1" in out, out
     assert "不自动删" in out, out
 
 

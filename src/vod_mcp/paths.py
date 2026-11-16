@@ -26,6 +26,7 @@
 """
 import json
 import os
+import tempfile
 import warnings
 from pathlib import Path
 
@@ -206,3 +207,36 @@ def describe() -> dict:
     return {"srcRoot": str(SRC_ROOT), "distRoot": str(DIST_ROOT), "assets": str(ASSETS),
             "stateHome": str(machine_state_home()),
             "runtime": str(runtime_json_path())}
+
+
+def atomic_write_text(path: Path | str, text: str, mode: int | None = None) -> None:
+    """原子写文本（P4，2026-11-16 评审）：同目录 tmp → fsync → chmod → os.replace。
+
+    为什么：账本与宿主 MCP 配置此前是裸 `Path.write_text`——中断/磁盘满会留下半截 JSON，
+    而读侧解析失败静默当空账本，下一次 install 就只写自己那一行（其它安装行全丢，
+    doctor 只看到一台、uninstall 摘不到）。runtime.json 早已是这套写法，这里统一。
+
+    `mode` 缺省沿用目标文件现有权限（新文件 0600）——账本含宿主路径/产品绑定，
+    配置里有用户自己的其它 server 条目，权限不许因改写而放宽。
+    """
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if mode is None:
+        try:
+            mode = p.stat().st_mode & 0o777
+        except OSError:
+            mode = 0o600
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=p.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, p)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise

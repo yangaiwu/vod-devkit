@@ -73,6 +73,5 @@ def merge_json_mcp(path: Path, entry: dict, section: str = "mcp",
     block[name] = entry
     cfg[section] = block
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8")
+    paths.atomic_write_text(path, json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
     return action

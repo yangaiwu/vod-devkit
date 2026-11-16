@@ -11,6 +11,7 @@ dsh profile 里可能是三个版本/三套 VOD_PACKS。单宿主命令回答"�
 """
 import json
 import shutil
+import sys
 from pathlib import Path
 
 from vod_mcp import packs as packs_mod
@@ -398,7 +399,11 @@ def _update_row_packs(target: str, packs: str) -> None:
     p = common.manifest_path()
     if not p.exists():
         return
-    mf = json.loads(p.read_text(encoding="utf-8"))
+    try:
+        mf = common._read_manifest(strict=True)
+    except common.ManifestCorrupt as e:
+        print(f"[vod-devkit] {e}", file=sys.stderr)
+        sys.exit(2)
     rows = mf.get("installs") or []
     for r in rows:
         if r.get("target") == target:
@@ -406,4 +411,4 @@ def _update_row_packs(target: str, packs: str) -> None:
     if rows:
         mf["installs"] = rows
         mf["packs"] = packs
-    p.write_text(json.dumps(mf, ensure_ascii=False, indent=2), encoding="utf-8")
+    common.atomic_write_text(p, json.dumps(mf, ensure_ascii=False, indent=2))

@@ -321,25 +321,35 @@ def cmd_doctor(args=None):
         except Exception:  # noqa: BLE001  诊断不应因该项失败而中断
             pass
         # 载荷并存可见（0.5.12）：install 不删旧载荷——删错的后果是某个宿主配置里
-        # 的 server.py 路径消失（白屏/工具全失），所以只报"谁在用哪份、哪份没人引用"，
+        # 的 server.py 路径消失（白屏/工具全失），所以只报「谁在用哪份、哪份没人引用」，
         # 清理由人决定。真机实锤：机器上同时躺着 0.5.9/0.5.10/0.5.11 三份。
+        # P2（2026-11-16 评审）：「在用」判定必须与 prune/uninstall 同一入口
+        # （in_use_payloads：账本 ∪ dsh 各 profile patch）。旧实现只按账本算，报出的
+        # 「未被任何安装行引用」可能是某个 profile 仍在用的载荷——照它删会白屏。
         try:
+            from vod_mcp import payload as _payload
             raw = json.loads(p.read_text(encoding="utf-8"))
             all_rows = raw.get("installs") or ([raw] if raw.get("target") else [])
-            used: dict[str, list[str]] = {}
+            used = _payload.in_use_payloads(all_rows)
+            labels: dict[str, list[str]] = {}
             for r in all_rows:
                 d = (r.get("payloadDir") or "").strip()
-                if d:
-                    used.setdefault(str(Path(d)), []).append(str(r.get("target")))
+                if not d:
+                    continue
+                try:
+                    labels.setdefault(str(Path(d).resolve()), []).append(str(r.get("target")))
+                except OSError:
+                    labels.setdefault(d, []).append(str(r.get("target")))
+            for k in sorted(used - set(labels)):
+                labels.setdefault(k, []).append("dsh 配置面")
             if used:
-                parent = Path(next(iter(used))).parent
-                if parent.is_dir():
-                    orphans = sorted(x.name for x in parent.iterdir()
-                                     if x.is_dir() and str(x) not in used)
-                    live = ", ".join(f"{Path(k).name}({'+'.join(sorted(set(v)))})" for k, v in sorted(used.items()))
-                    print(f"[doctor] 载荷：在用 {live}"
-                          + (f"；未被任何安装行引用 {orphans}"
-                             "（不自动删——确认没宿主配置指向后再 rm -rf）" if orphans else ""))
+                orphans = [ver for _d, ver, _sz in _payload.prune_candidates(rows=all_rows)]
+                live = ", ".join(f"{Path(k).name}({'+'.join(sorted(set(v)))})"
+                                 for k, v in sorted(labels.items()))
+                print(f"[doctor] 载荷：在用 {live}"
+                      + (f"；可清理（安装行与 dsh 配置都未引用）{orphans}"
+                         "（不自动删——doctor 与 prune 是同一判定，删前仍建议看一眼）"
+                         if orphans else ""))
         except Exception:  # noqa: BLE001  诊断项失败不阻断整体
             pass
         if mf.get("transport") == "remote" and mf.get("mcpUrl"):

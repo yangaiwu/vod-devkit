@@ -352,21 +352,46 @@ def block_facts(text: str) -> dict:
                 v = v.strip('"')
         return v
 
+    def scalar(key):
+        """外部标量按「JSON 双引号优先、裸标量兼容」读回（P1 读侧，2026-11-16）。
+
+        写侧 P4 起把外部标量统一写成 JSON 双引号（`product: "AI 开发者空间"`）；
+        读侧若还按「非空白捕获」（旧的 `(\\S+)`），空格处就截断（只捕到 `"AI`），去引号逻辑在捕获之后救不回来
+        → product=None。真实名录 103 项里 22 项含空格：doctor 对这些产品永不报漂移，
+        自愈补缺口还会用安装期值静默回写（破坏 R1「不重置定制」）。
+        裸标量分支只为老装机（P4 之前）兼容，不是新写法。
+        """
+        m = re.search(rf"^\s*{re.escape(key)}:\s*(.*)$", joined, re.MULTILINE)
+        if not m:
+            return None
+        v = m.group(1).strip()
+        if not v:
+            return None
+        if v[0] == '"':
+            try:
+                val, _end = json.JSONDecoder().raw_decode(v)   # 容忍行尾注释/空白
+                return val
+            except Exception:      # noqa: BLE001  坏转义按字面比
+                return v.strip('"')
+        if v[0] == "'" and v.endswith("'"):
+            return v[1:-1]
+        return v
+
     return {
         "present": start is not None,
         "present_mcp": any(ln.strip() == "- id: vod-devkit-mcp" for ln in seg),
         "present_shell": any(ln.strip() == "- id: vod-devkit" for ln in seg),
         "register_tools_false": bool(re.search(r"^\s*registerTools:\s*false\s*$", joined,
                                                re.MULTILINE)),
-        "command": first(r"^\s*command:\s*(\S+)\s*$"),
+        "command": scalar("command"),
         "server_py": first(r"^\s*-\s*(/\S+/vod_mcp/server\.py)\s*$"),
-        "cwd": first(r"^\s*cwd:\s*(\S+)\s*$"),
-        "pythonpath": first(r"^\s*PYTHONPATH:\s*(\S+)\s*$"),
-        "state_home": first(r"^\s*VOD_DEVKIT_HOME:\s*(\S+)\s*$"),
-        "uibase": first(r"^\s*uiBase:\s*(\S+)\s*$"),
-        "apibase": first(r"^\s*apiBase:\s*(\S+)\s*$"),
-        "packs": first(r"^\s*VOD_PACKS:\s*(\S+)\s*$"),
-        "product": first(r"^\s*product:\s*(\S+)\s*$"),
+        "cwd": scalar("cwd"),
+        "pythonpath": scalar("PYTHONPATH"),
+        "state_home": scalar("VOD_DEVKIT_HOME"),
+        "uibase": scalar("uiBase"),
+        "apibase": scalar("apiBase"),
+        "packs": scalar("VOD_PACKS"),
+        "product": scalar("product"),
     }
 
 

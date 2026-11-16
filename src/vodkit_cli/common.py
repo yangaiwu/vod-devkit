@@ -20,6 +20,10 @@ from vod_mcp import paths as _paths
 ROOT = _paths.DIST_ROOT
 
 
+class ManifestCorrupt(RuntimeError):
+    """账本存在但无法解析。写路径必须抛它，绝不用空账本覆盖（P4，2026-11-16）。"""
+
+
 _HERMES_SPEC = host_specs.load("hermes")
 
 
@@ -163,13 +167,27 @@ def _drifted_skills(manifest: dict) -> list:
     return drifted
 
 
-def _read_manifest() -> dict:
+def atomic_write_text(path, text: str, mode: int | None = None) -> None:
+    """原子写文本（P4）：实现在 `vod_mcp.paths`，安装器侧只做一层门面。"""
+    _paths.atomic_write_text(path, text, mode)
+
+
+def _read_manifest(*, strict: bool = False) -> dict:
     p = manifest_path()
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("顶层不是 JSON 对象")
+        return data
+    except Exception as e:  # noqa: BLE001  两种处置：写路径拒绝，读路径报警
+        if strict:
+            raise ManifestCorrupt(
+                f"{p} 无法解析（{e}）——拒绝写入：用空账本覆盖会把其它安装行一起丢掉。"
+                "先还原备份（同目录 *.bak / 上一版 install-manifest）或修好该 JSON 再重跑") from e
+        print(f"[vod-devkit] 警告：{p} 无法解析（{e}）——只读面按空账本继续；"
+              "任何写操作都会拒绝覆盖", file=sys.stderr)
         return {}
 
 
@@ -305,10 +323,10 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
     row["commitSha"] = manifest["source"]["commitSha"]
     row["skillInstalls"] = [si for si in manifest["skillInstalls"]
                             if si["host"] == target]
-    prev = _read_manifest()
+    prev = _read_manifest(strict=True)
     manifest["installs"] = _install_rows(prev, row)
-    manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
-                               encoding="utf-8")
+    atomic_write_text(manifest_path(),
+                      json.dumps(manifest, ensure_ascii=False, indent=2))
     print("installed:", json.dumps(manifest, ensure_ascii=False, indent=2))
     reach = manifest["source"].get("reachable")
     if reach is False:

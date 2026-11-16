@@ -222,6 +222,27 @@ def _patch_referenced_payloads() -> set:
     return used
 
 
+def in_use_payloads(rows=None) -> set:
+    """"在用"载荷集合（单一入口，P2 2026-11-16 评审）。
+
+    来源两处，必须合一：账本 `installs[].payloadDir`（安装器记录）∪ dsh 各 profile
+    patch 里 args 指向的载荷（账本只记最近一次安装的那一行，多 profile 会分叉）。
+    doctor 曾只按账本算，于是报出"未被任何安装行引用 0.5.19"，而 prune 判定它在用——
+    照 doctor 的建议删掉 = 那个 profile 下次启动白屏。所有"在用"判定只准走这里。
+    """
+    used: set = set()
+    for r in (rows or []):
+        d = str(r.get("payloadDir") or "").strip()
+        if not d:
+            continue
+        try:
+            used.add(str(Path(d).resolve()))
+        except OSError:
+            used.add(d)
+    used |= _patch_referenced_payloads()
+    return used
+
+
 def prune_candidates(rows=None, keep: int = 0) -> list:
     """可清理的旧载荷清单 —— 只认安装器自己落过的，且没有宿主在跑（D3，0.5.13）。
 
@@ -239,16 +260,7 @@ def prune_candidates(rows=None, keep: int = 0) -> list:
     base = payload_home() / "payloads"
     if not base.is_dir():
         return []
-    used = set()
-    for r in (rows or []):
-        d = str(r.get("payloadDir") or "").strip()
-        if d:
-            try:
-                used.add(str(Path(d).resolve()))
-            except OSError:
-                used.add(d)
-    # S153：配置面同样算"在用"（dsh 多 profile 各指一份版本）
-    used |= _patch_referenced_payloads()
+    used = in_use_payloads(rows)
     cand = []
     for d in sorted(base.iterdir(), key=lambda p: _vkey(p.name)):
         if not d.is_dir() or not (d / "payload.json").exists():

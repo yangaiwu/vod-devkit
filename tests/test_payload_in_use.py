@@ -15,7 +15,7 @@ from vod_mcp import payload
 
 def _mk_payload(base: Path, ver: str) -> Path:
     d = base / "payloads" / ver
-    (d / "vod_mcp").mkdir(parents=True)
+    (d / "vod_mcp").mkdir(parents=True, exist_ok=True)
     (d / "payload.json").write_text(json.dumps({"version": ver, "files": {}}), encoding="utf-8")
     return d
 

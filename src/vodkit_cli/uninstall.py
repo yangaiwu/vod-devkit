@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from vod_mcp import hosts as host_specs
@@ -216,11 +217,13 @@ def _clean_global(rows: list, remaining: list | None = None) -> None:
     """
     from vod_mcp import payload as _payload
     from vod_mcp import paths as _paths
-    in_use = {r.get("payloadDir") for r in rows if r.get("payloadDir")}
-    # S153：配置面同样算"在用"（dsh 多 profile 各指一份版本，账本只记最近一条）
-    in_use |= _payload._patch_referenced_payloads()
+    in_use = _payload.in_use_payloads(rows)   # 账本 ∪ dsh 各 profile patch（P2 单一入口）
     for res in _payload.residue():
-        if str(res) in in_use:
+        try:
+            key = str(Path(res).resolve())
+        except OSError:
+            key = str(res)
+        if key in in_use:
             continue
         shutil.rmtree(res, ignore_errors=True)
         print("removed payload residue:", res)
@@ -276,7 +279,11 @@ def cmd_uninstall(args=None):
     if not p.exists():
         print("未安装")
         return
-    mf = json.loads(p.read_text(encoding="utf-8"))
+    try:
+        mf = common._read_manifest(strict=True)
+    except common.ManifestCorrupt as e:
+        print(f"[vod-devkit] {e}", file=sys.stderr)
+        sys.exit(2)
     all_rows = mf.get("installs") or [mf]   # 老 manifest（无 installs[]）退化为单条
     rows = [r for r in all_rows if not target or r.get("target") == target]
     if not rows:
@@ -309,7 +316,7 @@ def cmd_uninstall(args=None):
                 _payload.marker_path().unlink(missing_ok=True)
             except Exception:
                 pass
-        p.write_text(json.dumps(mf, ensure_ascii=False, indent=2), encoding="utf-8")
+        common.atomic_write_text(p, json.dumps(mf, ensure_ascii=False, indent=2))
         print(f"removed install row(s): {', '.join(r.get('target','?') for r in rows)}"
               f"（保留 {', '.join(r.get('target','?') for r in remaining)}）")
     else:
