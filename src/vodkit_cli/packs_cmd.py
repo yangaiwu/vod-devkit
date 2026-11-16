@@ -92,12 +92,76 @@ def _dsh_version_line(row: dict, cur: str) -> None:
         verdict = (f"≠ CLI（{inst} → {cur}，重跑 install --target dsh "
                    f"--profile {row['profile']}）")
     print(f"  {name:14s} 已装 {inst:8s} {verdict}")
-    print(f"  {'':14s} 生效 packs: —   [n/a] 壳内固定（不走 MCP env）；{row['config']}")
+    _st, _eff, _note = _dsh_effective(row)
+    print(f"  {'':14s} 生效 packs: {','.join(_eff) if _eff else '—'}   [{_st}] {_note}")
+
+
+def _dsh_effective(row: dict) -> tuple:
+    """dsh 的 packs 来源，按形态分两种（B 模式 D-dsh-mcp-b-1，0.5.10 起）：
+
+    · MCP 模式：patch 托管块里 `- id: vod-devkit-mcp` 子项的 `env.VOD_PACKS`
+      就是生效值（agent 工具面的 server 由它拉起）→ 与其它宿主一样可读；
+    · 降级形态（无 mcp-client）：能力面由壳包固定（6 工具）→ 只能重装改。
+    旧实现见 .yml 就报 `unsupported 不是 JSON 形态`，把可读的 YAML 说成读不了（D1）。
+    """
+    prof = str(row.get("profile") or row.get("dshProfile") or "")
+    patch = Path.home() / ".dsh" / "profiles" / prof / "cordis.patch.yml"
+    if not prof or not patch.exists():
+        return ("missing", None, f"dsh profile patch 不存在：{patch}")
+    try:
+        text = patch.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:  # noqa: BLE001
+        return ("unparsable", None, f"patch 读不出（{e}）")
+    if "- id: vod-devkit-mcp" not in text:
+        return ("n/a", None,
+                f"{patch}（降级形态：壳自注册 6 工具，能力面由包内固定，改 packs 需重装）")
+    raw, in_mcp = None, False
+    for ln in text.splitlines():
+        s = ln.strip()
+        if s.startswith("- id:"):
+            in_mcp = (s == "- id: vod-devkit-mcp")
+            continue
+        if in_mcp and s.startswith("VOD_PACKS:"):
+            raw = s.split(":", 1)[1].strip().strip("'\"")
+            break
+    if not raw:
+        return ("n/a", None, f"{patch}（mcp-client 未设 VOD_PACKS，server 用内置默认）")
+    try:
+        eff = packs_mod.parse_packs(raw)
+    except packs_mod.UnknownPack as e:
+        return ("unparsable", None, str(e))
+    return ("ok", eff, f"{patch}（mcp-client env.VOD_PACKS）")
+
+
+def _codex_desktop_effective(row: dict) -> tuple:
+    """codex-desktop 是 marketplace 登记形态（{name, source}），没有 env：
+    packs 由插件包里的 .mcp.json 决定。旧实现按 mcpServers/env 找条目必然报
+    missing，而 host_matrix 同时报 PASS —— 同一台机器两个门禁互相打架（D2）。
+    判据：marketplace.plugins[] 里有登记就不是 missing。"""
+    mp = Path.home() / ".agents" / "plugins" / "marketplace.json"
+    if not mp.exists():
+        return ("missing", None, f"marketplace 不存在：{mp}")
+    try:
+        cfg = json.loads(mp.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:  # noqa: BLE001
+        return ("unparsable", None, f"marketplace 读不出（{e}）")
+    plugins = cfg.get("plugins") or []
+    hit = any((p.get("name") if isinstance(p, dict) else p) == "vod-devkit" for p in plugins)
+    if not hit:
+        return ("missing", None, f"marketplace 未登记 vod-devkit：{mp}")
+    return ("n/a", None,
+            f"{mp}（marketplace 登记形态：packs 由插件包内 .mcp.json 决定，装包时写入）")
 
 
 def _dsh_packs_note(row: dict) -> str:
-    return (f"dsh 壳不走 MCP env，能力面由包内固定；改 pack 需重装："
-            f"install --target dsh --profile {row['profile']}（{row['config']}）")
+    """改 packs 的出路：MCP 形态能直接改 env，降级形态只能重装换形态。"""
+    state, _eff, note = _dsh_effective(row)
+    prof = row.get("profile") or row.get("dshProfile") or ""
+    if state == "ok":
+        return (f"dsh 的 packs 在 MCP 托管块的 env.VOD_PACKS（{note}）：改它，"
+                f"或重跑 install --target dsh --profile {prof}")
+    return (f"当前形态不支持改 packs（{note}）；换形态："
+            f"install --target dsh --profile {prof}")
 
 
 def _dsh_filter(rows: list, target: str) -> list:
@@ -153,7 +217,17 @@ def _locate_entry(cfg):
 
 
 def _read_effective(row: dict) -> tuple:
-    """(形态, 实际生效 packs, 说明)。形态: ok / missing / unparsable / unsupported"""
+    """(形态, 实际生效 packs, 说明)。形态: ok / missing / unparsable / unsupported / n/a
+
+    D1/D2（0.5.12）：两种非 MCP 落点必须先分派掉，否则会被当成"JSON 里找不到条目"
+    —— dsh 读 patch YAML 托管块、codex-desktop 读 marketplace 登记。这两处曾与
+    host_matrix 的结论直接矛盾（同一台机器一个 PASS 一个 missing）。
+    """
+    target = str(row.get("target") or "")
+    if target == "dsh":
+        return _dsh_effective(row)
+    if target == "codex-desktop":
+        return _codex_desktop_effective(row)
     path = _config_path(row)
     if path is None:
         return ("unsupported", None, "该宿主的 MCP 配置不在可写 JSON 里（dsh 等需重跑 install）")
@@ -262,9 +336,12 @@ def cmd_packs(args):
             eff_s = ",".join(eff) if eff else "—"
             print(f"{row.get('target'):14s} 生效 packs: {eff_s}   [{state}] {note}")
         for drow in dsh:
-            print(f"{_dsh_name(drow):14s} 生效 packs: —   [n/a] {_dsh_packs_note(drow)}")
+            _st, _eff, _note = _dsh_effective(drow)
+            print(f"{_dsh_name(drow):14s} 生效 packs: "
+                  f"{','.join(_eff) if _eff else '—'}   [{_st}] {_note}")
         return
-    # enable/disable/all：dsh 不可写（壳内固定），明确说出路，不打印"已改"
+    # enable/disable/all：dsh 的 packs 在 patch YAML 托管块里，本命令只改 JSON 形态，
+    # 不代写 YAML（写坏托管块=插件掉出组合树/UI 消失）→ 跳过并说出路，不打印"已改"
     for drow in dsh:
         print(f"{_dsh_name(drow):14s} 跳过：{_dsh_packs_note(drow)}")
     if not rows:

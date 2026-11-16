@@ -262,12 +262,35 @@ def test_s130_profiles_without_the_package_are_ignored(tmp_path, monkeypatch, ca
 
 def test_s131_packs_status_reports_dsh_without_pretending_its_writable(
         tmp_path, monkeypatch, capsys):
+    """dsh 的 packs 面必须按形态如实报（D1，0.5.12 更新）。
+
+    旧实现见 .yml 就报 `unsupported 不是 JSON 形态`，把 patch 里可读的
+    `env.VOD_PACKS` 说成读不了；现在分三态：无 patch=missing（插件掉出组合树）、
+    降级形态=n/a（壳固定 6 工具，改 packs 需重装）、MCP 形态=ok（读 env.VOD_PACKS）。
+    """
     _env(tmp_path, monkeypatch)
     _dsh_profile(tmp_path, monkeypatch)
+    patch = tmp_path / ".dsh" / "profiles" / "web" / "cordis.patch.yml"
+
+    # ① 只有 package.json、没有 patch：如实报 missing（不是 n/a，也不是 unsupported）
     packs_cmd.cmd_packs(_A(packs_action="status", target="dsh", apply=False))
     out = capsys.readouterr().out
-    assert "dsh(web)" in out and "[n/a]" in out
-    assert "需重装" in out
+    assert "dsh(web)" in out and "[missing]" in out, out
+
+    # ② 降级形态（壳块，无 mcp 块）：n/a + 说清改 packs 需重装
+    patch.write_text("- insert:\n    - id: vod-devkit\n      config:\n"
+                     "        registerTools: false\n", encoding="utf-8")
+    packs_cmd.cmd_packs(_A(packs_action="status", target="dsh", apply=False))
+    out = capsys.readouterr().out
+    assert "[n/a]" in out and "需重装" in out, out
+
+    # ③ MCP 形态：可读，值来自 mcp-client 的 env.VOD_PACKS
+    patch.write_text("- insert:\n    - id: vod-devkit-mcp\n      config:\n"
+                     "        env:\n          VOD_PACKS: core,collect\n"
+                     "    - id: vod-devkit\n", encoding="utf-8")
+    packs_cmd.cmd_packs(_A(packs_action="status", target="dsh", apply=False))
+    out = capsys.readouterr().out
+    assert "[ok]" in out and "core,collect" in out and "VOD_PACKS" in out, out
 
 
 def test_s131_packs_write_skips_dsh_and_touches_nothing(tmp_path, monkeypatch, capsys):

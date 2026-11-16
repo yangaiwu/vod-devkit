@@ -144,6 +144,16 @@ git add package.json pyproject.toml src/vod_mcp/__init__.py assets/contract/tool
 # 插件副本不再入库（.gitignore，v0.5.9 零提交）——不再出现在 git add 清单里；
 # 漏项类事故因此消失，副本内容由 sync_plugin.py 在 prepack/发版前生成。
 git commit -qm "release: v$BUMP"
+# 业务代码必须由发布者**先提交**：这里的显式清单只覆盖版本号/生成物/CHANGELOG。
+# v0.5.12 实锤：D1/D2/D3/D4 的修复留在工作区没提交，tag 里没有这些代码，
+# 而 npm tarball 是从工作区打的 → 包与 tag 不一致（按 tag 复现不出来）。
+# 这条断言把"发版前忘了 commit"变成发版前的硬失败，而不是事后的静默漂移。
+_dirty=$(git status --porcelain | grep -vE '(^|/)build-info\.json$|\.tgz$' || true)
+if [ -n "$_dirty" ]; then
+  echo "FAIL: 工作区仍有未提交改动 —— tag 会缺这些文件（而 npm tarball 是从工作区打的，包与 tag 不一致）：" >&2
+  echo "$_dirty" >&2
+  exit 1
+fi
 # 提交之后再验一次（tag/push 之前）：这是唯一能抓住「sync 了但提交清单漏项」的位置。
 # v0.5.8 实锤——清单漏 plugins/vod-devkit/contract，工作区 diff 全绿而提交树是旧版。
 "$PY" scripts/verify_copies.py || {

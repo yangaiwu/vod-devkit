@@ -229,6 +229,28 @@ def cmd_doctor(args=None):
                       "未并入 state；确认无用后可手工清理）")
         except Exception:  # noqa: BLE001  诊断不应因该项失败而中断
             pass
+        # 载荷并存可见（0.5.12）：install 不删旧载荷——删错的后果是某个宿主配置里
+        # 的 server.py 路径消失（白屏/工具全失），所以只报"谁在用哪份、哪份没人引用"，
+        # 清理由人决定。真机实锤：机器上同时躺着 0.5.9/0.5.10/0.5.11 三份。
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            all_rows = raw.get("installs") or ([raw] if raw.get("target") else [])
+            used = {}
+            for r in all_rows:
+                d = (r.get("payloadDir") or "").strip()
+                if d:
+                    used.setdefault(str(Path(d)), []).append(str(r.get("target")))
+            if used:
+                parent = Path(next(iter(used))).parent
+                if parent.is_dir():
+                    orphans = sorted(x.name for x in parent.iterdir()
+                                     if x.is_dir() and str(x) not in used)
+                    live = ", ".join(f"{Path(k).name}({'+'.join(v)})" for k, v in sorted(used.items()))
+                    print(f"[doctor] 载荷：在用 {live}"
+                          + (f"；未被任何安装行引用 {orphans}"
+                             "（不自动删——确认没宿主配置指向后再 rm -rf）" if orphans else ""))
+        except Exception:  # noqa: BLE001  诊断项失败不阻断整体
+            pass
         if mf.get("transport") == "remote" and mf.get("mcpUrl"):
             url = mf["mcpUrl"]
             token = (os.environ.get("VOD_MCP_TOKEN")

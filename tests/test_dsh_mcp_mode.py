@@ -134,3 +134,31 @@ def test_config_forms_distinguishes_mcp_id_from_shell_id():
     assert (start, end) == (0, 3), "无标记旧形态：向上归并到组头，整组一块"
     assert cf._is_dsh_id_line("- id: vod-devkit") is True
     assert cf._is_dsh_id_line("- id: vod-devkit-mcp") is False
+
+
+def test_dsh_skips_mcp_install_when_registry_unreachable(env):
+    """registry 不可达时不跑 pnpm（否则离线机器要挂满子进程超时才降级），直接降级。
+    PATH 只留桩目录 → 子进程里 npm 不可见，等价于离线机器。"""
+    _dsh_stub(env)
+    e = dict(env["env"])
+    # 桩目录 + 系统目录：有 git（安装器要用），但没有 npm（node 装在 /usr/local/bin）
+    e["PATH"] = str(env["stub"]) + ":/usr/bin:/bin"
+    env2 = dict(env, env=e)
+    r = cli(env2, "install", "--target", "dsh", "--profile", "web", "--product", "CodeArts")
+    assert r.returncode == 0, r.stderr
+    text = _read_patch(env2)
+    assert "- id: vod-devkit-mcp" not in text, "registry 不可达时不得写 MCP 块"
+    assert "registry 不可达" in r.stderr, r.stderr
+
+
+def test_doctor_reports_unreferenced_payloads(env):
+    """载荷并存要可见：旧版本目录留在盘上，doctor 报出来并明确"不自动删"。"""
+    _dsh_stub(env)
+    assert cli(env, "install", "--target", "dsh", "--profile", "web",
+               "--product", "CodeArts").returncode == 0
+    pdir = env["home"] / ".vod-devkit" / "payloads"
+    (pdir / "0.0.1").mkdir(parents=True, exist_ok=True)
+    r = cli(env, "doctor")
+    out = (r.stdout or "") + (r.stderr or "")
+    assert "未被任何安装行引用" in out and "0.0.1" in out, out
+    assert "不自动删" in out, out

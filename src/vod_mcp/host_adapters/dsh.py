@@ -41,19 +41,35 @@ def _mcp_client_version(dsh_root: Path) -> str | None:
         return None
 
 
+def _registry_has(pkg: str, timeout: float = 10) -> bool:
+    """registry 可达且该包存在。离线机器上先判这一步，再决定要不要跑 pnpm——
+    直接把 `dsh plugin add` 甩出去会挂满 subprocess 超时（真机实锤 300s）才降级。"""
+    try:
+        r = subprocess.run(["npm", "view", pkg, "version", "--silent"],
+                           capture_output=True, text=True, timeout=timeout)
+        return r.returncode == 0 and bool((r.stdout or "").strip())
+    except Exception:      # noqa: BLE001  任何异常都按"不可达"处理（降级而非阻断）
+        return False
+
+
 def _ensure_mcp_client(dsh_cli: str, profile: str) -> str | None:
     """缺 mcp-client 时用 dsh 自己的安装通道补（参照物同做法）；可用 env 跳过。"""
     root = _dsh_root(dsh_cli)
     ver = _mcp_client_version(root)
     if ver:
         return ver
+    pkg = "@deepseek-ai/dsh-mcp-client"
     if os.environ.get("VOD_DSH_SKIP_MCP_CLIENT_ADD") == "1":
         print("[vod-devkit] 跳过 mcp-client 自装（VOD_DSH_SKIP_MCP_CLIENT_ADD=1）→ 降级为壳工具面",
               file=sys.stderr)
         return None
-    r = subprocess.run([dsh_cli, "plugin", "--profile", profile, "add",
-                        "@deepseek-ai/dsh-mcp-client"],
-                       capture_output=True, text=True, timeout=300)
+    if not _registry_has(pkg):
+        print(f"[vod-devkit] registry 不可达或查不到 {pkg} → 跳过自装，降级为壳工具面"
+              "（联网后可 `dsh plugin --profile <p> add " + pkg + "` 补，再重装本插件）",
+              file=sys.stderr)
+        return None
+    r = subprocess.run([dsh_cli, "plugin", "--profile", profile, "add", pkg],
+                       capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
         print("[vod-devkit] mcp-client 自装失败（降级为壳工具面）："
               f"{(r.stderr or r.stdout).strip()[-200:]}", file=sys.stderr)
