@@ -514,3 +514,8 @@
 - cdc54f7 fix(P1/P2/P4): 读侧标量 roundtrip、'在用载荷'单一入口、账本原子写与坏账本拒写
 - 5f2c025 test(门禁先行): 三条评审缺陷的红用例（P1 读侧 roundtrip / P2 in_use 单一入口 / P4 账本原子写）
 
+
+## v0.5.23（2026-11-16）
+
+- 56428df fix(P1/P2/P5+隔离): install 入口预检账本、hermes 认 HERMES_HOME、载荷路径读回
+
