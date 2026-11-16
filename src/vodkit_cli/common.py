@@ -226,6 +226,23 @@ def _source_reachable(sha: str) -> bool | None:
         return None
 
 
+def _released(sha: str) -> bool | None:
+    """该提交是否落在某个 tag 里（R10-2）：True=已发布构建；False=工作树/未打 tag；
+    None=判不了（无 .git / 无 sha）。
+
+    `reachable=True` 只证明"提交可达"，不代表"已发布"——真机曾把 46faccb（0 个 tag 包含）
+    当成 0.5.17 装进机器，而 npm 上的 0.5.17 是 a5bbea1：同版本号两份代码，行为对不上。
+    """
+    if not (ROOT / ".git").exists() or not sha:
+        return None
+    try:
+        r = subprocess.run(["git", "tag", "--contains", sha],
+                           cwd=ROOT, capture_output=True, text=True, timeout=10)
+        return bool((r.stdout or "").strip())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
                             extra_dirs, transport: str = "stdio",
                             mcp_url: str = "", payload_dir=None) -> None:
@@ -290,6 +307,11 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
     elif reach is None:
         print("[vod-devkit] 提示：安装根没有 git 元数据（npx 缓存 / tarball 形态）——"
               "provenance 不可判定（manifest 记 reachable=null），不影响运行。", file=sys.stderr)
+    if _released(str(manifest["source"].get("commitSha") or "")) is False:
+        print(f"[vod-devkit] 提示：本次载荷来自**未打 tag 的提交** "
+              f"{str(manifest['source'].get('commitSha'))[:12]}——版本号相同但内容可能与该版本的"
+              "npm 包不同（真机实锤：0.5.17 装机是 46faccb，registry 是 a5bbea1）。"
+              "要一字不差请用 npx vod-devkit@<ver> install，或等发版后再装。", file=sys.stderr)
     missing = [k for k in ("VOD_JAVA_API_KEY",) if
                not os.environ.get(k) and not _runtime_cfg_read().get("java_key")]
     if missing and transport == "stdio":

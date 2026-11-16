@@ -1079,3 +1079,20 @@ def test_source_reachable_three_states(tmp_path, monkeypatch):
     from vodkit_cli import common
     monkeypatch.setattr(common, "ROOT", tmp_path)       # 模拟安装根没有 .git
     assert common._source_reachable("deadbeef" * 5) is None
+
+
+def test_released_helper():
+    """R10-2：build-info 的提交是否落在 tag 里（区分"已发布构建"与"工作树/未打 tag"）。
+
+    真机实锤：0.5.17 装机载荷是 46faccb（git tag --contains = 0），registry 上是 a5bbea1
+    ——同版本号两份代码，行为对不上。判据本身只问 tag 包含关系。
+    """
+    from vodkit_cli import common
+    assert common._released("0" * 40) is False
+    assert common._released("") is None
+
+
+def test_released_helper_without_git(tmp_path, monkeypatch):
+    from vodkit_cli import common
+    monkeypatch.setattr(common, "ROOT", tmp_path)     # 模拟 npx/tarball 形态（无 .git）
+    assert common._released("deadbeef" * 5) is None
