@@ -179,3 +179,30 @@ def test_s153_prune_respects_payload_referenced_by_profile_patch(tmp_path, monke
     cands = P.prune_candidates(rows)
     versions = [v for _p, v, _s in cands]
     assert "0.5.15" not in versions, f"headless patch 仍在用的载荷被列为可删：{cands}"
+
+
+# ── S152 辅助纯函数真值表（重构后锁住判定面，防止"顺手改回整块比对"）──────────
+def test_s152_form_gap_matrix():
+    from vodkit_cli import doctor as _doc
+    ok = {"present_mcp": True, "present_shell": True, "register_tools_false": True}
+    assert _doc._dsh_form_gap(ok, True) == ""
+    assert _doc._dsh_form_gap(dict(ok, present_mcp=False), True) == "缺 MCP 块"
+    assert _doc._dsh_form_gap(dict(ok, present_shell=False), True) == "缺壳块"
+    assert _doc._dsh_form_gap(dict(ok, register_tools_false=False), True).startswith("壳未")
+    # 降级形态（want_mcp=False）：缺 MCP 块与壳自注册都不算缺口
+    assert _doc._dsh_form_gap(
+        dict(ok, present_mcp=False, register_tools_false=False), False) == ""
+
+
+def test_s152_field_diffs_are_report_only():
+    from vodkit_cli import doctor as _doc
+    facts = {"command": "/a/python", "state_home": "/s1",
+             "server_py": "/old/payloads/0.5.9/vod_mcp/server.py"}
+    snap = {"command": "/b/python", "stateHome": "/s2"}
+    diffs = _doc._dsh_field_diffs(facts, snap, "/p/new")
+    assert len(diffs) == 3, diffs
+    assert any("command=" in d for d in diffs)
+    assert any("VOD_DEVKIT_HOME=" in d for d in diffs)
+    assert any("入口=" in d for d in diffs)
+    # 无安装期记录 / 无 payloadDir → 不产出差异（不许凭猜判 drift）
+    assert _doc._dsh_field_diffs(facts, {}, "") == []
