@@ -1323,3 +1323,18 @@ doctor 的 dsh patch 自愈只做一件事：让文件回到**安装器该写的
 | 安装记录 ↔ 安装产物同源 | `<payloadDir>/build-info.json` | 根 `build-info.json` 是 tracked 的发版快照，release 记 `v^`、install 重烧 HEAD，发版后天然不等 |
 | 回落 | 老账本无 `payloadDir` / 载荷缺文件 → 仓根 | 不新增误伤面；载荷缺失另有完整性 FAIL |
 | 与调用方的约定 | `doctor._provenance_problem(mf) -> str \| None` | 单一入口，doctor 与 verify 共用，禁止第二套读法 |
+
+## hermes 落点重定向的归属判据（D-hermes-reroot-1，2026-11-16）
+
+`host_adapters/hermes._spec()` 在设了 `HERMES_HOME` 时重定向落点，判据是**前缀归属**：
+
+| 情形 | 行为 |
+|---|---|
+| 落点在 `$HOME/.hermes/` 之下 | 改挂到 `HERMES_HOME/<尾巴>` |
+| 落点不在此前缀下 | 原样保留（不改写别人钉的路径） |
+| `HOME` 是隔离目录、`HERMES_HOME` 指向该 HOME 之外 | 忽略 `HERMES_HOME`（落点跟随 HOME） |
+| `HOME` 是真实家目录 | 尊重 `HERMES_HOME` |
+
+为什么不用「路径里有没有 `.hermes` 分量」：HOME 自身可能落在含该分量的路径里
+（`<tmp>/.hermes/cache/...`），按分量搜索会命中外层并产生自我嵌套（2026-11-16 矩阵实锤）。
+与 `_cli_env()` 保持同源——隔离时 CLI 与文件写入的落点都跟随 HOME。

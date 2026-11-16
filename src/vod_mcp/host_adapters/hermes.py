@@ -104,20 +104,43 @@ def _spec() -> dict:
     """
     spec = host_specs.load("hermes")
     root = _hermes_home()
+    home_env = (os.environ.get("HOME") or "").strip()
+    real = _real_home()
+    if root is not None and home_env and real is not None:
+        # 隔离 HOME（HOME != 真实家目录）时，只有**同在该 HOME 之下**的 HERMES_HOME 才认：
+        # 网关派生的 env 恒带 HERMES_HOME=/root/.hermes（真实家目录），照它重定向会把
+        # 隔离安装写到真机（2026-11-16 实测：真机 ~/.hermes/mcp/vod-devkit.json 被桩值覆盖）。
+        # 与 `_cli_env()` 的判定同源：隔离时落点一律跟随 HOME。
+        try:
+            isolated = Path(home_env).expanduser().resolve() != real
+            if isolated:
+                root.resolve().relative_to(Path(home_env).expanduser().resolve())
+        except (OSError, ValueError):
+            root = None
     if root:
+        def reroot(val: str) -> str:
+            """`HOME/.hermes` 之下的落点改成挂到 HERMES_HOME 下；其它路径原样返回。
+
+            按**前缀**归属，不按分量名搜索：HOME 本身可能落在含 `.hermes` 分量的路径里
+            （隔离/容器形态 `<tmp>/.hermes/cache/...`），`parts.index(".hermes")` 会命中
+            外层那一层，把落点拼成 `<HERMES_HOME>/cache/.../home/.hermes/...` 的自我嵌套
+            （S159，host_matrix 实锤「配置未落盘」）。
+            """
+            home = (os.environ.get("HOME") or "").strip()
+            if not home or not val:
+                return val
+            try:
+                hh = (Path(home).expanduser() / ".hermes").resolve()
+                rel = Path(val).resolve().relative_to(hh)
+            except (OSError, ValueError):
+                return val
+            return str(root / rel) if rel.parts else str(root)
+
         for key in ("config", "mcpConfigFile", "profileConfig", "skillsDir",
                     "configPath"):
-            val = str(spec.get(key) or "")
-            parts = Path(val).parts if val else ()
-            if ".hermes" in parts:
-                spec[key] = str(root.joinpath(*parts[parts.index(".hermes") + 1:]))
+            spec[key] = reroot(str(spec.get(key) or "")) or spec.get(key)
         if spec.get("managedPaths"):
-            out = []
-            for pth in spec["managedPaths"]:
-                parts = Path(str(pth)).parts
-                out.append(str(root.joinpath(*parts[parts.index(".hermes") + 1:]))
-                           if ".hermes" in parts else pth)
-            spec["managedPaths"] = out
+            spec["managedPaths"] = [reroot(str(pth)) for pth in spec["managedPaths"]]
     return spec
 
 

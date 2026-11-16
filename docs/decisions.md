@@ -2017,3 +2017,32 @@ commitSha。根这份是 tracked 文件，release 按 tag 口径写 `v^`（relea
 **验证**：S158-1（根记 `v^` 时 doctor 仍 OK，命令面）+ S158-2（载荷 ≠ manifest 必须报，
 直调 `doctor._provenance_problem()`，判据退化回读根即红）；既有
 `test_verify_preset_fails_on_mixed_artifacts` 改为改载荷而不改根。
+
+## D-hermes-reroot-1：spec 重定向按前缀归属，隔离 HOME 下不认外部 HERMES_HOME（2026-11-16 真机）
+
+**缺陷（两条，同一处代码，实测）**：
+
+1. **自我嵌套**：`_spec()` 把 `~/.hermes/...` 重定向到 `HERMES_HOME` 时用
+   `parts.index(".hermes")` 取路径里**第一个** `.hermes` 分量。隔离 HOME 落在
+   `<tmp>/.hermes/cache/...` 下时命中**外层**缓存目录，configPath 被拼成
+   `<HERMES_HOME>/cache/.../home/.hermes/config.yaml` —— 安装器写到鬼路径，
+   `host_matrix` 报「配置未落盘」（矩阵抓到；本机真实 HOME 不触发）。
+2. **真机被隔离安装覆盖**：网关派生的 env 恒带 `HERMES_HOME=/root/.hermes`（真实家目录）。
+   带着它跑 `HOME=<tmp> install --target hermes` 时，旧写法把备份片写到了真机
+   `~/.hermes/mcp/vod-devkit.json`（实测被写成 `command=<Hermes 解释器>`、
+   `args=/payload/vod_mcp/server.py`、`apiBase=http://stub.local`、state=测试临时目录）。
+
+**决定**：
+
+- 重定向判据改成**前缀归属**：只有落在 `HOME/.hermes` 之下的落点才挂到 `HERMES_HOME`
+  下（`Path.relative_to`），其它路径原样保留；
+- 隔离 HOME（HOME ≠ 真实家目录）时，只有**同在该 HOME 之下**的 `HERMES_HOME` 才认，
+  否则整体忽略（落点一律跟随 HOME）——与 `_cli_env()` 的判定同源。
+
+**代价**：显式把 HERMES_HOME 钉到隔离 HOME 之外（如共享 state）的跑法不再被尊重；
+这种形态本来就被 `_cli_env()` 判为"拒绝，不猜用户意图"，行为现在一致了。
+
+**验证**：S159-1（HOME 含 `.hermes` 分量 + HERMES_HOME → 落点精确不加嵌套）与
+S159-2（落点不在 `HOME/.hermes` 下 → 原样保留）；`host_matrix` 从 9 PASS/1 FAIL
+回到 10 PASS/1 SKIP；真机备片按 config.yaml 恢复并复验（doctor OK、audit PASS、
+config.yaml mtime 未变）。
