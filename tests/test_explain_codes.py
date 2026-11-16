@@ -49,3 +49,17 @@ def test_s154_32011_is_draft_token_mismatch_not_catalog():
     got = diagnose.explain("-32011")
     assert "草稿" in got["cause"] or "令牌" in got["cause"], got
     assert "名录" not in got["cause"], f"-32011 又被写成产品名录：{got}"
+
+def test_s167_http_429_is_explained():
+    """S167：引擎 `POST /external/voices` 的 429 要能解释成「重试」而不是「插件/配置坏了」。
+
+    背景（引擎 dev 1d4fba8d，2026-11-17 核对）：voiceId 取号改序列表原子分配后，极端异常
+    （序列行写不进去、并发删行）抛 VoiceIdExhaustedException → Controller 回 429
+    「提交排队繁忙，请稍后再试」，明确不造假号。插件 `_http` 对非 401 透传
+    `上游返回 429: <detail>`。
+    """
+    msg = "上游返回 429: 提交排队繁忙，请稍后再试"
+    got = diagnose.explain(msg)
+    assert got["known"], got
+    assert "重试" in got["action"], got
+    assert "VOD_JAVA" not in got["action"], "429 不许被说成本机配置问题（会把排查引向错误方向）"

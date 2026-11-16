@@ -1819,3 +1819,15 @@ Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此�
 | S164-2 | preset 遍历全行 | 多安装行时逐行判，破坏**第一行**也必须报（报文带 target） |
 | S165 | 子进程超时 | `hermes mcp add` 受 `_CLI_TIMEOUT`（默认 60s）约束；超时后仍保住 JSON 片段并打印降级指引 |
 | S166 | 删死守卫 | 源码不再出现 `_guard_isolated_home`；落点安全性由 `_effective_hermes_home()` 保证 |
+
+## 引擎 429 的诊断口径（S167，D-engine-429-1，2026-11-17 接口核对）
+
+**背景**：VOD-Project dev（1d4fba8d）把 voiceId 取号改成序列表原子分配；极端异常
+（序列行写不进去、并发删行）抛 `VoiceIdExhaustedException`，`POST /external/voices`
+回 429「提交排队繁忙，请稍后再试」，明确不造假号。插件 `_http` 对非 401 一律透传
+`上游返回 <code>: <detail>`，但 `explain` 表里没有这一条 → 用户看到的是"未收录"，
+容易被判成插件/配置故障。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S167 | HTTP 429 解释 | `explain("上游返回 429: …")` known，动作含「重试」，且不得指向本机配置（不含 VOD_JAVA） |

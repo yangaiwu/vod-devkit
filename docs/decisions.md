@@ -2108,3 +2108,24 @@ config.yaml mtime 未变）。
 
 **验证**：S162（5 组 env 等式）、S163-1（sync 前后根字节不变）、S163-2（口径集合）、
 S164-1/2、S165（桩 CLI sleep 5 + timeout 1 → <3.5s 返回且片段在）、S166（源码扫描）。
+
+## D-engine-429-1：引擎 429 归「上游/重试」，不归本机配置（2026-11-17 接口核对）
+
+**来源**：核对 VOD-Project dev（`3e1b3205..789e9e0e`）后确认——外部接口的路由、入参键
+（content/tags/title/userType/voiceId）、回执键（voiceIds/statuses）与 `/external/token`、
+`/external/meta` 均无变化；行为面有两处：①提交不再实时建单/分析（800d7632 改为定时任务
+扫 source 表），②voiceId 改序列表原子分配（1d4fba8d，号可能跳号，极端失败回 429）。
+
+**决定**：插件侧代码不改（契约零变化）；只补一条诊断口径——`explain` 收录
+「上游返回 429」，层=上游、动作=稍后重试一次 / 持续则报引擎运维，**不得**指向
+`VOD_JAVA_API_BASE` 这类本机配置（真实语义是引擎侧忙，不是配置错）。
+
+**对照证据（不调整的理由）**：
+- 路由：`External*Controller` 本次零改动（`git diff --stat` 未列出任何 controller）；
+- 入参/回执键：service 内 `get("…")` 集合与回执 `voiceIds/statuses` 前后逐字相同；
+- meta 返回键（productCatalog/products/problemTypes/dictVersion）前后相同；
+- voiceId 前缀（VDPL/VDWD）插件不解析，跳号不影响幂等（幂等键在引擎侧）；
+- UA 设备绑定坑（引擎文档 16dafc21）不影响插件：插件用 `X-Vod-Device-Id` 设备锚点路径，
+  引擎 `ua_hash = sha256(deviceId)`，两处（安装器 remote.py / 运行期 net.py）带同一锚点。
+
+**验证**：S167；`tests/test_explain_codes.py` 四条全绿（含 -320XX 与 raise 点一致性）。
