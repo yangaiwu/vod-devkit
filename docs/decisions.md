@@ -1198,6 +1198,12 @@ C：新宿主 officeace/openclaw）。负责人拍板 A3/B1/C3；A3 落地前实
 宿主规格 + 适配器 + 用例补，不做提前适配（无消费者的适配层）。
 覆盖现状：任意 MCP 宿主今天可走 `install --target generic --mcp-config <file>`。
 
+> **已被 D-host-3 部分取代（2026-11-16）**：OpenClaw 侧后来出现了可安装面（npm 包
+> `openclaw@2026.11.4` + `mcp.servers` 注册表 + `mcp add/set/unset` CLI），已做成正式宿主；
+> 原结论"openclaw 没有可安装的宿主"在这半边不成立，按"后来出现安装面"更正，不是判断失误叙事。
+> OfficeAce 侧结论仍然成立（官方只发 Windows/macOS/HarmonyOS 客户端，Linux 无对象），
+> 因此只做形态登记 + 非 Windows 硬拒绝，不做提前适配。
+
 ## D-global-cmds-1：全局命令与多宿主消费面（2026-11-15，负责人要求"全部优化"）
 
 **背景**：install-manifest 早就按宿主记多行（`installs[]`，D-installs-1），但消费命令
@@ -1950,3 +1956,21 @@ OfficeAce 是桌面端（Windows 10/11、macOS 13+、HarmonyOS 6.1+，官方无 
 **验证**：`tests/test_openclaw_officeace_hosts.py`（假 CLI 锁"只经 CLI 写 + 配置字节不变"、
 无 CLI 拒绝；非 Windows 拒绝；sqlite 幂等 upsert 保留 owner_user_id、只删自己、不建表、rollback
 路径在 install 里）、`tests/test_hosts_spec.py`（宿主集合）、`tests/test_host_adapters.py`（契约）。
+
+## D-host-3 补记：评审收口（2026-11-16 第二轮）
+
+1. **OpenClaw 摘条目的护栏兜底**：openclaw 自己有写入护栏（`size-drop-vs-last-good`）——
+   配置很小时 `mcp unset` 会被拒（矩阵实锤 941→458）。兜底只允许"外科摘除"：
+   严格 JSON 可解析 → 先落 `.bak` → 原子删 `mcp.servers.vod-devkit` 一个键；
+   JSON5 带注释则不动字节，只打手工指引。
+2. **"在用载荷"加宿主配置面**：`in_use_payloads` = 账本 ∪ dsh patch ∪ openclaw/hermes 配置引用。
+   账本行丢了也不许把宿主正在引用的载荷当孤儿删（评审 P1）。
+3. **巡检必须抓"装了没入账"**：`--audit --host openclaw` 在注册表有条目但账本缺行时判 DRIFT。
+4. **OfficeAce 身份不猜**：`owner_user_id` 默认 NULL，只认显式 `OFFICEACE_OWNER_USER_ID`；
+   不再从库里抄第一个非空值（多用户桌面机会挂错人）。可用性判据也不用 `../` 相对穿越。
+5. **hermes 隔离 HOME 的判据改成"落点"而非"是否设置 HERMES_HOME"**：网关派生的 env 恒带
+   `HERMES_HOME=/root/.hermes`（评审两次实测把真机 config.yaml 改成探针路径）。现在隔离 HOME 时
+   CLI 落点一律跟随 `<HOME>/.hermes`，并打印一行说明；真实家目录一个字节不动（用例锁字节比对）。
+   卸载路径同样带 `_cli_env()`，摘钩子改走 `atomic_write_text`（P4 第五处）。
+6. **门禁派生式**：`test_hosts_spec` 从 `integrations/` 派生宿主集合 + 锁"host.json 有但 REGISTRY 无"
+   必红，不再硬编码 9 个名字（新增宿主必红的门禁本身是漂移源）。

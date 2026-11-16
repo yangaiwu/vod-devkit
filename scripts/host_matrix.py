@@ -63,8 +63,13 @@ EXPECT = {
     "codex-desktop": {"config": ".agents/plugins/marketplace.json", "entry": ("plugins", None)},
     "codex": {"cli": "codex", "config": None, "entry": None},
     "dsh": {"cli": "dsh", "profile": "web", "config": None, "entry": None},
-    # openclaw：注册表在 JSON5 配置里，读侧只认它的 CLI（probe --json），不解析文件
-    "openclaw": {"cli": "openclaw", "config": None, "entry": None},
+    # openclaw：注册表在 JSON5 配置里，读侧只信它的 CLI（probe --json）；矩阵里验的是
+    # CLI 写出来的那份（CLI 输出合法 JSON），注意真实文件可能带注释。
+    "openclaw": {"cli": "openclaw", "config": ".openclaw/openclaw.json",
+                 "entry": ("mcp", "servers", "vod-devkit")},
+    # officeace：桌面端（Windows-only），本机/no对象 → 显式 SKIP（不做假覆盖）
+    "officeace": {"cli": "", "config": None, "entry": None,
+                  "skip": "桌面端（Windows 10/11、macOS 13+、HarmonyOS），本机 Linux 无安装对象"},
 }
 
 # 卸载后必须仍然存在的用户内容：host → (文件, 断言函数)
@@ -124,6 +129,9 @@ def _isolated_env(host: str, home: Path) -> dict:
         # hermes CLI 认 HERMES_HOME（不认 HOME）：不搬它，隔离 HOME 里装 hermes 等于
         # 直接改真机配置（2026-11-16 实锤，见 docstring）
         **({"HERMES_HOME": str(home / ".hermes")} if host == "hermes" else {}),
+        # openclaw 认 OPENCLAW_CONFIG_PATH / OPENCLAW_STATE_DIR（官方 gateway/index.md）
+        **({"OPENCLAW_CONFIG_PATH": str(home / ".openclaw" / "openclaw.json"),
+           "OPENCLAW_STATE_DIR": str(home / ".openclaw")} if host == "openclaw" else {}),
         "VOD_DEVKIT_MANIFEST": str(home / "install-manifest.json"),
         "VOD_JAVA_API_BASE": "http://127.0.0.1:9/stub",
         "VOD_PACKS": "core",
@@ -268,6 +276,8 @@ def _probe(entry: dict, expect_version: str) -> tuple:
 
 def run_host(host: str, home: Path, expect_version: str, verbose=False) -> tuple:
     spec = EXPECT[host]
+    if spec.get("skip"):
+        return "SKIP", str(spec["skip"])
     if spec.get("cli") and not shutil.which(spec["cli"]):
         return "SKIP", f"宿主 CLI {spec['cli']} 不在 PATH（自托管 runner 上才有）"
     _seed(home, host)
@@ -576,7 +586,11 @@ def _audit_openclaw(home: Path, expect_version: str) -> tuple:
     if env:
         entry["env"] = env
     ok, msg = _probe(entry, expect_version)
-    return ("PASS" if ok else "DRIFT"), f"{msg}（openclaw 注册表 {srv.get('tools')} 工具）"
+    if ok and not row:
+        return "DRIFT", ("注册表里有条目但**账本缺 openclaw 行**（装了没入账：uninstall 摘不到、"
+                         "prune 的在用集合靠配置面兜底）——重跑 install --target openclaw")
+    label = f"openclaw 注册表 {srv.get('tools')} 工具" + ("" if row else "，账本未记")
+    return ("PASS" if ok else "DRIFT"), f"{msg}（{label}）"
 
 
 def audit_host(host: str, expect_version: str, home: Path | None = None) -> tuple:

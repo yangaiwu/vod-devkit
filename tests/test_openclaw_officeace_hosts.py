@@ -39,12 +39,23 @@ def test_both_hosts_registered_with_host_json():
 
 
 def test_openclaw_config_is_never_written_directly():
-    """openclaw.json 是 JSON5：adapter 里不许出现对它 write_text/merge 的路径。"""
+    """openclaw.json 是 JSON5：正常路径只经 CLI；唯一允许的直写是护栏兜底的外科摘除。
+
+    护栏实锤（2026-11-16 矩阵）：配置很小时 `mcp unset` 会被 openclaw 自己的
+    `size-drop-vs-last-good` 拒写。兜底只允许：**严格 JSON 可解析**时原子摘掉
+    mcp.servers.vod-devkit 一个键（先落 .bak）；JSON5 带注释则不动字节。
+    """
     src = (ROOT / "src" / "vod_mcp" / "host_adapters" / "openclaw.py").read_text(encoding="utf-8")
-    for bad in ("write_text(", "merge_mcp_servers(", "atomic_write_text("):
-        assert bad not in src, f"openclaw 适配器出现了直改配置的写法：{bad}"
-    assert "mcp\", \"add" in src or '"mcp", "add"' in src
-    assert '"mcp", "unset"' in src
+    import re as _re
+    bare = _re.findall(r"(?<!atomic_)write_text\(", src)
+    assert not bare, "不许出现裸 write_text（会写坏 JSON5/丢注释）"
+    assert "merge_mcp_servers(" not in src
+    assert '"mcp", "add"' in src and '"mcp", "unset"' in src
+    # 唯一写点必须在 _surgical_remove 里，且先做严格 JSON 解析、先备份
+    seg = src[src.index("def _surgical_remove"):src.index("def uninstall")]
+    assert "json.loads" in seg and "atomic_write_text" in seg and "copyfile" in seg, seg
+    assert seg.index("json.loads") < seg.index("atomic_write_text"), "兜底必须先校验再写"
+    assert seg.index("copyfile") < seg.index("atomic_write_text"), "兜底必须先备份再写"
 
 
 # ── OpenClaw：假 CLI 全链路 ───────────────────────────────────────────────
@@ -166,8 +177,19 @@ def test_officeace_upsert_is_idempotent_and_keeps_owner(tmp_path):
                        "WHERE name = 'vod-devkit'").fetchall()
     con.close()
     assert len(rows) == 1, rows
-    assert rows[0][1] == "u-42", "owner_user_id 必须沿用已有行，不许自己编"
+    assert rows[0][1] is None, (
+        "owner_user_id 默认必须 NULL（2026-11-16 评审 P4：从库里抄第一个非空值 = 把连接器挂到别人名下）")
     assert json.loads(rows[0][2]) == {"A": "2"}
+
+
+def test_officeace_owner_only_from_explicit_env(tmp_path, monkeypatch):
+    db = _mk_officeace_db(tmp_path)
+    monkeypatch.setenv("OFFICEACE_OWNER_USER_ID", "u-7")
+    officeace.upsert_row(db, officeace.connector_row("/py", ["/s.py"], {}))
+    con = sqlite3.connect(str(db))
+    got = con.execute("SELECT owner_user_id FROM mcp_connectors WHERE name='vod-devkit'").fetchone()
+    con.close()
+    assert got[0] == "u-7", "显式来源必须生效（且只认这一个来源）"
 
 
 def test_officeace_uninstall_removes_only_its_rows(tmp_path):
@@ -185,3 +207,63 @@ def test_officeace_never_creates_schema(tmp_path):
     sqlite3.connect(str(db)).close()
     with pytest.raises(RuntimeError):
         officeace.upsert_row(db, officeace.connector_row("/py", ["/s.py"], {}))
+
+# ── openclaw 的 size-drop 护栏兜底（2026-11-16 矩阵实锤：小配置 941→458 被 CLI 拒写）──
+BLOCKED_CLI = '''#!/usr/bin/env python3
+import sys
+print("Config write rejected: size-drop-vs-last-good:941->458", file=sys.stderr)
+sys.exit(1)
+'''
+
+
+def test_openclaw_unset_size_drop_falls_back_to_surgical_remove(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".openclaw").mkdir(parents=True)
+    conf = home / ".openclaw" / "openclaw.json"
+    conf.write_text(json.dumps({"mcp": {"servers": {"vod-devkit": {"command": "py", "args": ["/s.py"]},
+                                                   "other": {"command": "x"}}},
+                                "plugins": {"entries": {}}}, indent=2), encoding="utf-8")
+    bindir = tmp_path / "bin"; bindir.mkdir()
+    cli = bindir / "openclaw"; cli.write_text(BLOCKED_CLI, encoding="utf-8"); cli.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
+    monkeypatch.setenv("OPENCLAW_CONFIG_PATH", str(conf))
+    monkeypatch.setenv("HOME", str(home))
+    assert openclaw.uninstall() is True
+    data = json.loads(conf.read_text(encoding="utf-8"))
+    assert "vod-devkit" not in data["mcp"]["servers"], "护栏兜底没摘掉条目"
+    assert "other" in data["mcp"]["servers"], "外科摘除不许碰别人的 server"
+    assert data["plugins"] == {"entries": {}}, "其它键必须原样保留"
+    assert list(conf.parent.glob("openclaw.json.bak-vod-devkit")), "兜底前必须落备份"
+
+
+def test_openclaw_surgical_remove_refuses_json5_with_comments(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".openclaw").mkdir(parents=True)
+    conf = home / ".openclaw" / "openclaw.json"
+    raw = '{\n  // 用户注释\n  "mcp": {"servers": {"vod-devkit": {}}}\n}\n'
+    conf.write_text(raw, encoding="utf-8")
+    bindir = tmp_path / "bin"; bindir.mkdir()
+    cli = bindir / "openclaw"; cli.write_text(BLOCKED_CLI, encoding="utf-8"); cli.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
+    monkeypatch.setenv("OPENCLAW_CONFIG_PATH", str(conf))
+    assert openclaw.uninstall() is False
+    assert conf.read_text(encoding="utf-8") == raw, "JSON5 带注释时不许动字节（宁可不摘）"
+
+
+def test_audit_flags_openclaw_entry_without_ledger_row(tmp_path, monkeypatch):
+    """P1 门禁：装了 openclaw（注册表有条目）但账本缺行 → 巡检必须红。"""
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT / "scripts"))
+    import host_matrix as hm
+    cli = tmp_path / "openclaw"
+    cli.write_text("#!/usr/bin/env python3\n"
+                   "import json,sys\n"
+                   "print(json.dumps({'servers': {'vod-devkit': {'launch': '/x/py /y/server.py',"
+                   " 'tools': 10}}}))\n", encoding="utf-8")
+    cli.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    monkeypatch.setenv("VOD_DEVKIT_MANIFEST", str(tmp_path / "none.json"))
+    monkeypatch.setattr(hm, "_probe", lambda entry, ver: (True, "工具面 OK，版本一致"))
+    verdict, msg = hm._audit_openclaw(tmp_path, "0.5.24")
+    assert verdict == "DRIFT", msg
+    assert "账本" in msg, msg

@@ -49,7 +49,7 @@ def _remove_managed_mcp_entry(target: str, path: Path) -> None:
             new_text, removed = _hermes.remove_llm_hook(text)
             new_text2, removed2 = _hermes.remove_guard_hook(new_text)
             if removed or removed2:
-                cfg.write_text(new_text2, encoding="utf-8")
+                common.atomic_write_text(cfg, new_text2)   # P4：第五处裸 write_text
                 print("removed vod-devkit hooks:", cfg,
                       "(pre_llm_call)" if removed else "",
                       "(pre_tool_call)" if removed2 else "")
@@ -57,16 +57,33 @@ def _remove_managed_mcp_entry(target: str, path: Path) -> None:
         legacy = _hermes.remove_legacy_plugin()
         if legacy:
             print("removed legacy plugin:", legacy)
-        if shutil.which("hermes"):
+        if shutil.which("hermes") and not _hermes_cli_unsafe():
             cli, args = "hermes", ["mcp", "remove", "vod-devkit"]
         else:
             cli, args = None, []
     elif target == "codex" and shutil.which("codex"):
         cli, args = "codex", ["mcp", "remove", "vod-devkit"]
     if cli:
-        r = subprocess.run([cli, *args], capture_output=True, text=True, timeout=120)
+        env = _hermes._cli_env() if cli == "hermes" else None
+        r = subprocess.run([cli, *args], capture_output=True, text=True, timeout=120,
+                           env=env)
         print(f"{cli} mcp remove:", "OK" if r.returncode == 0
               else (r.stderr or r.stdout).strip()[-120:])
+
+
+def _hermes_cli_unsafe() -> bool:
+    """隔离跑（HOME 改了）时 hermes CLI 会写真实家目录 → 卸载路径跳过它，只做文件面清理。
+
+    与安装路径不同：安装是"拒绝执行"（宁可不装），卸载是"跳过 CLI + 打印指引"
+    （配置条目摘不掉的残留有指引可循，而写坏真实 config.yaml 是不可接受的破坏）。
+    """
+    try:
+        from vod_mcp.host_adapters import hermes as _h
+        _h._guard_isolated_home()
+    except SystemExit:
+        print("skip（隔离 HOME：hermes CLI 会写真实家目录，已跳过 CLI 摘除）", file=sys.stderr)
+        return True
+    return False
 
 
 def _outside_home(p: Path) -> bool:
@@ -122,12 +139,6 @@ def _cleanup_install_row(row: dict, skill_hashes: dict | None = None,
         from vod_mcp.host_adapters import codex_desktop as _cd
         _cd.uninstall()
         return
-    # openclaw：注册表在 JSON5 配置里（可能带注释），只许经它自己的 CLI 摘条目；
-    # officeace：条目在宿主 sqlite（schema 不是我们的），只许删自己那几行。
-    if target in ("openclaw", "officeace"):
-        from vod_mcp.host_adapters import get as _get
-        _get(target).uninstall()
-        return
     mf = dict(row)
     mf["skillHashes"] = skill_hashes or {}
     # ① 技能：落点真源是 skillInstalls（按 host 匹配），且**共享落点不许摘**——
@@ -161,6 +172,13 @@ def _cleanup_install_row(row: dict, skill_hashes: dict | None = None,
         _remove_managed_skills(mf, d, si.get("host"))
     # ② MCP 配置
     path_s = row.get("mcpConfig")
+    # openclaw：注册表在 JSON5 配置里（可能带注释），只许经它自己的 CLI 摘条目；
+    # officeace：条目在宿主 sqlite（schema 不是我们的），只许删自己那几行。
+    # 两者都不许走下面的 JSON 合并/整文件删分支（会把用户注释/别人的连接器带走）。
+    if target in ("openclaw", "officeace"):
+        from vod_mcp.host_adapters import get as _get
+        _get(target).uninstall()
+        path_s = None
     if path_s and _outside_home(Path(path_s)):
         print(f"skip（配置不在当前 HOME 之下，拒绝改动）：{path_s}")
         path_s = None

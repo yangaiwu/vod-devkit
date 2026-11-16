@@ -54,8 +54,8 @@ def _usable(root: Path) -> bool:
             return False
     except OSError:
         return False
-    return any((root / x).exists() for x in
-               ("capabilities.json", "skills", "../data/mcp-connectors.sqlite"))
+    return any((root / x).exists() for x in ("capabilities.json", "skills")) or \
+        (root.parent / "data" / "mcp-connectors.sqlite").exists()
 
 
 def _registry_install_dir() -> str | None:
@@ -123,8 +123,9 @@ def _tables(db: sqlite3.Connection) -> set:
 def upsert_row(db_path: Path, row: dict) -> str:
     """按 name 幂等写一行（已有则更新 command/args/env，保留 owner_user_id 等用户字段）。
 
-    owner_user_id 没有可查询来源：沿用已有行的值（对齐上游 #559 的处理），
-    没有已有行时写 NULL——**不猜身份**。
+    owner_user_id 没有可查询来源：默认写 NULL（不猜身份），只有显式
+    `OFFICEACE_OWNER_USER_ID` 才写；不在库里找"第一个非空值"抄——多用户桌面机上那是把
+    连接器挂到别人名下（2026-11-16 评审 P4）。已有行更新时保留原 owner_user_id（不动别人数据）。
     """
     db = sqlite3.connect(str(db_path))
     try:
@@ -140,11 +141,9 @@ def upsert_row(db_path: Path, row: dict) -> str:
                  "disconnected", cur[0]))
             action = "updated"
         else:
-            owner = None
-            hit = db.execute("SELECT owner_user_id FROM mcp_connectors "
-                             "WHERE owner_user_id IS NOT NULL LIMIT 1").fetchone()
-            if hit:
-                owner = hit[0]
+            # 身份只能来自显式来源：OFFICEACE_OWNER_USER_ID。**绝不从库里抄别人的**
+            # （2026-11-16 评审 P4：多用户桌面机上照抄 = 把连接器挂到别人名下）。
+            owner = (os.environ.get("OFFICEACE_OWNER_USER_ID") or "").strip() or None
             row = dict(row, owner_user_id=owner)
             cols = ", ".join(_COLS)
             marks = ", ".join("?" for _ in _COLS)

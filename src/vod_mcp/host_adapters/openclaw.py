@@ -14,6 +14,7 @@
 - 卸载只 `unset` 自己那一条，配置文件与其它 server 原样保留。
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -84,6 +85,12 @@ def install(args, packs):
         add += ["--env", f"{k}={v}"]
     r = subprocess.run(add, capture_output=True, text=True, timeout=TIMEOUT)
     if r.returncode != 0:
+        msg = ((r.stderr or "") + (r.stdout or "")).lower()
+        # 只有"已存在"才退 set；其它错误（参数/schema/网关占用）必须当场报，不许糊成"更新成功"
+        if not any(k in msg for k in ("exist", "已存在", "already")):
+            print(f"[vod-devkit] openclaw mcp add 失败（rc={r.returncode}）："
+                  f"{(r.stderr or r.stdout or '').strip()[-300:]}", file=sys.stderr)
+            sys.exit(2)
         _run([cli, "mcp", "set", NAME, json.dumps(payload, ensure_ascii=False)],
              "mcp set")
         verb = "更新"
@@ -112,6 +119,45 @@ def install_remote(args, url, token):
     return Path(_spec()["configPath"])
 
 
+def _config_path() -> Path:
+    """当前生效的配置文件（OPENCLAW_CONFIG_PATH 优先——它才是 CLI 的真正落点）。"""
+    env = (os.environ.get("OPENCLAW_CONFIG_PATH") or "").strip()
+    if env:
+        return Path(env).expanduser()
+    return Path(_spec()["configPath"])
+
+
+def _surgical_remove(conf: Path) -> bool:
+    """护栏兜底的"外科摘除"：只在配置是**严格 JSON**（无注释）时动字节。
+
+    为什么需要：openclaw 自身有写入护栏（`size-drop-vs-last-good`）——配置文件很小时，
+    摘掉一整条大条目会让体积骤降，CLI 直接拒绝写（2026-11-16 矩阵实锤：941→458 被拒）。
+    真实用户配置通常更大不会触发，但"刚装上 OpenClaw 就装我们"这种小配置会。
+    兜底纪律：先落 .bak；严格 JSON 解析成功才删 `mcp.servers.vod-devkit` 一个键；
+    解析失败（JSON5 带注释）就**不动字节**，只打印手工指引。
+    """
+    if not conf.exists():
+        return False
+    raw = conf.read_text(encoding="utf-8")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        print(f"[vod-devkit] {conf} 不是严格 JSON（含注释），不做外科摘除；"
+              "请手工执行 `openclaw mcp unset vod-devkit` 或删掉 mcp.servers.vod-devkit",
+              file=sys.stderr)
+        return False
+    servers = ((data.get("mcp") or {}).get("servers") or {})
+    if NAME not in servers:
+        return True
+    del servers[NAME]
+    backup = conf.with_name(conf.name + ".bak-vod-devkit")
+    shutil.copyfile(conf, backup)
+    from vod_mcp import paths as _paths
+    _paths.atomic_write_text(conf, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    print(f"removed OpenClaw MCP entry（护栏 size-drop 触发，已外科摘除；备份 {backup.name}）：{conf}")
+    return True
+
+
 def uninstall() -> bool:
     """只摘自己那一条（openclaw mcp unset）；配置里其它 server 原样保留。"""
     cli = shutil.which("openclaw")
@@ -121,7 +167,11 @@ def uninstall() -> bool:
         return False
     r = subprocess.run([cli, "mcp", "unset", NAME],
                        capture_output=True, text=True, timeout=TIMEOUT)
-    ok = r.returncode == 0
-    print(("removed OpenClaw MCP entry: " if ok else "skip（OpenClaw 条目未摘除）：")
-          + (r.stdout or r.stderr or "").strip()[-160:])
-    return ok
+    if r.returncode == 0:
+        print("removed OpenClaw MCP entry:", (r.stdout or r.stderr or "").strip()[-120:])
+        return True
+    msg = ((r.stderr or "") + (r.stdout or ""))
+    if "size-drop" in msg:
+        return _surgical_remove(_config_path())
+    print("skip（OpenClaw 条目未摘除）：" + msg.strip()[-160:], file=sys.stderr)
+    return False

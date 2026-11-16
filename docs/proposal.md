@@ -1733,3 +1733,14 @@ Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此�
 | S156-4 | OfficeAce 平台门 | 非 Windows `install --target officeace` exit 2 且零写入 |
 | S156-5 | OfficeAce 行域 | upsert 幂等、保留已有 `owner_user_id`、uninstall 只删 `name=vod-devkit`、表不存在时报错不建表 |
 | S156-6 | 注册表一致性 | 两个新宿主都在 `hosts.hosts()` 与适配器 REGISTRY 里，host.json 具备 configPath/skillsDir |
+
+### S156 补记（2026-11-16 第二轮收口）
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S156-7 | OpenClaw 护栏兜底 | `mcp unset` 被 `size-drop-vs-last-good` 拒时：严格 JSON → 先 `.bak` 再原子摘单键，别人 server/其它键原样；JSON5 带注释 → 字节不动 |
+| S156-8 | 在用载荷配置面 | 账本缺行时，openclaw/hermes 配置里引用的载荷仍算在用（prune 不许删） |
+| S156-9 | 装了没入账 | 巡检在"注册表有条目、账本缺行"时判 DRIFT |
+| S156-10 | OfficeAce 身份 | owner_user_id 默认 NULL，仅显式 env 生效；不抄库里别人的值 |
+| S156-11 | hermes 隔离 | 隔离 HOME 时 CLI 落点跟随 HOME；真实 config.yaml 字节不变（含继承 HERMES_HOME 的网关场景） |
+| S156-12 | 宿主门禁 | 宿主集合由 integrations/ 派生，REGISTRY 覆盖不全必红 |

@@ -17,6 +17,7 @@ undici 那一段）；我们只校验 Python 版本与文件指纹。
 """
 import hashlib
 import json
+import re
 import os
 import shutil
 import datetime
@@ -222,6 +223,32 @@ def _patch_referenced_payloads() -> set:
     return used
 
 
+def _host_config_referenced_payloads() -> set:
+    """宿主**配置面**引用到的载荷（账本之外的第二个来源）。
+
+    P1（2026-11-16 评审）："在用"只认账本 payloadDir + dsh patch。宿主配置里明明还指着
+    某份载荷、账本却缺那一行时（并行会话覆盖账本 / 手工改过配置），prune 会把那份当孤儿删掉
+    —— 宿主下次启动即白屏。OpenClaw 的注册表是 JSON5（可能带注释），所以只做**文本正则**
+    提取 `.../payloads/<ver>/vod_mcp/server.py`，不解析整份文件。
+    """
+    used: set = set()
+    cands = [Path(os.path.expanduser("~")) / ".openclaw" / "openclaw.json",
+             Path(os.path.expanduser("~")) / ".hermes" / "mcp" / "vod-devkit.json"]
+    for f in cands:
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for m in re.finditer(r"([~/][^\"'\s,]*?/payloads/[^/\"'\s]+)/vod_mcp/server\.py",
+                             text):
+            root = m.group(1)
+            try:
+                used.add(str(Path(root).expanduser().resolve()))
+            except OSError:
+                used.add(root)
+    return used
+
+
 def in_use_payloads(rows=None) -> set:
     """"在用"载荷集合（单一入口，P2 2026-11-16 评审）。
 
@@ -240,6 +267,7 @@ def in_use_payloads(rows=None) -> set:
         except OSError:
             used.add(d)
     used |= _patch_referenced_payloads()
+    used |= _host_config_referenced_payloads()
     return used
 
 

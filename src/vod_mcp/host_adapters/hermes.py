@@ -22,43 +22,74 @@ def _hermes_home() -> Path | None:
     return Path(env).expanduser() if env else None
 
 
+def _real_home() -> Path | None:
+    try:
+        import pwd
+        return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+    except Exception:      # noqa: BLE001  平台没有 pwd 就不猜
+        return None
+
+
 def _cli_env() -> dict:
-    """给 hermes CLI 子进程的环境：显式带上 HERMES_HOME（否则它按真实家目录写）。"""
+    """给 hermes CLI 子进程的环境：让 CLI 的落点与我们写文件的落点**同一处**。
+
+    三种情形（2026-11-16 评审实锤 + 本轮修正）：
+    - HOME 是真实家目录 → 原样继承（HERMES_HOME 设了就跟随）；
+    - HOME 被隔离、HERMES_HOME 未设 → 自动补 `HERMES_HOME=<HOME>/.hermes`
+      （否则 CLI 按真实家目录写，我们的文件写到隔离目录 → 两边分裂）；
+    - HOME 被隔离、HERMES_HOME 指回真实家目录（网关派生的 env 恒带
+      HERMES_HOME=/root/.hermes）→ 拒绝，不猜用户意图。
+    """
     env = dict(os.environ)
+    real = _real_home()
+    home = (os.environ.get("HOME") or "").strip()
     root = _hermes_home()
-    if root:
-        env["HERMES_HOME"] = str(root)
+    if not home or real is None:
+        if root:
+            env["HERMES_HOME"] = str(root)
+        return env
+    try:
+        isolated = Path(home).expanduser().resolve() != real
+    except OSError:
+        isolated = False
+    if not isolated:
+        if root:
+            env["HERMES_HOME"] = str(root)
+        return env
+    # 隔离 HOME 时 CLI 落点一律跟随 HOME（**不让继承来的 HERMES_HOME 指向真实家目录**：
+    # 网关派生的 env 恒带 HERMES_HOME=/root/.hermes，照它写就会改真机 config.yaml——
+    # 2026-11-16 评审两次实锤的破坏面）。显式 HERMES_HOME 指到隔离目录时尊重它。
+    if root is not None:
+        try:
+            isolated_root = root.resolve() != real and real not in root.resolve().parents
+        except OSError:
+            isolated_root = False
+        if isolated_root:
+            env["HERMES_HOME"] = str(root)
+            return env
+    env["HERMES_HOME"] = str(Path(home).expanduser() / ".hermes")
+    print(f"[vod-devkit] 隔离 HOME：hermes CLI 落点跟随 HOME（{env['HERMES_HOME']}），"
+          f"不写 {real}（继承的 HERMES_HOME={os.environ.get('HERMES_HOME') or '<unset>'} 被忽略）",
+          file=sys.stderr)
     return env
 
 
 def _guard_isolated_home() -> None:
-    """HOME 被改而 HERMES_HOME 未设 → 拒绝安装（hermes CLI 仍会写真实家目录）。
-
-    2026-11-16 评审实锤：用 HOME=<tmp> 装 hermes 验证隔离路径时，JSON 落在 tmp，
-    但 `hermes mcp add` / `config set plugins.enabled` 把**真实** ~/.hermes/config.yaml
-    改成了 probe 路径（args 指 probe 载荷、VOD_DEVKIT_HOME 指 probe state）。
-    隔离跑法的正确姿势是同时设 HERMES_HOME=<tmp>/.hermes（host_matrix 一直这么做）。
+    """保留调用点（install/install_remote）。安全性已由 `_cli_env()` 的落点重定向保证：
+    隔离 HOME 时 CLI 一律写 `<HOME>/.hermes`，继承来的 HERMES_HOME 不会把写入带回真实家目录。
+    这里只做一次可见性说明，不再拒绝（拒绝会让所有隔离跑法只能被迫改环境）。
     """
-    if (os.environ.get("HERMES_HOME") or "").strip():
-        return
     home = (os.environ.get("HOME") or "").strip()
-    if not home:
+    real = _real_home()
+    if not home or real is None:
         return
     try:
-        import pwd
-        real = pwd.getpwuid(os.getuid()).pw_dir
-    except Exception:      # noqa: BLE001  平台没有 pwd 就不猜
-        return
-    try:
-        same = Path(home).expanduser().resolve() == Path(real).resolve()
+        if Path(home).expanduser().resolve() == real:
+            return
     except OSError:
         return
-    if not same:
-        print("[vod-devkit] 拒绝安装 hermes：HOME 已被改到隔离目录但未设 HERMES_HOME"
-              "（hermes CLI 不认 HOME，会写真实 ~/.hermes/config.yaml）。"
-              "隔离跑法：HERMES_HOME=<隔离目录>/.hermes install --target hermes",
-              file=sys.stderr)
-        sys.exit(2)
+    if (os.environ.get("HERMES_HOME") or "").strip():
+        return          # 说明由 _cli_env 打（只在真正重定向时打，避免噪声）
 
 
 def _spec() -> dict:

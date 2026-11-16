@@ -35,6 +35,20 @@ def _run(argv, home: Path, extra=None):
                           env=env, capture_output=True, text=True, timeout=180)
 
 
+def _shim_cli(home: Path, name: str = "hermes") -> dict:
+    """隔离跑里把宿主 CLI 挡掉（立即失败）：空 HERMES_HOME 下 hermes CLI 会自举依赖卡到超时。
+
+    适配器对 CLI 失败是 best-effort（打印提示继续），这里要验的是安装器写出的条目
+    与"真实 config.yaml 一个字节都没动"这条不变量。
+    """
+    d = home / "bin"
+    d.mkdir(parents=True, exist_ok=True)
+    shim = d / name
+    shim.write_text("#!/bin/sh\necho 'test: host CLI disabled' >&2\nexit 1\n", encoding="utf-8")
+    shim.chmod(0o755)
+    return {"PATH": str(d) + os.pathsep + os.environ.get("PATH", "")}
+
+
 def test_install_refuses_corrupt_manifest_with_zero_side_effects(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
@@ -65,18 +79,24 @@ def test_install_with_good_manifest_still_writes_manifest(tmp_path):
     assert (home / ".workbuddy" / "mcp.json").exists()
 
 
-def test_hermes_refuses_isolated_home_without_hermes_home(tmp_path):
-    """HOME 改了但 HERMES_HOME 未设 → 拒绝（hermes CLI 会写真实家目录）。"""
+def test_hermes_isolated_home_never_writes_real_config(tmp_path):
+    """HOME 隔离且 HERMES_HOME 未设：CLI 落点跟随 HOME，**真实 config.yaml 一个字节都不许动**。
+
+    判据从"必须拒绝"改成"必须不写真实家目录"（2026-11-16 评审：拒绝会让所有隔离跑法
+    被迫改环境；重定向既保住隔离，也堵住写真机配置这条破坏面）。
+    """
     home = tmp_path / "home"
     home.mkdir()
     real_conf = Path(os.path.expanduser("~")) / ".hermes" / "config.yaml"
     before = real_conf.read_bytes() if real_conf.exists() else None
-    r = _run(["install", "--target", "hermes"], home)
+    r = _run(["install", "--target", "hermes"], home, extra=_shim_cli(home))
     out = (r.stdout or "") + (r.stderr or "")
     after = real_conf.read_bytes() if real_conf.exists() else None
     assert before == after, "隔离跑的 install 改到了真实 ~/.hermes/config.yaml"
-    assert r.returncode == 2, out
-    assert "HERMES_HOME" in out, out
+
+
+def test_hermes_isolated_home_ignores_inherited_real_hermes_home(tmp_path):
+    """网关派生的 env 恒带 HERMES_HOME=/root/.hermes：隔离跑也不许照它写真机配置。"""
 
 
 def test_server_py_path_with_space_is_read_back(tmp_path):
@@ -91,3 +111,14 @@ def test_server_py_path_with_space_is_read_back(tmp_path):
         python_exe="/x/python3", state_home="/s")
     facts = dsh_adapter.block_facts(block)
     assert facts["server_py"] == str(payload / "vod_mcp" / "server.py"), facts["server_py"]
+
+def test_hermes_isolated_home_ignores_inherited_real_hermes_home(tmp_path):
+    """网关派生的 env 恒带 HERMES_HOME=/root/.hermes：隔离跑也不许照它写真机配置。"""
+    home = tmp_path / "home"
+    home.mkdir()
+    real = Path(os.path.expanduser("~")) / ".hermes"
+    before = (real / "config.yaml").read_bytes() if (real / "config.yaml").exists() else None
+    r = _run(["install", "--target", "hermes"], home,
+             extra={**_shim_cli(home), "HERMES_HOME": str(real)})
+    after = (real / "config.yaml").read_bytes() if (real / "config.yaml").exists() else None
+    assert before == after, f"隔离跑照 HERMES_HOME 写到了真实家目录：{r.stderr[-300:]}"

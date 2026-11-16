@@ -19,9 +19,21 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_every_integration_has_a_valid_spec():
-    assert set(hosts.hosts()) == {"hermes", "opencode", "codeartsdoer", "codeartswork",
-                                  "codex", "codex-desktop", "dsh", "workbuddy",
-                                  "atomcode", "openclaw", "officeace"}
+    """宿主集合从 integrations/ 派生，不硬编码名单。
+
+    2026-11-16 评审：旧写法把 9 个名字写死，新增宿主必红，而修法只能是再补名字——
+    门禁自己在制造枚举漂移。派生式后：新增宿主只要落 integrations/<id>/host.json
+    且进了适配器 REGISTRY 就自动通过；漏注册（host.json 有、REGISTRY 无）仍然红。
+    """
+    from vod_mcp.host_adapters import REGISTRY
+    found = sorted(x.name for x in (ROOT / "integrations").iterdir()
+                   if (x / "host.json").exists())
+    assert found, "integrations 下没有任何宿主规格"
+    assert set(hosts.hosts()) == set(found), "hosts() 与磁盘上的 host.json 不一致"
+    missing = sorted(set(found) - set(REGISTRY))
+    assert not missing, f"这些宿主有 host.json 但没进适配器 REGISTRY：{missing}"
+    assert set(REGISTRY) - set(found) == {"generic"}, (
+        "REGISTRY 里出现无 host.json 的宿主（目前只允许 generic 兜底）")
     for h in hosts.hosts():
         spec = hosts.load(h, "web")
         assert spec["id"] == h

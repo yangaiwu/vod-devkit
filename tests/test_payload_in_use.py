@@ -72,3 +72,23 @@ def test_prune_candidates_still_excludes_current_version(tmp_path, monkeypatch):
     _mk_payload(base, __version__)
     cands = [ver for _p, ver, _sz in payload.prune_candidates(rows)]
     assert __version__ not in cands, "当前版本永不进清理清单"
+
+def test_openclaw_config_reference_counts_as_in_use(tmp_path, monkeypatch):
+    """P1：宿主配置里引用的载荷也要算“在用”（账本行丢了时 prune 不许删它）。"""
+    base = tmp_path / "devkit"
+    home = tmp_path / "home"
+    (home / ".openclaw").mkdir(parents=True)
+    monkeypatch.setenv("VOD_DEVKIT_HOME", str(base))
+    monkeypatch.setenv("HOME", str(home))
+    _mk_payload(base, "0.5.19")
+    _mk_payload(base, "0.5.22")
+    # openclaw 的注册表是 JSON5，读侧只做文本正则（这里放一条带注释的配置）
+    (home / ".openclaw" / "openclaw.json").write_text(
+        "{\n  // 用户注释\n  \"mcp\": {\"servers\": {\"vod-devkit\": {\"args\": [\""
+        + str(base / "payloads" / "0.5.19" / "vod_mcp" / "server.py")
+        + "\"]}}}\n}\n", encoding="utf-8")
+    used = payload.in_use_payloads([])
+    assert str((base / "payloads" / "0.5.19").resolve()) in used, (
+        "openclaw 配置指向的载荷没算在用 → prune 会删掉正在跑的那份")
+    cands = [v for _p, v, _s in payload.prune_candidates([])]
+    assert "0.5.19" not in cands
