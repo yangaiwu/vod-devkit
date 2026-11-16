@@ -26,6 +26,7 @@
   ],
   "skillHashes": "<SKILL_HASHES>",
   "payloadDir": "<PAYLOAD>",
+  "dshPatch": null,
   "installs": [
     {
       "target": "hermes",
@@ -39,6 +40,7 @@
       "mcpConfig": "<HOME>/.hermes/mcp/vod-devkit.json",
       "skillsDir": "<HOME>/.hermes/skills/devops/vod-devkit",
       "payloadDir": "<PAYLOAD>",
+      "dshPatch": null,
       "version": "0.5.16",
       "commitSha": "<SHA>",
       "skillInstalls": [

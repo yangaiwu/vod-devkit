@@ -230,6 +230,15 @@ docs/proposal.md · docs/design.md · docs/scheme-overview.md ·
 docs/safety-model.md · docs/decisions.md · docs/rules-provenance.json ·
 QUICKSTART.md · INSTALL.md · CONTRIBUTING.md · SECURITY.md
 
+## Troubleshooting: product catalog cache
+
+Install-time product validation hits the engine's anonymous-token endpoint, which is rate limited.
+The catalog is cached at `~/.vod-devkit/state/product-catalog.json` for 7 days:
+
+- `install --refresh-product-catalog` — force a refresh (needed right after a new product is published);
+- `VOD_PRODUCT_CATALOG_TTL=604800` — override TTL in seconds (`0` disables the cache);
+- `VOD_SKIP_PRODUCT_CHECK=1` — skip validation (matrix/audit internals only, not for end users).
+
 ## License
 
 MIT (see LICENSE.txt). Third-party notices in NOTICE.

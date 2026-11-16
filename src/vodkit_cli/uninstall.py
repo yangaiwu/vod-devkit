@@ -217,6 +217,8 @@ def _clean_global(rows: list, remaining: list | None = None) -> None:
     from vod_mcp import payload as _payload
     from vod_mcp import paths as _paths
     in_use = {r.get("payloadDir") for r in rows if r.get("payloadDir")}
+    # S153：配置面同样算"在用"（dsh 多 profile 各指一份版本，账本只记最近一条）
+    in_use |= _payload._patch_referenced_payloads()
     for res in _payload.residue():
         if str(res) in in_use:
             continue

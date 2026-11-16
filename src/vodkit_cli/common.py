@@ -168,14 +168,32 @@ def _read_manifest() -> dict:
 
 
 def _install_rows(prev: dict, row: dict) -> list:
-    """按 target 去重的安装行（D-installs-1）：一个 manifest 记全部宿主安装。
+    """按 (target, dshProfile) 去重的安装行（D-installs-1 / S153）：一个 manifest 记全部宿主安装。
 
     起因（结构债）：顶电平字段只记「最近一次安装」，装 hermes 再装 codearts 后
     uninstall 只清最后一个宿主的 MCP 条目，另一台宿主的配置永远留在那。
+
+    S153：dsh 的多个 profile（web / headless）是**独立的安装对象**——只按 target 去重
+    会让第二个 profile 顶掉第一个：doctor 只自愈最后装的那个、uninstall 只摘一个块、
+    prune 的"在用"集合丢掉另一个 profile 仍在用的载荷（下次启动白屏）。
     """
-    rows = [r for r in (prev.get("installs") or []) if r.get("target") != row["target"]]
+    def _key(r):
+        return (r.get("target"), (r.get("dshProfile") or ""))
+
+    rows = [r for r in (prev.get("installs") or []) if _key(r) != _key(row)]
     rows.append(row)
     return sorted(rows, key=lambda r: r.get("installedAt") or "")
+
+
+def _dsh_install_snapshot(target):
+    """dsh 安装期真源；非 dsh 宿主返回 None（S152）。探测失败不阻断安装。"""
+    if target != "dsh":
+        return None
+    try:
+        from vod_mcp.host_adapters import dsh as _dsh_ad
+        return _dsh_ad.install_snapshot()
+    except Exception:  # noqa: BLE001  记录缺失只是让自愈退化到"只报告"，不阻断安装
+        return None
 
 
 def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
@@ -215,10 +233,13 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
         "skillHashes": _skill_hashes(),
         # 载荷副本（D-payload-1）：宿主入口指向这里，而不是仓/npx 缓存路径
         "payloadDir": str(payload_dir) if payload_dir else None,
+        # S152：dsh 安装期真源（解释器/state 根/mcp-client 版本）。doctor 自愈只跟这份
+        # 记录比，不再拿"当前进程环境"重新生成整块去比——后者会把用户钉的解释器换掉。
+        "dshPatch": _dsh_install_snapshot(target),
     }
     row = {k: manifest[k] for k in
            ("target", "transport", "mcpUrl", "installedAt", "product", "packs",
-            "dshProfile", "apiBase", "mcpConfig", "skillsDir", "payloadDir")}
+            "dshProfile", "apiBase", "mcpConfig", "skillsDir", "payloadDir", "dshPatch")}
     row["version"] = manifest["version"]
     row["commitSha"] = manifest["source"]["commitSha"]
     row["skillInstalls"] = [si for si in manifest["skillInstalls"]

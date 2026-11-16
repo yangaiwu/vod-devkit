@@ -43,6 +43,8 @@
 | 宿主侧工具面为空 / 启动失败 | 宿主 PATH 里没有能用的解释器（沙箱/精简 PATH） | 安装时钉解释器：`VOD_PYTHON=/usr/bin/python3.12 npx -y vod-devkit@latest install ...`；`doctor` 看 MCP 实际形态 |
 | `ETARGET` / 拿到的还是旧版本 | npm 镜像滞后（npmmirror、内部镜像常见） | `npx --yes --registry=https://registry.npmjs.org vod-devkit@latest ...` |
 | 更新了但行为没变 | codex 插件缓存跑旧副本（实测 0.4.2） | 重跑 `install --target codex`；`doctor` 会报"CLI 形态 / 载荷形态" |
+| 安装期 `exit 2`：产品不在名录（拼写正确） | 名录缓存默认 7 天（`~/.vod-devkit/state/product-catalog.json`），刚上线的新产品查不到 | `install --refresh-product-catalog` 强刷；TTL 用 `VOD_PRODUCT_CATALOG_TTL`（秒，`0` = 禁用缓存，示例 `604800`）；矩阵/巡检内部可 `VOD_SKIP_PRODUCT_CHECK=1` 跳过校验 |
+| 装机报"令牌签发被限流（429）" | 每次产品校验要一枚匿名令牌，密集重装会打满当日配额 | 等窗口或配正式 key；名录缓存会把"重复校验"从每次一枚降到 7 天一次 |
 
 ## 快速开始
 

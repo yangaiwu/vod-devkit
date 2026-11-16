@@ -40,15 +40,17 @@ def cmd_status(args=None):
 
 
 def _repair_dsh_patch_block(mf: dict) -> str | None:
-    """doctor 自愈（S58/A + B 模式 D-dsh-mcp-b-1）：profile 的 vod-devkit 块缺失/打平/
-    形态与当前环境不符时，按 manifest 重建。
+    """doctor 自愈（S58 → S152 重写：结构化不变量 + 安装期真源）。
 
-    关键（0.5.15 真机实锤）：重建必须**复用安装器的 `_patch_block`**——有 mcp-client 就写
-    `vod-devkit-mcp` + 壳两条 insert（壳 `registerTools:false`）。旧实现手写"只有壳块"的
-    形态，doctor 跑一次就把 MCP 工具面打回 6 工具降级（headless 的 vod-devkit-mcp 被抹掉，
-    audit 从"MCP 模式 PASS"变成"降级 PASS"）——自愈不能改变形态。
+    旧判据是「安装器整块文本 == patch 现有文本」，而块内嵌 sys.executable /
+    state 根 / payload 路径，全按**当前 doctor 进程**求值 → 四条静默改写（0.5.16 实锤）：
+    换解释器改 command、手工 uiBase=/dsh 被写回、PATH 无 dsh 时删 MCP 块退回 6 工具、
+    manifest 缺 payloadDir 时写成相对路径。
 
-    嵌套铁律（真机实锤）：id/name/config 必须缩进在 `- insert:` 之下。
+    新口径：
+      · 只补**形态缺口**：缺 MCP 块 / 缺壳块 / 壳未 registerTools:false；
+      · 已有块但与安装期记录字段不同 → 只报告，不动字节（手工定制要留住）；
+      · 环境不可判定（无 payloadDir / 无安装期记录）→ 不动字节 + 打印指引。
     """
     prof = mf["dshProfile"]
     patch = Path(host_specs.load("dsh", prof)["configPath"])
@@ -68,15 +70,55 @@ def _repair_dsh_patch_block(mf: dict) -> str | None:
               file=sys.stderr)
         return None
 
-    dsh_cli = shutil.which("dsh")
-    mcp_ver = _dsh._mcp_client_version(_dsh._dsh_root(dsh_cli)) if dsh_cli else None
-    payload = Path(str(mf.get("payloadDir") or ""))
+    facts = _dsh.block_facts(text)
+    snap = mf.get("dshPatch") or {}
+    payload_s = str(mf.get("payloadDir") or "").strip()
+    payload = Path(payload_s)
+    # 形态判据：manifest 记录优先；只有老 manifest 没有记录时才回退当前环境探测。
+    # 回退只用于"补形态缺口"，绝不会因为环境不同去改已有块。
+    env_fallback = "mcpClient" not in snap
+    want_mcp_ver = snap.get("mcpClient")
+    if env_fallback:
+        cli = shutil.which("dsh")
+        want_mcp_ver = _dsh._mcp_client_version(_dsh._dsh_root(cli)) if cli else None
+    want_mcp = bool(want_mcp_ver)
+
+    gap = ""
+    if want_mcp and not facts["present_mcp"]:
+        gap = "缺 MCP 块"
+    elif not facts["present_shell"]:
+        gap = "缺壳块"
+    elif want_mcp and not facts["register_tools_false"]:
+        gap = "壳未 registerTools:false（会与 MCP 工具面双注册）"
+
+    if not gap:
+        diffs = []
+        if snap.get("command") and facts["command"] and facts["command"] != snap["command"]:
+            diffs.append(f"command={facts['command']}（安装期 {snap['command']}）")
+        if (snap.get("stateHome") and facts["state_home"]
+                and facts["state_home"] != snap["stateHome"]):
+            diffs.append(f"VOD_DEVKIT_HOME={facts['state_home']}（安装期 {snap['stateHome']}）")
+        if payload_s and facts["server_py"] and \
+                facts["server_py"] != str(payload / "vod_mcp" / "server.py"):
+            diffs.append(f"入口={facts['server_py']}（安装期 {payload / 'vod_mcp' / 'server.py'}）")
+        if diffs:
+            print("[doctor] dsh patch 与安装期记录不一致（只报告，不改字节；"
+                  "确认要恢复请重装：install --target dsh --profile " + prof + "）：\n  - "
+                  + "\n  - ".join(diffs), file=sys.stderr)
+        return None
+
+    if not payload_s:
+        print("[doctor] dsh patch 需要补块，但 manifest 缺 payloadDir（老账本）——"
+              "不动字节。请重装以生成安装期真源："
+              f"install --target dsh --profile {prof}", file=sys.stderr)
+        return None
+
     args = SimpleNamespace(product=mf.get("product") or "",
                            java_api_base=mf.get("apiBase") or "")
-    expected = _dsh._patch_block(args, mcp_ver, payload, str(mf.get("packs") or "core"))
-    if expected in text:
-        # 已是安装器该写的样子（有 mcp 块 + 壳 registerTools:false，或降级形态）→ 不动
-        return None
+    expected = _dsh._patch_block(args, want_mcp_ver, payload,
+                                 str(mf.get("packs") or "core"),
+                                 python_exe=snap.get("command"),
+                                 state_home=snap.get("stateHome"))
     try:
         # upsert 按托管标记划界（标记优先），不靠 "- " 猜边界：mcp 块的 args 列表项
         # 形如 "- /root/.../server.py"，旧实现会把块从中间切断，留下残块（0.5.15 实锤）。
@@ -87,6 +129,9 @@ def _repair_dsh_patch_block(mf: dict) -> str | None:
               f"（本插件的块在 `# vod-devkit DSH integration start/end` 之间）：{patch}",
               file=sys.stderr)
         return None
+    if env_fallback:
+        print(f"[doctor] dsh patch 已按**当前环境**补{ gap}（manifest 无安装期记录，"
+              f"建议重装以固化真源：install --target dsh --profile {prof}）", file=sys.stderr)
     return str(patch)
 
 
@@ -203,14 +248,18 @@ def cmd_doctor(args=None):
                 # 缺省视图=最近一次安装（顶层字段即最后一次写入）；多行只在末尾列出，
                 # 要看单个宿主用 --target（避免在多宿主上把"某一行的问题"说成全局）
                 print(f"[doctor] 安装行: {row_names}（--target <agent> 选择单个）")
-        # dsh patch 块自愈（S58/A 止血，2026-11-06 真机实锤）：dsh 运行时
-        # 序列化会冲掉 profile patch 里的 vod 块（配置树不含手工块）——
-        # doctor 检测缺失/打平后按 manifest 的 product/apiBase 重建嵌套块
-        if mf.get("target") == "dsh" and mf.get("dshProfile"):
-            patched = _repair_dsh_patch_block(mf)
+        # dsh patch 块自愈（S58/A 止血，2026-11-06 真机实锤；S152 改写判据、S153 遍历全 profile）：
+        # dsh 运行时序列化会冲掉 profile patch 里的 vod 块——只补形态缺口，字段差异只报告。
+        # 遍历账本里**每一条 dsh 行**（web / headless 是独立安装对象），不是只看最近一条。
+        dsh_rows = [r for r in rows if r.get("target") == "dsh" and r.get("dshProfile")]
+        if not dsh_rows and mf.get("target") == "dsh" and mf.get("dshProfile"):
+            dsh_rows = [mf]
+        for row in dsh_rows:
+            view = {**mf, **{k: v for k, v in row.items() if v is not None}}
+            patched = _repair_dsh_patch_block(view)
             if patched:
-                print(f"[doctor] 已重建 dsh patch 的 vod-devkit 块：{patched}"
-                      "（重启 dsh 生效）")
+                print(f"[doctor] 已补 dsh patch 形态缺口（profile={row.get('dshProfile')}）："
+                      f"{patched}（重启 dsh 生效）")
         bi = json.loads((common.ROOT / "build-info.json").read_text(encoding="utf-8"))
         if mf["source"]["commitSha"] != bi.get("commitSha"):
             problems.append("install-manifest 与 build-info 的 commitSHA 不一致")
@@ -233,7 +282,7 @@ def cmd_doctor(args=None):
         try:
             raw = json.loads(p.read_text(encoding="utf-8"))
             all_rows = raw.get("installs") or ([raw] if raw.get("target") else [])
-            used = {}
+            used: dict[str, list[str]] = {}
             for r in all_rows:
                 d = (r.get("payloadDir") or "").strip()
                 if d:
@@ -243,7 +292,7 @@ def cmd_doctor(args=None):
                 if parent.is_dir():
                     orphans = sorted(x.name for x in parent.iterdir()
                                      if x.is_dir() and str(x) not in used)
-                    live = ", ".join(f"{Path(k).name}({'+'.join(v)})" for k, v in sorted(used.items()))
+                    live = ", ".join(f"{Path(k).name}({'+'.join(sorted(set(v)))})" for k, v in sorted(used.items()))
                     print(f"[doctor] 载荷：在用 {live}"
                           + (f"；未被任何安装行引用 {orphans}"
                              "（不自动删——确认没宿主配置指向后再 rm -rf）" if orphans else ""))

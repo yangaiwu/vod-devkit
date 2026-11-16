@@ -139,6 +139,10 @@ npm 首发已解锁，收录审核进行中。
   VOD 平台签发的 key（引擎 401 原文「API Key 无效或已失效」）
 - **`设备绑定校验失败`**：匿名令牌跨设备使用——token 有效但本机不是签发设备，
   在本设备首次提交时自动重领（探活归 `device-mismatch` 放行，不拦）
+- **安装期 `exit 2：产品不在名录`**（拼写正确也拒）：名录缓存默认 7 天，新上线产品查不到——
+  `install --refresh-product-catalog` 强刷；`VOD_PRODUCT_CATALOG_TTL=<秒>` 改 TTL（`0`=禁用缓存）
+- **安装期 `令牌签发被限流（429）`**：产品校验每次要一枚匿名令牌，密集重装会打满配额——
+  等窗口滑过或配正式 key；名录缓存已把重复校验降到 7 天一次
 - 更多：[QUICKSTART.md](QUICKSTART.md)（任意 MCP 客户端手动配置片段）
 - 排障日志：`/tmp/vod_mcp_server.log`（每次 HTTP 的 URL/key 有无）
 

@@ -1784,3 +1784,51 @@ args 列表项形如 `- /root/.vod-devkit/payloads/<v>/vod_mcp/server.py`，被�
 
 **验证**：`tests/test_dsh_mcp_mode.py::test_s151_doctor_repair_keeps_mcp_mode`
 （降级形态 + 有 mcp-client → 自愈后必须同时有 mcp 块与 `registerTools:false`，且二次调用 no-op）。
+
+## D-doctor-repair-2：自愈判据 = 结构化不变量 + 安装期真源（2026-11-16 评审实锤）
+
+**缺陷**：D-doctor-repair-1 把"完好"定义成「安装器整块文本 `in text`」，而块内嵌三处
+**进程级环境值**：`command: sys.executable`、`VOD_DEVKIT_HOME: machine_state_home()`、
+`args: <payloadDir>/vod_mcp/server.py`。于是任何环境差异都被判成"配置损坏"并整块重写：
+
+1. 换解释器跑 doctor（venv / 系统 / npx 各带不同 python）→ `command` 被改成"跑 doctor 的那个"；
+2. 按公网反代形态手工设 `uiBase: /dsh` → 被回写成 apiBase（CORS 问题复发）；
+3. PATH 里没有 `dsh`（systemd / cron / 非登录 shell / 别的用户）→ `mcp_ver=None` → 整块重写成
+   降级形态：删掉 `- id: vod-devkit-mcp`、壳回到自注册，**12 工具 → 6 工具**（正是 S151 要防的事故）；
+4. manifest 行缺 `payloadDir`（老账本 / skills-only 行）→ 重写成 `args: - vod_mcp/server.py` +
+   `cwd: .` → server 起不来。
+
+真机已发生：`/root/.dsh/profiles/web/cordis.patch.yml` 的 command 是 Hermes 3.14 的 python，
+`headless` 是安装期 venv python——两份不一致即第 1 条的现场。
+
+**修法**：
+- `install` 把安装期真源落进 manifest 行：`dshPatch = {command, stateHome, mcpClient}`；
+- 自愈改用 `block_facts()` 解析**结构字段**，只补形态缺口（缺 MCP 块 / 缺壳块 / 壳未
+  `registerTools:false`）；已有块与记录不同时**只报告不改字节**（手工定制要留住）；
+- 环境不可判定（无 `payloadDir` / 无 `dshPatch`）→ 不动字节 + 打印重装指引；
+- 重建时 `_patch_block(..., python_exe=, state_home=)` 用记录值，不用进程值；
+- 老 manifest 无记录时才回退环境探测（只为补形态缺口），并提示重装以固化真源。
+
+**代价**：manifest 增加一个字段（golden 重录两行）；老账本的自愈退化为"只补缺口 + 提示"。
+
+**验证**：`tests/test_doctor_repair_boundaries.py`（S152-1…5，先红后绿；探针复现见
+`/root/.hermes/cache/scratch/doctor-probe*.py`）。
+
+## D-installs-profile-1：dsh 账本行键 = (target, profile)，"在用"集合扫配置面（2026-11-16）
+
+**缺陷**：`_install_rows` 只按 `target` 去重 → dsh 的 web / headless 互相顶掉，账本只剩一行：
+
+1. doctor 只自愈最后装的那个 profile，另一个的块坏了没人管；
+2. `uninstall --target dsh` 只摘一个 profile 的块；
+3. `prune --payloads` 的在用集合只读 `installs[].payloadDir` → 两个 profile 版本一旦错位
+   （`--profile web` 单独升级是标准用法），另一个仍在用的载荷被当孤儿删掉，宿主下次启动白屏。
+
+**修法**：
+- 行键改 `(target, (dshProfile or ""))`，同 profile 重装仍是覆盖；
+- `payload.prune_candidates()` 与 `uninstall` 的 `in_use` 同时扫 `~/.dsh/profiles/*/cordis.patch.yml`
+  的 args 指向的载荷根（配置面也算在用）；
+- doctor 遍历账本里所有 dsh 行，逐 profile 自愈。
+
+**代价**：status/roster 的输出多一行（多 profile 机器上）；in-use 集合多一次目录扫描。
+
+**验证**：`tests/test_doctor_repair_boundaries.py`（S153-1 行键、S153-2 prune 扫 patch）。

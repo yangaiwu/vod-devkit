@@ -1282,3 +1282,25 @@ doctor 的 dsh patch 自愈只做一件事：让文件回到**安装器该写的
 多块/形态未知 → 只报告 + 人工指引，不动字节。
 
 用例承载：`tests/test_dsh_mcp_mode.py`（S151）。
+
+## doctor 自愈：结构化不变量 + 安装期真源（D-doctor-repair-2，2026-11-16）
+
+自愈**只补形态缺口**，不比"整块文本"，因为块内嵌 `command` / `VOD_DEVKIT_HOME` / payload 路径
+三处安装期环境值——拿当前进程重新生成再比，会把环境差异当配置损坏（换解释器改 command、
+手工 `uiBase` 被回写、PATH 无 `dsh` 时删 MCP 块、缺 payloadDir 时写相对入口）。
+
+| 形态 | 判定 | 动作 |
+|---|---|---|
+| 缺 MCP 块 / 缺壳块 / 壳未 `registerTools:false` | 形态缺口 | 用 `dshPatch` 记录值重建（`upsert_patch`，标记划界）|
+| 已有块、字段与记录不同 | 字段差异 | **只报告**，不动字节（手工定制保留）|
+| 无 `payloadDir` / 无 `dshPatch` | 环境不可判定 | 不动字节 + 打印重装指引 |
+
+`dshPatch = {command, stateHome, mcpClient}` 由 install 写入 manifest 行；老账本无此字段时
+才回退环境探测（只为补缺口，并提示重装固化）。
+
+## dsh 多 profile：账本行键与"在用"集合（D-installs-profile-1，2026-11-16）
+
+- 账本行键 = `(target, dshProfile)`：web / headless 各一行；doctor 遍历全部 dsh 行逐 profile 自愈，
+  uninstall 只摘对应的那份块。
+- `prune --payloads` 的"在用"集合 = `installs[].payloadDir` ∪ `~/.dsh/profiles/*/cordis.patch.yml`
+  的 args 指向的载荷根——版本错位时另一个 profile 仍在用的载荷不会被当孤儿删掉。

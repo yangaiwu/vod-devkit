@@ -196,6 +196,32 @@ def _tree_size(p: Path) -> int:
         return 0
 
 
+def _patch_referenced_payloads() -> set:
+    """dsh profile patch 里 args 指向的载荷根（S153）。
+
+    账本的 payloadDir 只记"最近一次安装"的那一行；dsh 有多个 profile（web/headless），
+    各自 patch 可能指向不同版本。只按账本算"在用"，会把另一个 profile 仍在用的载荷
+    当孤儿删掉——宿主下次启动即白屏（工具面全失）。所以"在用"集合必须同时扫配置面。
+    """
+    import re
+    used: set = set()
+    root = Path(os.path.expanduser("~")) / ".dsh" / "profiles"
+    if not root.is_dir():
+        return used
+    pat = re.compile(r"(/\S+?/payloads/[^/\s]+)/vod_mcp/server\.py")
+    for f in root.glob("*/cordis.patch.yml"):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for m in pat.finditer(text):
+            try:
+                used.add(str(Path(m.group(1)).resolve()))
+            except OSError:
+                used.add(m.group(1))
+    return used
+
+
 def prune_candidates(rows=None, keep: int = 0) -> list:
     """可清理的旧载荷清单 —— 只认安装器自己落过的，且没有宿主在跑（D3，0.5.13）。
 
@@ -219,6 +245,8 @@ def prune_candidates(rows=None, keep: int = 0) -> list:
                 used.add(str(Path(d).resolve()))
             except OSError:
                 used.add(d)
+    # S153：配置面同样算"在用"（dsh 多 profile 各指一份版本）
+    used |= _patch_referenced_payloads()
     cand = []
     for d in sorted(base.iterdir(), key=lambda p: _vkey(p.name)):
         if not d.is_dir() or not (d / "payload.json").exists():

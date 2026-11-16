@@ -80,14 +80,23 @@ def _ensure_mcp_client(dsh_cli: str, profile: str) -> str | None:
     return ver
 
 
-def _patch_block(args, mcp_ver: str | None, payload: Path, packs: str) -> str:
+def _patch_block(args, mcp_ver: str | None, payload: Path, packs: str,
+                 python_exe: str | None = None,
+                 state_home: str | None = None) -> str:
     """生成托管块：标记包裹 + 两条（或一条）insert 子项，全部缩进在 `- insert:` 下。
 
     嵌套铁律（真机实锤）：块必须缩进在 `- insert:` 之下——平铺会被 dsh 组合层丢弃，
     插件掉出组合树（banner/工具/UI 全消失）。壳的 `name:` 行必须保留（绑定 UI 半）。
+
+    `python_exe` / `state_home`（S152）：doctor 重建时必须传**安装期记录值**，默认值只是
+    安装器的行为。自愈拿"当前进程"的这两个值去比/去写，会把用户钉的解释器换掉、
+    把 state 指到别的目录（0.5.16 评审实锤四条静默改写）。
     """
     from vod_mcp import config_forms as cf
     from vod_mcp import paths as _paths
+
+    py = python_exe or sys.executable
+    st = state_home or str(_paths.machine_state_home())
 
     prod_yaml = args.product or "''"   # schema 是 z.string()：YAML null 会校验失败
     shell_cfg = [
@@ -112,14 +121,14 @@ def _patch_block(args, mcp_ver: str | None, payload: Path, packs: str) -> str:
         "        serverName: vod-devkit",     # 工具名 = mcp__vod-devkit__vod_*
         "        transport: stdio",
         # stdio 形态零第三方依赖：用安装器自己的解释器即可（不抄显示层路径）
-        f"        command: {sys.executable}",
+        f"        command: {py}",
         "        args:",
         f"          - {payload / 'vod_mcp' / 'server.py'}",
         "        env:",
         # mcp-client 只给「清洗过的父环境 + 显式 env」：凭据形状的变量会被丢掉，
         # 所以状态根/引擎地址/packs 必须显式传；key 故意不传（走机器级匿名令牌）。
         f"          PYTHONPATH: {payload}",
-        f"          VOD_DEVKIT_HOME: {_paths.machine_state_home()}",
+        f"          VOD_DEVKIT_HOME: {st}",
         f"          VOD_JAVA_API_BASE: {args.java_api_base}",
         f"          VOD_PACKS: {packs}",
         f"        cwd: {payload}",
@@ -301,3 +310,52 @@ def install_remote(args, url, token):
           "（dsh-mcp-client 支持 streamable-http，本机已实测）。请用："
           "install --target dsh --profile <name>", file=sys.stderr)
     sys.exit(2)
+
+
+# ── S152：托管块的结构化事实（自愈判据用它，不用"环境快照全等"）──────────────
+def block_facts(text: str) -> dict:
+    """把 patch 里的 vod-devkit 块解析成**结构字段**，供 doctor 判断形态与字段差异。
+
+    为什么不比整块文本：块内嵌 command/VOD_DEVKIT_HOME/payload 路径，都是安装期环境值；
+    拿"当前进程"重新生成再比，等于把环境变化当成配置损坏（0.5.16 实锤四条静默改写）。
+    """
+    import re
+
+    from vod_mcp import config_forms as cf
+
+    lines = text.splitlines()
+    start, end = cf.find_dsh_block(lines)
+    seg = lines[start:end] if start is not None else []
+    joined = "\n".join(seg)
+
+    def first(pattern):
+        m = re.search(pattern, joined, re.MULTILINE)
+        return m.group(1).strip() if m else None
+
+    return {
+        "present": start is not None,
+        "present_mcp": any(ln.strip() == "- id: vod-devkit-mcp" for ln in seg),
+        "present_shell": any(ln.strip() == "- id: vod-devkit" for ln in seg),
+        "register_tools_false": bool(re.search(r"^\s*registerTools:\s*false\s*$", joined,
+                                               re.MULTILINE)),
+        "command": first(r"^\s*command:\s*(\S+)\s*$"),
+        "server_py": first(r"^\s*-\s*(/\S+/vod_mcp/server\.py)\s*$"),
+        "cwd": first(r"^\s*cwd:\s*(\S+)\s*$"),
+        "pythonpath": first(r"^\s*PYTHONPATH:\s*(\S+)\s*$"),
+        "state_home": first(r"^\s*VOD_DEVKIT_HOME:\s*(\S+)\s*$"),
+        "uibase": first(r"^\s*uiBase:\s*(\S+)\s*$"),
+        "apibase": first(r"^\s*apiBase:\s*(\S+)\s*$"),
+        "packs": first(r"^\s*VOD_PACKS:\s*(\S+)\s*$"),
+        "product": first(r"^\s*product:\s*(\S+)\s*$"),
+    }
+
+
+def install_snapshot(profile: str | None = None) -> dict:
+    """安装期真源（落进 manifest 行，doctor 只跟它比）：解释器 / state 根 / mcp-client 版本。"""
+    from vod_mcp import paths as _paths
+
+    cli = shutil.which("dsh")
+    ver = _mcp_client_version(_dsh_root(cli)) if cli else None
+    return {"command": sys.executable,
+            "stateHome": str(_paths.machine_state_home()),
+            "mcpClient": ver}

@@ -180,7 +180,7 @@ def _write_catalog_cache(base: str, catalog: list) -> None:
     并发读到半截会当 miss（可接受，但不要留下半文件）。"""
     import time
     p = _catalog_cache_path()
-    tmp = p.with_name(p.name + ".tmp")
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(json.dumps({"base": str(base), "at": time.time(), "catalog": catalog},
@@ -210,6 +210,8 @@ def _validate_product_or_exit(product: str, base: str, refresh: bool = False) ->
     「API Key 无效或已失效」。这不是网络故障，文案必须点明（实际踩过：照「不可达」
     去查网络，白查）；401 时换设备锚点重领一次令牌能救掉偶发的那一半。
     """
+    base = str(base).rstrip("/")   # S152/P5：尾斜杠一处归一——否则 http://h/ 拼出 //rest，
+    # 且同一引擎地址在缓存键里会变成两个条目（换写法 = 缓存失效）
     import urllib.request
     import urllib.error
     import uuid
@@ -282,7 +284,8 @@ def _validate_product_or_exit(product: str, base: str, refresh: bool = False) ->
               "VOD_SKIP_PRODUCT_CHECK=1；归因名单在装机时已验过）", file=sys.stderr)
         return True
 
-    catalog, unauthorized, rate_limited, last_exc = None, False, False, None
+    catalog, unauthorized, rate_limited = None, False, False
+    last_exc: BaseException | None = None
     if not refresh:
         cached = _read_catalog_cache(base)
         if cached:

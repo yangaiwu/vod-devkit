@@ -103,5 +103,6 @@ VOD_JAVA_API_KEY=<KEY> npx -y vod-devkit@latest \
 | `token 无效（引擎判定 rejected）` | attach 时坏 key——确认 VOD 平台签发的 key |
 | `设备绑定校验失败` | 匿名令牌跨设备使用——本设备首次提交会自动重领 |
 | 工具不出现 | 确认 VOD_PACKS 含对应 pack；重启会话 |
+| 安装期「产品不在名录」exit 2 | 名录缓存 7 天；`install --refresh-product-catalog` 强刷，TTL 用 `VOD_PRODUCT_CATALOG_TTL`（秒）|
 
 更多：[INSTALL.md](INSTALL.md)（每宿主安装细节/故障表/安全边界）。

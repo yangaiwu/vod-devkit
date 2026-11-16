@@ -807,7 +807,11 @@ def test_doctor_repairs_dsh_patch_block(monkeypatch, tmp_path):
     patch = home / ".dsh" / "profiles" / "web" / "cordis.patch.yml"
     patch.parent.mkdir(parents=True, exist_ok=True)
     mf = {"target": "dsh", "dshProfile": "web",
-          "product": "VOD", "apiBase": "http://127.0.0.1:18080"}
+          "product": "VOD", "apiBase": "http://127.0.0.1:18080",
+          # S152 起：没有 payloadDir 的自愈一律不动字节（入口无法判定），
+          # 这条用例测的是"形态缺口→重建"，所以必须给安装期载荷路径。
+          "payloadDir": str(tmp_path / "payloads" / "0.5.16")}
+    (tmp_path / "payloads" / "0.5.16" / "vod_mcp").mkdir(parents=True, exist_ok=True)
 
     # ① 块缺失（dsh 运行时序列化冲掉的实锤形态）→ 重建
     patch.write_text("- insert:\n"
