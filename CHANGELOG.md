@@ -487,3 +487,8 @@
 - afe5602 fix(doctor): 自愈改用结构化判据 + 安装期真源；dsh 账本行键带 profile
 - 0774bbe test(S152/S153): 门禁先行——doctor 自愈边界与 dsh 多 profile 账本
 
+
+## v0.5.18（2026-11-16）
+
+- 46faccb fix(matrix,install): R2b 真机 manifest 路径 + R10 三态/不覆盖 provenance
+
