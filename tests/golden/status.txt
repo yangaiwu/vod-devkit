@@ -1,5 +1,5 @@
 {
-  "version": "0.5.16",
+  "version": "0.5.17",
   "source": {
     "type": "git",
     "remote": "<ORIGIN>",
@@ -42,7 +42,7 @@
       "skillsDir": "<HOME>/.hermes/skills/devops/vod-devkit",
       "payloadDir": "<PAYLOAD>",
       "dshPatch": null,
-      "version": "0.5.16",
+      "version": "0.5.17",
       "commitSha": "<SHA>",
       "skillInstalls": [
         {

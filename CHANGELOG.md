@@ -476,3 +476,14 @@
 - docs: 全系统通读清理过期描述（-32013 已废除、installs 行键、payload 在用集合、远程身份口径、
   dsh 手册版本号）；INSTALL 的 `--mcp-token` 改为"可选"（与代码一致）
 - chore: P3 mypy 两条清零、P5 base 尾斜杠归一、P6 名录缓存 tmp 名唯一化
+
+## v0.5.17（2026-11-16）
+
+- 5a3e848 fix(matrix): R2b 区分「MCP 块被清」与「合法降级」（S153-4）
+- 8e81c80 fix(install,doctor): R10 安装期提交可达性标记（source.reachable）
+- 47f19c5 fix(doctor,matrix,explain): 评审 R1/R2/R3/R8/R9 收口 + 通读补漏
+- ff92e5f docs: 全系统通读——清理与实现不一致的过期描述
+- 19bfdcd refactor(doctor): 自愈判定拆成两个纯函数 + 真值表用例
+- afe5602 fix(doctor): 自愈改用结构化判据 + 安装期真源；dsh 账本行键带 profile
+- 0774bbe test(S152/S153): 门禁先行——doctor 自愈边界与 dsh 多 profile 账本
+
