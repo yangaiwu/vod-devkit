@@ -492,3 +492,8 @@
 
 - 46faccb fix(matrix,install): R2b 真机 manifest 路径 + R10 三态/不覆盖 provenance
 
+
+## v0.5.19（2026-11-16）
+
+- b8e4cf0 fix(install): 载荷 commitSha 不在任何 tag 里时提示"非发布构建"（R10-2）
+
