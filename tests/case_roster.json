@@ -454,6 +454,9 @@
     "S150": {
       "carrier": "docs/design.md"
     },
+    "S151": {
+      "carrier": "docs/design.md"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

@@ -164,7 +164,12 @@ def _run_install(env, host, extra=()):
 
 
 def _payload_version(argv: list):
-    """entry 指向的载荷目录里的 build-info 版本（载荷自证，不看 server 自述）。"""
+    """entry 指向的载荷目录里的 build-info 版本（载荷自证，不看 server 自述）。
+
+    适用面：入口形态是 `…/<载荷>/vod_mcp/server.py` 的**文件型**（本仓九宿主目前全是这种）。
+    将来若出现 `-m vod_mcp.server` 或纯远程 URL 形态，本函数返回 None —— 此时调用方必须把
+    "无载荷文件判据，仅 server 自述"显式写进报文，不许静默退回自述（否定式证据也要可审计）。
+    """
     for a in argv:
         if str(a).endswith("vod_mcp/server.py"):
             bi = Path(str(a)).parent.parent / "build-info.json"
@@ -198,6 +203,7 @@ def _probe(entry: dict, expect_version: str) -> tuple:
     # 的版本必须就是期望版本。server 自述会被 env（VOD_DEVKIT_DIST_ROOT）影响而读成
     # 仓根版本，文件版本不会——这是"巡检假绿"暴露后补的独立证据。
     pv = _payload_version(argv)
+    no_file_evidence = "" if pv else "（无载荷文件判据：入口非 …/vod_mcp/server.py 形态，仅 server 自述）"
     if pv and expect_version and pv != expect_version:
         return False, f"载荷版本 {pv} ≠ 期望 {expect_version}{tail}"
     env = os.environ.copy()
@@ -246,7 +252,7 @@ def _probe(entry: dict, expect_version: str) -> tuple:
             return False, f"探针版本 {ver} ≠ 构建 {expect_version}（指向旧副本）"
         if "vod_submit_voices" not in names:
             return False, f"工具面缺 vod_submit_voices（{len(names)} 个工具）"
-        return True, f"{len(names)} 工具，版本 {ver}"
+        return True, f"{len(names)} 工具，版本 {ver}{no_file_evidence}"
     except Exception as e:  # noqa: BLE001
         return False, f"{e.__class__.__name__}: {e}{tail}"
     finally:

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from vod_mcp import hosts as host_specs
 from vod_mcp import paths as paths_mod
@@ -39,19 +40,24 @@ def cmd_status(args=None):
 
 
 def _repair_dsh_patch_block(mf: dict) -> str | None:
-    """doctor 自愈（S58/A）：profile cordis.patch.yml 的 vod-devkit 块缺失或
-    打平（未缩进在 - insert: 之下）时，按 manifest 的 product/apiBase 重建
-    正确嵌套块。返回修复的文件路径；块完好返回 None。
+    """doctor 自愈（S58/A + B 模式 D-dsh-mcp-b-1）：profile 的 vod-devkit 块缺失/打平/
+    形态与当前环境不符时，按 manifest 重建。
 
-    嵌套铁律（真机实锤）：id/name/config 必须缩进在 `- insert:` 之下——
-    dsh 的配置序列化只保留它能识别的块，手工游离块会被下次写盘冲掉。
+    关键（0.5.15 真机实锤）：重建必须**复用安装器的 `_patch_block`**——有 mcp-client 就写
+    `vod-devkit-mcp` + 壳两条 insert（壳 `registerTools:false`）。旧实现手写"只有壳块"的
+    形态，doctor 跑一次就把 MCP 工具面打回 6 工具降级（headless 的 vod-devkit-mcp 被抹掉，
+    audit 从"MCP 模式 PASS"变成"降级 PASS"）——自愈不能改变形态。
+
+    嵌套铁律（真机实锤）：id/name/config 必须缩进在 `- insert:` 之下。
     """
     prof = mf["dshProfile"]
     patch = Path(host_specs.load("dsh", prof)["configPath"])
     if not patch.exists():
         return None
     from vod_mcp import config_forms as cf
-    lines = patch.read_text(encoding="utf-8").splitlines()
+    from vod_mcp.host_adapters import dsh as _dsh
+    text = patch.read_text(encoding="utf-8")
+    lines = text.splitlines()
     try:
         verdict, reason = cf.classify_dsh_patch(lines)
     except cf.Refused as e:
@@ -61,34 +67,26 @@ def _repair_dsh_patch_block(mf: dict) -> str | None:
         print(f"[doctor] skip（cordis.patch.yml 形态不受支持，未自愈）：{reason}",
               file=sys.stderr)
         return None
-    vod_idx = next((i for i, ln in enumerate(lines)
-                    if ln.strip().startswith("- id: vod-devkit")), None)
-    if vod_idx is not None and lines[vod_idx].startswith((" ", "\t")):
-        # 已嵌套且在 insert 组内（简化判定：缩进+前文存在 - insert: 行）→ 完好
-        has_insert = any(ln.strip() == "- insert:" for ln in lines[:vod_idx])
-        has_name = any("name: dsh-vod-devkit" in ln
-                       for ln in lines[vod_idx:vod_idx + 3])
-        if has_insert and has_name:
-            return None
-    # 需要重建：先摘除旧块（块边界=下一个 `- ` 群组项，任何缩进），再追加正确嵌套组
-    if vod_idx is not None:
-        end = next((j for j in range(vod_idx + 1, len(lines))
-                    if lines[j].strip().startswith("- ")), len(lines))
-        del lines[vod_idx:end]
-    if lines and lines[-1].strip():
-        lines.append("")
-    product = mf.get("product") or ""
-    api_base = mf.get("apiBase") or ""
-    lines += [
-        "- insert:",
-        "    - id: vod-devkit",
-        "      name: dsh-vod-devkit",
-        "      config:",
-        f"        product: {product}",
-        f"        apiBase: {api_base}",
-        f"        uiBase: {api_base}",  # D-uiBase-direct：浏览器半直连，与 install 同口径
-    ]
-    patch.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+
+    dsh_cli = shutil.which("dsh")
+    mcp_ver = _dsh._mcp_client_version(_dsh._dsh_root(dsh_cli)) if dsh_cli else None
+    payload = Path(str(mf.get("payloadDir") or ""))
+    args = SimpleNamespace(product=mf.get("product") or "",
+                           java_api_base=mf.get("apiBase") or "")
+    expected = _dsh._patch_block(args, mcp_ver, payload, str(mf.get("packs") or "core"))
+    if expected in text:
+        # 已是安装器该写的样子（有 mcp 块 + 壳 registerTools:false，或降级形态）→ 不动
+        return None
+    try:
+        # upsert 按托管标记划界（标记优先），不靠 "- " 猜边界：mcp 块的 args 列表项
+        # 形如 "- /root/.../server.py"，旧实现会把块从中间切断，留下残块（0.5.15 实锤）。
+        _dsh.upsert_patch(patch, expected)
+    except Exception as e:  # noqa: BLE001  自愈失败只报告，不动字节
+        print(f"[doctor] dsh patch 自愈失败（{e.__class__.__name__}: {e}）——"
+              "多半是文件里有多份 vod-devkit 块；请人工确认后删掉多余那份"
+              f"（本插件的块在 `# vod-devkit DSH integration start/end` 之间）：{patch}",
+              file=sys.stderr)
+        return None
     return str(patch)
 
 

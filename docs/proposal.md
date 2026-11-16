@@ -1647,3 +1647,14 @@ hermes config / **机器级 state**）任一漂移 → `[S143] 测试写到了�
 | S150-1 | entry 指向旧载荷 | 即使巡检进程被钉仓根，也必须 DRIFT 且报文含"载荷版本 0.5.11" |
 | S150-2 | 载荷版本读取 | 从 entry 的 `vod_mcp/server.py` 反推载荷目录读 `build-info.json`；没有则 None |
 | S150-3 | 单用 skip 不生效 | 只设 `VOD_SKIP_PRODUCT_CHECK=1`（无 `VOD_MATRIX=1`）仍走校验并拒绝（S149 边界）|
+
+
+## doctor 自愈不破坏托管块（S151，D-doctor-repair-1，2026-11-16 真机实锤）
+
+**背景**：旧自愈用 `- ` 猜块边界，把 mcp 块的 args 项当成下一组开头 → 托管块被切断 + 追加旧形态块
+→ 两份 `- id: vod-devkit` → 后续自愈全 refuse，MCP 工具面静默丢失（audit 变"降级 PASS"假绿）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S151-1 | 降级形态 + 环境有 mcp-client | 自愈后必须**同时**有 `- id: vod-devkit-mcp` 与壳 `registerTools: false` |
+| S151-2 | 幂等 | 形态已正确（期望块文本在场）时再调自愈 → 返回 None 且不改写 |

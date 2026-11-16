@@ -1765,3 +1765,22 @@ D-product-id-2 的硬校验——那行 env 被从审计日志抄去单用就会
 
 **验证**：`tests/test_host_matrix.py::test_s150_probe_rejects_entry_pointing_at_old_payload`
 （entry 指向旧载荷 + 进程被钉仓根 → 必须 DRIFT）与 `test_s150_payload_version_helper...`（S150）。
+
+## D-doctor-repair-1：doctor 自愈不得改变/切断 dsh 托管块（2026-11-16 真机实锤）
+
+**缺陷**：S58 的自愈逻辑用 `lines[j].strip().startswith("- ")` 猜块尾——而 B 模式的 mcp 块里
+args 列表项形如 `- /root/.vod-devkit/payloads/<v>/vod_mcp/server.py`，被当成"下一组开头"：
+
+1. 它从 `- id: vod-devkit` 一路切到 args 项，把托管块**从中间切断**（`vod-devkit-mcp` 的
+   `id/name/config/args` 头全丢，只剩 env/cwd 尾巴）；
+2. 再追加一个"只有壳块"的旧形态组；
+3. 结果文件里出现两份 `- id: vod-devkit` → 之后每次自愈都 `refuse`，MCP 工具面静默丢失
+   （audit 从"MCP 模式 PASS"变成"降级 PASS"，看起来还绿）。
+
+**修法**：
+- 完好判定改为**期望块文本比对**：`_patch_block(...)` 生成的块整体 `in text` 即视为完好（幂等）；
+- 重建走 `upsert_patch`（**托管标记优先划界**），不再用 `- ` 猜边界；
+- 多块/形态未知时只报告并给人工指引（"删掉 `start/end` 标记之外多余那份"），不动字节。
+
+**验证**：`tests/test_dsh_mcp_mode.py::test_s151_doctor_repair_keeps_mcp_mode`
+（降级形态 + 有 mcp-client → 自愈后必须同时有 mcp 块与 `registerTools:false`，且二次调用 no-op）。

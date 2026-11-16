@@ -162,3 +162,31 @@ def test_doctor_reports_unreferenced_payloads(env):
     out = (r.stdout or "") + (r.stderr or "")
     assert "未被任何安装行引用" in out and "0.0.1" in out, out
     assert "不自动删" in out, out
+
+
+def test_s151_doctor_repair_keeps_mcp_mode(env, monkeypatch):
+    """doctor 自愈不许改变形态（0.5.15 真机实锤）：环境里有 mcp-client，
+    重建后的托管块必须**同时**有 mcp 块与壳块 registerTools:false——
+    旧实现手写只有壳块的形态，doctor 跑一次就把 12 工具打回 6 工具降级。"""
+    _fake_dsh_root(env)                      # PATH 里有桩 dsh + 本体带 mcp-client
+    monkeypatch.setenv("HOME", str(env["home"]))
+    monkeypatch.setenv("PATH", str(env["stub"]) + ":/usr/bin:/bin")
+    prof = env["home"] / ".dsh" / "profiles" / "web"
+    prof.mkdir(parents=True, exist_ok=True)
+    patch = prof / "cordis.patch.yml"
+    # 先造成"降级形态"（只有壳块，无 mcp 块）
+    patch.write_text("- insert:\n    - id: vod-devkit\n      name: dsh-vod-devkit\n"
+                     "      config:\n        product: CodeArts\n", encoding="utf-8")
+    from vodkit_cli import doctor as _doc
+    mf = {"dshProfile": "web", "product": "CodeArts", "apiBase": "https://e",
+          "payloadDir": str(env["home"] / ".vod-devkit" / "payloads" / "0.5.15"),
+          "packs": "core,collect"}
+    fixed = _doc._repair_dsh_patch_block(mf)
+    assert fixed, "形态与环境不符时必须自愈"
+    text = patch.read_text(encoding="utf-8")
+    assert "- id: vod-devkit-mcp" in text, f"自愈把 MCP 块丢了：{text}"
+    assert "registerTools: false" in text, f"自愈后壳未关注册：{text}"
+    assert "name: dsh-vod-devkit" in text and "product: CodeArts" in text, text
+    # 已经是正确形态时不得再动（幂等）
+    again = _doc._repair_dsh_patch_block(mf)
+    assert again is None, "形态已正确时不得重复改写"

@@ -1272,3 +1272,13 @@ productCatalog 的 state 缓存（TTL + 强制刷新开关）。
 真机复验：修前 `9 PASS`（假绿）→ 修后 `0 PASS / 9 DRIFT`（载荷与壳 0.5.11 vs 构建 0.5.14）。
 
 用例承载：`tests/test_host_matrix.py`（S150）。
+
+## doctor 自愈的边界（D-doctor-repair-1，2026-11-16）
+
+doctor 的 dsh patch 自愈只做一件事：让文件回到**安装器该写的样子**。判据是块文本比对
+（`_patch_block(...)` 生成块整体 `in text` 即完好），重建走 `upsert_patch`（托管标记优先划界）。
+**绝不用 `- ` 猜边界**——mcp 块的 args 列表项形如 `- /path/server.py`，会把块从中间切断，
+再叠加旧形态块后文件里出现两份 `- id: vod-devkit`，后续自愈全部 refuse，工具面静默降级。
+多块/形态未知 → 只报告 + 人工指引，不动字节。
+
+用例承载：`tests/test_dsh_mcp_mode.py`（S151）。
