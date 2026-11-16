@@ -3,7 +3,8 @@ import argparse
 import os
 import sys
 
-from vodkit_cli import auth_cmd, common, doctor, install, packs_cmd, uninstall, update
+from vodkit_cli import (auth_cmd, common, doctor, install, packs_cmd, prune_cmd,
+                        uninstall, update)
 
 
 def main():
@@ -95,6 +96,20 @@ def main():
     sp_auth.add_argument("--apply", action="store_true",
                          help="真正写盘（缺省只校验并显示指纹）")
     sp_auth.set_defaults(fn=auth_cmd.cmd_auth)
+    def _prune(a):
+        """cmd_prune 返回退出码（0=干净/no-op，1=有删除失败，2=参数/确认问题）。"""
+        sys.exit(prune_cmd.cmd_prune(a))
+
+    sp_prune = sub.add_parser("prune", help="显式清理旧载荷（默认 dry-run；二次确认）")
+    sp_prune.add_argument("--payloads", action="store_true",
+                          help="清理旧载荷版本（当前唯一的清理对象）")
+    sp_prune.add_argument("--keep", type=int, default=0,
+                          help="额外保留最新的 N 份旧载荷（默认 0）")
+    sp_prune.add_argument("--apply", action="store_true",
+                          help="真正删除（缺省只打印清单，dry-run 优先）")
+    sp_prune.add_argument("--yes", action="store_true",
+                          help="非交互环境确认删除（交互式会再问一次 y/N）")
+    sp_prune.set_defaults(fn=_prune)
     sub.add_parser("build-info").set_defaults(fn=lambda a: common.write_build_info(strict=False))
 
     def _serve(a):

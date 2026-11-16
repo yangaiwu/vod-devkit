@@ -132,20 +132,31 @@ def _remote_reachable(url: str, timeout: int = 6) -> bool:
 def _validate_product_or_exit(product: str, base: str) -> bool:
     """D-product-id-2：安装期产品硬校验（B 案，2026-11-05 拍板）。
     --product 命中 meta productCatalog（名字大小写不敏感或 id 精确）才放行；
-    未命中/目录不可达一律拒绝安装并给可执行引导（宁可不装不可装错）。"""
+    未命中/目录不可达一律拒绝安装并给可执行引导（宁可不装不可装错）。
+
+    0.5.12（真机实锤）：引擎多实例时「签发令牌的实例」与「校验令牌的实例」可能不同步——
+    POST /external/token 刚拿到的匿名令牌，紧随其后 GET /external/meta 就 401
+    「API Key 无效或已失效」。这不是网络故障，文案必须点明（实际踩过：照「不可达」
+    去查网络，白查）；401 时换设备锚点重领一次令牌能救掉偶发的那一半。
+    """
     import urllib.request
     import urllib.error
     import uuid
     api_prefix = "/rest/developer/manager/hdvodmngservice/v1"
     key = os.environ.get("VOD_JAVA_API_KEY", "")
-    token = ""
-    # 全程一致的设备锚点（S1 设备绑定：token 与后续请求必须同 device/UA，
-    # 否则 meta 401 设备不匹配；每次装机一个新锚点，一次校验只耗一枚令牌）
-    device = uuid.uuid4().hex[:32]
     ua = "vod-devkit-installer/1"
 
-    def _get(url: str):
-        auth = key or token
+    def _mint(device: str) -> str:
+        """零字段匿名令牌（方案 C 同链）；设备锚点必须与后续请求一致（S1 设备绑定）。"""
+        req = urllib.request.Request(
+            f"{base}{api_prefix}/external/token", data=b"{}",
+            headers={"content-type": "application/json", "X-Vod-Device-Id": device,
+                     "User-Agent": ua}, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+        return (body.get("data") or {}).get("token") or body.get("token") or ""
+
+    def _get(url: str, auth: str, device: str):
         req = urllib.request.Request(url, headers={
             "content-type": "application/json",
             "X-Vod-Device-Id": device,
@@ -155,46 +166,102 @@ def _validate_product_or_exit(product: str, base: str) -> bool:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return resp.status, resp.read().decode("utf-8", "replace")
 
-    try:
-        if not key:
-            req = urllib.request.Request(  # 零字段匿名令牌（方案 C 同链）
-                f"{base}{api_prefix}/external/token", data=b"{}",
-                headers={"content-type": "application/json", "X-Vod-Device-Id": device,
-                         "User-Agent": ua}, method="POST")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                body = json.loads(resp.read().decode("utf-8", "replace") or "{}")
-            token = (body.get("data") or {}).get("token") or body.get("token") or ""
-        catalog = None
-        status, text = _get(f"{base}{api_prefix}/external/meta")
+    def _state_identity() -> tuple:
+        """机器级 state 里已存的匿名令牌 + 它的设备锚点（install_nonce）。
+
+        装机校验**不该每次新签一枚**：引擎对"同网络当日签发次数"有限流
+        （实测撞到 100/日 → 429，整批装机全被挡）。复用 state 的令牌既省配额，
+        又避免一次新的设备锚点漂移；device 必须用 state 的 install_nonce，
+        否则令牌与设备不配对（S1 设备绑定）。
+        """
+        try:
+            from vod_mcp import runtime_state as _rt
+            cfg = _rt._runtime_cfg() or {}
+            if str(cfg.get("token_tier") or "") != "anonymous":
+                return ("", "")
+            tok = str(cfg.get("java_key") or "")
+            dev = str(_rt._install_nonce() or "")
+            return (tok, dev) if (tok and dev) else ("", "")
+        except Exception:  # noqa: BLE001  读不到就当没有，回落新签
+            return ("", "")
+
+    def _catalog_once():
+        """一个回合：有 state 令牌就复用，否则新设备锚点 + 领令牌 → 读目录。"""
+        reuse_tok, reuse_dev = _state_identity()
+        if key:
+            device, token = uuid.uuid4().hex[:32], key
+        elif reuse_tok:
+            device, token = reuse_dev, reuse_tok
+        else:
+            device = uuid.uuid4().hex[:32]
+            token = _mint(device)
+        status, text = _get(f"{base}{api_prefix}/external/meta", token, device)
         data = (json.loads(text) or {}).get("data") or {}
-        catalog = data.get("productCatalog")
-        if not catalog and token:  # 老引擎 meta 无目录 → 退 /external/products
-            status, text = _get(f"{base}{api_prefix}/external/products") if not key else (None, None)
-            if text:
-                data = (json.loads(text) or {}).get("data") or []
-                catalog = data
-        if not catalog:
-            print("[vod-devkit] 产品校验失败：引擎 meta 无 productCatalog 且 /external/products 不可用。\n"
-                  "  不执行安装（宁可不装不可装错）。请核对 --java-api-base 指向的引擎是否已部署 T7i 版本。",
+        cat = data.get("productCatalog")
+        if not cat and not key:  # 老引擎 meta 无目录 → 退 /external/products
+            status, text = _get(f"{base}{api_prefix}/external/products", token, device)
+            data = (json.loads(text) or {}).get("data") or []
+            cat = data if isinstance(data, list) else None
+        return cat
+
+    catalog, unauthorized, rate_limited, last_exc = None, False, False, None
+    for attempt in (1, 2):
+        try:
+            catalog = _catalog_once()
+            last_exc = None
+            break
+        except urllib.error.HTTPError as e:
+            last_exc = e
+            if e.code == 401:
+                unauthorized = True
+            if e.code == 429:
+                # 限流：重试只会更糟（配额头是"当日/网络"），立刻停
+                rate_limited = True
+                break
+            if attempt == 2:
+                break
+        except Exception as e:  # noqa: BLE001  网络抖动也重试一次
+            last_exc = e
+            if attempt == 2:
+                break
+
+    if catalog is None:
+        if rate_limited:
+            print("[vod-devkit] 产品校验失败：令牌签发被限流（HTTP 429，同网络当日签发次数上限）。\n"
+                  "  这不是装机器本身的问题——安装器每校验一次都要一枚匿名令牌，"
+                  "密集重装/联调会把日配额打满。\n"
+                  "  处置：配 VOD_JAVA_API_KEY 走正式 key（不占匿名配额）；或明天再试；"
+                  "或找 VOD 运营调整限流。", file=sys.stderr)
+        elif unauthorized:
+            print("[vod-devkit] 产品校验失败：引擎鉴权异常（HTTP 401）——刚签发的匿名令牌被"
+                  "校验侧拒绝。\n"
+                  "  典型原因：引擎多实例的令牌存储/缓存不同步（重试一次通常就过），"
+                  "或该环境只接受正式 key。\n"
+                  "  这不是网络故障，别先查网络。处置：稍后重跑 install / 配 "
+                  "VOD_JAVA_API_KEY / 找 VOD 运营核对引擎。", file=sys.stderr)
+        elif last_exc is not None:
+            print(f"[vod-devkit] 产品校验不可达（{last_exc.__class__.__name__}），"
+                  "拒绝安装（宁可不装不可装错）。\n"
+                  "  请核对网络与 --java-api-base；确需离线安装请联系 VOD 运营。",
                   file=sys.stderr)
-            sys.exit(2)
-        p = product.strip()
-        hit = any(
-            (str(x.get("name") or "").lower() == p.lower())
-            or (str(x.get("id")) == p)
-            for x in catalog if isinstance(x, dict))
-        if not hit:
-            sample = " / ".join(str(x.get("name")) for x in catalog[:8] if isinstance(x, dict))
-            print(f"[vod-devkit] --product '{product}' 不在产品名录（t_vod_product），拒绝安装。\n"
-                  "  归因前提无效=内置采集技能/分类/透传全部空转且用户无感知（归因错误比报错更糟）。\n"
-                  f"  权威名单：GET {api_prefix}/external/products（共 {len(catalog)} 项），示例：{sample} …",
-                  file=sys.stderr)
-            sys.exit(2)
-        return True
-    except SystemExit:
-        raise
-    except Exception as e:
-        print(f"[vod-devkit] 产品校验不可达（{e.__class__.__name__}），拒绝安装（宁可不装不可装错）。\n"
-              "  请核对网络与 --java-api-base；确需离线安装请联系 VOD 运营。",
+        else:
+            print("[vod-devkit] 产品校验失败：引擎 meta 无 productCatalog 且 "
+                  "/external/products 不可用。\n"
+                  "  不执行安装（宁可不装不可装错）。请核对 --java-api-base 指向的引擎"
+                  "是否已部署 T7i 版本。", file=sys.stderr)
+        sys.exit(2)
+
+    p = product.strip()
+    hit = any(
+        (str(x.get("name") or "").lower() == p.lower())
+        or (str(x.get("id")) == p)
+        for x in catalog if isinstance(x, dict))
+    if not hit:
+        sample = " / ".join(str(x.get("name")) for x in catalog[:8] if isinstance(x, dict))
+        print(f"[vod-devkit] --product '{product}' 不在产品名录（t_vod_product），拒绝安装。\n"
+              "  归因前提无效=内置采集技能/分类/透传全部空转且用户无感知（归因错误比报错更糟）。\n"
+              f"  权威名单：GET {api_prefix}/external/products（共 {len(catalog)} 项），"
+              f"示例：{sample} …",
               file=sys.stderr)
         sys.exit(2)
+    return True

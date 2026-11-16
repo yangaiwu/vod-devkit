@@ -179,3 +179,74 @@ def residue() -> list:
         return []
     return [p for p in sorted(base.iterdir())
             if p.is_dir() and not (p / "payload.json").exists()]
+
+
+def _vkey(name: str) -> tuple:
+    """版本目录名排序键（0.5.9 < 0.5.10 < 0.5.11；非数字段落当 0，不抛异常）。"""
+    out = []
+    for part in str(name).replace("-", ".").split("."):
+        out.append(int(part) if part.isdigit() else 0)
+    return tuple(out)
+
+
+def _tree_size(p: Path) -> int:
+    try:
+        return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+    except OSError:
+        return 0
+
+
+def prune_candidates(rows=None, keep: int = 0) -> list:
+    """可清理的旧载荷清单 —— 只认安装器自己落过的，且没有宿主在跑（D3，0.5.13）。
+
+    约束（负责人 2026-11-16 定案）：
+      · 只删清单内：必须是 `<payload_home>/payloads/<ver>/` 且带 `payload.json`
+        （= stage() 落的），绝不按 glob 删目录；
+      · 保留当前版本，以及任何安装行 payloadDir 指向的版本（在用的不碰）；
+      · keep>0 时额外保留最新的 keep 份；
+      · 只读 payloads/ 目录，不碰机器级 state（令牌/账本）。
+    返回 [(path, version, size_bytes)]，按版本升序（最旧的在前）。
+    """
+    from vod_mcp import __version__
+    base = payload_home() / "payloads"
+    if not base.is_dir():
+        return []
+    used = set()
+    for r in (rows or []):
+        d = str(r.get("payloadDir") or "").strip()
+        if d:
+            try:
+                used.add(str(Path(d).resolve()))
+            except OSError:
+                used.add(d)
+    cand = []
+    for d in sorted(base.iterdir(), key=lambda p: _vkey(p.name)):
+        if not d.is_dir() or not (d / "payload.json").exists():
+            continue
+        try:
+            if str(d.resolve()) in used:
+                continue
+        except OSError:
+            continue
+        if d.name == __version__:
+            continue
+        cand.append(d)
+    if keep > 0:
+        cand = cand[:-keep] if len(cand) > keep else []
+    return [(d, d.name, _tree_size(d)) for d in cand]
+
+
+def remove_payloads(cands, quiet: bool = False) -> tuple:
+    """按清单删除载荷目录：单条失败记录后继续，返回 (removed, failed)。"""
+    removed, failed = [], []
+    for path, ver, _size in cands:
+        try:
+            shutil.rmtree(path)
+            removed.append(str(path))
+            if not quiet:
+                print(f"removed old payload {ver}: {path}")
+        except OSError as e:  # noqa: BLE001  单条失败不中断整体
+            failed.append((str(path), str(e)))
+            if not quiet:
+                print(f"[warn] 删除失败 {path}: {e}")
+    return removed, failed

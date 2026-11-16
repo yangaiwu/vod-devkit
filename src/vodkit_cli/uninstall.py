@@ -222,6 +222,13 @@ def _clean_global(rows: list, remaining: list | None = None) -> None:
             continue
         shutil.rmtree(res, ignore_errors=True)
         print("removed payload residue:", res)
+    # 旧载荷（带 payload.json 的安装器产物）：与 `prune --payloads` 同一实现
+    #（D3 定案：显式、只删清单内、保留 remaining 宿主仍在引用的版本）。
+    old = _payload.prune_candidates(remaining or [])
+    if old:
+        _removed, _failed = _payload.remove_payloads(old)
+        if _failed:
+            print(f"[warn] 旧载荷删除失败 {len(_failed)} 份（见上）")
     # D-token-machine-1：机器级 state（跨版本/跨宿主共享的那一份）。
     state = _paths.machine_state_home()
     if remaining:
