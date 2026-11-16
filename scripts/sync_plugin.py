@@ -19,6 +19,7 @@
 import argparse
 import datetime
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -76,6 +77,15 @@ def sync(root: Path = ROOT, quiet: bool = False) -> dict:
     bi = {"version": version, "commitSha": sha,
           "builtAt": datetime.datetime.now().isoformat(timespec="seconds"),
           "sourceRemote": remote or None}
+    if os.environ.get("VOD_DEVKIT_NO_BUILD_INFO"):
+        # 打包/隔离跑法：保留现有 build-info（npm prepack 会跑本函数，若按当前 HEAD
+        # 重烧，tarball 的代码指纹就不再等于 tag，与 release.sh 的终态断言冲突——
+        # 2026-11-16 实锤：v0.5.27 因此被拒发）。
+        if not quiet:
+            print("build-info：跳过重烧（VOD_DEVKIT_NO_BUILD_INFO）")
+        bi = json.loads((root / "build-info.json").read_text(encoding="utf-8")) \
+            if (root / "build-info.json").is_file() else bi
+        return bi
     for rel in BUILD_INFO:
         (root / rel).write_text(json.dumps(bi, ensure_ascii=False, indent=2) + "\n",
                                 encoding="utf-8")

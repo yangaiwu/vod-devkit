@@ -171,9 +171,13 @@ if git push github main --tags 2>/dev/null; then echo "已推送 GitHub 镜像";
 # == tag 父提交（build-info 由 sync 在发版前写入，sha=发版起点提交——自指
 # 不可能，等式只能对 tag^ 成立），之后只允许发布这颗已验证的 tarball。
 TGZ="vod-devkit-$BUMP.tgz"
-npm pack --silent >/dev/null
 TAG_PARENT=$(git rev-parse "v$BUMP^")
 TAG_COMMIT=$(git rev-parse "v$BUMP")
+# 打包前把 provenance 钉成**tag 里的那份**：prepack 会跑 sync_plugin，若按当前 HEAD
+# 重烧，tarball 代码指纹就变成"打包时的 HEAD"——并发会话/发版后补的 docs 提交会让它
+# 既不是 tag^ 也不是 tag，终态断言只能拒发（2026-11-16 v0.5.27 实锤）。
+git checkout "v$BUMP" -- build-info.json plugins/vod-devkit/build-info.json
+VOD_DEVKIT_NO_BUILD_INFO=1 npm pack --silent >/dev/null
 BI_SHA=$(tar xzOf "$TGZ" package/plugins/vod-devkit/build-info.json | grep -o '"commitSha": "[0-9a-f]*"' | head -1 | grep -o '[0-9a-f]\{7,\}')
 # v0.5.9 起 prepack 会重跑 sync（副本零提交），于是 build-info 的 sha 变成发版提交
 # 本身而不是它的父提交——两者指的是同一份代码（release 提交只改版本号），
