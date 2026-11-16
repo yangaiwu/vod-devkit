@@ -449,3 +449,8 @@
 - 5fafa27 feat(quota): 产品名录缓存 + 巡检跳过校验（S149）
 - dea16a6 docs: D3/D6 决策入 ADR + 装机失败分层排查 + 发版纪律教训
 
+
+## v0.5.15（2026-11-16）
+
+- 6ce9752 fix(matrix): 巡检不再假绿 + S149 边界（a/b/c/d）（D-matrix-probe-1 / S150）
+
