@@ -1190,3 +1190,32 @@ tmp→`os.replace` + 0600），并发不会丢更新、不会写坏文件。
 否则机器级"存在即用"会让测试读到真机令牌。
 
 用例承载：`tests/test_token_machine_scope.py`（S145）。
+
+## dsh 走 MCP client：壳只留 UI（D-dsh-mcp-b-1，2026-11-16）
+
+**参照物做法**（huaweicloud-devkit，本地克隆核对）：dsh 不做专用 JS 工具插件，用 dsh 本体自带的
+`@deepseek-ai/dsh-mcp-client` 把 MCP server 挂成宿主工具；profile patch 里一个**托管块**
+（`# … start/end` 注释包裹 + 幂等替换 + 卸载只摘自己），缺 client 时用 `dsh plugin add` 自装。
+本仓照抄这套**形态**（不抄业务面）。
+
+| 项 | 实现 |
+|---|---|
+| 版本门槛 | `_dsh_root()` = `realpath(dsh).parent.parent`；client 装在**本体** `node_modules/@deepseek-ai/dsh-mcp-client`（profile 的 node_modules 里没有） |
+| 自装 | 缺则 `dsh plugin --profile <p> add @deepseek-ai/dsh-mcp-client`；`VOD_DSH_SKIP_MCP_CLIENT_ADD=1` 跳过（跳过/失败都降级，不阻断安装） |
+| 托管块 | `config_forms._DSH_MARK_START/_END`；`find_dsh_block` 优先按标记定位，无标记回落旧 `- id: vod-devkit`（兼容已装机实例） |
+| 有 client | 两条 insert 子项：`id: vod-devkit-mcp`（serverName=vod-devkit、stdio、`command`=安装器解释器、`args`=载荷 `server.py`、env 显式 `VOD_DEVKIT_HOME`/`VOD_JAVA_API_BASE`/`VOD_PACKS`、**不传 key** 走机器级匿名令牌）+ `id: vod-devkit`（壳，`registerTools: false` 只留 UI 半） |
+| 无 client | 只写壳块（6 工具自注册，`registerTools` 缺省 true），报文写明"降级" |
+| 卸载 | 只摘托管块；**`cordis.patch.yml` 是共享文件，永不整文件删**（本轮实锤：旧卸载路径会整份删掉，连带用户的其它 insert 块） |
+
+**为什么壳不能继续注册工具**：MCP 与壳同时注册 = 两个 `vod_submit_voices`、两套账本/令牌，
+用户可能重复提交。所以 `registerTools=false` 是 B 模式的强制项，降级形态才保留 true。
+
+**实测**（工具在 `vod-devkit-verification` 技能的 `scripts/dsh-mcp-probe.py`）：dsh 0.2.1-rc.5 +
+mcp-client 0.2.1-rc.5，stdio 与 streamable-http 两条传输都通；server 日志 argv 指向载荷
+`server.py`，模型回执 0.5.9；工具名 `mcp__vod-devkit__vod_*`。
+
+**边界**：本轮 MCP 模式只做 stdio，`SUPPORTS_REMOTE` 仍 False（client 支持 streamable-http，
+远程 attach 单独一轮）；**UI 半不随本方案统一**——`packages/dsh/src/client.jsx` 仍是浏览器直连
+引擎（自己领令牌、自己提交），agent 工具面与 UI 提交是两条链。
+
+用例承载：`tests/test_dsh_mcp_mode.py`（S146）。
