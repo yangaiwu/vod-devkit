@@ -373,3 +373,56 @@
 - 592024b fix(ci): 发版状态对账在浅克隆下假红（tag 不可见≠未打 tag）
 - 316a872 fix(release): 发版双副本检查/提交清单补插件副本 contract+safety
 
+
+## v0.5.10（2026-11-16）
+
+- 55cc756 !22 merge feat/dsh-b-mode into main
+- e5ea23c feat(dsh): B 模式——工具面走 MCP client，壳只留 UI（D-dsh-mcp-b-1）
+- 9706e28 fix(identity): clean-global 保留共享 state + doctor 并存态 + dsh 半套口径（评审 R1/R2B/R3/R4）
+- d13e7a8 feat(identity): 机器级匿名令牌 + vod_auth_ensure，远程面与本地同效果（S145 / D-token-machine-1）
+- e86e1e7 fix(matrix,audit,test-isolation): 矩阵不再写真机配置 + 巡检判生效入口 + 测试隔离切断继承（S141-S143）
+- 280021b !21 merge feat/state-live-read into main
+- 39684f4 refactor(state): read identity values at call time instead of import time (S140)
+- 7b43e43 !20 merge feat/state-txn into main
+- e6ab464 fix: transactional read-modify-write + key guard covers file/code tools
+- 0dce393 !19 merge feat/packs-consistency into main
+- 46e3257 fix(uninstall): clean skills by skillInstalls and never touch other hosts
+- bafe51b docs: record S136/S137 closure (switch consistency, state atomicity)
+- 08139db fix(state): runtime.json cross-process atomicity, never silently zeroed
+- d05c91b fix(mcp): session-scoped pack switch must answer the same on every surface
+- 69477b5 !18 merge feat/key-guard-hook into main
+- b982fab feat(hooks): block reading the engine key into the conversation (hermes pre_tool_call)
+- dfe47d1 !17 merge feat/doctor-egress into main
+- 4fafaba feat(doctor): report egress proxy and engine reachability
+- d36460f !16 merge feat/packs-configure into main
+- 1d47e5c feat(mcp): session-scoped pack switch (vod_packs_configure) + tools/list_changed
+- 9dcfd70 !15 merge feat/dsh-global-view into main
+- 637c94a feat(cli): version/packs cover hosts outside installs[] (dsh profiles)
+- e799d32 !14 merge docs/readme-skills-path into main
+- 3ab72f4 docs(readme): 目录结构补 assets/（技能/契约/策略真源）与 hook 新位置，写清技能在哪
+- 174f8a5 !13 merge fix/release-paths into main
+- f034c1b chore(release): 质量门的 pyflakes 作用域补上 src/vodkit_cli（与 pre-push 对齐）
+- 1cfd1fc fix(release): 发版链路与本地门禁跟上 S3 路径，字节码挡在包外
+- 7ce767f !12 merge fix/registry-dsh-path into main
+- 1355969 fix(release): registry_reconcile 跟上 packages/dsh 迁移（CI 红修复）
+- 4c9f672 !11 merge feat/s3a-migrate into main
+- d9d096b merge main：S3 规格（!10）与 S3 落地章节并存
+- e3c82e0 !10 merge feat/s3-spec into main
+- a347f23 docs(structure): 对齐 S3-A 后的真实布局
+- 6fc5a66 refactor(structure): S3-A 迁移到 src-layout（两个根 + 入口显式设置）
+- 77a4660 docs(architecture): 按业界对照收紧 S3 规格三处（资产→assets/、入口显式设根、workspace 触发条件）
+- c584043 docs(architecture): 拍死 S3 规格（两个根取值表/插件副本不内嵌 src/回落退出条件/测试影响实测/hooks 归位）
+- 025b93f !9 merge feat/structure-s2 into main
+- 54c15fc refactor(structure): 共享资产收进 src/（S2），发布布局保持不变
+- 09667bb !8 merge feat/install-s127 into main
+- befadc2 docs(structure): 结构契约 + 根预算门禁 + README 对标重写 + CI 单门禁收口（S129）
+- c27dd7a refactor(hooks)!: 预采集路由从 hermes 插件包改为宿主无关 shell hook（D-hook-unify-1）
+- 1ace520 feat(install): 省略 --target 的 0/1/N 交互选择 + --target all 缺落点跳过（S127）
+- fc5f6c0 !7 merge feat/mcp-manifest-evidence into main
+- 9ddfe5d test(scope): 范围锁——云操作面无对象，且用断言锁住（S126）
+- 10f95b9 feat(auth+skills): 凭据单入口 auth status/init + 技能读取"动作优先"教法（S124-S125）
+- 6785ffd feat(cli): 全局命令 version/packs + --target all + uninstall 收窄/清残留 + 未知包即报错（S116-S123）
+- 64abf63 fix(mcp)!: 清单补规范字段 + codex 改写读回验证/失败分类 + doctor 报形态（S111-S115）
+- 7df5ffb docs+refactor(copies): 需求/设计补 S103-S110，生成器与门禁收敛到单一真源
+- a2d9836 fix(release): build-info 指纹断言接受发版提交（prepack 重跑 sync 后 sha 前移一格）
+
