@@ -1744,3 +1744,13 @@ Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此�
 | S156-10 | OfficeAce 身份 | owner_user_id 默认 NULL，仅显式 env 生效；不抄库里别人的值 |
 | S156-11 | hermes 隔离 | 隔离 HOME 时 CLI 落点跟随 HOME；真实 config.yaml 字节不变（含继承 HERMES_HOME 的网关场景） |
 | S156-12 | 宿主门禁 | 宿主集合由 integrations/ 派生，REGISTRY 覆盖不全必红 |
+
+## 类型门禁与 OfficeAce 快照（S157，D-gate-mypy-1，2026-11-16 评审）
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S157-1 | 类型门禁 | `release.sh` 质量门包含 mypy；mypy 非零即拒绝发版（本地与 CI 不再分裂） |
+| S157-2 | 备份一致性 | OfficeAce 备份由 sqlite `backup()` 产出（开头是 `SQLite format 3`），不是文件复制 |
+| S157-3 | 回滚 | 失败时用快照 backup 回在线库，回滚后条目恢复、行数一致（不覆盖文件） |
+| S157-4 | 备份保留 | 超期快照被清理（默认 7 天），同秒多次不互覆盖（名含 pid） |
+| S157-5 | 兜底触发 | OpenClaw 卸载兜底只看"条目是否仍在"，错误文案变化不影响行为 |

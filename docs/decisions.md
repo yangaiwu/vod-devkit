@@ -1974,3 +1974,27 @@ OfficeAce 是桌面端（Windows 10/11、macOS 13+、HarmonyOS 6.1+，官方无 
    卸载路径同样带 `_cli_env()`，摘钩子改走 `atomic_write_text`（P4 第五处）。
 6. **门禁派生式**：`test_hosts_spec` 从 `integrations/` 派生宿主集合 + 锁"host.json 有但 REGISTRY 无"
    必红，不再硬编码 9 个名字（新增宿主必红的门禁本身是漂移源）。
+
+## D-gate-mypy-1：类型门禁进发版脚本；OfficeAce 备份改 sqlite 快照（2026-11-16 评审）
+
+**缺陷（实测）**：
+
+1. **mypy 只本地跑、CI 红着发版**：`officeace.py` 的 3 个 arg-type 错误在 v0.5.24/25/26 三个
+   tag 上都在，而 `release.sh` 质量门只有 pyflakes + pytest → 本地"发版成功"与 CI 长期不一致。
+2. **OfficeAce 备份是文件复制**：宿主桌面端可能开着那个 sqlite，WAL 里还有未落盘事务；
+   `copyfile` 拿到的可能是残缺/过期副本，而回滚又用它覆盖宿主库（治不了反而更糟），
+   且不处理 `-wal/-shm`；备份名按秒取、永不清理。
+3. **OpenClaw 卸载兜底依赖错误文案**：靠 `size-drop` 字样触发，openclaw 改文案就静默退化成
+   "只给手工指引"。
+
+**修法**：
+
+- `release.sh` 质量门 = pyflakes + **mypy** + pytest；mypy 报错 = 拒绝发版。
+- OfficeAce：备份用 sqlite `backup()` 在线快照；回滚把快照 backup 回在线库（不覆盖文件）；
+  快照名 `…vod-devkit-<YYYYmmdd-HHMMSS>-<pid>.bak`，按天保留 7 天自动清理；不建表不改 schema。
+- OpenClaw 兜底触发条件改成事实判断：`mcp show`（或配置文本）里条目仍在 → 严格 JSON 才外科摘除。
+
+**代价**：发版多跑一次 mypy（约数秒）；OfficeAce 每次装/卸多一个快照文件（7 天后自动清）。
+
+**验证**：`release.sh` 干跑通过 mypy；`tests/test_openclaw_officeace_hosts.py` 新增快照一致性 /
+回滚 / 保留期三条与"兜底不靠文案"一条；`officeace.py:213` 类型错误清零（mypy 49 文件全绿）。
