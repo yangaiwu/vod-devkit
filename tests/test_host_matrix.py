@@ -200,10 +200,13 @@ def _dsh_profile(home: Path, *, mcp: bool, register_tools: bool, shell_ver: str)
         (pkg / "package.json").write_text(json.dumps({"version": shell_ver}), encoding="utf-8")
 
 
-def test_s146_audit_dsh_reports_mcp_mode_only_when_shell_stops_registering(tmp_path):
+def test_s146_audit_dsh_reports_mcp_mode_only_when_shell_stops_registering(tmp_path, monkeypatch):
     """D-dsh-mcp-b-1：dsh 巡检必须看"双块 + 壳不注册"，否则半坏态（patch 写了
     registerTools:false 而 profile 里壳还是旧版本、字段根本不存在）会报假 PASS。"""
     m = _load_matrix()
+    # S153-4 起巡检还会读安装期 manifest 的 dshPatch；不隔离就会读**本仓**真机账本
+    # （127 行 dsh 记录），把"④ 无 mcp-client 的合法降级"误判成"MCP 块被清"。
+    monkeypatch.setenv("VOD_DEVKIT_MANIFEST", str(tmp_path / "install-manifest.json"))
     # ① 完整 B 模式
     _dsh_profile(tmp_path, mcp=True, register_tools=False, shell_ver="0.5.10")
     state, msg = m.audit_host("dsh", "0.5.10", home=tmp_path)

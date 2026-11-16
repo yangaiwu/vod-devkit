@@ -1072,3 +1072,10 @@ def test_source_reachable_helper():
     assert common._source_reachable(head) is True
     assert common._source_reachable("0" * 40) is False
     assert common._source_reachable("") is False
+
+
+def test_source_reachable_three_states(tmp_path, monkeypatch):
+    """R10：无 .git（npx/tarball 形态）必须返回 None，不许当 False 报（真机实测误诊）。"""
+    from vodkit_cli import common
+    monkeypatch.setattr(common, "ROOT", tmp_path)       # 模拟安装根没有 .git
+    assert common._source_reachable("deadbeef" * 5) is None

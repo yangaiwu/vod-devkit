@@ -312,3 +312,22 @@ def test_s153_dsh_audit_flags_cleared_mcp_block(tmp_path, monkeypatch):
     verdict2, msg2 = hm.audit_host("dsh", "0.5.16", home=tmp_path)
     assert verdict2 == "PASS", f"合法降级被误判 DRIFT：{msg2}"
     assert "降级" in msg2, msg2
+
+# ── S153-5（R2b 真机路径）不设 env 也能从安装根读到 manifest ────────────────
+def test_s153_dsh_audit_reads_install_root_manifest(tmp_path, monkeypatch):
+    """真机布局：manifest 在安装根（仓根），不在 $HOME。只读 HOME 会静默失效 → 假绿。"""
+    hm = _load_host_matrix()
+    monkeypatch.delenv("VOD_DEVKIT_MANIFEST", raising=False)
+    install_root = tmp_path / "root"
+    install_root.mkdir()
+    monkeypatch.setattr(hm, "ROOT", install_root)
+    home = tmp_path / "home"
+    _mk_shell_only(home, "web")                  # MCP 块被清
+    _mk_profile(home, "headless", good=True)
+    (install_root / "install-manifest.json").write_text(json.dumps({"installs": [
+        {"target": "dsh", "dshProfile": "web", "dshPatch": {"mcpClient": "0.2.1-rc.5"}},
+        {"target": "dsh", "dshProfile": "headless", "dshPatch": {"mcpClient": "0.2.1-rc.5"}},
+    ]}), encoding="utf-8")
+    verdict, msg = hm.audit_host("dsh", "0.5.16", home=home)
+    assert verdict == "DRIFT", f"不设 env 就退回假绿：{msg}"
+    assert "[web]" in msg and "MCP 块被清" in msg, msg

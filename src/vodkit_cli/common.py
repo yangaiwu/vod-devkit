@@ -65,6 +65,12 @@ def write_build_info(strict: bool):
     if os.environ.get("VOD_DEVKIT_NO_BUILD_INFO"):
         print("build-info.json: 跳过写入（VOD_DEVKIT_NO_BUILD_INFO）")
         return
+    # R10（2026-11-16 实测）：npx/tarball 形态没有 .git，重烧会把 provenance 写成
+    # commitSha:null / sourceRemote:null 并随 stage() 进载荷——"载荷代表哪个提交"永久丢失
+    #（doctor 两边都是 null 反而判 OK，假绿）。已有 provenance 时一律保留。
+    if not (ROOT / ".git").exists() and (ROOT / "build-info.json").is_file():
+        print("build-info.json: 保留包内 provenance（安装根无 .git 元数据，不重烧）")
+        return
     (ROOT / "build-info.json").write_text(
         json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
     print("build-info.json:", json.dumps(info, ensure_ascii=False))
@@ -196,16 +202,16 @@ def _dsh_install_snapshot(target):
         return None
 
 
-def _source_reachable(sha: str) -> bool:
-    """安装期提交是否可达（R10）：本地对象存在且被某个分支/远端引用包含。
+def _source_reachable(sha: str) -> bool | None:
+    """安装期提交是否可达（R10）：三态。
 
-    动机（2026-11-16 实测）：amend 改写历史后，install-manifest 与载荷 build-info 里的
-    commitSha 会变成 dangling 对象（`git branch -a --contains` 为空、远端 0 命中）——
-    doctor 直接报"manifest 与 build-info 不一致"，审计/回滚时也找不到"载荷代表哪个提交"。
-
-    这里只做**标记与告警**，不阻断安装：离线机器 / 干净检出都可能查不到远端引用，
-    阻断会让"$ git archive 出来的包"装不上。判据只取本地引用面（不联网）。
+    True  = 本地对象存在且被某个分支/远端引用包含；
+    False = 有 .git 但该 sha 不可达（amend 后的 dangling / 未推送）；
+    None  = 判不了（无 .git：npx 缓存/tarball 形态）——**不许当成 False 报**，
+            那会把用户引向"amend/未推送"的错误方向（真机实测）。
     """
+    if not (ROOT / ".git").exists():
+        return None          # 包内没有 git 元数据，provenance 不可判定
     if not sha:
         return False
     try:
@@ -217,7 +223,7 @@ def _source_reachable(sha: str) -> bool:
                             cwd=ROOT, capture_output=True, text=True, timeout=10)
         return bool((r2.stdout or "").strip())
     except Exception:  # noqa: BLE001  没有 git / 超时 → 当作不可判定（不误报）
-        return False
+        return None
 
 
 def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
@@ -276,10 +282,14 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
     manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
                                encoding="utf-8")
     print("installed:", json.dumps(manifest, ensure_ascii=False, indent=2))
-    if manifest["source"].get("reachable") is False:
+    reach = manifest["source"].get("reachable")
+    if reach is False:
         print(f"[vod-devkit] 警告：安装期提交 {str(manifest['source'].get('commitSha'))[:12]} "
               "不可达（不在任何分支上：amend 改写历史 / 未推送）——manifest 已记 "
               "source.reachable=false。发版提交定稿后重装一次即可消除。", file=sys.stderr)
+    elif reach is None:
+        print("[vod-devkit] 提示：安装根没有 git 元数据（npx 缓存 / tarball 形态）——"
+              "provenance 不可判定（manifest 记 reachable=null），不影响运行。", file=sys.stderr)
     missing = [k for k in ("VOD_JAVA_API_KEY",) if
                not os.environ.get(k) and not _runtime_cfg_read().get("java_key")]
     if missing and transport == "stdio":

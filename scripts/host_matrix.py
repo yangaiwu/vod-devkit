@@ -467,11 +467,23 @@ def _dsh_manifest_mcp(home: Path) -> dict:
 
     为什么必须读：宿主"本来就没 mcp-client"（合法降级 6 工具）与"MCP 块被清掉"
     （12→6 退化）在 patch 文本上长得一模一样；只有安装期记录能区分。
-    没记录的机器（老账本）回退"降级 PASS"，并在报文里明说按配置面判。
+
+    读取顺序（真机实测，2026-11-16）：VOD_DEVKIT_MANIFEST → **安装根(ROOT)**/install-manifest.json
+    → home/install-manifest.json。真机上 manifest 落在仓根（common.manifest_path()），
+    只读 home/… 会返回 {}，判据静默失效（真机假绿，隔离用例却因设了 env 而绿）。
     """
     import os as _os
-    p = Path(_os.environ.get("VOD_DEVKIT_MANIFEST") or (home / "install-manifest.json"))
-    if not p.is_file():
+    env_p = _os.environ.get("VOD_DEVKIT_MANIFEST")
+    if env_p:
+        # 显式指定就**只认它**：文件不在 = 没有账本（{}）。回退到 ROOT 会让"隔离测试"
+        # 读到真机 manifest（S146 ④ 被误判成"MCP 块被清"的现场）。
+        cands = [Path(env_p)]
+    else:
+        cands = [ROOT / "install-manifest.json", home / "install-manifest.json"]
+    for p in cands:
+        if p.is_file():
+            break
+    else:
         return {}
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
