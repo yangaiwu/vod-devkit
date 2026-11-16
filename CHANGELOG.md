@@ -519,3 +519,9 @@
 
 - 56428df fix(P1/P2/P5+隔离): install 入口预检账本、hermes 认 HERMES_HOME、载荷路径读回
 
+
+## v0.5.24（2026-11-16）
+
+- 9a0902f docs(readme): 去掉手写的工具计数（门禁要求对外文档不写会漂移的数字）
+- 73192df feat(hosts): 新增 OpenClaw 一等宿主 + OfficeAce 桌面端登记（D-host-3 / S156）
+
