@@ -5,7 +5,8 @@
     "remote": "<ORIGIN>",
     "ref": "<REF>",
     "commitSha": "<SHA>",
-    "reachable": true
+    "reachable": true,
+    "released": true
   },
   "target": "hermes",
   "transport": "stdio",

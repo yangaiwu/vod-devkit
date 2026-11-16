@@ -1857,3 +1857,25 @@ known 且三要素齐全，并单独锁 `-32011` 不许写成"名录"。
 
 **验证**：`tests/test_explain_codes.py::test_s154_every_raised_code_is_explained` /
 `..._known_codes_are_self_consistent` / `..._32011_is_draft_token_mismatch_not_catalog`。
+
+## D-dsh-patch-scalars-1：托管块外部标量一律 JSON 引号 + status 多行（2026-11-16 评审 P1/P4/P5）
+
+**缺陷（实测）**：
+1. `_patch_block` 把 product / apiBase / uiBase / VOD_PACKS 裸写进 YAML。`product: A: B`
+   直接 `ScannerError: mapping values are not allowed here` → 整个 cordis.patch.yml 解析失败
+   = profile 起不来；`classify_dsh_patch` 只看缩进/根节点，抓不到。当前名录里没有含 `:` 的名字、
+   URL 形态也安全，所以目前不是故障，但是"名录一改就静默生成坏文件"的定时炸弹。
+2. `status --target dsh` 只取账本第一条 dsh 行 → 两个 profile 只显示一个，另一台"安装对象"
+   在用户视野里不存在（doctor --target 同）。
+3. 自愈的"字段差异"只报 command/stateHome/入口/cwd/PYTHONPATH，product/apiBase/packs 变了不报
+   —— 而这三项恰是重装会改的。
+
+**修法**：
+- 所有外部可控标量统一 `json.dumps(...)`（JSON 双引号就是合法 YAML 标量）；`block_facts` 解析时
+  去引号，比较面与安装期记录同形；用例 `test_p4_patch_scalars_survive_yaml_parse`（含 `:` 与 `#`）。
+- `status|doctor --target <t>` 列出**全部**匹配行（多行时 stderr 逐行标 profile）；
+  用例 `test_p1_status_target_dsh_lists_all_profiles`。
+- `dshPatch` 增记 product/apiBase/packs；差异报告面同步补这三项（P5）。
+
+**代价**：patch 文本形态变化（外部标量多一对引号）——相关断言与 golden 同批更新；
+老 patch 不受影响（读取侧两种形态都接受）。

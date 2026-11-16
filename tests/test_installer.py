@@ -617,7 +617,7 @@ def test_install_dsh_valid_product_writes_config(env_dsh):
     patch = _dsh_patch(env_dsh)
     text = patch.read_text()
     assert "- id: vod-devkit" in text
-    assert "product: CodeArts" in text
+    assert 'product: "CodeArts"' in text
     # D-uiBase-direct 回归锁：安装必须写 uiBase——缺它浏览器半提交发 dsh
     # 同源（404→暂存），嵌入方真机实锤；apiBase 是 server 半自用不顶替
     assert "uiBase: " in text
@@ -680,7 +680,7 @@ def test_install_dsh_updates_existing_block(env_dsh):
             "--product", "GTD")
     assert r.returncode == 0, r.stderr
     text = _dsh_patch(env_dsh).read_text()
-    assert "product: GTD" in text and "CodeArts" not in text
+    assert 'product: "GTD"' in text and "CodeArts" not in text
     assert text.count("- id: vod-devkit") == 1  # 更新而非追加
 
 
@@ -704,7 +704,7 @@ def test_install_dsh_block_carries_name_binding(env_dsh):
     # upsert 后 name 绑定必须在（新块模板自带或保留既有值，二者皆可，不可消失）
     assert "name: dsh-vod-devkit" in text, \
         "重装吞掉 name 绑定 → client 半静默失激活（真机事故回归）"
-    assert "product: CodeArts" in text
+    assert 'product: "CodeArts"' in text
     assert "product: Old" not in text  # 配置值仍幂等更新
 
 
@@ -826,8 +826,9 @@ def test_doctor_repairs_dsh_patch_block(monkeypatch, tmp_path):
     assert mod._repair_dsh_patch_block(mf) == str(patch)
     t = patch.read_text()
     assert "    - id: vod-devkit" in t and "      name: dsh-vod-devkit" in t
-    assert "product: VOD" in t and "apiBase: http://127.0.0.1:18080" in t
-    assert "uiBase: http://127.0.0.1:18080" in t  # doctor 重建与 install 同口径
+    # P4（2026-11-16）起外部标量写成 JSON 双引号（裸写含 `:` 的值会破坏 YAML）
+    assert 'product: "VOD"' in t and 'apiBase: "http://127.0.0.1:18080"' in t
+    assert 'uiBase: "http://127.0.0.1:18080"' in t  # doctor 重建与 install 同口径
     assert "- id: ui-settings-general" in t and "k: 1" in t  # 不吞他人段
 
     # ② 打平（未缩进在 - insert: 下）→ 重建为嵌套
@@ -1071,7 +1072,7 @@ def test_source_reachable_helper():
                           capture_output=True, text=True).stdout.strip()
     assert common._source_reachable(head) is True
     assert common._source_reachable("0" * 40) is False
-    assert common._source_reachable("") is False
+    assert common._source_reachable("") is None   # P2：判不了 ≠ 不可达
 
 
 def test_source_reachable_three_states(tmp_path, monkeypatch):

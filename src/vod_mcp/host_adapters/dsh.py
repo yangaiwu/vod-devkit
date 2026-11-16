@@ -99,11 +99,17 @@ def _patch_block(args, mcp_ver: str | None, payload: Path, packs: str,
     py = python_exe or sys.executable
     st = state_home or str(_paths.machine_state_home())
 
-    prod_yaml = args.product or "''"   # schema 是 z.string()：YAML null 会校验失败
+    prod_yaml = json.dumps(args.product, ensure_ascii=False) if args.product else "''"
+    # P4（2026-11-16）：外部可控标量一律 JSON 双引号——YAML 里裸写 `product: A: B`
+    # 是 ScannerError（整个 cordis.patch.yml 解析失败 = profile 起不来）；
+    # json.dumps 的输出就是合法 YAML 双引号标量。
+    api_y = json.dumps(args.java_api_base or "", ensure_ascii=False)
+    ui_y = json.dumps(ui_base or args.java_api_base or "", ensure_ascii=False)
+    packs_y = json.dumps(str(packs), ensure_ascii=False)
     shell_cfg = [
         f"        product: {prod_yaml}",
-        f"        apiBase: {args.java_api_base}",
-        f"        uiBase: {ui_base or args.java_api_base}",   # 浏览器半直连引擎（D-uiBase-direct）
+        f"        apiBase: {api_y}",
+        f"        uiBase: {ui_y}",   # 浏览器半直连引擎（D-uiBase-direct）
         # headless 无审批通道：dsh 原生 ask 门禁会永久阻断写工具（四宿主实锤）。
         # 同意确认由 SKILL 话术层承担；web 端要硬门禁按 profile 覆盖回 true。
         "        confirmWrites: false",
@@ -130,8 +136,8 @@ def _patch_block(args, mcp_ver: str | None, payload: Path, packs: str,
         # 所以状态根/引擎地址/packs 必须显式传；key 故意不传（走机器级匿名令牌）。
         f"          PYTHONPATH: {payload}",
         f"          VOD_DEVKIT_HOME: {st}",
-        f"          VOD_JAVA_API_BASE: {args.java_api_base}",
-        f"          VOD_PACKS: {packs}",
+        f"          VOD_JAVA_API_BASE: {api_y}",
+        f"          VOD_PACKS: {packs_y}",
         f"        cwd: {payload}",
         "        toolCallTimeoutMs: 30000",
         "        failOnStartupError: false",
@@ -335,7 +341,16 @@ def block_facts(text: str) -> dict:
 
     def first(pattern):
         m = re.search(pattern, joined, re.MULTILINE)
-        return m.group(1).strip() if m else None
+        if not m:
+            return None
+        v = m.group(1).strip()
+        # P4 起外部标量写成 JSON 双引号：解析时去引号，比较面才和安装期记录同形
+        if len(v) >= 2 and v.startswith('"') and v.endswith('"'):
+            try:
+                v = json.loads(v)
+            except Exception:      # noqa: BLE001  坏转义按字面比
+                v = v.strip('"')
+        return v
 
     return {
         "present": start is not None,

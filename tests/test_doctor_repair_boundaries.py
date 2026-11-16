@@ -81,12 +81,12 @@ def test_s152_doctor_does_not_overwrite_manual_uibase(env, monkeypatch):
     mf = _mf(env, dshPatch={"command": __import__("sys").executable,
                             "stateHome": "/tmp/st", "mcpClient": "0.2.1-rc.5"})
     p = _patch_path(env)
-    text = _block(mf).replace("        uiBase: https://e", "        uiBase: /dsh")
+    text = _block(mf).replace('        uiBase: "https://e"', '        uiBase: "/dsh"')
     p.write_text(text, encoding="utf-8")
     before = p.read_text(encoding="utf-8")
     _doc._repair_dsh_patch_block(mf)
     after = p.read_text(encoding="utf-8")
-    assert "uiBase: /dsh" in after, f"自愈把手工 uiBase 覆盖了：{after}"
+    assert 'uiBase: "/dsh"' in after, f"自愈把手工 uiBase 覆盖了：{after}"
     assert after == before, "字段级差异只报告，不该改字节"
 
 
@@ -217,15 +217,15 @@ def test_s152_gap_repair_preserves_manual_fields(env, monkeypatch):
                             "stateHome": "/tmp/st", "mcpClient": "0.2.1-rc.5"})
     p = _patch_path(env)
     # E 场景：壳未关注册（形态缺口）+ 手工 uiBase=/dsh（公网反代定制）
-    p.write_text(_block(mf).replace("        uiBase: https://e", "        uiBase: /dsh")
+    p.write_text(_block(mf).replace('        uiBase: "https://e"', '        uiBase: "/dsh"')
                  .replace("        registerTools: false\n", ""), encoding="utf-8")
     before = p.read_text(encoding="utf-8")
-    assert "uiBase: /dsh" in before and "registerTools: false" not in before
+    assert 'uiBase: "/dsh"' in before and "registerTools: false" not in before
     fixed = _doc._repair_dsh_patch_block(mf)
     assert fixed, "形态缺口必须补（壳未关注册）"
     after = p.read_text(encoding="utf-8")
     assert "registerTools: false" in after, after
-    assert "uiBase: /dsh" in after, f"补缺口时把手工 uiBase 重置了：{after}"
+    assert 'uiBase: "/dsh"' in after, f"补缺口时把手工 uiBase 重置了：{after}"
 
 
 # ── S152-7（R3）无安装期记录一律不动字节（老账本只提示重装）──────────────────
@@ -331,3 +331,30 @@ def test_s153_dsh_audit_reads_install_root_manifest(tmp_path, monkeypatch):
     verdict, msg = hm.audit_host("dsh", "0.5.16", home=home)
     assert verdict == "DRIFT", f"不设 env 就退回假绿：{msg}"
     assert "[web]" in msg and "MCP 块被清" in msg, msg
+
+
+# ── P1：status --target dsh 必须列出全部 profile 行 ─────────────────────────
+def test_p1_status_target_dsh_lists_all_profiles(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("VOD_DEVKIT_MANIFEST", str(tmp_path / "install-manifest.json"))
+    (tmp_path / "install-manifest.json").write_text(json.dumps({"installs": [
+        {"target": "dsh", "dshProfile": "web", "version": "0.5.19"},
+        {"target": "dsh", "dshProfile": "headless", "version": "0.5.19"},
+    ]}), encoding="utf-8")
+    _doc.cmd_status(SimpleNamespace(target="dsh"))
+    out = capsys.readouterr().out
+    assert '"web"' in out and '"headless"' in out, f"漏了某个 profile：{out}"
+
+
+# ── P4：外部标量必须写成合法 YAML 标量（含冒号/井号的值不许破坏文件）──────────
+def test_p4_patch_scalars_survive_yaml_parse(tmp_path):
+    import yaml
+    block = _dsh._patch_block(SimpleNamespace(product="A: B", java_api_base="https://e/#x"),
+                              "0.2.1-rc.5", tmp_path, "core,collect",
+                              python_exe="/x/python3", state_home="/s")
+    doc = yaml.safe_load(block)          # 旧实现这里是 ScannerError
+    assert isinstance(doc, list) and doc, block
+    items = doc[0]["insert"]
+    cfg = {i["id"]: i.get("config", {}) for i in items}
+    assert cfg["vod-devkit"]["product"] == "A: B", cfg
+    assert cfg["vod-devkit"]["apiBase"] == "https://e/#x", cfg
+    assert cfg["vod-devkit-mcp"]["env"]["VOD_JAVA_API_BASE"] == "https://e/#x", cfg

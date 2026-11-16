@@ -22,12 +22,20 @@ def cmd_status(args=None):
     if target:
         mf = json.loads(p.read_text(encoding="utf-8"))
         rows = mf.get("installs") or ([mf] if mf.get("target") else [])
-        hit = next((r for r in rows if r.get("target") == target), None)
-        if hit is None:
+        # P1（2026-11-16）：dsh 的多 profile 是独立安装行，`--target dsh` 必须全部列出——
+        # 只取第一条会让 headless（或 web）在用户视野里"不存在"。
+        hits = [r for r in rows if r.get("target") == target]
+        if not hits:
             print(f"没有该宿主的安装记录：{target}"
                   f"（现有：{', '.join(r.get('target','?') for r in rows) or '无'}）")
             sys.exit(1)
-        print(json.dumps(hit, ensure_ascii=False, indent=2))
+        for i, hit in enumerate(hits):
+            if len(hits) > 1:
+                prof = hit.get("dshProfile")
+                print(f"[{target}{f':{prof}' if prof else ''}]", file=sys.stderr)
+            print(json.dumps(hit, ensure_ascii=False, indent=2))
+            if i != len(hits) - 1:
+                print()
         return
     # golden 稳定性：apiBase 含安装期动态值（本地验证实例端口），归一化后输出
     text = p.read_text(encoding="utf-8")
@@ -74,6 +82,14 @@ def _dsh_field_diffs(facts: dict, snap: dict, payload_s: str) -> list[str]:
             diffs.append(f"cwd={facts['cwd']}（安装期 {payload_s}）")
         if facts.get("pythonpath") and facts["pythonpath"] != payload_s:
             diffs.append(f"PYTHONPATH={facts['pythonpath']}（安装期 {payload_s}）")
+    # P5（2026-11-16）：这三项恰是"重装会改"的字段，旧报告面看不见它们的漂移
+    for key, label, snap_key in (("product", "product", "product"),
+                                 ("apibase", "apiBase", "apiBase"),
+                                 ("packs", "VOD_PACKS", "packs")):
+        rec = snap.get(snap_key)
+        cur = facts.get(key)
+        if rec and cur and str(cur) != str(rec):
+            diffs.append(f"{label}={cur}（安装期 {rec}）")
     return diffs
 
 
@@ -287,9 +303,10 @@ def cmd_doctor(args=None):
         bi = json.loads((common.ROOT / "build-info.json").read_text(encoding="utf-8"))
         if mf["source"]["commitSha"] != bi.get("commitSha"):
             problems.append("install-manifest 与 build-info 的 commitSHA 不一致")
-        # R10：`source.reachable` 只入库供审计（status/manifest 原文可查），**不 FAIL**——
-        # 干净检出 / 隔离克隆里 build-info 的 sha 天然不在本仓分支上（实测：remote 用例误伤）。
-        # 真正的处置是发版定稿后重装，install 侧已有 warning。
+        if (mf.get("source") or {}).get("released") is False:
+            print("[doctor] 提示：安装期提交不在任何 tag 里（非发布构建）——版本号相同，"
+                  "内容可能与该版本的 npm 包不同（R10-2）；要一字不差请用 "
+                  "npx vod-devkit@<ver> install", file=sys.stderr)
         if mf.get("mcpConfig") and not Path(mf["mcpConfig"]).exists():
             problems.append("MCP 配置文件缺失")
         # D-token-machine-1（R4）：state 与旧位并存 = "静默不迁"要可见。

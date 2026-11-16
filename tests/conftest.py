@@ -129,8 +129,9 @@ def pytest_sessionfinish(session, exitstatus):
     drift = [k for k in before if before[k] != after[k]]
     if not drift:
         return
-    print("\n[S143] 测试写到了真机（隔离缺失）："
+    print("\n[S143] 机器状态被改动了（测试或**并行 install** 都可能）："
           + "；".join(f"{k}: {before[k]!r} → {after[k]!r}" for k in drift)
-          + "\n  修法：tests/conftest.py 的 _isolate_machine_writes（VOD_DEVKIT_MANIFEST / "
-            "VOD_PAYLOAD_HOME 必须指向 tmp）", file=sys.stderr)
+          + "\n  先确认不是并行 install 在跑（install/矩阵/巡检同一时间只由一方做）；"
+            "确实是测试写的才按隔离缺失处理：tests/conftest.py 的 _isolate_machine_writes"
+            "（VOD_DEVKIT_MANIFEST / VOD_PAYLOAD_HOME 必须指向 tmp）", file=sys.stderr)
     session.exitstatus = 1

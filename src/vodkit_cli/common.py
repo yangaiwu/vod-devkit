@@ -191,13 +191,21 @@ def _install_rows(prev: dict, row: dict) -> list:
     return sorted(rows, key=lambda r: r.get("installedAt") or "")
 
 
-def _dsh_install_snapshot(target):
-    """dsh 安装期真源；非 dsh 宿主返回 None（S152）。探测失败不阻断安装。"""
+def _dsh_install_snapshot(target, product=None, api_base=None, packs=None):
+    """dsh 安装期真源；非 dsh 宿主返回 None（S152）。探测失败不阻断安装。
+
+    P5（2026-11-16）：除解释器/state/壳版本外，把 product / apiBase / packs 也记下来——
+    这三项恰恰是"重装会改、自愈却看不见"的字段，doctor 只能报 command/入口差异时
+    它们的漂移是盲区。
+    """
     if target != "dsh":
         return None
     try:
         from vod_mcp.host_adapters import dsh as _dsh_ad
-        return _dsh_ad.install_snapshot()
+        snap = _dsh_ad.install_snapshot()
+        snap.update({"product": product or "", "apiBase": api_base or "",
+                     "packs": packs or ""})
+        return snap
     except Exception:  # noqa: BLE001  记录缺失只是让自愈退化到"只报告"，不阻断安装
         return None
 
@@ -213,7 +221,7 @@ def _source_reachable(sha: str) -> bool | None:
     if not (ROOT / ".git").exists():
         return None          # 包内没有 git 元数据，provenance 不可判定
     if not sha:
-        return False
+        return None          # 空 sha 同样是"判不了"，不是"不可达"（否则会打出"提交 None 不可达"）
     try:
         r = subprocess.run(["git", "rev-parse", "--verify", f"{sha}^{{commit}}"],
                            cwd=ROOT, capture_output=True, text=True, timeout=10)
@@ -257,7 +265,9 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
                    "commitSha": bi["commitSha"],
                    # R10：提交不可达（amend 后的 dangling 对象）要能被审计看见，而不是
                    # 只在 doctor 里表现为"manifest 与 build-info 不一致"。
-                   "reachable": _source_reachable(bi["commitSha"])},
+                   "reachable": _source_reachable(bi["commitSha"]),
+                   # R10-2：同版本号两份代码的现场——"可达"不等于"已发布"，落盘供审计。
+                   "released": _released(bi["commitSha"])},
         "target": target,
         # 传输形态（D-attach-1）：stdio=宿主本机拉起进程；remote=指向单独部署的
         # 远程端点；skills-only=只装技能（MCP 由别处注册）
@@ -285,7 +295,8 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
         "payloadDir": str(payload_dir) if payload_dir else None,
         # S152：dsh 安装期真源（解释器/state 根/mcp-client 版本）。doctor 自愈只跟这份
         # 记录比，不再拿"当前进程环境"重新生成整块去比——后者会把用户钉的解释器换掉。
-        "dshPatch": _dsh_install_snapshot(target),
+        "dshPatch": _dsh_install_snapshot(target, bound_product,
+                                          (getattr(args, "java_api_base", "") or ""), packs),
     }
     row = {k: manifest[k] for k in
            ("target", "transport", "mcpUrl", "installedAt", "product", "packs",

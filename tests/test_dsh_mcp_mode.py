@@ -190,7 +190,7 @@ def test_s151_doctor_repair_keeps_mcp_mode(env, monkeypatch):
     text = patch.read_text(encoding="utf-8")
     assert "- id: vod-devkit-mcp" in text, f"自愈把 MCP 块丢了：{text}"
     assert "registerTools: false" in text, f"自愈后壳未关注册：{text}"
-    assert "name: dsh-vod-devkit" in text and "product: CodeArts" in text, text
+    assert "name: dsh-vod-devkit" in text and 'product: "CodeArts"' in text, text
     # 已经是正确形态时不得再动（幂等）
     again = _doc._repair_dsh_patch_block(mf)
     assert again is None, "形态已正确时不得重复改写"
