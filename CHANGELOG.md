@@ -584,3 +584,27 @@
 - 1effa63 fix(install/doctor): dsh 壳版本读回 + hook 命令随安装更新 + 宿主体检按账本行（S174-S176）
 - 8aac845 test(门禁先行): S174-S176 壳版本读回/hook 命令替换/多行宿主体检
 
+
+## v0.5.31（2026-11-17）
+
+- ea2205c fix(e2e/router): 评审 P1 出口分档 + 回执不可判；路由词表并表（S192/S193）
+- def1c6d test(门禁先行): S193 路由词表与 S184 并表 / 元讨论只认工程语汇
+- 8de3d81 test(门禁先行): S192 退出码分档 + 回执不可判
+- 4ec5da8 docs(skill): 自指命中先验后不再追问产品（S191，D-attrib-binding-1 补充）
+- 0061476 test(门禁先行): S191 自指+安装先验后不再追问产品
+- c74f901 fix(e2e): 正向用例补自指，负向不得判成明确同意（S190，D-e2e-suite-basis-1）
+- 1585e78 test(门禁先行): S190 正向用例必须带自指（否则提交链永远验不到）
+- aacfb51 fix(e2e): 回合无产出=不可判，exit 2 与违规 exit 1 分档（S189，D-e2e-indeterminate-1）
+- 9513b91 test(门禁先行): S189 回合无产出=不可判，不记违规
+- 6bdf0cf feat(e2e): 套件支持 --model 临时覆盖宿主模型（S188，D-e2e-model-override-1）
+- 92797c2 test(门禁先行): S188 套件支持宿主模型临时覆盖
+- 1f0cbf4 fix(e2e): 引擎 5xx 退避重试 + 不可判与违规分档（S187，D-e2e-engine-5xx-1）
+- ca11663 test(门禁先行): S187 套件对引擎 5xx 的容错边界
+- 6e3b8ed fix(router): 元讨论零注入 + 现象词变体（S185/S186，D-router-scope-1）
+- d327e48 test(门禁先行): S185 元讨论零注入 / S186 现象词变体
+- be0d5dc docs(skill): 反馈分型与建议型话术（S184）
+- da30fec docs(skill): 草稿展示的缺失字段声明（S183）
+- dfc605e test+fix(e2e): C1 断言拆分与基线剥离（S182）
+- ae1c0f3 test(对账门禁): S181 巡检与 host_verify 同结论
+- 082e924 docs(adr/design): S174-S180 三条 ADR + 读回与写入纪律表
+
