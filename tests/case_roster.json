@@ -628,6 +628,9 @@
     "S212": {
       "carrier": "tests/test_router_corpus.py"
     },
+    "S213": {
+      "carrier": "tests/test_publish_verify.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

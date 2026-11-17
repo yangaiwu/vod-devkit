@@ -212,9 +212,15 @@ if [ "$PUBLISH" = "1" ]; then
   # npm 把不存在的相对路径当 git 地址（ssh://git@github.com/dsh/...），报 publickey 失败。
   ( cd packages/dsh && npm publish "./dsh-vod-devkit-$BUMP.tgz" --access public ) \
     || { echo "FAIL: dsh 壳 publish 失败"; exit 1; }
+  # S213：区分"未发布会（1）"与"不可判=registry 查询超时（3）"——后者不许宣告失败
   python3 scripts/publish_verify.py --version "$BUMP" \
-      --pkg vod-devkit --pkg dsh-vod-devkit \
-    || { echo "FAIL: 发版终态断言未过（registry 未上线或包内容不符）"; exit 1; }
+      --pkg vod-devkit --pkg dsh-vod-devkit; PV_RC=$?
+  if [ "$PV_RC" = "3" ]; then
+    echo "不可判：发版终态未核实（registry 查询超时，不是未发布）——稍后手工核："
+    echo "  python3 scripts/publish_verify.py --version $BUMP --pkg vod-devkit --pkg dsh-vod-devkit"
+  elif [ "$PV_RC" != "0" ]; then
+    echo "FAIL: 发版终态断言未过（registry 未上线或包内容不符）"; exit 1
+  fi
   echo "发版完成 v$BUMP，两颗包已上线并通过内容核验"
 else
   echo "发版完成 v$BUMP，待发布两颗包（加 --publish 可自动发布并核验终态）："

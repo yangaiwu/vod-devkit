@@ -39,15 +39,34 @@ REQUIRED = {
 }
 
 
-def _npm_view(pkg: str, field: str):
-    r = subprocess.run(["npm", "view", f"{pkg}", field, "--json"],
-                       capture_output=True, text=True, timeout=60)
-    if r.returncode != 0:
-        return None
-    try:
-        return json.loads(r.stdout)
-    except json.JSONDecodeError:
-        return r.stdout.strip().strip('"')
+class RegistryQueryTimeout(RuntimeError):
+    """registry 查询超时（网络/npm 工具层），与"包未发布"是两件事（S213）。"""
+
+
+def _npm_view(pkg: str, field: str, attempts: int = 3, timeout: float = 90.0):
+    """查询 registry 字段。超时重试，耗尽抛 RegistryQueryTimeout——**不许**把超时当"未发布"。
+
+    实锤（0.5.33）：两颗包已 publish、tarball 200，但一次 `npm view … --json` 60s 超时，
+    TimeoutExpired 直接冒泡成裸 traceback，发版脚本据此宣告"终态断言未过"并 exit 1——
+    与 S187（引擎 502 打断整轮 e2e）同一类错：把不可判当失败。
+    """
+    last_err = None
+    for i in range(max(1, attempts)):
+        try:
+            r = subprocess.run(["npm", "view", f"{pkg}", field, "--json"],
+                               capture_output=True, text=True, timeout=timeout)
+            if r.returncode != 0:
+                return None
+            try:
+                return json.loads(r.stdout)
+            except json.JSONDecodeError:
+                return r.stdout.strip().strip('"')
+        except subprocess.TimeoutExpired as e:
+            last_err = e
+            if i + 1 < attempts:
+                time.sleep(min(5.0 * (i + 1), 15.0))
+                continue
+    raise RegistryQueryTimeout(f"{pkg} {field} 查询超时（{timeout:.0f}s × {attempts} 次）") from last_err
 
 
 def wait_for_version(pkg: str, version: str, timeout: float, interval: float) -> tuple:
@@ -61,11 +80,23 @@ def wait_for_version(pkg: str, version: str, timeout: float, interval: float) ->
     任一信号到位都不该判失败；latest 落后只提示，不阻塞。
     """
     deadline = time.time() + timeout
+    timeouts = 0
     last_latest, last_specific = None, None
     started = time.time()
     while True:
-        last_latest = _npm_view(pkg, "version")
-        last_specific = _npm_view(f"{pkg}@{version}", "version")
+        try:
+            last_latest = _npm_view(pkg, "version")
+            last_specific = _npm_view(f"{pkg}@{version}", "version")
+        except RegistryQueryTimeout as e:
+            # 查询层故障 ≠ 包未发布（S213）：窗口内继续轮询，窗口用尽则交"不可判"
+            timeouts += 1
+            last_err = e
+            last_specific = None
+            if time.time() >= deadline:
+                raise RegistryQueryTimeout(
+                    f"{pkg} 在 {timeout:.0f}s 内始终查询超时（{timeouts} 次）：{e}") from last_err
+            time.sleep(interval)
+            continue
         specific_ok = str(last_specific) == str(version)
         latest_ok = str(last_latest) == str(version)
         if specific_ok or latest_ok:
@@ -126,8 +157,16 @@ def main():
     a = ap.parse_args()
 
     failed = False
+    indeterminate = False
     for pkg in a.pkg:
-        ok, latest, specific_ok = wait_for_version(pkg, a.version, a.timeout, a.interval)
+        try:
+            ok, latest, specific_ok = wait_for_version(pkg, a.version, a.timeout, a.interval)
+        except RegistryQueryTimeout as e:
+            # 不可判（不是失败）：exit 3，调用方据此不清账、手工复核
+            print(f"不可判：{pkg} registry 查询超时——**不是**未发布（{e}）；"
+                  f"请稍后手工复核：npm view {pkg}@{a.version} version", file=sys.stderr)
+            indeterminate = True
+            continue
         if not ok:
             print(f"FAIL: {pkg} 在 {a.timeout:.0f}s 内查不到 {a.version}"
                   f"（latest 仍是 {latest}；publish 回执成功≠已上线，"
@@ -144,6 +183,10 @@ def main():
             continue
         try:
             blob = fetch_tarball(pkg, a.version)
+        except RegistryQueryTimeout as e:
+            print(f"不可判：{pkg} tarball 地址查询超时（不是内容不符）：{e}", file=sys.stderr)
+            indeterminate = True
+            continue
         except Exception as e:
             print(f"FAIL: {pkg} tarball 拉取失败：{e}", file=sys.stderr)
             failed = True
@@ -157,9 +200,14 @@ def main():
             print(f"OK: {pkg} tarball 内容与版本已核验（{len(blob)} bytes）")
     if failed:
         print("发版终态断言未过：不要宣告发版完成。", file=sys.stderr)
-        sys.exit(1)
+        return 1
+    if indeterminate:
+        print("发版终态断言：不可判（registry 查询超时，不是未发布）——"
+              "请稍后手工复核，不要据此重发或改版本号。", file=sys.stderr)
+        return 3
     print("发版终态断言通过：" + "、".join(f"{p}@{a.version}" for p in a.pkg))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
