@@ -1925,6 +1925,7 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S187 | 行为回归的引擎可用性 | 5xx/连接类错误退避重试（4 次）→ 用尽抛 `EngineUnavailable`，脚本 exit 2 报「不可判（环境故障）」；401/403 不重试不吞（判定依据）；无 key 不发请求 |
 | S188 | 宿主模型临时覆盖 | `--model`：codex `-m` / opencode `--model` 插在 prompt 之前；不给时 argv 与旧版逐字一致；未知宿主显式失败；只改本轮 argv、不改宿主配置 |
 | S189 | 回合无产出 | 回复为空且零落库 → `indeterminate`：无 fails、零记账、`[不可判]` 打印并 exit 2（与违规 exit 1 分档）；有落库或有回复照常判 |
+| S190 | 用例基准的自指前提 | 正向用例（submit_consent/single_row）必须含 `attribution.SELF_REFERENCE` 任一词；负向用例不得被判成 explicit_consent；自指词表单一真源、用例文件不复制 |
 
 ## 预采集路由的判定口径（S185/S186，D-router-scope-1，2026-11-17）
 

@@ -13,7 +13,6 @@
 中的任一词；负向用例（no_submit）必须不含。这样以后改提示词不会静默丢掉自指、也不会让负向
 用例失去「不该提交」的前提。
 """
-import importlib.util
 import sys
 from pathlib import Path
 

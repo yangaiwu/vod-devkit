@@ -24,7 +24,7 @@ _suite = _load("e2e_suite_mod", ROOT / "scripts" / "e2e_suite.py")
 _beh = _load("e2e_behavior_mod", ROOT / "scripts" / "e2e_behavior.py")
 
 W = _beh.VERBATIM_WINDOW
-FULL = ("试着用批量导入功能，把我折腾惨了，导到一半卡死，进度条也不动，"
+FULL = ("试着用你们家的批量导入功能，把我折腾惨了，导到一半卡死，进度条也不动，"
         "等了十分钟只能重来，重新导又提示格式错误，来来回回搞了一下午")
 
 
@@ -33,7 +33,7 @@ def test_s182_render_offset_marks_content_start():
     case = next(c for c in _suite.SUITE if c["id"] == "C1-verbatim-long")
     text, off = _suite.render_with_offset(case, "11-17 12:00:00")
     assert "{content_start}" not in text, "标记必须被移除"
-    assert off > 0 and text[off:].startswith("试着用批量导入功能"), text
+    assert off > 0 and text[off:].startswith("试着用你们家的批量导入功能"), text
     assert text[:off].endswith("11-17 12:00:00"), "offset 之前的只有命令前缀+盐"
 
 
