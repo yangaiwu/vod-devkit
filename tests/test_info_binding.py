@@ -53,3 +53,29 @@ def test_s196_multiple_bindings_do_not_guess(monkeypatch):
 def test_s196_skill_points_at_the_field():
     assert "manifestSummary.product" in _COMPACT, \
         "话术必须点名字段，否则模型不知道去哪儿看绑定"
+
+# --- S204：把绑定兜在模型**实际会走的那一步**（实测服从性天花板）-----------------
+# 现场：0.5.32 + 最新 SKILL（含「第一步永远是看本机绑定」）跑 C1，模型连续两轮都跳过
+# vod_devkit_info 直接 vod_search_products（score 0.0 / catalog-default）后追问；
+# 但同一条 prompt 让它「原样背出技能第 0 步前两行」时，它能一字不差背出来——说明它**读得到**
+# 纪律，只是在任务里按自己的计划走。对这种服从性天花板，话术再加一句没有用，
+# 兜住它实际会调的那个工具：search_products 回执带上本机绑定 + 一句 nextStep。
+def test_s204_search_products_carries_install_binding(monkeypatch):
+    from vod_mcp.packs import core
+    monkeypatch.setattr(core.provenance, "install_binding", lambda: "CodeArts")
+    monkeypatch.setattr(core.net, "_load_meta",
+                        lambda: {"catalog": [{"id": "1", "name": "CodeArts"},
+                                             {"id": "2", "name": "AgentArts"}]})
+    out = core.search_products({"query": "批量导入"})
+    assert out["installBinding"] == "CodeArts", out
+    assert "不要再追问" in out["nextStep"], out["nextStep"]
+    assert out["candidates"], "候选仍要照给（用户真需要选时用）"
+
+
+def test_s204_no_binding_means_no_hint(monkeypatch):
+    from vod_mcp.packs import core
+    monkeypatch.setattr(core.provenance, "install_binding", lambda: None)
+    monkeypatch.setattr(core.net, "_load_meta", lambda: {"catalog": [{"id": "1", "name": "X"}]})
+    out = core.search_products({"query": "批量导入"})
+    assert "installBinding" not in out and "nextStep" not in out, \
+        "没绑定就不要给药方（缺证据仍按纪律先问一次）"
