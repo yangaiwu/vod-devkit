@@ -2278,3 +2278,25 @@ S186（现象词变体）。复现探针：`/root/.hermes/cache/scratch/s185-rou
 **代价**：单次引擎抖动最多多等 ~50s（退避总和），换来一轮 10 分钟遥测不丢。
 **验证**：S187（`tests/test_e2e_engine_resilience.py`）四条：抖动两次后恢复拿到行、持续 502 抛
 `EngineUnavailable`、401 原样抛出且不重试、无 key 零请求。真机复跑记录见 e2e 日志。
+
+## D-e2e-model-override-1：宿主模型漂移时用 `--model` 继续验，不改宿主配置（2026-11-17 真机）
+
+**问题**：真机跑 `e2e_behavior.py --host codex --suite`，三条正向用例（C1/C4/C5，都要走 MCP
+工具调用轮）全部 `rows=0` + 「宿主回复为空」，两条负向用例（C2/C3）全绿。取证到 codex 会话
+文件：`task_complete.error = "stream disconnected before completion: Internal error"`、
+`last_agent_message = null`，同时 CLI 侧打满 `Reconnecting 1..5/5`。同一提示用
+`-m glm-5.3-flash` 一次过（工具真调到 `vod_devkit_info`，回执 `version 0.5.30`）。
+**定责=网关侧模型（opengw 的 glm-5.3 在工具调用轮掉流）**，不是插件、不是引擎、不是套件。
+
+**决定**：
+- 套件接受 `--model <name>`：codex 走 `-m`、opencode 走 `--model`，插在 prompt 之前，
+  只影响本轮 argv；**不改宿主配置文件**（改 config 属交付物，要先问负责人）。
+- 落成纯函数 `host_cmd(host, prompt, model)`，用例锁「prompt 必须在最后一位」「不给 model 时
+  argv 与旧版逐字一致」「未知宿主显式失败」——argv 顺序错了会把 prompt 当模型名，症状是
+  宿主报 `unknown model` 而不是跑错提示，极难归因。
+- 报告纪律：模型漂移期间的真机行为结论必须注明实际使用的模型；`glm-5.3` 掉流期间的
+  C1/C4/C5 记「不可判（宿主模型流断开）」，不得记违规。
+
+**代价**：多一个 CLI 参数（默认 None，行为不变）；用别的模型跑出来的行为结论与「默认模型下的
+真实用户路径」有差异，报结论时要写明。
+**验证**：S188 四条（`tests/test_e2e_engine_resilience.py`）。真机复跑用 `--model glm-5.3-flash`。

@@ -141,14 +141,28 @@ def echo_status(reply: str, full: str, ref: str) -> str:
     return "missing"
 
 
-def run_host(host: str, prompt: str) -> str:
+def host_cmd(host: str, prompt: str, model: str | None = None) -> list:
+    """构造宿主调用 argv（S188）。
+
+    `model` 是本轮临时覆盖（网关模型漂移时的处置手段）：只影响这次 argv，
+    **不改宿主配置文件**——改 config 属交付物，要先问负责人。
+    """
     if host == "codex":
-        cmd = ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", prompt]
+        cmd = ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox"]
+        if model:
+            cmd += ["-m", model]
     elif host == "opencode":
-        cmd = ["opencode", "run", prompt]
+        cmd = ["opencode", "run"]
+        if model:
+            cmd += ["--model", model]
     else:
         sys.exit(f"不支持宿主: {host}（codex/opencode）")
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    cmd.append(prompt)          # prompt 必须留在最后一位
+    return cmd
+
+
+def run_host(host: str, prompt: str, model: str | None = None) -> str:
+    r = subprocess.run(host_cmd(host, prompt, model), capture_output=True, text=True, timeout=600)
     return r.stdout
 
 
@@ -293,7 +307,7 @@ def _stable_engine_rows(ts: str, stable_gap_s: int = 120, cap_s: int = 900) -> l
     return rows
 
 
-def run_case(host: str, case: dict, cfg: dict) -> dict:
+def run_case(host: str, case: dict, cfg: dict, model: str | None = None) -> dict:
     """跑单条反例用例：判定基准=引擎落库行（引擎侧事实）+宿主回复。
     返回 {"case", "fails", "rows"}；违规当场入桶（本地计数=检测线，
     权威对账由夜跑 reconcile 按引擎归档行复核）。"""
@@ -301,7 +315,7 @@ def run_case(host: str, case: dict, cfg: dict) -> dict:
     verbatim_full = prompt[start:]            # 引擎侧应存的完整原话
     expect_rows = expected_row_count(case)
     t0 = _now_ts()
-    reply = run_host(host, prompt)
+    reply = run_host(host, prompt, model)
     rows = _await_engine_rows(t0, expect_rows)
     # 接口粒度：title=提交内容前 N 字 → 逐字校验窗口取原话起点之后的 N 字
     # （旧实现用 prompt[:N]，含「帮我记录反馈：」命令前缀，引擎按纪律会剥 → 长句必假红）
@@ -361,6 +375,9 @@ def main() -> None:
                     help="单条模式：给一条 prompt（确认强度自动分级）")
     ap.add_argument("--suite", action="store_true",
                     help="反例集模式：C 档规则全量对抗（scripts/e2e_suite.py）")
+    ap.add_argument("--model", default=None,
+                    help="本轮临时覆盖宿主模型（只改 argv，不改宿主配置；"
+                         "网关模型在工具调用轮掉流时用）")
     a = ap.parse_args()
 
     data = json.loads(COUNTER.read_text()) if COUNTER.exists() else {}
@@ -382,7 +399,7 @@ def main() -> None:
     all_fails, total_rows = [], 0
     try:
         for case in cases:
-            res = run_case(a.host, case, cfg)
+            res = run_case(a.host, case, cfg, a.model)
             total_rows += len(res["rows"])
             status = "PASS" if not res["fails"] else "FAIL"
             print(f"[{status}] {res['case']}（{res['rule']}）rows={len(res['rows'])}")
