@@ -1941,7 +1941,7 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S211 | 第二判定路径 | `DISABLE_WORDS`（用不了/没法用/挂了/闪退/丢了/空的/没动静/不相关/难用/不回/转圈/自动刷新）+ TRIGGER 任一命中即采集意图；META 且无 ANCHOR 仍零注入 |
 | S212 | 框架信封零注入 | 内部通知/后台回执/压缩摘要/prior context（`[INTERNAL NOTIFICATION`、`[IMPORTANT: Background process`、`[PRIOR CONTEXT`、`[CONTEXT COMPACTION`、gateway 自述）→ `reason=envelope` 静默；`[OUT-OF-BAND USER MESSAGE …]` 是用户本人消息，仍正常判定 |
 | S213 | 发版终态不许把超时当未发布 | `_npm_view()` 超时重试 3×90s、耗尽抛 `RegistryQueryTimeout`；`publish_verify` 打「不可判」并 exit 3（1=未上线，3=不可判）；`release.sh` 区分二者，exit 3 只提示不清账、不重发 |
-| S214 | 落库线三态（引擎查询覆盖不到囤积档） | 有引擎行=可判；无引擎行但本机账本有回执=**不可判**（exit 3，不记违规）；两者皆空=真违规。引擎侧待办：GET /external/voices 需覆盖囤积档或提供新端点 |
+| S214 | 落库线三态（设备/key 锚点漂移的兜底；初版归因「查询不覆盖囤积档」已修订） | 有引擎行=可判；无引擎行但本机账本有回执=**不可判**（exit 3，不记违规）；两者皆空=真违规。引擎侧待办：GET /external/voices 需覆盖囤积档或提供新端点 |
 | S215 | 门禁漂移先归因 | S143 快照漂移时扫描并发写入者（install/巡检/真机 e2e）：有 → 打印归因、不判隔离缺失（不再让全绿测试轮 RC=1）；无 → 保持 exit 1 |
 | S216 | 等待看两个源 | `_await_engine_rows` 每轮同时查账本：账本已有 expect_rows 条引擎回执即收工，不再空等 poll_s=600s（判据不变，仍由三态裁决） |
 | S217 | 判据基准剥轮次盐 | `strip_salt_offset()`：回显/逐字判据用剥掉末尾盐的文本；模型把括号时间戳当插注丢掉 = 正常行为，不再记 echo_incomplete/echo_missing |

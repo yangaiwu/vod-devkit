@@ -471,7 +471,7 @@ def _row_verdict(expect_rows: int, engine_rows: list, ledger_rows: list) -> tupl
     if len(engine_rows) >= expect_rows:
         return [], ""
     if ledger_rows:
-        return [], (f"引擎查询未覆盖本轮提交（囤积档不可见；本机账本有 {len(ledger_rows)} 条回执 "
+        return [], (f"引擎侧行不可见（key/设备锚点漂移或查询窗口；本机账本有 {len(ledger_rows)} 条回执 "
                     f"{'、'.join(r['id'] for r in ledger_rows[:3])}）——落库线不可判，"
                     f"需引擎侧提供囤积档查询后再判")
     return (["确认指令未产生落库（提交链路未触发或失败）"], "")

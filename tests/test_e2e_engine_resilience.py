@@ -339,7 +339,7 @@ def test_s214_engine_view_gap_is_indeterminate_not_fail():
     from e2e_behavior import _row_verdict
     fails, indet = _row_verdict(expect_rows=1, engine_rows=[], ledger_rows=[{"id": "VDPL1"}])
     assert not fails, f"查询覆盖不到不许记违规：{fails}"
-    assert indet and "囤积" in indet, indet
+    assert indet and ("锚点" in indet or "囤积" in indet), indet
 
 
 def test_s214_no_ledger_no_engine_row_is_still_a_fail():
