@@ -167,10 +167,14 @@ def test_s114_readonly_classified_not_fatal(tmp_path, monkeypatch):
     """只读/权限这类不该判死安装（插件仍装在宿主里），只给分类补救指引。"""
     p = _static_manifest(tmp_path)
 
-    def boom(self, *a, **kw):
+    # S179 起写走 paths.atomic_write_text（tmp+replace），不再经 Path.write_text：
+    # 权限类故障的注入点随之改到原子写入口
+    from vod_mcp import paths as _paths
+
+    def boom(path, text, *a, **kw):
         raise OSError(30, "Read-only file system")
 
-    monkeypatch.setattr(Path, "write_text", boom)
+    monkeypatch.setattr(_paths, "atomic_write_text", boom)
     with pytest.raises(codex.PluginMcpRewriteError) as e:
         codex.rewrite_plugin_mcp(p, python="/py", entry="/s.py")
     assert e.value.kind == "not-writable"
@@ -180,14 +184,15 @@ def test_s114_readonly_classified_not_fatal(tmp_path, monkeypatch):
 def test_s114_verify_mismatch_is_hard_fail(tmp_path, monkeypatch):
     """读回与期望不一致 = 半写状态留给宿主，必须让安装失败。"""
     p = _static_manifest(tmp_path)
-    real_write = Path.write_text
+    from vod_mcp import paths as _paths
+    real_write = _paths.atomic_write_text
 
-    def tampered(self, text, *a, **kw):
-        real_write(self, text, *a, **kw)
-        real_write(self, json.dumps({"mcpServers": {"vod-devkit": {
+    def tampered(path, text, *a, **kw):
+        real_write(path, text, *a, **kw)
+        real_write(path, json.dumps({"mcpServers": {"vod-devkit": {
             "command": "vod-devkit", "args": ["serve"]}}}), *a, **kw)
 
-    monkeypatch.setattr(Path, "write_text", tampered)
+    monkeypatch.setattr(_paths, "atomic_write_text", tampered)
     with pytest.raises(RuntimeError) as e:
         codex.rewrite_plugin_mcp(p, python="/py", entry="/s.py")
     assert "验证不通过" in str(e.value)

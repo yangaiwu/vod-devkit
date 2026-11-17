@@ -526,6 +526,12 @@
     "S178": {
       "carrier": "tests/test_codearts_host.py"
     },
+    "S179": {
+      "carrier": "tests/test_mcp_manifest_a3.py"
+    },
+    "S180": {
+      "carrier": "tests/test_review_r2.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

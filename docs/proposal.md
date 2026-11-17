@@ -1886,3 +1886,16 @@ Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此�
 | S178-2 | 条目 `enabled: false` | code == "disabled"（宿主不会加载） |
 | S178-3 | 条目指向的 server.py 不存在 | code == "mismatch"（载荷被删/路径写错） |
 | S178-4 | 条目健康 | 返回 `[]`（不误报） |
+
+## 宿主配置写入原子化（S179，D-atomic-host-writes-1，2026-11-17 真机）
+
+**背景**：`write_text` 写宿主主配置与共享 JSON 是「半截文件」制造机——写到一半被中断/磁盘满，
+宿主拿到的是残缺 config.yaml / cordis.patch.yml / codex config.toml，**直接起不来**；而
+install 已经把账本写成"装好了"。此前只有账本、openclaw、officeace、merge_json_mcp 走了
+atomic（同目录 tmp → fsync → chmod → replace），其余十余处仍是裸写。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S179 | 扫描 `src/vod_mcp/host_adapters/*.py`、`paths.py`、`vodkit_cli/{install,uninstall,packs_cmd}.py` | 除 `atomic_write_text` / `tmp.` / `bak.` / `dest.` / `# atomic-ok` 之外不得出现裸 `.write_text(` |
+| S180 | 目标文件是符号链接（dotfiles 场景） | 先 `resolve()` 再 tmp+replace：软链保持、真实文件被更新（不许把链接换成普通文件） |
+| S180-2 | 目标文件是 chmod 444（用户显式保护） | 抛 PermissionError、内容不变（tmp+replace 会绕过 write_text 的旧语义） |

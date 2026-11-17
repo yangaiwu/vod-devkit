@@ -491,3 +491,60 @@ def test_s178_json_hosts_must_be_read_back(monkeypatch, tmp_path):
                               ensure_ascii=False), encoding="utf-8")
     assert host_verify.problems("opencode") == []
     host_verify.require_ok("opencode")      # 不抛
+
+
+def test_s179_host_config_writes_are_atomic():
+    """S179：宿主主配置/共享 JSON 的写入必须原子（tmp→fsync→replace）。
+
+    裸 write_text 写到一半被中断/磁盘满 = 宿主拿到残缺 config.yaml / cordis.patch.yml /
+    config.toml，**直接起不来**；而 install 早已把账本写成「装好了」。
+    允许的非配置写入只有三类：tmp（自身就是临时文件）、bak（备份副本）、dest（随装生成的文档）。
+    """
+    root = ROOT / "src"
+    files = list((root / "vod_mcp" / "host_adapters").glob("*.py"))
+    files += [root / "vod_mcp" / "paths.py"]
+    files += [root / "vodkit_cli" / n for n in ("install.py", "uninstall.py", "packs_cmd.py")]
+    allow = ("atomic_write_text", "tmp.write_text", "bak.write_text",
+             "dest.write_text", "# atomic-ok")
+    bad = []
+    for p in files:
+        for i, ln in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if ".write_text(" not in ln or any(a in ln for a in allow):
+                continue
+            bad.append(f"{p.relative_to(ROOT)}:{i}: {ln.strip()[:80]}")
+    assert not bad, ("裸 write_text（半截文件会让宿主起不来）：\n  " + "\n  ".join(bad))
+
+
+def test_s180_atomic_write_follows_symlink(tmp_path):
+    """S180：atomic_write_text 不许把用户的符号链接换成普通文件。
+
+    os.replace 换的是目录项本身——dotfiles 场景（config.yaml → ~/dotfiles/…）下，
+    原子写会把软链变成普通文件，之后用户的同步/版本管理静默失效。旧 write_text 跟随链接，
+    语义必须保持：落点先 resolve。
+    """
+    from vod_mcp.paths import atomic_write_text
+
+    real = tmp_path / "dotfiles" / "config.yaml"
+    real.parent.mkdir()
+    real.write_text("old\n", encoding="utf-8")
+    link = tmp_path / "config.yaml"
+    link.symlink_to(real)
+    atomic_write_text(link, "new\n")
+    assert link.is_symlink(), "软链被替换成了普通文件"
+    assert real.read_text(encoding="utf-8") == "new\n"
+
+
+def test_s180_readonly_target_is_refused(tmp_path):
+    """S180：chmod 444 的目标必须拒写（tmp+replace 会绕过 write_text 的 PermissionError）。
+
+    原子写的副作用：只要目录可写，os.replace 能替换只读文件——用户特意 chmod 444 保护
+    的配置会被静默覆盖。判据取 owner 写位（root 下 os.access 恒 True，不能用）。
+    """
+    from vod_mcp.paths import atomic_write_text
+
+    p = tmp_path / "config.yaml"
+    p.write_text("keep\n", encoding="utf-8")
+    p.chmod(0o444)
+    with pytest.raises(PermissionError):
+        atomic_write_text(p, "clobber\n")
+    assert p.read_text(encoding="utf-8") == "keep\n"
