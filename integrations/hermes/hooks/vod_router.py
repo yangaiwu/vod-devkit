@@ -10,10 +10,13 @@ hermes docs「Shell Hooks → JSON wire protocol」。
 行为：
 - 命中 TRIGGER_WORDS（确定性关键词，非模型判断）→ 注入 directives（含显式
   「提交反馈」前缀的分支）；
+- 命中词出现在元讨论里（工程对象语汇命中且无用户视角锚点）→ 零注入（S185，
+  D-router-scope-1）；
 - 未命中 → 什么都不输出（零注入零噪音）。
 
 规则表纪律：新增触发词改 TRIGGER_WORDS（单一事实源），改文案改 DIRECTIVE /
-STRONG_DIRECTIVE；两处都有回归锁（tests/test_router.py）。
+STRONG_DIRECTIVE，改元讨论排除改 META_WORDS / ANCHOR_WORDS；三处都有回归锁
+（tests/test_router.py 的 S185/S186 与 R7）。
 """
 import json
 import re
@@ -22,15 +25,38 @@ import sys
 TRIGGER_WORDS = (
     "提交反馈", "提单",
     "体验不好", "体验差", "体验很差", "体验糟", "很糟糕", "太糟糕",
+    "体验太差", "太差", "很差",
     "太慢", "很慢", "回复慢", "响应慢",
     "卡顿", "卡死", "卡",
+    "白屏", "没反应",
     "不好用", "很难用",
     "报错", "有bug", "有 bug", "出bug",
     "希望支持", "建议增加", "要是能", "为什么不能",
 )
+
+# S185 元讨论排除（D-router-scope-1）：命中词出现在「谈工程对象」的句子里时，
+# 用户谈的是产品反馈这件事（评审/方案/代码/文档），不是他自己的遭遇。实测 7 条
+# 元讨论 6 条被误判成采集意图，注入指令会把设计评审拐去提单。
+# 判据 = 命中 META_WORDS 且不含任何「用户视角对象/体验面」锚点 → 零注入。
+# 为什么不用模型判断：本 hook 是确定性路由（线协议只回 context，不跑 LLM），
+# 且误注入比漏注入贵——漏了模型仍可能自识别反馈，误注入会打断当前任务。
+META_WORDS = (
+    "代码", "用例", "测试", "门禁", "文档", "ADR", "断言", "夹具",
+    "PR", "MR", "评审", "方案", "接口", "字段", "配置", "日志",
+    "仓库", "分支", "发版", "部署", "脚本", "函数", "模块", "依赖",
+    "版本", "tag", "commit", "pytest", "mypy", "profile", "packs",
+    "载荷", "适配器", "巡检", "账本", "契约", "需求", "重构", "实现",
+)
+ANCHOR_WORDS = (
+    "产品", "平台", "网站", "网页", "页面", "界面", "客户端", "插件", "工具", "系统",
+    "功能", "按钮", "菜单", "搜索框", "输入框", "登录", "上传", "下载", "导出",
+    "加载", "速度", "打开", "点击", "点了", "体验",
+)
 _STRONG_PREFIX = "提交反馈"
 
 _COMPLAINT_RE = re.compile("|".join(re.escape(w) for w in TRIGGER_WORDS))
+_META_RE = re.compile("|".join(re.escape(w) for w in META_WORDS))
+_ANCHOR_RE = re.compile("|".join(re.escape(w) for w in ANCHOR_WORDS))
 
 DIRECTIVE = (
     "[vod-router] 确定性意图路由命中：本消息匹配产品反馈采集意图（规则命中，非模型判断）。"
@@ -63,13 +89,25 @@ def _text_of(payload: dict) -> str:
     return msg if isinstance(msg, str) else ""
 
 
+def _is_meta_discussion(text: str) -> bool:
+    """元讨论判定（S185）：谈工程对象、又不带任何用户视角锚点 = 在讨论「反馈这件事」。
+
+    两侧都是确定性词表：META_WORDS 是工作产物语汇（代码/用例/门禁/文档/评审…），
+    ANCHOR_WORDS 是用户能直接感知的对象与动作（页面/按钮/登录/导出/加载…）。
+    只看「有没有命中词」会把评审、方案讨论判成采集意图——那是本 hook 修前的现状。
+    """
+    return bool(_META_RE.search(text)) and not _ANCHOR_RE.search(text)
+
+
 def route(text) -> str | None:
     """返回要注入的指令；未命中/非字符串返回 None（钩子绝不对载荷形状抛错）。"""
     if not isinstance(text, str) or not text.strip():
         return None
     if text.lstrip().startswith(_STRONG_PREFIX):
         return STRONG_DIRECTIVE
-    return DIRECTIVE if _COMPLAINT_RE.search(text) else None
+    if not _COMPLAINT_RE.search(text) or _is_meta_discussion(text):
+        return None
+    return DIRECTIVE
 
 
 def main() -> int:
