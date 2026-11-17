@@ -49,7 +49,7 @@ def _row(**kw) -> bytes:
 
 def test_s187_retries_transient_5xx_then_returns_rows(monkeypatch):
     calls = []
-    payload = _row(id="VDPL1", title="原话", at="2999-01-01 00:00:00")
+    payload = _row(voiceId="VDPL1", title="原话", at="2999-01-01 00:00:00")
 
     def fake_urlopen(req, timeout=30):
         calls.append(req.full_url)

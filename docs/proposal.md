@@ -1922,6 +1922,7 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S182 | e2e 判定口径 | `content_not_paraphrased`：引擎 content 必须是「剥前缀原话取前 60 字」的**前缀**（截断 PASS，窗口内增删改 FAIL）；`echo_status` 三态 ok/incomplete/missing，incomplete 单独记 `echo_incomplete` 桶；模板用 `{content_start}` 标记算 offset，不靠字符串搜索 |
 | S183 | 草稿展示缺字段 | 展示 contents 时缺失的 reproSteps/expectedBehavior 明写「（…：用户未提供）」；只出现在展示，不进 content 不上送，不写推测 |
 | S184 | 引导话术分型 | 现象词优先（报错/卡死/失败/打不开/超时/崩/没反应）→ 缺陷型；否则含建议词（希望/建议/能不能/要是…就好/太繁琐/不方便）→ 建议型；都无→缺陷型。建议型只问「场景 + 希望什么样」，禁索要复现步骤；本轮只做话术分流，不写 problem_type 标签 |
+| S187 | 行为回归的引擎可用性 | 5xx/连接类错误退避重试（4 次）→ 用尽抛 `EngineUnavailable`，脚本 exit 2 报「不可判（环境故障）」；401/403 不重试不吞（判定依据）；无 key 不发请求 |
 
 ## 预采集路由的判定口径（S185/S186，D-router-scope-1，2026-11-17）
 

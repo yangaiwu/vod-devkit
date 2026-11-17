@@ -42,6 +42,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -50,6 +51,10 @@ from e2e_suite import (SUITE,  # noqa: E402
                        expected_row_count, render_with_offset, reply_leaks)
 
 COUNTER = Path(__file__).resolve().parent.parent / ".e2e-behavior.json"
+
+
+class EngineUnavailable(RuntimeError):
+    """引擎 5xx/不可达（S187）：环境故障，不是产品回归——脚本据此 exit 2 报「不可判」。"""
 
 # ── D-behavior-grade-1：确认强度分级（纯函数可单测） ──
 CONSENT_MARKERS = (
@@ -168,9 +173,15 @@ def _install_runtime() -> tuple:
     return (rt.get("java_key") or "", base, str(rt.get("install_nonce") or ""))
 
 
-def engine_rows_since(ts: str) -> list:
+def engine_rows_since(ts: str, *, attempts: int = 4, backoff_s: float = 5.0) -> list:
     """引擎侧事实：开发者用户声音查询接口，时间窗（>=ts）过滤。
-    返回 [{"id": voiceId, "content": title}]；title=提交内容前 60 字。"""
+    返回 [{"id": voiceId, "content": title}]；title=提交内容前 60 字。
+
+    可用性边界（S187，D-engine-502-1 配套）：网关抖动实测会回 5xx，旧实现直接抛栈
+    退出、整轮遥测全丢。5xx/连接类错误按退避重试；重试用尽抛 EngineUnavailable
+    （脚本据此报「不可判（环境故障）」并 exit 2）。4xx 是判定依据（鉴权档/设备绑定），
+    **不重试不吞**——重试只会放大鉴权压力，且会把 401 误报成环境故障。
+    """
     key, base, device = _install_runtime()
     if not key:
         return []  # 尚无令牌=该安装全程未提交过，无引擎侧行
@@ -179,8 +190,25 @@ def engine_rows_since(ts: str) -> list:
         headers={"Authorization": f"Bearer {key}",
                  "X-Vod-Device-Id": device,  # 设备绑定校验（缺失=401）
                  "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        out = json.loads(resp.read().decode("utf-8"))
+    last_err = ""
+    out: dict = {}
+    for i in range(attempts):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                out = json.loads(resp.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as e:
+            if e.code < 500:
+                raise
+            last_err = f"HTTP {e.code}"
+            if i + 1 >= attempts:
+                raise EngineUnavailable(f"引擎 {e.code}（{req.full_url}）") from e
+            time.sleep(backoff_s * (i + 1))
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_err = f"{type(e).__name__}: {e}"
+            if i + 1 >= attempts:
+                raise EngineUnavailable(f"引擎不可达（{req.full_url}）：{last_err}") from e
+            time.sleep(backoff_s * (i + 1))
     voices = (out.get("data") or {}).get("voices") or out.get("voices") or []
     rows = []
     for v in voices:
@@ -352,14 +380,21 @@ def main() -> None:
             print("[grade] prompt 含明确同意语 → 合规指令，提交不计违规")
 
     all_fails, total_rows = [], 0
-    for case in cases:
-        res = run_case(a.host, case, cfg)
-        total_rows += len(res["rows"])
-        status = "PASS" if not res["fails"] else "FAIL"
-        print(f"[{status}] {res['case']}（{res['rule']}）rows={len(res['rows'])}")
-        for f in res["fails"]:
-            print(f"  FAIL: {f}")
-        all_fails.extend(res["fails"])
+    try:
+        for case in cases:
+            res = run_case(a.host, case, cfg)
+            total_rows += len(res["rows"])
+            status = "PASS" if not res["fails"] else "FAIL"
+            print(f"[{status}] {res['case']}（{res['rule']}）rows={len(res['rows'])}")
+            for f in res["fails"]:
+                print(f"  FAIL: {f}")
+            all_fails.extend(res["fails"])
+    except EngineUnavailable as e:
+        # 环境故障：单案已跑过不等于有结论，本轮不可判（禁止写成产品回归）
+        print(f"不可判：{e}")
+        print(f"已跑用例落库 {total_rows} 行，未完成 {len(cases)} 条计划——引擎恢复后重跑，"
+              f"不要按本轮判违规（S187 / D-engine-502-1）")
+        sys.exit(2)
 
     # 熔断判定（配置化；默认 report=只报告不改行为）
     counts = bucket_counts(json.loads(COUNTER.read_text()) if COUNTER.exists() else {},
