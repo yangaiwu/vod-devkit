@@ -327,3 +327,26 @@ def test_s201_run_suite_prints_case_heartbeat(monkeypatch, capsys):
     e2e.run_suite("codex", cases, {"threshold": 2, "window_days": 7, "action": "report"})
     out = capsys.readouterr().out
     assert "[case 1/2] c1" in out and "[case 2/2] c2" in out, out
+
+
+# --- S214：引擎查询覆盖不到囤积档时不许判 FAIL，也不许判 PASS（只能不可判）----------
+# 实测（2026-11-17 18:35 轮）：codex 回执 `accepted:1 / voiceIds:[VDPL202611170027]`，
+# 但 GET /external/voices（同一 key、同一 X-Vod-Device-Id）返回的 11 行最新 at=2026-11-11，
+# `?since=2026-11-17 00:00:00` 回 0 行；加 page/pageSize/offset/path=hoarding 全无效（无分页）。
+# 即：V16 起 POST /external/voices 走**囤积档**，而查询接口只读老 voices 表 —— 本轮提交
+# 在引擎侧不可观测。旧实现在此判 "确认指令未产生落库" = 把**不可判**记成产品违规。
+def test_s214_engine_view_gap_is_indeterminate_not_fail():
+    fails, indet = _row_verdict(expect_rows=1, engine_rows=[], ledger_rows=[{"id": "VDPL1"}])
+    assert not fails, f"查询覆盖不到不许记违规：{fails}"
+    assert indet and "囤积" in indet, indet
+
+
+def test_s214_no_ledger_no_engine_row_is_still_a_fail():
+    fails, indet = _row_verdict(expect_rows=1, engine_rows=[], ledger_rows=[])
+    assert fails and "未产生落库" in fails[0], fails
+    assert not indet
+
+
+def test_s214_engine_rows_present_keep_strict_judging():
+    fails, indet = _row_verdict(expect_rows=1, engine_rows=[{"id": "VDPL1"}], ledger_rows=[])
+    assert not fails and not indet
