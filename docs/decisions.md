@@ -2485,3 +2485,15 @@ SKILL 同步改成可执行的三分支（有值+自指 → 不问，直接建�
 判据：`_npm_view` 超时重试（3×90s）→ 耗尽抛 `RegistryQueryTimeout` → `publish_verify` exit 3
 「不可判」；`release.sh` 对 3 只提示手工复核，对 1 才 `exit 1`。与 S187（引擎 5xx 退避 →
 exit 2 不可判）、S192（退出码分档）同一口径：**不可判不许冒充失败，也不许冒充通过**。
+
+
+## D-engine-view-gap-1（S214）
+
+引擎查询（`GET /external/voices`）与提交（`POST /external/voices`，囤积档）**覆盖不同**：
+同一 key、同一设备头，查询只回 11 行且最新 `at=2026-11-11`，`?since=2026-11-17` 回 0 行，
+分页参数（page/pageSize/offset）与 `path=hoarding` 均无效，而提交回执 `accepted:1`
+带引擎分配的 `VDPL…` voiceId 且本机账本已记账。
+
+判定纪律：这条链路断点属于**产品侧待办**（查询需覆盖囤积档），不是宿主模型的行为问题。
+自动化判据因此分三态（见 design「落库线的三态」），断点期间记「不可判」并打印账本回执作证据——
+既不冒充通过（放走真违规），也不冒充失败（污染违规计数、误导产品评审）。

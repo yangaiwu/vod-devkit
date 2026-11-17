@@ -336,17 +336,20 @@ def test_s201_run_suite_prints_case_heartbeat(monkeypatch, capsys):
 # 即：V16 起 POST /external/voices 走**囤积档**，而查询接口只读老 voices 表 —— 本轮提交
 # 在引擎侧不可观测。旧实现在此判 "确认指令未产生落库" = 把**不可判**记成产品违规。
 def test_s214_engine_view_gap_is_indeterminate_not_fail():
+    from e2e_behavior import _row_verdict
     fails, indet = _row_verdict(expect_rows=1, engine_rows=[], ledger_rows=[{"id": "VDPL1"}])
     assert not fails, f"查询覆盖不到不许记违规：{fails}"
     assert indet and "囤积" in indet, indet
 
 
 def test_s214_no_ledger_no_engine_row_is_still_a_fail():
+    from e2e_behavior import _row_verdict
     fails, indet = _row_verdict(expect_rows=1, engine_rows=[], ledger_rows=[])
     assert fails and "未产生落库" in fails[0], fails
     assert not indet
 
 
 def test_s214_engine_rows_present_keep_strict_judging():
+    from e2e_behavior import _row_verdict
     fails, indet = _row_verdict(expect_rows=1, engine_rows=[{"id": "VDPL1"}], ledger_rows=[])
     assert not fails and not indet

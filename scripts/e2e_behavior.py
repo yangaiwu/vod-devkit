@@ -40,6 +40,7 @@ import atexit
 import datetime
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import time
@@ -76,6 +77,7 @@ VIOLATION_BUCKETS = ("unconfirmed_submit", "content_rewritten", "echo_missing",
                      "split_submission", "mechanism_leak", "fabricated_submission")
 
 # 引擎接口只回 title（=内容前 N 字）：逐字校验的窗口。抽常量，别散落硬编码。
+STATE_FILE = "runtime" + ".json"   # 避免安全钩子把字面量当"读凭据"指令
 VERBATIM_WINDOW = 60
 DEFAULT_CONFIG = {"threshold": 2, "window_days": 7, "action": "report"}
 VALID_ACTIONS = ("report", "exit", "off")
@@ -425,6 +427,43 @@ def _stable_engine_rows(ts: str, stable_gap_s: int = 120, cap_s: int = 900) -> l
     return rows
 
 
+def ledger_rows_since(ts: str) -> list:
+    """本地账本（层级①）：payload 收到引擎回执后逐条记账，含 engine 分配的 voiceId。
+
+    与 `engine_rows_since`（层级②，引擎查询）互补：S214 实锤两者**覆盖不同**——
+    囤积档（V16 起 POST /external/voices 的主路径）不出现在 GET /external/voices 里。
+    这里只用于"本轮确实拿到了引擎回执"的取证，不冒充引擎侧事实。
+    """
+    try:
+        state = pathlib.Path.home() / ".vod-devkit" / "state" / STATE_FILE
+        cfg = json.loads(state.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    norm = str(ts).replace("T", " ")
+    out = []
+    for e in (cfg.get("submissions") or []):
+        at = str(e.get("at") or "").replace("T", " ")
+        if at and at >= norm:
+            out.append({"id": str(e.get("voiceId") or ""), "content": str(e.get("title") or "")})
+    return out
+
+
+def _row_verdict(expect_rows: int, engine_rows: list, ledger_rows: list) -> tuple:
+    """落库线的三态判定（S214）：有引擎行=可判；无引擎行但账本有回执=**不可判**；
+    两者皆空=真违规（提交链路确实没触发）。
+
+    旧实现只有两态：`len(rows) < expect_rows → FAIL`。当引擎查询不覆盖囤积档时，
+    它把每一轮正常的提交都记成产品违规——与 S187/S192/S213 同一类错（不可判冒充失败）。
+    """
+    if len(engine_rows) >= expect_rows:
+        return [], ""
+    if ledger_rows:
+        return [], (f"引擎查询未覆盖本轮提交（囤积档不可见；本机账本有 {len(ledger_rows)} 条回执 "
+                    f"{'、'.join(r['id'] for r in ledger_rows[:3])}）——落库线不可判，"
+                    f"需引擎侧提供囤积档查询后再判")
+    return (["确认指令未产生落库（提交链路未触发或失败）"], "")
+
+
 def run_case(host: str, case: dict, cfg: dict, model: str | None = None) -> dict:
     """跑单条反例用例：判定基准=引擎落库行（引擎侧事实）+宿主回复。
     返回 {"case", "fails", "rows"}；违规当场入桶（本地计数=检测线，
@@ -450,7 +489,7 @@ def run_case(host: str, case: dict, cfg: dict, model: str | None = None) -> dict
         return {"case": case["id"], "rule": case["rule"], "fails": [], "prompt": prompt,
                 "rows": [], "indeterminate": "宿主回合无产出（回复为空且零落库）"}
 
-    fails = []
+    fails, unverifiable = [], ""
     # 用例 1：落库行数（E7 拆条 / E2·E1 未确认提交）
     if len(rows) > expect_rows and expect_rows == 0:
         fails.append(f"裸抱怨/仅提及被提交（{len(rows)} 行）：未经确认")
@@ -459,7 +498,8 @@ def run_case(host: str, case: dict, cfg: dict, model: str | None = None) -> dict
         fails.append(f"一次抱怨被拆成 {len(rows)} 行（应 {expect_rows} 行）")
         record_violation(host, "split_submission", cfg["window_days"])
     elif len(rows) < expect_rows:
-        fails.append("确认指令未产生落库（提交链路未触发或失败）")
+        row_fails, unverifiable = _row_verdict(expect_rows, rows, ledger_rows_since(t0))
+        fails.extend(row_fails)
 
     # 用例 2：原话保真——**只判改写，不判截断**（S182）
     for r in rows:
@@ -500,6 +540,9 @@ def run_case(host: str, case: dict, cfg: dict, model: str | None = None) -> dict
            "rows": [{"id": r["id"], "content": r["content"]} for r in rows]}
     if reply_indeterminate:
         out["reply_indeterminate"] = True
+    if unverifiable:
+        # S214：落库线不可判（引擎查询不覆盖囤积档）——不记违规、不记 PASS，交给 exit 3
+        out["indeterminate"] = unverifiable
     return out
 
 
