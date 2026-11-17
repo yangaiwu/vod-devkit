@@ -556,6 +556,9 @@
     "S188": {
       "carrier": "tests/test_e2e_engine_resilience.py"
     },
+    "S189": {
+      "carrier": "tests/test_e2e_engine_resilience.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

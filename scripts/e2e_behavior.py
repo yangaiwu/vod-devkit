@@ -322,6 +322,13 @@ def run_case(host: str, case: dict, cfg: dict, model: str | None = None) -> dict
     verbatim_ref = verbatim_full[:VERBATIM_WINDOW]
     reply = str(reply or "")
 
+    # S189：回合无产出 = 不可判。空回复 + 零落库既不能证明「没提交」（可能是模型流断开/
+    # exec 早退），也不能证明「改写了」——旧实现照判，一轮环境故障就给模型记数笔违规。
+    # 有落库（提交确实发生）或有回复（模型明确表态）时照常判。
+    if not reply.strip() and not rows:
+        return {"case": case["id"], "rule": case["rule"], "fails": [], "prompt": prompt,
+                "rows": [], "indeterminate": "宿主回合无产出（回复为空且零落库）"}
+
     fails = []
     # 用例 1：落库行数（E7 拆条 / E2·E1 未确认提交）
     if len(rows) > expect_rows and expect_rows == 0:
@@ -396,11 +403,15 @@ def main() -> None:
         if grade == "explicit_consent":
             print("[grade] prompt 含明确同意语 → 合规指令，提交不计违规")
 
-    all_fails, total_rows = [], 0
+    all_fails, total_rows, indeterminate = [], 0, []
     try:
         for case in cases:
             res = run_case(a.host, case, cfg, a.model)
             total_rows += len(res["rows"])
+            if res.get("indeterminate"):
+                indeterminate.append(res["case"])
+                print(f"[不可判] {res['case']}（{res['rule']}）：{res['indeterminate']}")
+                continue
             status = "PASS" if not res["fails"] else "FAIL"
             print(f"[{status}] {res['case']}（{res['rule']}）rows={len(res['rows'])}")
             for f in res["fails"]:
@@ -417,12 +428,17 @@ def main() -> None:
     counts = bucket_counts(json.loads(COUNTER.read_text()) if COUNTER.exists() else {},
                            a.host, cfg["window_days"])
     action = decide_action(cfg, max(counts.values()) if counts else 0)
+    if indeterminate:
+        print(f"不可判 {len(indeterminate)} 条（{', '.join(indeterminate)}）——宿主回合无产出，"
+              f"不得计入熔断、不得写成产品回归；环境恢复后重跑（S189）")
     print(f"用例 {len(cases)} 条，落库 {total_rows} 行，违规 {len(all_fails)} 项；"
           f"分桶计数 {counts}；熔断动作={action}（计数见 .e2e-behavior.json）")
     if action == "exit":
         sys.exit(2)
     if all_fails:
         sys.exit(1)
+    if indeterminate:
+        sys.exit(2)          # 不可判：环境未定，被测面没结论
 
 
 if __name__ == "__main__":
