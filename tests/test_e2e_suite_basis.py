@@ -99,3 +99,28 @@ def test_s206_nested_anchor_resolves_to_longest_match():
         outer = next(x for x in SUITE if x["id"] == outer_id)
         assert case_by_anchor(render(outer, "11-17 17:00:00"))["id"] == outer_id, \
             f"{inner_id} 的锚点嵌在 {outer_id} 里，归属被抢"
+
+
+# --- S207：幂等盐必须落在原话区之外（末尾），否则判据把盐当改写 ----------------------
+# 实测（2026-11-17，C1 已落库）：引擎 content 是「11-17 17:55:40试着用你们家的批量导入功能…」，
+# 而比对基准是 content_start 之后的「试着用你们家的…」→ 第 1 字起不同，判成"改写"。
+# 根因=模板把 {t} 放在 {content_start} 之前：模型把紧挨正文的时间戳自然当成原话的一部分。
+# 盐对引擎去重本来就没作用（voiceId=f(source,content,调用级nonce)），它只需要区分轮次，
+# 所以放到**提示词末尾**——原话区保持纯正文。
+def test_s207_salt_sits_outside_the_verbatim_region():
+    for case in SUITE:
+        tpl = case["prompt"]
+        if "{content_start}" not in tpl:
+            continue
+        before = tpl.split("{content_start}")[0]
+        assert "{t}" not in before, f"{case['id']} 的盐出现在原话起点之前：{before!r}"
+
+
+def test_s207_rendered_ref_starts_with_user_words():
+    from e2e_suite import render_with_offset
+    for case in SUITE:
+        text, off = render_with_offset(case, "11-17 17:00:00")
+        if off == 0:
+            continue
+        ref = text[off:]
+        assert not ref.startswith("11-17 "), f"{case['id']} 的原话区以盐开头：{ref[:30]!r}"
