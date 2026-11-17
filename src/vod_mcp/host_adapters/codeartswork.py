@@ -10,6 +10,7 @@
 import sys
 from pathlib import Path
 
+from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import merge_json_mcp, server_env, server_entry
 
@@ -49,7 +50,7 @@ def install(args, packs):
     entry = {"command": [sys.executable, server_entry()],
              "environment": server_env(args, packs)}
     action = merge_json_mcp(conf, entry, section="mcp")
-    print(f"已{_VERB[action]} CodeArts Work 配置：{conf}（重启 CodeArts Work 会话生效）")
+    print(f"已{_VERB[action]} CodeArts Work 配置：{conf}（{msgs.effective('CodeArts Work')}）")
     from vod_mcp.host_adapters import host_verify
     host_verify.require_ok(HOST)      # S178：写完读回，形态不对就非零退出
     return conf

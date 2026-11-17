@@ -1,5 +1,6 @@
 """update 子命令：git fetch/ff 拉取 + build-info 重烧 + 版本跳过状态。"""
 import subprocess
+from vod_mcp import msgs
 import sys
 
 from vodkit_cli import common
@@ -42,4 +43,4 @@ def cmd_update(args=None):
     common.write_build_info(strict=False)
     print("build-info 已重烧；如需重新安装执行：")
     print(f"  {sys.argv[0]} install --target hermes --preset collect --product <产品名>")
-    print("  并重启 agent 会话")
+    print(f"  并{msgs.restart_only('agent 会话')}")

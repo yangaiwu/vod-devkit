@@ -20,6 +20,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import server_env, server_entry
 
@@ -104,7 +105,7 @@ def install(args, packs):
             print(f"[vod-devkit] openclaw 读回与期望不一致：{text[:300]}", file=sys.stderr)
             sys.exit(2)
     print(f"已{verb} OpenClaw MCP 注册表：{NAME}（{conf}，mcp.servers 键；"
-          "重启 OpenClaw 会话/网关生效）")
+          f"{msgs.effective_unit('OpenClaw 会话/网关', tight=True)}）")
     return conf
 
 

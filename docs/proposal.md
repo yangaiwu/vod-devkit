@@ -521,7 +521,7 @@ S16 双形态语义一致（架构约束回归）
   （f(source,content,nonce)、同调用幂等跨调用保声量）、归因三层同构
   （配置绑定>显式传参>报错引导，禁止静默默认）、护栏同构（写须审批/
   单批≤50/content≤2000 逐条拒）。契约变更必须双形态同步——此为
-  contract/tools.schema.json 单一事实源纪律在宿主适配层的延伸
+  assets/contract/tools.schema.json 单一事实源纪律在宿主适配层的延伸
 
 ### dsh 安装硬校验与 description 截断预算（S45-S48，2026-11-06
 ### D-dsh-install-1 / D-desc-budget-1 新增）
@@ -709,7 +709,7 @@ S63 追问=可选增强，四条硬约束前置（D-followup-design-1）
 | U12 | vod-devkit verify | SHA 在 origin 存在且 build-info 一致=可信；改动包内容后 verify 报篡改 |
 | U13 | 宿主以 MCP client 连接后调用 vod_devkit_info | 返回插件版本+commitSHA+宿主产品名与版本（来自握手 clientInfo） |
 | U14 | git show <manifest.SHA> 于 origin | 与已装包内容一致（版本可复现） |
-| U15 | 改 contract/tools.schema.json 后跑 CI | 实现侧 schema 未同步跟随契约即测试失败（单一事实源生效） |
+| U15 | 改 assets/contract/tools.schema.json 后跑 CI | 实现侧 schema 未同步跟随契约即测试失败（单一事实源生效） |
 | U16 | AIShell/CodeArts 等 MCP 客户端直连 vod-mcp | 不改 Python 核心即可列举并调用全部工具（宿主矩阵分流验证） |
 | U21 | 协议级：所有上游调用抓包 | Authorization: Bearer 头必在（E1 回归锁） |
 | U22 | 协议级：submit_voices 抓包 | 路径=Java 前缀 /rest/.../external/voices，用 VOD_JAVA_API_KEY（E2 回归锁） |
@@ -873,7 +873,7 @@ UI 壳不加输入框（UX 红线：直达表单不藏门槛）。四约束逐�
 - S66 话术锁：固定问句逐字出现在契约 description（恰好 1 次）+SKILL.md 双副本
   +dsh 壳描述；dsh 组合 desc 总长 ≤1500（desc 预算门禁既有锁复验通过）
 
-承载：contract/tools.schema.json（submit+draft 双工具 voices[] 新增可选字段
+承载：assets/contract/tools.schema.json（submit+draft 双工具 voices[] 新增可选字段
 maxLength 2000）+vod_mcp/tools.py+dsh/lib/index.js+skills/vod-feedback-collect
 （双副本 md5 同步+四宿主装机副本已刷）。tests/test_followup.py（5 例）+
 dsh/test/followup.test.mjs（行为级 stub fetch）。引擎零改动、旧路径不变。
@@ -1955,6 +1955,9 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S225 | 判据两侧都剥盐 | `strip_salt_anywhere()`：引擎落库内容里的首/尾时间戳同样剥掉再比对——盐是提示词的一部分，模型会把它当正文提交，基准剥了候选没剥即假「改写」（实测 C4/C5） |
 | S226 | 反馈渠道边界（A 方案） | 技能内新增「渠道边界」：判据=用户要的产物（提个单/建 issue→建单渠道；提交反馈/收录→VOD；只抱怨→问一次去向），**同一句抱怨只进一个通道**，且该条优先于其它触发规则；README/README.en 增加「同机不要同时启用两个采集技能」须知；触发动词不删 |
 | S227 | 信封不许自注自判 | 信封余文的用户意图判据改为**行首**锚定，且剥掉 `[vod-router]` 自身输出行——否则后台回执引用我方指令里的「提交反馈」会再触发一次注入（死循环） |
+| S228 | 插件不托管宿主生命周期 | 插件职责固定三件（写宿主配置/落载荷与技能/doctor 读回）；`src/` 零 `systemctl|systemd|launchctl|restart`，用户文案不出现宿主命令行；边界写入 design 九·五 + D-boundary-1（含 Falsifier）；门禁 `tests/test_boundary_host_lifecycle.py::test_s228_*`（含反向锁：用户文案不许教人跑 systemctl） |
+| S229 | 生效口径单一真源 | 用户可见「重启…生效」只由 `vod_mcp.msgs` 拼：11 个宿主适配器 + doctor/update/packs/auth 全部改走它（措辞逐字不变，golden 不动）；门禁断言除 msgs.py 外无第二拼写点，且每个适配器都必须 import 并调用 msgs |
+| S230 | 现役文档路径卫生 | 现役文档（README/README.en/RELEASING/docs 现役篇）零坏链；不得出现旧布局裸路径（`contract/…`、`safety/…`、`skills/vod-core/…`、`hooks/vod_*.py`），须写 `assets/…` 或 `integrations/hermes/hooks/…`（载荷平铺语境与历史台账 decisions.md/CHANGELOG 不追溯）；门禁 `tests/test_docs_path_hygiene.py` |
 | S192 | 退出码与回执不可判 | 0 全绿 / 1 违规 / 2 熔断 / 3 不可判 / 4 鉴权或引擎 4xx（优先级 1>2>3>4）；空回复+有落库 → `reply_indeterminate` 不进 fails、内容判据照跑；横幅打 model+argv、收尾打 `e2e[exit]` |
 | S193 | 路由词表并表 | `TRIGGER_WORDS` ⊇ SKILL 的 S184 现象词（失败/打不开/超时/崩）+ 口语词；裸「卡」加边界；META 移出共用词（接口/配置/字段/日志/版本）、改收工程动作词 |
 | S194 | 不可判只管网线 | 回执不可判不清空 fails（内容线结论保留）；单出口 `decide_exit` 让异常路径带已收违规（有违规 exit 1）；异常报文逐条打 FAIL、未完成数取剩余 |

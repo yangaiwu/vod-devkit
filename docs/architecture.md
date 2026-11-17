@@ -78,7 +78,7 @@ plugins/vod-devkit/            ← 唯一"宿主发布物"：清单 + 钩子 + �
   plugin.json                    Agent Plugins 清单（$schema）
   .codex-plugin/plugin.json     codex 兼容清单
   .mcp.json                     MCP 入口（CLI 形态，见 D-mcp-manifest-a3-1）
-  hooks/vod_router.py           宿主无关钩子（由 integrations/hermes/hooks/ 同步）
+  hooks/                        宿主无关钩子（载荷内平铺；源在 integrations/hermes/hooks/）
   skills/ contract/ safety/     发布树（生成物，零提交）
   vod_mcp/ build-info.json      运行时副本（生成物，零提交）
 
@@ -89,7 +89,7 @@ src/                           ← 唯一的可导入 Python 包根（S3 起，�
 assets/                        ← 项目级资产（不进 wheel；随 npm 载荷/插件副本分发）
   skills/ contract/ safety/      共享资产（发布/载荷布局仍是根级平铺，见 paths.ASSETS）
 
-integrations/hermes/           ← 宿主规格 + 宿主侧 hook 脚本（hooks/vod_router.py）
+integrations/hermes/           ← 宿主规格 + 宿主侧 hook 脚本（hooks/ 下，仓内真源）
   host.json
   hooks/vod_router.py           真源；载荷物化为 <payload>/hooks/vod_router.py
 
@@ -144,7 +144,7 @@ S2/S3 的顺序不能反：先让"共享资产有唯一落点"，再动"运行�
 | 短板 | 处理 |
 |---|---|
 | 根目录零散（42 条 vs 26 条） | 本文定预算 + S129 门禁用例；S2/S3 收敛 |
-| 钩子以宿主特例存在（`hermes-plugin/`） | D-hook-unify-1：`hooks/vod_router.py` + 宿主注册机制（已落地，`hermes hooks list/test` 可验） |
+| 钩子以宿主特例存在（`hermes-plugin/`） | D-hook-unify-1：`integrations/hermes/hooks/vod_router.py` + 宿主注册机制（已落地，`hermes hooks list/test` 可验） |
 | 结构没有可执行契约 | 本文 + `test_s129_*` |
 | README 缺"每宿主四件套/钩子/能力包/安全模型/结构" | 本次补齐（见 README 对应节） |
 | 生成物与源混在根上 | S2 |

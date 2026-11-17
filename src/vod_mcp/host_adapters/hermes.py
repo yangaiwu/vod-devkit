@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vod_mcp import msgs
 from vod_mcp import paths as _paths
 from vod_mcp import hosts as host_specs
 from vod_mcp import paths
@@ -389,7 +390,7 @@ def install(args, packs: str) -> Path:
     else:
         r = None
         print(f"提示：未找到 hermes CLI（PATH），已写出配置片段：{conf}\n"
-              "      将其并入 ~/.hermes/config.yaml 的 mcp_servers 后重启会话生效",
+              f"      将其并入 ~/.hermes/config.yaml 的 mcp_servers 后{msgs.effective()}",
               file=sys.stderr)
     # D-hook-unify-1：预采集路由走 config.yaml 的 hooks.pre_llm_call（shell hook）。
     # 不再装 Python 插件：同一个"stdin JSON → stdout context"脚本可被任何宿主
@@ -402,7 +403,7 @@ def install(args, packs: str) -> Path:
         print(f"已清理旧插件形态（避免与新 hook 双份注入）：{legacy}")
     registered = mcp_entry_present()
     if registered:
-        print("已注册 Hermes MCP（hermes mcp list 可见；重启会话生效）")
+        print(f"已注册 Hermes MCP（hermes mcp list 可见；{msgs.effective()}）")
     elif r is None:
         # 无 CLI / 超时：降级（片段已写），但缺口必须可见——文案与 doctor 同源（S172）
         from vod_mcp.host_adapters import host_verify

@@ -17,6 +17,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from vod_mcp import msgs
 from vod_mcp import paths as _paths
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import server_env, server_entry
@@ -113,7 +114,7 @@ def _register_plugin(pdir: Path) -> None:
     mp["plugins"] = plugins
     _write_json(mp_path, mp)
     print(f"已写入 Codex Desktop 插件目录：{pdir}")
-    print(f"已在个人市场登记（{('更新' if replaced else '新增')}）：{mp_path}（重启 Codex Desktop 生效）")
+    print(f"已在个人市场登记（{('更新' if replaced else '新增')}）：{mp_path}（{msgs.effective_unit('Codex Desktop')}）")
 
 
 def install(args, packs):

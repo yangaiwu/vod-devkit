@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp import paths as paths_mod
 from vodkit_cli import common, remote
@@ -435,7 +436,7 @@ def cmd_doctor(args=None):
             patched = _repair_dsh_patch_block(view)
             if patched:
                 print(f"[doctor] 已补 dsh patch 形态缺口（profile={row.get('dshProfile')}）："
-                      f"{patched}（重启 dsh 生效）")
+                      f"{patched}（{msgs.effective_unit('dsh')}）")
         prov = _provenance_problem(mf)
         if prov:
             problems.append(prov)
@@ -541,7 +542,7 @@ def cmd_doctor(args=None):
                 if bad:
                     problems.append("载荷被改动：" + "；".join(bad[:5]))
                 if _payload.marker_path().exists():
-                    print(f"[doctor] 载荷已换（{pd}）——重启宿主会话生效")
+                    print(f"[doctor] 载荷已换（{pd}）——{msgs.effective()}")
         else:
             print("[doctor] 提示：本次安装无载荷副本（旧版），入口指向仓内路径；重跑 install 可固化")
         for res in _payload.residue():

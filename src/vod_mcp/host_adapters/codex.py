@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vod_mcp import msgs
 from vod_mcp import paths as _paths
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import ROOT, server_env, server_entry
@@ -316,7 +317,7 @@ def install(args, packs: str) -> Path:
         _run([codex, "plugin", "marketplace", "add", str(mp_root)])
         print(f"已注册本地 marketplace：{mp_root}")
     _run([codex, "plugin", "add", f"vod-devkit@{mp_name}"])
-    print("已安装 codex 原生插件 vod-devkit（skills + MCP，重启 Codex 会话生效）")
+    print(f"已安装 codex 原生插件 vod-devkit（skills + MCP，{msgs.effective('Codex')}）")
     # P1-5（深审 2026-11-06）：插件自带的 .mcp.json 硬编码 env.VOD_PACKS=
     # core,collect——--packs 对 codex 半失效（运行期仍注册 collect 工具）。
     # plugin add 后把缓存内 .mcp.json 改写成「绝对解释器 + 载荷副本」并做

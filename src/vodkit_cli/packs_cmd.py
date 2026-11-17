@@ -14,6 +14,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from vod_mcp import msgs
 from vod_mcp import packs as packs_mod
 from vod_mcp import paths
 from vodkit_cli import common
@@ -325,7 +326,7 @@ def _write_packs(row: dict, new_packs: tuple, apply: bool) -> tuple:
     hit2 = _locate_entry(back)
     if not hit2 or (hit2[0].get(hit2[1]) or {}).get("VOD_PACKS") != want:
         raise RuntimeError(f"写入后读回不一致：{path}")
-    return (True, f"已写入 {path}（重启宿主会话生效；旧值备份 .bak）")
+    return (True, f"已写入 {path}（{msgs.effective()}；旧值备份 .bak）")
 
 
 def cmd_packs(args):

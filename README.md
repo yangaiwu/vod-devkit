@@ -63,7 +63,8 @@ npx -y vod-devkit@latest install --target auto
 - 扫到 **0 个** → 交互终端问一次 target 名；非交互报错并列出支持列表；
 - 一步全量：`install --target all`（`dsh` 缺 `--profile` 时跳过并说明，不算失败）。
 
-装完**重启会话**才生效（宿主在启动时读取 MCP 配置）。随后自检：
+装完**重启会话**才生效（宿主在启动时读取 MCP 配置）。插件只写配置、落载荷、doctor 读回——
+宿主的进程/服务/重启方式归宿主自己，插件不声明也不执行（D-boundary-1）。随后自检：
 
 ```bash
 npx -y vod-devkit@latest doctor   # 配置 + 技能名册 + build-info 三查（针对已装实例）
@@ -402,7 +403,7 @@ npx -y vod-devkit@latest install --target codex    --mcp-url https://<网关>/mc
 - **如何关闭**：无需关闭（本就没有）。若要不连引擎：`uninstall`，或把
   `--java-api-base` 指向你自己的实例。
 
-## 工具面（契约唯一事实源：contract/tools.schema.json）
+## 工具面（契约唯一事实源：assets/contract/tools.schema.json）
 
 | 工具 | pack | 类型 | 护栏 |
 |---|---|---|---|
@@ -418,7 +419,7 @@ npx -y vod-devkit@latest install --target codex    --mcp-url https://<网关>/mc
 | vod_check_update | core | 只读 | registry latest（24h 缓存 / 失败静默）；只提醒不升级 |
 | vod_list_skills / vod_retrieve_skill | knowledge | 只读 | 领域规则技能披露（pack 裁剪即拒绝并给恢复命令） |
 
-安全：`safety/policy.json` 声明式规则拦 DB 直连意图与凭据读取；文本规则只扫结构性
+安全：`assets/safety/policy.json` 声明式规则拦 DB 直连意图与凭据读取；文本规则只扫结构性
 字段，不误杀反馈内容里的凭据引用（引用与读取是两件事）。
 
 ## 质量与可验证性
@@ -440,7 +441,7 @@ install-manifest 名册对账（doctor 逐落点）+ 声明计数对账（对外
 
 ## 预采集钩子（hermes）
 
-hermes 侧装一个**宿主无关的钩子脚本** `hooks/vod_router.py`，由 `~/.hermes/config.yaml` 的
+hermes 侧装一个**宿主无关的钩子脚本** `integrations/hermes/hooks/vod_router.py`，由 `~/.hermes/config.yaml` 的
 `hooks.pre_llm_call` 注册：每轮对用户消息做确定性意图判定（关键词，模型不参与），命中就
 往本轮用户消息追加一段采集指令，未命中零注入。
 
@@ -477,7 +478,7 @@ hermes hooks test pre_llm_call --payload-file payload.json
 
 1. **技能教**：`vod-feedback-collect` 规定先承接、再征得同意、原话逐字、不猜产品。
 2. **钩子提醒**：pre_llm_call 命中采集意图时注入指令（防止模型把抱怨当排障问题去复现）。
-3. **运行期护栏**：`safety/policy.json` 的声明式规则 + 两段式草稿/令牌
+3. **运行期护栏**：`assets/safety/policy.json` 的声明式规则 + 两段式草稿/令牌
    （`-32010` deny、`-32011` 草稿/令牌不符、`-32012` 无凭据/令牌不可用、`-32014` 非回环 http；
    归因**没有**本地错误码——`-32013` 已废除，改为运行期引导：原话唯一命中 > 显式参数 >
    会话记忆 > 安装先验，都没有就先问用户一次）

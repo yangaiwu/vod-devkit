@@ -13,6 +13,7 @@
 """
 import sys
 
+from vod_mcp import msgs
 from vod_mcp import net, runtime_state
 
 
@@ -67,13 +68,13 @@ def cmd_auth(args=None):
     fp = _fingerprint(key)
     if not getattr(args, "apply", False):
         print(f"将写入 key（指纹 {fp}）到 {runtime_state._runtime_path()}；"
-              "未写盘——加 --apply 生效（重启宿主会话后使用新 key）")
+              f"未写盘——加 --apply 生效（{msgs.after('使用新 key')}）")
         return
     runtime_state._runtime_update({"java_key": key, "token_tier": "key"})
     back = _current().get("java_key")
     if back != key:
         raise SystemExit(f"[vod-devkit] 写入后读回不一致：{runtime_state._runtime_path()}")
-    print(f"已写入 key（指纹 {fp}）：{runtime_state._runtime_path()}（0600；重启宿主会话生效）")
+    print(f"已写入 key（指纹 {fp}）：{runtime_state._runtime_path()}（0600；{msgs.effective()}）")
 
 
 def paths_default_base() -> str:

@@ -16,6 +16,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from vod_mcp import msgs
 from vod_mcp import paths as _paths
 from vod_mcp.host_adapters.base import server_env, server_entry
 
@@ -109,7 +110,7 @@ def install(args, packs):
              "env": server_env(args, packs)}
     action = merge_mcp_servers(path, entry)
     verb = {"created": "写入", "updated": "更新", "unchanged": "跳过（已一致）"}[action]
-    print(f"已{verb} {path.name} 的 mcpServers.vod-devkit：{path}（重启宿主会话生效）")
+    print(f"已{verb} {path.name} 的 mcpServers.vod-devkit：{path}（{msgs.effective()}）")
     return path
 
 

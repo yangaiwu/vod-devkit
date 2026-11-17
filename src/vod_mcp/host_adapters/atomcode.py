@@ -10,6 +10,7 @@ import os
 import sys
 from pathlib import Path
 
+from vod_mcp import msgs
 from vod_mcp.host_adapters.base import server_env, server_entry
 from vod_mcp.host_adapters.generic import merge_mcp_servers
 
@@ -50,7 +51,7 @@ def install(args, packs):
     entry = {"command": sys.executable, "args": [server_entry()],
              "env": server_env(args, packs)}
     action = merge_mcp_servers(spec["configPath"], entry)
-    print(f"已{_VERB[action]} AtomCode 配置：{spec['configPath']}（重启 AtomCode 会话生效）")
+    print(f"已{_VERB[action]} AtomCode 配置：{spec['configPath']}（{msgs.effective('AtomCode')}）")
     return spec["configPath"]
 
 

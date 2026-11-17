@@ -11,6 +11,7 @@
 import sys
 from pathlib import Path
 
+from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import server_env, server_entry
 from vod_mcp.host_adapters.generic import merge_mcp_servers
@@ -44,7 +45,7 @@ def install(args, packs):
     entry = {"command": sys.executable, "args": [server_entry()],
              "env": server_env(args, packs)}
     action = merge_mcp_servers(conf, entry)
-    print(f"已{_VERB[action]} WorkBuddy 配置：{conf}（重启 WorkBuddy 会话生效）")
+    print(f"已{_VERB[action]} WorkBuddy 配置：{conf}（{msgs.effective('WorkBuddy')}）")
     from vod_mcp.host_adapters import host_verify
     host_verify.require_ok(HOST)      # S178：写完读回，形态不对就非零退出
     return conf

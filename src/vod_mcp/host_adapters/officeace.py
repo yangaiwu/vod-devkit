@@ -26,6 +26,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import server_env, server_entry
 
@@ -267,7 +268,7 @@ def install(args, packs):
               file=sys.stderr)
         sys.exit(2)
     print(f"已{'更新' if action == 'updated' else '写入'} OfficeAce 连接器："
-          f"{db_path}（name={NAME}，备份 {backup.name}；重启 OfficeAce 生效）")
+          f"{db_path}（name={NAME}，备份 {backup.name}；{msgs.effective_unit('OfficeAce')}）")
     return Path(db_path)
 
 

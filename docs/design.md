@@ -49,7 +49,7 @@ full 已删。技能拷贝按 packs 过滤；manifest 记录 preset。
 ## 二、MCP 工具契约
 
 契约单一事实源：全部工具 schema 以一份 JSON Schema 契约文件
-（safety 同级：contract/tools.schema.json）为唯一事实源，Python 实现
+（safety 同级：assets/contract/tools.schema.json）为唯一事实源，Python 实现
 （以及将来任何宿主适配壳/TS 实现）均从同一份契约生成或校验，禁止两边
 各自手写。跨语言边界的类型漂移由契约文件+CI 对账兜住（业界混合架构
 的通行纪律：字段变更只改契约，实现自动跟进；golden fixture 校验入
@@ -570,6 +570,9 @@ VOD_PACKS 两种取值的 tools/list 断言）。
   的运维债，挂账收敛为"升级即替换 + 保留最近 1 份"。
 - 不采纳：由插件侧用 systemd / socket activation 托管宿主——越界，且本机端口动态分配、
   会话快照断点不因托管方式改变。
+- **Falsifier**：宿主若支持 `tools/list_changed` 或会话内重连，可只换工具面而不重启进程，
+  第 2 条话术可删；部署面若恒可访问 registry 且无 preset/离线需求，载荷固化与账本可退化为
+  包依赖 + lockfile。
 
 ## 承载补充：followupStatus 插件对接（S74-S76，2026-11-08）
 
@@ -585,7 +588,7 @@ VOD_PACKS 两种取值的 tools/list 断言）。
 
 - 单源改动点：`vod_mcp/tools.py` draft_voices（草稿条目新增 `token` 明文落盘）、
   commit_voices（approvalToken/payloadSha256 可省略，draftId 命中本地未过期草稿
-  即恢复）；`contract/tools.schema.json` vod_commit_voices required 收窄为
+  即恢复）；`assets/contract/tools.schema.json` vod_commit_voices required 收窄为
   `draftId`。附带重构 `_drafts_load()`：draft/commit 草稿库读写单源
   （现读+TTL 惰性清除），禁双边漂移。
 - 安全语义：token 威胁模型=防 draft→commit 间载荷改写（sha 比对），非同意
@@ -645,7 +648,7 @@ VOD_PACKS 两种取值的 tools/list 断言）。
   一段安装逻辑，改漏变成结构上不可能。承载：integrations/*/host.json +
   tests/test_hosts_spec.py。
 - **顺手修的两处存量漂移**（本次实测发现）：
-  ① `skills/vod-core/SKILL.md` 还在教 `vod_run_analysis` / `vod_task_status` /
+  ① `assets/skills/vod-core/SKILL.md` 还在教 `vod_run_analysis` / `vod_task_status` /
   `vod_task_result` / `vod_kb_search`（2026-11-03 已删的工具）与不存在的
   `vod-category-matching` 技能——按本技能路由会直接调到不存在的工具，已按当前
   工具面重写（v2）。

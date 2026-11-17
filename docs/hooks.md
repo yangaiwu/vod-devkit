@@ -2,13 +2,13 @@
 
 本仓有两条宿主钩子，同一套脚本形态、各自事件注册：
 
-1. **预采集路由**（`hooks/vod_router.py`，`pre_llm_call`）：回答"这一轮用户的话，该不该
+1. **预采集路由**（`integrations/hermes/hooks/vod_router.py`，`pre_llm_call`）：回答"这一轮用户的话，该不该
    进入采集流程"，不阻塞任何动作。
-2. **读 Key 拦截**（`hooks/vod_guard.py`，`pre_tool_call`，D-key-guard-4）：只拦"把引擎 key
+2. **读 Key 拦截**（`integrations/hermes/hooks/vod_guard.py`，`pre_tool_call`，D-key-guard-4）：只拦"把引擎 key
    读进对话"的动作（`cat runtime.json`、`env` 导出点名 key 变量），其余一律放行；脚本
    任何异常都 **fail-open**（阻塞事件里崩溃=所有工具调用被拦，伤害远大于漏拦一次）。
 
-两条都不做业务拦截（业务护栏在 MCP 的 `safety/policy.json` 与两段式里，见 docs/safety-model.md）。
+两条都不做业务拦截（业务护栏在 MCP 的 `assets/safety/policy.json` 与两段式里，见 docs/safety-model.md）。
 
 ## 为什么是"宿主无关脚本"，不是宿主插件
 

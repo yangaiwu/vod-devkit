@@ -44,7 +44,9 @@ The remote face additionally needs the official MCP SDK:
 npx -y vod-devkit@latest install --target auto
 ```
 
-**Restart the session** afterwards (hosts read MCP config at startup), then:
+**Restart the session** afterwards (hosts read MCP config at startup). The plugin only writes
+config, stages the payload and reads versions back — host processes/services/restart methods
+belong to the host, never to the plugin (D-boundary-1). Then:
 
 ```bash
 npx -y vod-devkit@latest doctor   # config + skill roster + build-info
@@ -203,7 +205,7 @@ There is no built-in auth: bind to loopback and front it with TLS + identity.
 - **How to opt out**: nothing to opt out of. To disconnect entirely, `uninstall`
   or point `--java-api-base` at your own instance.
 
-## Tool surface (single source: contract/tools.schema.json)
+## Tool surface (single source: assets/contract/tools.schema.json)
 
 | Tool | pack | Type | Guardrail |
 |---|---|---|---|
@@ -219,7 +221,7 @@ There is no built-in auth: bind to loopback and front it with TLS + identity.
 | vod_check_update | core | read | npm latest (24h cache, silent on failure); never self-upgrades |
 | vod_list_skills / vod_retrieve_skill | knowledge | read | rule-skill disclosure (pack filtering refuses with a fix hint) |
 
-Security: `safety/policy.json` denies DB-direct intent and credential reads;
+Security: `assets/safety/policy.json` denies DB-direct intent and credential reads;
 text rules only inspect structural fields, so feedback quoting a secret is not
 misfired (quoting vs reading are different acts).
 
