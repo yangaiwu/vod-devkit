@@ -143,3 +143,49 @@ def test_pass_when_target_version_visible_but_latest_lags(tmp_path):
              "--timeout", "2", "--interval", "0.1")
     assert r.returncode == 0, (r.stdout, r.stderr)
     assert "dist-tag latest 仍指向 0.4.2" in r.stdout
+
+
+# --- S213：registry 查询超时 ≠ 未发布（发版脚本不许把网络抖动判成业务失败）-------------
+# 实锤（2026-11-17 0.5.33）：两颗包都已 publish 成功、tarball 200，但
+# `npm view vod-devkit version --json` 一次 60s 超时 → publish_verify 抛 TimeoutExpired
+# （裸 traceback）→ release.sh 打出 "FAIL: 发版终态断言未过"，RELEASE_RC=1。
+# 这与 S187（引擎 502 打断整轮 e2e）是同一类错：把**不可判**当成了**失败**。
+def test_s213_npm_view_retries_on_timeout(monkeypatch):
+    import subprocess
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import publish_verify as pv
+
+    calls = {"n": 0}
+
+    def fake_run(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise subprocess.TimeoutExpired(cmd="npm", timeout=kw.get("timeout", 60))
+        class R:
+            returncode = 0
+            stdout = '"0.5.33"'
+        return R()
+
+    monkeypatch.setattr(pv.subprocess, "run", fake_run)
+    monkeypatch.setattr(pv.time, "sleep", lambda *_: None)
+    assert pv._npm_view("vod-devkit", "version") == "0.5.33"
+    assert calls["n"] == 2, "第一次超时必须重试"
+
+
+def test_s213_indeterminate_is_not_failure(monkeypatch):
+    import subprocess
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import publish_verify as pv
+
+    def always_timeout(*a, **kw):
+        raise subprocess.TimeoutExpired(cmd="npm", timeout=kw.get("timeout", 60))
+
+    monkeypatch.setattr(pv.subprocess, "run", always_timeout)
+    monkeypatch.setattr(pv.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(sys, "argv",
+                        ["publish_verify.py", "--version", "0.5.33", "--pkg", "vod-devkit",
+                         "--timeout", "1", "--interval", "0"])
+    rc = pv.main()
+    assert rc == 3, f"不可判必须是 3（不是 1=失败）：{rc}"
