@@ -1666,6 +1666,14 @@ MCP server 独立部署"）：远程与本地是同一套效果，不是多租�
 运行期问答通道；也不采用 C（维持无条件兜底）——无证据错归比多问一句更糟。
 自指词表只放"指向当前语境"的词，不收录泛称"产品"（太容易误命中文档类正文）。
 
+
+**补充（S191，2026-11-17 真机）**：代码层「自指才承认先验」早已生效（`attribute()` 直判回
+`source=install_binding`），但 SKILL 文本只写了「没有任何产品线索 → 取候选后问一次」，没写
+「自指命中先验时**别再问**」。真机后果：原话「……试着用你们家的批量导入功能……」照样被追问
+「这条反馈可能是哪个产品的？」，正向用例永远提交不了——代码对、话术缺一句，行为就是错的。
+已补该句并锁在 `tests/test_skill_display_rules.py::test_s191_self_reference_skips_product_ask`
+（改话术必须同批改用例）。教训：**判据在代码、执行在话术时，两处都要有锁**。
+
 **验证**：`tests/test_attribution.py::test_s145_binding_requires_self_reference` /
 `test_s145_binding_used_when_user_points_at_current_product`；
 S96 用例同步改为"自指才归 + 无自指转 unknown"。
