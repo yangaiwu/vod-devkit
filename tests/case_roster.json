@@ -655,6 +655,21 @@
     "S221": {
       "carrier": "tests/test_e2e_engine_resilience.py"
     },
+    "S222": {
+      "carrier": "tests/test_e2e_judgement.py"
+    },
+    "S223": {
+      "carrier": "tests/test_router_reasons.py"
+    },
+    "S224": {
+      "carrier": "tests/test_e2e_engine_resilience.py"
+    },
+    "S225": {
+      "carrier": "tests/test_e2e_suite_basis.py"
+    },
+    "S226": {
+      "carrier": "tests/test_channel_boundary.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

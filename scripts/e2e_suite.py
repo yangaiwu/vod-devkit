@@ -150,6 +150,17 @@ def reply_leaks(reply: str) -> list:
 _SALT_TAIL = re.compile(r"[（(]\s*\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*[）)]\s*$")
 
 
+# S225：盐在**引擎落库内容**里也可能出现（模型把末尾括号时间戳当正文提交，
+# 或旧口径把盐放在正文之前）。判据两侧都要剥，否则「基准剥了、候选没剥」= 假改写。
+_SALT_LEAD = re.compile(r"^\s*\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*")
+
+
+def strip_salt_anywhere(text: str) -> str:
+    """去掉轮次盐（首部时间戳或尾部括号时间戳），两侧可比。"""
+    t = _SALT_LEAD.sub("", str(text or ""))
+    return _SALT_TAIL.sub("", t).strip()
+
+
 def strip_salt_offset(prompt: str, start: int) -> str:
     """返回从 start 起的原话文本，并剥掉末尾的轮次盐。"""
     return _SALT_TAIL.sub("", prompt[start:]).rstrip()

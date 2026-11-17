@@ -428,3 +428,28 @@ def test_s221_empty_reply_uses_short_poll(monkeypatch):
     res = e2e.run_case("codex", case, {"threshold": 2, "window_days": 7, "action": "report"})
     assert seen["poll_s"] <= 60, f"空回复不许等满 600s：{seen['poll_s']}"
     assert res.get("indeterminate"), "空回合必须记不可判而不是违规"
+
+
+# --- S224：环境故障的退出码只许有一个说法（文档/实现/自述同步）------------------------
+# 实测：EngineUnavailable 的自述写 exit 3，engine_rows_since 的 docstring 却写 exit 2（熔断档），
+# docs/host-realverify.md 的表又写 3 —— 三处说法不一致，排障的人会按 2 去查熔断桶。
+def test_s224_unavailable_maps_to_indeterminate_code():
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import e2e_behavior as e2e
+
+    assert e2e.exit_code([], "report", indeterminate=True) == 3
+    assert e2e.exit_code([], "report", auth_error=True) == 4
+    assert e2e.exit_code([], "exit") == 2, "熔断才是 2"
+
+
+def test_s224_docstrings_agree_with_code_table():
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import e2e_behavior as e2e
+
+    src = Path(e2e.__file__).read_text(encoding="utf-8")
+    assert "不可判（环境故障）」并 exit 3" in src, "engine_rows_since 自述与退出码表不一致"
+    assert "不可判（环境故障）」并 exit 2" not in src, "残留旧口径（exit 2）"
+    doc = (Path(__file__).resolve().parent.parent / "docs" / "host-realverify.md").read_text(encoding="utf-8")
+    assert "| 3 |" in doc and "| 4 |" in doc, "文档退出码表缺档"

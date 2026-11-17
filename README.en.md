@@ -24,6 +24,8 @@ Three rules that matter more than the skeleton:
   once instead of guessing. The bound product is visible as
   `manifestSummary.product` in the `vod_devkit_info` reply.
 
+> **Do not enable two feedback-capture skills on the same host.** If a host already ships a ticket-creating skill (e.g. `huawei-cloud-vod-collector`: feedback → GitCode issue), pick one, or tell the model the channel split explicitly (ticket vs. VOD ingestion). Their trigger words overlap, so both enabled means one complaint may randomly land in either channel. The skill ships a "channel boundary" rule: judge by the artifact the user asks for, not by the word.
+
 ## Prerequisites
 
 | Dependency | Requirement | Notes |

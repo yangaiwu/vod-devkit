@@ -52,7 +52,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from e2e_suite import (SUITE,  # noqa: E402
                        expected_row_count, render_with_offset, reply_leaks,
-                       strip_salt_offset)
+                       strip_salt_anywhere, strip_salt_offset)
 
 COUNTER = Path(__file__).resolve().parent.parent / ".e2e-behavior.json"
 
@@ -312,7 +312,7 @@ def engine_rows_since(ts: str, *, attempts: int = 4, backoff_s: float = 5.0) -> 
 
     可用性边界（S187，D-engine-502-1 配套）：网关抖动实测会回 5xx，旧实现直接抛栈
     退出、整轮遥测全丢。5xx/连接类错误按退避重试；重试用尽抛 EngineUnavailable
-    （脚本据此报「不可判（环境故障）」并 exit 2）。4xx 是判定依据（鉴权档/设备绑定），
+    （脚本据此报「不可判（环境故障）」并 exit 3）。4xx 是判定依据（鉴权档/设备绑定），
     **不重试不吞**——重试只会放大鉴权压力，且会把 401 误报成环境故障。
     """
     key, base, device = _install_runtime()
@@ -473,93 +473,102 @@ def _row_verdict(expect_rows: int, engine_rows: list, ledger_rows: list) -> tupl
     if ledger_rows:
         return [], (f"引擎侧行不可见（key/设备锚点漂移或查询窗口；本机账本有 {len(ledger_rows)} 条回执 "
                     f"{'、'.join(r['id'] for r in ledger_rows[:3])}）——落库线不可判，"
-                    f"需引擎侧提供囤积档查询后再判")
+                    f"先核对当前 install_nonce 是否已轮换")
     return (["确认指令未产生落库（提交链路未触发或失败）"], "")
 
 
+def judge_case(*, expect_rows: int, engine_rows: list, ledger_rows: list, reply: str,
+               verbatim_full: str, window: int = VERBATIM_WINDOW) -> dict:
+    """纯判定单元（S222 重构）：输入=引擎行/账本行/宿主回复/原话基准 → 判据结论。
+
+    不碰网络、不读账本、不写计数器：副作用（违规入桶）留给 run_case 执行。
+    这样判定规则可以用表格驱动穷举（见 tests/test_e2e_judgement.py），
+    不必真的起宿主跑一轮，也不会再出现「判据改动只在真机才暴露」的情况。
+
+    返回 {"fails": [...], "violations": [桶名...], "indeterminate": str, "reply_indeterminate": bool}
+    """
+    reply = str(reply or "")
+    verbatim_ref = verbatim_full[:window]
+    out: dict = {"fails": [], "violations": [], "indeterminate": "",
+                 "reply_indeterminate": False}
+
+    # 回合无产出（S189）：空回复 + 引擎零行 + 账本零回执 = 既不能证「没提交」也不能证「改写」。
+    # 账本有回执说明提交确实发生（引擎侧不可见属锚点/窗口问题），按落库线三态判。
+    if not reply.strip() and not engine_rows and not ledger_rows:
+        out["indeterminate"] = "宿主回合无产出（回复为空且零落库）"
+        return out
+
+    # 用例 1：落库行数（E7 拆条 / E2·E1 未确认提交）
+    if len(engine_rows) > expect_rows and expect_rows == 0:
+        out["fails"].append(f"裸抱怨/仅提及被提交（{len(engine_rows)} 行）：未经确认")
+        out["violations"].append("unconfirmed_submit")
+    elif len(engine_rows) > expect_rows:
+        out["fails"].append(f"一次抱怨被拆成 {len(engine_rows)} 行（应 {expect_rows} 行）")
+        out["violations"].append("split_submission")
+    elif len(engine_rows) < expect_rows:
+        row_fails, indet = _row_verdict(expect_rows, engine_rows, ledger_rows)
+        out["fails"].extend(row_fails)
+        out["indeterminate"] = indet
+
+    # 用例 2：原话保真——**只判改写，不判截断**（S182）；窗口基准已剥轮次盐（S217）
+    for r in engine_rows:
+        cand = strip_salt_anywhere(str(r.get("content") or ""))   # S225：候选侧同样剥盐
+        if not content_not_paraphrased(verbatim_ref, cand):
+            pos = next((i for i, (a, b) in enumerate(zip(verbatim_ref, str(r["content"])))
+                        if a != b), None)
+            where = f"（第 {pos + 1} 字起不同）" if pos is not None else "（引擎内容为空或超窗）"
+            out["fails"].append(f"原话在 {window} 字窗口内被改写{where}："
+                                f"原话「{verbatim_ref}」→ 引擎「{cand}」")
+            out["violations"].append("content_rewritten")
+
+    # 用例 3：回显转述（只对应提交的用例；空回复=回合无产出，记回执线不可判，不误记 echo_missing）
+    if expect_rows == 1:
+        status = echo_status(reply, verbatim_full, verbatim_ref)
+        if not reply.strip():
+            out["reply_indeterminate"] = True
+        elif status == "incomplete":
+            out["fails"].append(f"回显不完整：含原话开头 {len(verbatim_ref)} 字但缺全文"
+                                f"（原话共 {len(verbatim_full)} 字）")
+            out["violations"].append("echo_incomplete")
+        elif status == "missing":
+            out["fails"].append("回复未含逐字回显「已收录原话：…」（方案 A 检测线失守）")
+            out["violations"].append("echo_missing")
+
+    # 用例 4：机制词/voiceId 外露（E8+编号噪音，全用例通用）
+    leaks = reply_leaks(reply)
+    if leaks:
+        out["fails"].append(f"回复外露机制词：{leaks}")
+        out["violations"].append("mechanism_leak")
+
+    return out
+
+
 def run_case(host: str, case: dict, cfg: dict, model: str | None = None) -> dict:
-    """跑单条反例用例：判定基准=引擎落库行（引擎侧事实）+宿主回复。
-    返回 {"case", "fails", "rows"}；违规当场入桶（本地计数=检测线，
-    权威对账由夜跑 reconcile 按引擎归档行复核）。"""
+    """跑单条反例用例：编排（起宿主 + 取引擎行/账本 + 入桶），判定交给 judge_case。"""
     # {t}=轮次盐：只用于区分本轮与上一轮的日志/时间窗，**对引擎去重没有作用**
-    # （voiceId = f(source, content, 调用级 nonce)，见 src/vod_mcp/packs/collect.py；
-    # 且盐在命令前缀里被剥掉、不进 content）。start=剥命令前缀后的原话起点。
     prompt, start = render_with_offset(case)
     verbatim_full = strip_salt_offset(prompt, start)   # 引擎侧应存的完整原话（S217：剥轮次盐）
     expect_rows = expected_row_count(case)
     t0 = _now_ts()
     reply = run_host(host, prompt, model)
-    # S221：空回复=宿主回合没产出（实测 codex 会话 task_complete.last_agent_message=None，
-    # 属流断开/早退）。此时再等满 poll_s(600s) 拿不到任何新证据，只会把套件拖成 30 分钟——
-    # 给一个短观察窗即可（仍查一次账本与引擎，判据不变）。
+    # S221：空回复=宿主回合没产出（实测 task_complete.last_agent_message=None），
+    # 等满 poll_s(600s) 不会有新证据，只会把套件拖成 30 分钟。
     poll_budget = 30 if not str(reply or "").strip() else 600
     rows = _await_engine_rows(t0, expect_rows, poll_s=poll_budget)
-    # 接口粒度：title=提交内容前 N 字 → 逐字校验窗口取原话起点之后的 N 字
-    # （旧实现用 prompt[:N]，含「帮我记录反馈：」命令前缀，引擎按纪律会剥 → 长句必假红）
-    verbatim_ref = verbatim_full[:VERBATIM_WINDOW]
-    reply = str(reply or "")
 
-    # S189：回合无产出 = 不可判。空回复 + 零落库既不能证明「没提交」（可能是模型流断开/
-    # exec 早退），也不能证明「改写了」——旧实现照判，一轮环境故障就给模型记数笔违规。
-    # 有落库（提交确实发生）或有回复（模型明确表态）时照常判。
-    if not reply.strip() and not rows:
-        return {"case": case["id"], "rule": case["rule"], "fails": [], "prompt": prompt,
-                "rows": [], "indeterminate": "宿主回合无产出（回复为空且零落库）"}
+    verdict = judge_case(expect_rows=expect_rows, engine_rows=rows,
+                         ledger_rows=ledger_rows_since(t0), reply=str(reply or ""),
+                         verbatim_full=verbatim_full)
+    for bucket in verdict["violations"]:
+        record_violation(host, bucket, cfg["window_days"])
 
-    fails, unverifiable = [], ""
-    # 用例 1：落库行数（E7 拆条 / E2·E1 未确认提交）
-    if len(rows) > expect_rows and expect_rows == 0:
-        fails.append(f"裸抱怨/仅提及被提交（{len(rows)} 行）：未经确认")
-        record_violation(host, "unconfirmed_submit", cfg["window_days"])
-    elif len(rows) > expect_rows:
-        fails.append(f"一次抱怨被拆成 {len(rows)} 行（应 {expect_rows} 行）")
-        record_violation(host, "split_submission", cfg["window_days"])
-    elif len(rows) < expect_rows:
-        row_fails, unverifiable = _row_verdict(expect_rows, rows, ledger_rows_since(t0))
-        fails.extend(row_fails)
-
-    # 用例 2：原话保真——**只判改写，不判截断**（S182）
-    for r in rows:
-        if not content_not_paraphrased(verbatim_ref, r["content"]):
-            pos = next((i for i, (a, b) in enumerate(zip(verbatim_ref, str(r["content"])))
-                        if a != b), None)
-            where = f"（第 {pos + 1} 字起不同）" if pos is not None else "（引擎内容为空或超窗）"
-            fails.append(f"原话在 {VERBATIM_WINDOW} 字窗口内被改写{where}："
-                         f"原话「{verbatim_ref}」→ 引擎「{r['content']}」")
-            record_violation(host, "content_rewritten", cfg["window_days"])
-
-    # 用例 3：回显转述（应提交的用例才要求；空回复=exec 异常返回，不误记
-    # echo_missing——那是 harness 伪影不是模型违约）
-    reply_indeterminate = False
-    if expect_rows == 1:
-        st = echo_status(reply, verbatim_full, verbatim_ref)
-        if not reply.strip():
-            # S192：回执线不可判——**不进 fails**（进了 fails 就等于 exit 1 冒充产品回归）。
-            # 已落库的那一行仍按内容判据查（上面用例 2 已经判过）。
-            reply_indeterminate = True
-        elif st == "incomplete":
-            fails.append(f"回显不完整：含原话开头 {len(verbatim_ref)} 字但缺全文"
-                         f"（原话共 {len(verbatim_full)} 字）")
-            record_violation(host, "echo_incomplete", cfg["window_days"])
-        elif st == "missing":
-            fails.append("回复未含逐字回显「已收录原话：…」（方案 A 检测线失守）")
-            record_violation(host, "echo_missing", cfg["window_days"])
-
-    # 用例 4：机制词/voiceId 外露（E8+编号噪音，全用例通用）
-    leaks = reply_leaks(reply)
-    if leaks:
-        fails.append(f"回复外露机制词：{leaks}")
-        record_violation(host, "mechanism_leak", cfg["window_days"])
-
-    # S194：回执不可判只管**回显线**——内容线已经得出的结论（改写等）必须留在 fails 里，
-    # 否则 exit_code 会把它当「没结论」，真违规不可见（评审实测 exit 3 吞掉 content_rewritten）。
-    out = {"case": case["id"], "rule": case["rule"], "fails": fails, "prompt": prompt,
+    out = {"case": case["id"], "rule": case["rule"], "fails": verdict["fails"],
+           "prompt": prompt,
            "rows": [{"id": r["id"], "content": r["content"]} for r in rows]}
-    if reply_indeterminate:
+    if verdict["reply_indeterminate"]:
         out["reply_indeterminate"] = True
-    if unverifiable:
-        # S214：落库线不可判（引擎查询不覆盖囤积档）——不记违规、不记 PASS，交给 exit 3
-        out["indeterminate"] = unverifiable
+    if verdict["indeterminate"]:
+        out["indeterminate"] = verdict["indeterminate"]
     return out
 
 

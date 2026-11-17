@@ -151,3 +151,22 @@ def test_s217_natural_echo_is_ok():
         reply = "已收录原话：" + full
         status = echo_status(reply, full, full[:window])
         assert status == "ok", f"{cid} 自然回显被判 {status}"
+
+
+# --- S225：判据两侧都要剥盐（引擎落库内容里带着盐是正常的）-------------------------
+# 实测（2026-11-17 19:59 全套）：C4/C5 被记「原话被改写」，
+# 引擎 content=「…回复也慢（11-17 19:59:04）」vs 基准「…回复也慢」——
+# 盐是提示词的一部分（模型把它当正文提交），落库后当然带着；基准剥了、候选没剥 ≠ 改写。
+def test_s225_engine_content_with_trailing_salt_is_not_rewrite():
+    from e2e_suite import strip_salt_anywhere
+    basis = "你们家网页卡，回复也慢"
+    assert strip_salt_anywhere(basis + "（11-17 19:59:04）") == basis
+    assert strip_salt_anywhere("11-17 17:55:40" + basis) == basis      # 旧口径：盐在前
+    assert strip_salt_anywhere(basis) == basis
+
+
+def test_s225_real_rewrite_still_detected():
+    from e2e_suite import strip_salt_anywhere
+    basis = "你们家网页卡，回复也慢"
+    cand = strip_salt_anywhere("你们家网页很卡，回复慢（11-17 19:59:04）")
+    assert cand != basis
