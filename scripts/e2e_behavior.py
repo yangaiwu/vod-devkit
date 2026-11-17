@@ -36,6 +36,7 @@ per-install 命名空间，跨 key 查不到；曾误读本地 mysql legacy inbo
 口径——尾部改写需引擎 listSubmitted 增加 desc 字段（待拍板项，引擎侧改造）。
 """
 import argparse
+import atexit
 import datetime
 import json
 import os
@@ -175,6 +176,30 @@ def decide_exit(fails, action: str, *, indeterminate: bool = False,
     结论是「有违规」（exit 1），不是「没结论」（exit 3）。
     """
     return exit_code(fails, action, indeterminate=indeterminate, auth_error=auth_error)
+
+
+class Tee:
+    """把 stdout 同时写进运行日志（S197）：kill 掉的一轮也要留下已产生的行。"""
+
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, s):
+        for st in self._streams:
+            st.write(s)
+
+    def flush(self):
+        for st in self._streams:
+            st.flush()
+
+
+def run_log_path(host: str, model: str | None, root: Path | None = None) -> Path:
+    """每轮一份日志：`<repo>/.e2e-runs/<ts>-<host>-<model>.log`（评审第 5 条：结论要能审）。"""
+    base = root or (Path(__file__).resolve().parent.parent / ".e2e-runs")
+    base.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    safe_model = (model or "default").replace("/", "_")
+    return base / f"{stamp}-{host}-{safe_model}.log"
 
 
 def remaining_cases(total: int, processed: int) -> int:
@@ -446,6 +471,11 @@ def main() -> None:
 
     data = json.loads(COUNTER.read_text()) if COUNTER.exists() else {}
     cfg = load_config(data if isinstance(data, dict) else {})
+    # S197：本轮日志自动落盘（调用方仍可另加重定向；两处都留）
+    _lf = run_log_path(a.host, a.model).open("w", encoding="utf-8")
+    atexit.register(_lf.close)
+    sys.stdout = Tee(sys.stdout, _lf)
+    print(f"[e2e] log={_lf.name}")
     print_run_banner(a.host, a.model, host_cmd(a.host, "<prompt>", a.model))
 
     if a.suite:

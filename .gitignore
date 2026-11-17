@@ -25,3 +25,4 @@ src/*.egg-info/
 
 # codeartsdoer CLI 在 cwd 生成的项目级目录（L3 真调副产物）
 .codeartsdoer/
+.e2e-runs/

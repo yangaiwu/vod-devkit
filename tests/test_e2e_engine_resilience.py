@@ -274,3 +274,27 @@ def test_s194_remaining_count_is_not_total():
     """异常报文里的「未完成 N 条」必须是剩余数，不是计划总数。"""
     assert e2e.remaining_cases(total=5, processed=2) == 3
     assert e2e.remaining_cases(total=5, processed=5) == 0
+
+
+# --- S197：每轮 e2e 必须自动落一份带 host/model 的日志（评审第 5 条）---------------
+# 现状：日志靠调用方手工重定向，kill 掉的那两轮留下 0 字节文件，真机结论只能靠 codex
+# 会话文件反推。判据：脚本自己 tee 一份到 <repo>/.e2e-runs/<ts>-<host>-<model>.log。
+def test_s197_run_log_path_names_host_and_model(tmp_path):
+    p = e2e.run_log_path("codex", "glm-5.3-flash", root=tmp_path)
+    assert p.parent == tmp_path
+    assert "codex" in p.name and "glm-5.3-flash" in p.name and p.suffix == ".log"
+
+
+def test_s197_run_log_path_defaults_to_repo_runs_dir():
+    p = e2e.run_log_path("codex", None)
+    assert p.parent.name == ".e2e-runs"
+    assert "default" in p.name, "未指定模型也要在文件名里标出来（事后审计要知道跑的是默认模型）"
+
+
+def test_s197_tee_writes_both_streams(tmp_path):
+    f = (tmp_path / "x.log").open("w", encoding="utf-8")
+    tee = e2e.Tee(sys.stdout, f)
+    tee.write("hello\n")
+    tee.flush()
+    f.close()
+    assert "hello" in (tmp_path / "x.log").read_text(encoding="utf-8")

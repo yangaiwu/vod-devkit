@@ -580,6 +580,9 @@
     "S196": {
       "carrier": "tests/test_info_binding.py"
     },
+    "S197": {
+      "carrier": "tests/test_e2e_engine_resilience.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

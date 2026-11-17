@@ -1932,6 +1932,7 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S194 | 不可判只管网线 | 回执不可判不清空 fails（内容线结论保留）；单出口 `decide_exit` 让异常路径带已收违规（有违规 exit 1）；异常报文逐条打 FAIL、未完成数取剩余 |
 | S195 | 路由工程第二层 | META 补 CI/构建/编译/流水线/发布/回滚/单测/环境/栈；裸「麻烦」换成语境化（太麻烦/很麻烦/麻烦死了）；语料含反向断言 |
 | S196 | 安装绑定可观测 | `vod_devkit_info` 的 `manifestSummary.product`：state 优先、manifest 唯一绑定回落、多绑定回 null（不猜）；SKILL 据该字段执行「自指→不问产品→直接建草稿」 |
+| S197 | 每轮日志留痕 | 脚本 tee 到 `.e2e-runs/<ts>-<host>-<model>.log`（未指定模型写 default）；kill 也留下已产生的行；目录进 .gitignore |
 
 ## 预采集路由的判定口径（S185/S186，D-router-scope-1，2026-11-17）
 
