@@ -633,6 +633,20 @@ def _audit_openclaw(home: Path, expect_version: str) -> tuple:
     return ("PASS" if ok else "DRIFT"), f"{msg}（{label}）"
 
 
+# S232：安全面差异要机器可查——"哪个宿主有 hook 层"原来只写在文档里，
+# 巡检时看不出来（运维会以为 10 个宿主保护等级一样）。口径与 docs/hooks.md 一致：
+# 只有 hermes 注册了 pre_llm_call（路由）+ pre_tool_call（读 key 拦截）；其余宿主
+# 只有技能教法（软约束），codex/opencode 的等价注册未探。
+HOOK_LAYER = {
+    "hermes": "有（pre_llm_call 路由 + pre_tool_call 读 key 拦截）",
+}
+
+
+def hook_layer_label(host: str) -> str:
+    """巡检用：该宿主的 hook 保护层形态（S232）。未知宿主按文档口径=无。"""
+    return HOOK_LAYER.get(host, "无（仅技能教法，软约束）")
+
+
 def audit_host(host: str, expect_version: str, home: Path | None = None) -> tuple:
     """只读巡检**真实机器**上的安装（不写任何文件）：条目在不在、入口存不存在、
     自证版本是否等于构建版本。返回 PASS / DRIFT / NOT_INSTALLED。
@@ -742,7 +756,7 @@ def main():
                 continue
             state, msg = audit_host(h, version)
             results[h] = state
-            print(f"[{h}] {state}: {msg}")
+            print(f"[{h}] {state}: {msg}｜hook 层：{hook_layer_label(h)}")
         drift = [h for h, s in results.items() if s == "DRIFT"]
         missing = [h for h, s in results.items() if s == "NOT_INSTALLED"]
         skipped = [h for h, s in results.items() if s == "SKIP"]

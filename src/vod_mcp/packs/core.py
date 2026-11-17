@@ -34,7 +34,10 @@ def search_products(params: dict) -> dict:
         return {"candidates": [], "total": 0, "reason": "catalog_unavailable",
                 "hint": "产品名录不可达（引擎或令牌不可用）：直接问用户产品名或 ID，不要编造候选"}
     if not query:
-        return {"candidates": [], "total": len(catalog)}
+        # S232：空查询要分因。模型把入参写成 keyword/q 时这里静默返回 0 候选，
+        # 看起来像"目录里没有这个产品"，实际是参数名不对——回执必须说清楚。
+        return {"candidates": [], "total": len(catalog), "reason": "empty_query",
+                "hint": "入参名是 query（其它名字会被当成空查询）；本次没有按任何关键词匹配"}
     idx = _attrib.build_alias_index(meta)
     hits = _attrib.match_products(query, idx)
     seen, cands = set(), []

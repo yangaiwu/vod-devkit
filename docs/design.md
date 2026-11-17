@@ -574,6 +574,14 @@ VOD_PACKS 两种取值的 tools/list 断言）。
   第 2 条话术可删；部署面若恒可访问 registry 且无 preset/离线需求，载荷固化与账本可退化为
   包依赖 + lockfile。
 
+### hook 保护层的宿主差异要机器可查（S232）
+
+只有 hermes 注册了 hook 层（`pre_llm_call` 路由 + `pre_tool_call` 读 key 拦截）；其余宿主
+只有技能教法（软约束），codex/opencode 的等价注册未探（docs/hooks.md:90）。这个差异原来只写在
+文档里，运维从巡检输出看不出来，容易把 10 个宿主当同一保护等级。现口径：`host_matrix --audit`
+每行追加 `hook 层：有/无`（`HOOK_LAYER`/`hook_layer_label()`），使安全面差异在机器上可见。
+新增宿主支持 hook 时必须同步该表——表里没有即按"无"报，宁可低估不虚报。
+
 ## 承载补充：followupStatus 插件对接（S74-S76，2026-11-08）
 
 - 单源：_followup_fields 扩展（submit 主路径/draft 暂存共用）——三态白名单
@@ -745,6 +753,9 @@ D-attrib-A 的「只认安装绑定」→ 绑定降为第三顺位先验，模�
   展示名只在 `products` 里（catalog 用另一套库名，如 OBS vs 对象存储服务 OBS）→ 名字通道保留，证据标 `name_only`；
   老引擎（无 catalog）→ `name_legacy`。
 - 用户回答命中目录项但无主键 → 同口径回 `unmatched_answer` 交候选，绝不写 `"None"`。
+- 空查询要分因（S232）：`query` 为空（模型把入参写成 `keyword`/`q`）时回
+  `reason=empty_query` + `hint`（说明入参名是 query），不再静默返回 0 候选——
+  否则看起来像"目录里没有这个产品"。
 
 ### 别名索引与误命中判定例
 
