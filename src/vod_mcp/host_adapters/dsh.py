@@ -153,6 +153,24 @@ def skills_dir(args):
     return Path(d) if d else None
 
 
+def _installed_shell_version(profile: str) -> str:
+    """profile 里已装壳的版本（读 node_modules/dsh-vod-devkit/package.json）。
+
+    为什么必须读回（S174 真机实锤）：`dsh plugin add dsh-vod-devkit@<ver>` 在 registry
+    未传播时失败，代码回落「不带版本」→ pnpm 认为依赖已满足直接跳过 → 壳停旧版，而
+    install 返回成功、账本写新版本号；只有 host_matrix --audit 会报 DRIFT。壳版本错位
+    正是「patch 写了 registerTools:false 而壳里没这个字段」那类双注册现场的来源。
+    """
+    cfg = host_specs.load("dsh", profile).get("configPath")
+    if not cfg:
+        return ""
+    pkg = Path(cfg).parent / "node_modules" / "dsh-vod-devkit" / "package.json"
+    try:
+        return json.loads(pkg.read_text(encoding="utf-8")).get("version") or ""
+    except (OSError, json.JSONDecodeError):
+        return ""
+
+
 def install(args, packs: str) -> Path:
     """dsh 工具壳（D-dsh-install-1，2026-11-06 用户拍板 A）：三壳口径统一——
     --product 安装期硬校验（cmd_install 已先行，到达此处必已过）+ 校验先于
@@ -194,6 +212,21 @@ def install(args, packs: str) -> Path:
         print(f"[vod-devkit] dsh plugin add 失败：{(r.stderr or r.stdout).strip()[-300:]}",
               file=sys.stderr)
         sys.exit(1)
+    # S174：rc=0 不算数——回落到「不带版本」时 pnpm 认为已满足直接跳过，壳仍是旧版。
+    # 读回 profile 里的壳版本：读到且不等 → 非零退出（此时 patch 还没写，不留半装状态）；
+    # 完全读不到（该 dsh 版本没有 profile 的 node_modules 布局）→ 只告警，不阻断安装。
+    got = _installed_shell_version(profile)
+    if got and got != _ver:
+        print(f"[vod-devkit] dsh 壳版本未达目标：profile={profile} 里是 {got}，"
+              f"目标是 {_ver}（多半是 registry 未传播，回落到不带版本的 add 被 pnpm 跳过）\n"
+              f"  处置：等 registry 传播后重跑 install，或手工 "
+              f"`dsh plugin --profile {profile} add dsh-vod-devkit@{_ver}`",
+              file=sys.stderr)
+        sys.exit(1)
+    if not got:
+        print(f"[vod-devkit] warn: 读不到 profile={profile} 的壳版本"
+              "（node_modules/dsh-vod-devkit/package.json 不存在）——请手工核对 "
+              f"`dsh plugin list` 里的 dsh-vod-devkit 是否为 {_ver}", file=sys.stderr)
     print(f"已安装 dsh 插件 dsh-vod-devkit（profile={profile}，目标版本 {_ver}，"
           "dsh plugin list 可见）")
 

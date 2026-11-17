@@ -205,8 +205,13 @@ def upsert_hook(text: str, event: str, command: str, timeout: int, mark: str) ->
         out += ["hooks:", f"  {event}:", "    " + entries[0], "    " + entries[1]]
         return ("\n".join(out) + "\n", "created")
 
-    if any(_is_ours(ln) for ln in lines):
-        return (text, "unchanged")
+    ours = next((ln for ln in lines if _is_ours(ln)), None)
+    if ours is not None:
+        # S175：同 mark 但命令不同 → 替换。旧实现直接 unchanged，于是换解释器/换脚本路径后
+        # 永不更新（真机实测：pre_tool_call 停在 python3.12、pre_llm_call 停在 Hermes 3.14 venv）。
+        lead = ours[:len(ours) - len(ours.lstrip())]
+        out = [f"{lead}- command: \"{command}\"" if ln is ours else ln for ln in lines]
+        return ("\n".join(out), "updated")
 
     # hooks 段结束位置：下一个缩进为 0 的非空行
     end_hooks = len(lines)
@@ -319,7 +324,8 @@ def _register_hooks(cfg_path: Path) -> None:
                 continue
         text = new_text
         verb = {"created": "已新建 hooks 段", "added": f"已加入 hooks.{event}",
-                "unchanged": "已存在"}[state]
+                "updated": "已替换旧命令（解释器/脚本路径变了）",
+                "unchanged": "已存在"}.get(state, state)
         print(f"已注册{label}（{cfg_path}，{verb}；首次使用 hermes 会弹一次同意）")
 
 

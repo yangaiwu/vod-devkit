@@ -204,6 +204,75 @@ def _provenance_problem(mf: dict) -> str | None:
     return "无法核验 provenance（载荷与仓根都没有可读的 build-info）"
 
 
+def _hermes_hook_command_problems(text: str, want_router, want_guard) -> list:
+    """hermes hook 行存在之后的下一条判据（S175-2）：命令本身必须是对的那一条。
+
+    为什么要单独判：`upsert_hook` 旧实现「同 mark 即 unchanged」，于是换解释器/换脚本
+    路径后旧行会一直留着；doctor 只判 mark 存在 → 全绿。真机实锤：pre_tool_call 用
+    /usr/local/bin/python3.12、pre_llm_call 用 Hermes 3.14 venv（两次写入各按当时的
+    sys.executable）。
+    """
+    out = []
+    marks = (("vod_router.py", want_router, "预采集 hook"),
+             ("vod_guard.py", want_guard, "读 Key 拦截 hook"))
+    for mark, want, label in marks:
+        cmds = [ln.strip() for ln in text.splitlines() if mark in ln and "command" in ln]
+        if cmds and not any(str(want) in c for c in cmds):
+            out.append(f"{label}的命令指向旧脚本（应为 {want}；实际 {cmds[0][:80]}）"
+                       "——重跑 install --target hermes 替换")
+    inters = {ln.split("command:", 1)[1].split()[0].strip("\"'")
+              for ln in text.splitlines() if "command:" in ln
+              and ("vod_router.py" in ln or "vod_guard.py" in ln)}
+    inters = {i for i in inters if i}
+    if len(inters) > 1:
+        out.append("两条 hook 使用不同解释器（" + "、".join(sorted(inters))
+                   + "）——重跑 install --target hermes 统一")
+    return out
+
+
+def _installed_targets(mf: dict) -> set:
+    """账本里装过的宿主集合（S176）。
+
+    为什么必须有：doctor 的逐宿主体检（hermes hook / codex 插件形态 / codearts 冒烟）曾用
+    `mf.get("target")` 判——那是**最近一次安装**的宿主。多宿主机器上顶层 target 恒为最后一个
+    （真机：11 行时是 dsh），于是这些体检整段不执行、doctor 却 OK。本轮实锤：hermes 两条 hook
+    停在两个解释器上，doctor 全绿。
+    """
+    rows = common.install_rows(mf)
+    out = {(r.get("target") or "").strip() for r in rows}
+    out |= {(mf.get("target") or "").strip()}
+    out.discard("")
+    return out
+
+
+def _hermes_host_problems() -> list:
+    """hermes 侧 hook 体检（行存在 → 命令对 → 解释器一致）。S175-2 / S176。"""
+    from vod_mcp.host_adapters import hermes as _hermes
+
+    out = []
+    cfg = Path(_hermes._profile_config())
+    text = cfg.read_text(encoding="utf-8") if cfg.exists() else ""
+    if _hermes.HOOK_MARK not in text:
+        out.append(f"预采集 hook 未注册（{cfg} 的 hooks.pre_llm_call）"
+                   "——重跑 install --target hermes")
+    if _hermes.GUARD_MARK not in text:
+        out.append(f"读 Key 拦截 hook 未注册（{cfg} 的 hooks.pre_tool_call）"
+                   "——重跑 install --target hermes（技能里的"
+                   "「只引指纹」靠它兜住 cat runtime.json）")
+    if not _hermes._hook_script().exists():
+        out.append(f"hook 脚本缺失：{_hermes._hook_script()}"
+                   "（载荷不含 hooks/ 的旧版本？重跑 install）")
+    if not paths_mod.guard_script().exists():
+        out.append(f"读 Key 拦截脚本缺失：{paths_mod.guard_script()}"
+                   "——重跑 install（或升级载荷）")
+    out.extend(_hermes_hook_command_problems(
+        text, _hermes._hook_script(), paths_mod.guard_script()))
+    if (Path.home() / ".hermes" / "plugins" / _hermes.LEGACY_PLUGIN).exists():
+        out.append("旧插件形态仍在（~/.hermes/plugins/vod-feedback-router）"
+                   "= 与 hook 双份注入——重跑 install --target hermes 清理")
+    return out
+
+
 def _host_verify_problems(mf: dict) -> list:
     """装了 hermes/codex 但注册没落盘 → 报出来（S172，判据统一在 host_verify）。
 
@@ -486,30 +555,12 @@ def cmd_doctor(args=None):
                             "——重跑 install --target codex 自动清理")
         # 预采集 hook（D-hook-unify-1）：hermes 侧靠 config.yaml 的 hooks.pre_llm_call
         # 登记我们的脚本；脚本在载荷里（改口径随载荷更新，不再有"装机副本是旧的"）。
-        if mf.get("target") == "hermes":
-            from vod_mcp.host_adapters import hermes as _hermes
-            cfg = Path(_hermes._profile_config())
-            text = cfg.read_text(encoding="utf-8") if cfg.exists() else ""
-            if _hermes.HOOK_MARK not in text:
-                problems.append(f"预采集 hook 未注册（{cfg} 的 hooks.pre_llm_call）"
-                                "——重跑 install --target hermes")
-            if _hermes.GUARD_MARK not in text:
-                problems.append(f"读 Key 拦截 hook 未注册（{cfg} 的 hooks.pre_tool_call）"
-                                "——重跑 install --target hermes（技能里的"
-                                "「只引指纹」靠它兜住 cat runtime.json）")
-            if not _hermes._hook_script().exists():
-                problems.append(f"hook 脚本缺失：{_hermes._hook_script()}"
-                                "（载荷不含 hooks/ 的旧版本？重跑 install）")
-            if not paths_mod.guard_script().exists():
-                problems.append(f"读 Key 拦截脚本缺失：{paths_mod.guard_script()}"
-                                "——重跑 install（或升级载荷）")
-            if (Path.home() / ".hermes" / "plugins" / _hermes.LEGACY_PLUGIN).exists():
-                problems.append("旧插件形态仍在（~/.hermes/plugins/vod-feedback-router）"
-                                "= 与 hook 双份注入——重跑 install --target hermes 清理")
+        if "hermes" in _installed_targets(mf):
+            problems.extend(_hermes_host_problems())
         # codex 插件 MCP 形态（D-mcp-manifest-a3-1）：静态清单只能是 CLI 形态
         # （codex 0.167 实测不展开 ${PLUGIN_ROOT}、cwd 也不是插件根），运行时正确性
         # 全靠安装器改写。所以 doctor 必须回答"现在实际跑的是哪一种"，不留猜测空间。
-        if mf.get("target") == "codex":
+        if _installed_targets(mf) & {"codex", "codex-desktop"}:
             from vod_mcp.host_adapters import codex as _codex
             mp = _codex.locate_plugin_mcp(None)
             if mp is None:
@@ -530,7 +581,7 @@ def cmd_doctor(args=None):
                     problems.append(f"插件 .mcp.json 读不出 mcpServers.vod-devkit（{mp}）"
                                     "——重跑 install --target codex")
         # CodeArts Agent 冒烟：官方 CLI 在就 list 一次（实测通道=codearts_cli.json 的 mcp 段）
-        if mf.get("target") == "codeartsdoer" and shutil.which("codearts"):
+        if "codeartsdoer" in _installed_targets(mf) and shutil.which("codearts"):
             r = subprocess.run(["codearts", "mcp", "list"], capture_output=True,
                                text=True, timeout=60)
             if "vod-devkit" in (r.stdout or ""):
