@@ -592,6 +592,12 @@
     "S200": {
       "carrier": "tests/test_skill_display_rules.py"
     },
+    "S201": {
+      "carrier": "tests/test_e2e_engine_resilience.py"
+    },
+    "S202": {
+      "carrier": "tests/test_router_corpus.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

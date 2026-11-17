@@ -176,8 +176,11 @@ class Tee:
         self._streams = streams
 
     def write(self, s):
+        # S201：写即刷——被 kill 的一轮也要留下已产生的行（旧实现只转发不 flush，
+        # 文件按块缓冲，atexit 又只覆盖正常退出 → 实测日志全程 0 字节）。
         for st in self._streams:
             st.write(s)
+            st.flush()
 
     def flush(self):
         for st in self._streams:
@@ -215,7 +218,9 @@ def run_suite(host: str, cases, cfg: dict, model: str | None = None) -> Summary:
     """逐案跑完整套；把「打印」与「聚合」放一起，把「退出码」留给 main 唯一处（S198）。"""
     s = Summary()
     try:
-        for case in cases:
+        for idx, case in enumerate(cases, 1):
+            # S201：每案先打心跳——进程被 kill 时也能看出跑到第几案
+            print(f"[case {idx}/{len(cases)}] {case['id']} …")
             res = run_case(host, case, cfg, model)
             s.processed += 1
             s.total_rows += len(res["rows"])
@@ -513,7 +518,7 @@ def main() -> None:
     data = json.loads(COUNTER.read_text()) if COUNTER.exists() else {}
     cfg = load_config(data if isinstance(data, dict) else {})
     # S197：本轮日志自动落盘（调用方仍可另加重定向；两处都留）
-    _lf = run_log_path(a.host, a.model).open("w", encoding="utf-8")
+    _lf = run_log_path(a.host, a.model).open("w", encoding="utf-8", buffering=1)
     atexit.register(_lf.close)
     sys.stdout = Tee(sys.stdout, _lf)
     print(f"[e2e] log={_lf.name}")

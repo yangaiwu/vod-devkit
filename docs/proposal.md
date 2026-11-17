@@ -1928,6 +1928,8 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S190 | 用例基准的自指前提 | 正向用例（submit_consent/single_row）必须含 `attribution.SELF_REFERENCE` 任一词；负向用例不得被判成 explicit_consent；自指词表单一真源、用例文件不复制 |
 | S191 | 自指命中后不追问产品 | 原话含自指词（attribution.SELF_REFERENCE）且安装绑定过产品 → 按安装先验归因、不再问产品；草稿回执 `attribution.source=install_binding` 为佐证；自指与先验都没有才追问 |
 | S200 | 绑定检查是第零步 | 采集流程 0 步首句=先调一次 `vod_devkit_info` 读 `manifestSummary.product`；有值+自指 → 不许先调 `vod_search_products`、不许追问产品，直接承接+征得同意 |
+| S201 | 日志写即可见 | `Tee.write` 逐行 flush（日志文件按行缓冲）；`run_suite` 每案先打 `[case i/n] id` 心跳——被 kill 的轮次也要留下已产生的行与进度 |
+| S202 | 元语汇只收工程搭配 | META 去掉裸「发布」「环境」，改收 发布流水线/发布流程/环境变量/测试环境/预发环境/构建产物；补「登录不上/登录不了/登不上」现象词；用户视角句（刚发布的版本打不开 / 生产环境卡死了）必须注入 |
 | S192 | 退出码与回执不可判 | 0 全绿 / 1 违规 / 2 熔断 / 3 不可判 / 4 鉴权或引擎 4xx（优先级 1>2>3>4）；空回复+有落库 → `reply_indeterminate` 不进 fails、内容判据照跑；横幅打 model+argv、收尾打 `e2e[exit]` |
 | S193 | 路由词表并表 | `TRIGGER_WORDS` ⊇ SKILL 的 S184 现象词（失败/打不开/超时/崩）+ 口语词；裸「卡」加边界；META 移出共用词（接口/配置/字段/日志/版本）、改收工程动作词 |
 | S194 | 不可判只管网线 | 回执不可判不清空 fails（内容线结论保留）；单出口 `decide_exit` 让异常路径带已收违规（有违规 exit 1）；异常报文逐条打 FAIL、未完成数取剩余 |
