@@ -28,3 +28,18 @@ def test_s184_feedback_triage_and_suggestion_script():
     assert "希望它变成" in COMPACT
     assert "禁止索要操作步骤" in COMPACT
     assert "不写problem_type标签" in COMPACT or "不写 problem_type 标签" in SKILL
+
+
+def test_s191_self_reference_skips_product_ask():
+    """S191：自指 + 安装先验 → 不许再追问产品（模型照读的就是这句）。
+
+    真机实测（2026-11-17，glm-5.3-flash / codex）：原话「……试着用你们家的批量导入功能……」
+    明明满足 D-attrib-binding-1 的自指条件（`attribution.attribute` 直判
+    `source=install_binding / product=CodeArts`），宿主却仍问「这条反馈可能是哪个产品的？」。
+    根因是 SKILL 只写了「没有任何产品线索 → 取候选后问一次」，没写「自指命中先验时不要再问」，
+    模型于是把「没点名产品」等同于「没线索」。
+    """
+    assert "自指" in COMPACT, "归因段必须出现「自指」这一判据"
+    assert "别再问产品" in COMPACT or "不再问产品" in COMPACT, \
+        "必须明确写：自指命中安装先验时不再追问产品"
+    assert "install_binding" in COMPACT, "要给出可佐证的来源标记（草稿回执里能看到）"
