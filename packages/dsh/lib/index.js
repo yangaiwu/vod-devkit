@@ -943,7 +943,8 @@ export function apply(ctx, config) {
         },
     ];
 
-    // D-dsh-mcp-b-1：工具面两条路——① MCP client 挂 python server（12 工具、机器级 state、
+    // D-dsh-mcp-b-1：工具面两条路——① MCP client 挂 python server（工具面随 packs：默认
+    // core,collect=10，含 knowledge=12；机器级 state、
     // 两段式/ensure 全在）；② 壳自注册（6 工具，mcp-client 缺失或显式关闭时的降级形态）。
     // registerTools=false 时壳只提供 UI 半（浏览器按钮），不再注册任何工具。
     const registerShellTools = cfg().registerTools !== false;

@@ -75,6 +75,16 @@ def search_products(params: dict) -> dict:
     return out
 
 
+def format_candidates(cands, empty: str = "（名录为空）") -> str:
+    """候选串的唯一拼写点（S233）：`名字（主键）` 顿号分隔。
+
+    此前 collect 里三处各拼一次（其中一处用 '+' 拼接绕 f-string 限制），
+    主键缺失时写法还不一致。候选串会进错误文案（模型据此问用户），口径必须一处。
+    """
+    items = [c for c in (cands or []) if isinstance(c, dict)]
+    return "、".join(f"{c.get('name')}（{c.get('id')}）" for c in items) or empty
+
+
 def devkit_info(params: dict, client_info: dict | None = None) -> dict:
     return provenance.info_payload(client_info)
 

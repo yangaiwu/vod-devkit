@@ -134,7 +134,7 @@ def _require_product_or_ask(attr: dict, items: list, client_info: dict | None = 
 
     if attr.get("unmatched_answer"):
         cands = attr.get("candidates") or []
-        hint = "、".join(f"{c['name']}（{c['id']}）" for c in cands) or "（名录为空）"
+        hint = core.format_candidates(cands, "（名录为空）")
         raise net.ToolError(
             f"用户说的产品「{attr['rawText']}」不在产品名录里，不能按它提交。"
             f"请按名录再确认一次是哪一个：{hint}；用户仍说不出来就说明这条先不提交。"
@@ -144,10 +144,13 @@ def _require_product_or_ask(attr: dict, items: list, client_info: dict | None = 
         # 兼容 Python 3.10/3.11：PEP 701 之前 f-string 表达式内不允许反斜杠
         # （'\n' 会触发 SyntaxError），故先在 f-string 外计算查询串再引用。
         _query = "\n".join(x[2] for x in items)
+        _cands_hint = core.format_candidates(
+            core.search_products({"query": _query, "limit": 5})["candidates"],
+            "（名录不可用：请让用户直接说产品名）")
         raise net.ToolError(
             "用户没有提供产品，这条反馈**不能提交**：请告诉用户「没有产品归属的反馈我不提交，"
             "因为不知道要转给哪个产品团队」，并请他补充是哪个产品；他仍不想说就说明这条先不提交。"
-            f"可选候选：{'、'.join(c['name'] + '（' + str(c['id']) + '）' for c in core.search_products({'query': _query, 'limit': 5})['candidates'])}"
+            f"可选候选：{_cands_hint}"
             + (tail if stop else ""),
             code=_UNRESOLVED_CODE)
     if os.environ.get("VOD_ALLOW_UNKNOWN_PRODUCT") == "1":
@@ -158,7 +161,7 @@ def _require_product_or_ask(attr: dict, items: list, client_info: dict | None = 
         return
     text = "\n".join(c for _i, _v, c in items)
     cands = core.search_products({"query": text, "limit": 5})["candidates"]
-    hint = "、".join(f"{c['name']}（{c['id']}）" for c in cands) or "（名录未命中，可问用户直接说产品名）"
+    hint = core.format_candidates(cands, "（名录未命中，可问用户直接说产品名）")
     raise net.ToolError(
         "这条反馈还没确定是哪个产品：请先问用户一次『这条是哪个产品的反馈？』，"
         "把回答填进 product（产品名或 ID）；用户明确说不知道/随便时，传 productNotSpecified=true。"

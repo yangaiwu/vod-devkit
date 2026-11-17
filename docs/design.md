@@ -574,6 +574,15 @@ VOD_PACKS 两种取值的 tools/list 断言）。
   第 2 条话术可删；部署面若恒可访问 registry 且无 preset/离线需求，载荷固化与账本可退化为
   包依赖 + lockfile。
 
+### 计数类断言必须由代码真值推导（S233）
+
+文档与注释里写死的"工具数/用例数"会随 packs 与实现漂移，且漂移只在真机上暴露。实测两处：
+proposal 写 dsh 降级形态 `Registered 3 tools`（真值 6，壳 `name: '<tool>'` 定义数），
+壳注释把 MCP 形态写成"12 工具"（真值随 packs：默认 core,collect=10，含 knowledge=12）。
+口径：计数不进文档正文当事实，**一律由代码/测试推导**——`tests/test_s233_counts.py` 从壳源码
+数工具、从文档抽 `Registered N tools` 对账；改壳工具面而没改文档会在门禁红。
+候选串同理：`core.format_candidates()` 是「名字（主键）」的唯一拼写点（collect 三处曾各拼一次）。
+
 ### hook 保护层的宿主差异要机器可查（S232）
 
 只有 hermes 注册了 hook 层（`pre_llm_call` 路由 + `pre_tool_call` 读 key 拦截）；其余宿主

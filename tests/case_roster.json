@@ -688,6 +688,9 @@
     "S232": {
       "carrier": "docs/design.md"
     },
+    "S233": {
+      "carrier": "docs/design.md"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },
