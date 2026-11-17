@@ -184,3 +184,57 @@ def test_s189_normal_reply_no_rows_still_fails(monkeypatch):
     res = e2e.run_case("codex", case, _cfg())
     assert not res.get("indeterminate"), "有回复就该判（模型说了提交却没落库=真缺陷）"
     assert any("未产生落库" in f for f in res["fails"]), res["fails"]
+
+
+# --- S192：退出码分档 + 回执不可判（评审 2026-11-17 P1）--------------------------
+# 实测问题：
+# ① S189 只堵了「空回复 + 零落库」；「空回复 + 有落库」（流在最后一帧断，工具调用已落库）
+#    仍把报文自己写着「不可判」的那行放进 fails → main 走 exit 1，和「产品回归」同码。
+# ② exit 2 有三重语义：EngineUnavailable / 熔断 action=exit / indeterminate，自动化读 2
+#    分不清「产品熔断」和「环境没结论」；而 4xx（鉴权档/设备绑定）按 ADR 要原样抛出，
+#    main 却没人接 → 裸 traceback → 退出码 1，同样冒充违规。
+# 定档：0 全绿 / 1 真违规 / 2 熔断 / 3 不可判（含回执不可判）/ 4 鉴权或引擎 4xx。
+def test_s192_exit_code_table():
+    assert e2e.exit_code([], "report", indeterminate=False) == 0
+    assert e2e.exit_code(["真缺陷"], "report", indeterminate=False) == 1
+    assert e2e.exit_code([], "exit", indeterminate=False) == 2
+    assert e2e.exit_code([], "report", indeterminate=True) == 3
+    assert e2e.exit_code([], "report", indeterminate=False, auth_error=True) == 4
+    # 优先级：真违规 > 熔断 > 不可判 > 鉴权
+    assert e2e.exit_code(["真缺陷"], "exit", indeterminate=True) == 1
+
+
+def test_s192_empty_reply_with_rows_is_reply_indeterminate(monkeypatch):
+    """空回复 + 有落库：回执线不可判，不许进 fails（否则 exit 1 冒充产品回归）。"""
+    rec = []
+    prompt, start = e2e.render_with_offset(dict(e2e.SUITE[0]))
+    rows = [{"id": "V1", "content": prompt[start:][:e2e.VERBATIM_WINDOW]}]
+    monkeypatch.setattr(e2e, "run_host", lambda *a, **kw: "")
+    monkeypatch.setattr(e2e, "_await_engine_rows", lambda *a, **kw: rows)
+    monkeypatch.setattr(e2e, "record_violation",
+                        lambda host, kind, days=7: rec.append(kind) or 1)
+    res = e2e.run_case("codex", dict(e2e.SUITE[0]),
+                       {"threshold": 2, "window_days": 7, "action": "report"})
+    assert res["fails"] == [], res["fails"]
+    assert res.get("reply_indeterminate"), "空回复必须单独标回执不可判"
+    assert rec == [], f"不可许记违规：{rec}"
+
+
+def test_s192_engine_4xx_raises_auth_error(monkeypatch):
+    def fake_urlopen(req, timeout=30):
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", None, io.BytesIO(b""))
+
+    monkeypatch.setattr(e2e, "_install_runtime", lambda: ("k", "https://e", "dev"))
+    monkeypatch.setattr(e2e.urllib.request, "urlopen", fake_urlopen)
+    try:
+        e2e.engine_rows_since("2000-01-01 00:00:00")
+    except e2e.EngineAuthError as e:
+        assert "401" in str(e)
+    else:
+        raise AssertionError("4xx 必须抛 EngineAuthError（main 据此 exit 4，不许裸 traceback）")
+
+
+def test_s192_banner_prints_model_and_argv(capsys):
+    e2e.print_run_banner("codex", "glm-5.3-flash", e2e.host_cmd("codex", "p", "glm-5.3-flash"))
+    out = capsys.readouterr().out
+    assert "model=glm-5.3-flash" in out and "argv=" in out, out
