@@ -434,7 +434,7 @@
       "carrier": "tests/test_host_matrix.py"
     },
     "S143": {
-      "carrier": "tests/conftest.py"
+      "carrier": "docs/design.md"
     },
     "S145": {
       "carrier": "docs/design.md"
@@ -629,10 +629,13 @@
       "carrier": "tests/test_router_corpus.py"
     },
     "S213": {
-      "carrier": "tests/test_publish_verify.py"
+      "carrier": "tests/test_conftest_guard.py"
     },
     "S214": {
       "carrier": "tests/test_e2e_engine_resilience.py"
+    },
+    "S215": {
+      "carrier": "tests/conftest.py"
     },
     "U1": {
       "carrier": "tests/test_skeleton.py"

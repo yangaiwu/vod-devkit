@@ -117,6 +117,32 @@ def _machine_state() -> dict:
     }
 
 
+# S215：漂移必须先归因。并发写入者（install / 巡检 / 真机 e2e）在跑时，state/账本被改是
+# **预期**的，不是隔离漏洞；把它们判成 exit 1 会让全绿的测试轮拿到 RC=1 并挡住发版。
+_MUTATOR_MARKERS = ("install --target", "host_matrix.py", "e2e_behavior.py", "vod-devkit install")
+
+
+def _concurrent_mutators(proc_root=None) -> list:
+    """扫描 /proc，返回正在运行的真机写入者命令行（截断 120 字）。"""
+    root = Path(proc_root) if proc_root else Path("/proc")
+    found = []
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return found
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            raw = (entry / "cmdline").read_bytes().decode("utf-8", "replace")
+        except OSError:
+            continue
+        cmd = raw.replace("\x00", " ").strip()
+        if cmd and any(m in cmd for m in _MUTATOR_MARKERS):
+            found.append(cmd[:120])
+    return found
+
+
 def pytest_sessionstart(session):
     session.config._machine_before = _machine_state()
 
@@ -134,4 +160,9 @@ def pytest_sessionfinish(session, exitstatus):
           + "\n  先确认不是并行 install 在跑（install/矩阵/巡检同一时间只由一方做）；"
             "确实是测试写的才按隔离缺失处理：tests/conftest.py 的 _isolate_machine_writes"
             "（VOD_DEVKIT_MANIFEST / VOD_PAYLOAD_HOME 必须指向 tmp）", file=sys.stderr)
+    mutators = _concurrent_mutators()
+    if mutators:
+        print("[S143] 归因：检测到并发真机写入者，本次漂移判为**预期**，不记隔离缺失：\n    "
+              + "\n    ".join(mutators), file=sys.stderr)
+        return
     session.exitstatus = 1
