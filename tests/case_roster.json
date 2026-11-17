@@ -670,6 +670,9 @@
     "S226": {
       "carrier": "tests/test_channel_boundary.py"
     },
+    "S227": {
+      "carrier": "tests/test_router_corpus.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

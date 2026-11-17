@@ -121,7 +121,10 @@ _ENG_OBJ_RE = re.compile("|".join(re.escape(w) for w in ENGINE_OBJ_WORDS))
 
 # S219：信封要"剥掉再判"，不能"含标记就整条判死"——否则信封后面跟的用户显式指令
 # 会被一起吞掉（实测 3/3）。剥完的余文里若出现"用户在说话"的标记，继续走正常判定。
-_USER_INTENT_RE = re.compile("提交反馈|帮我|我要|我这边|我们|麻烦你|你们家|我试|我点|我觉得")
+# S227：只在**行首**出现才算"用户在说话"。此前是全文任一位置匹配，而宿主信封里常引用
+# 我们自己的输出（"[vod-router] … 提交反馈 …"）→ 自注自判的死循环：每条后台回执都被再注入一次。
+_USER_INTENT_RE = re.compile(r"^\s*(提交反馈|帮我|我要|我这边|我们|麻烦你|你们家|我试|我点|我觉得)",
+                             re.M)
 
 
 def _strip_envelopes(text: str) -> str:
@@ -129,6 +132,8 @@ def _strip_envelopes(text: str) -> str:
     out = []
     skipping = False
     for line in text.splitlines():
+        if line.lstrip().startswith("[vod-router]"):
+            continue          # 自己的输出，不参与判定（S227：防自注自判）
         hit = next((m for m in ENVELOPE_MARKERS if m in line), None)
         if hit:
             skipping = True
