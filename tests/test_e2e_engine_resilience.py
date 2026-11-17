@@ -106,3 +106,33 @@ def test_s187_no_key_returns_empty_without_calling_engine(monkeypatch):
     monkeypatch.setattr(e2e, "_install_runtime", lambda: ("", "https://e", ""))
     monkeypatch.setattr(e2e.urllib.request, "urlopen", boom)
     assert e2e.engine_rows_since("2000-01-01 00:00:00") == []
+
+# --- S188：宿主模型临时覆盖（网关模型漂移时继续验，不改宿主配置）------------------
+# 实测（2026-11-17）：codex 默认模型 glm-5.3 在「需要工具调用」的回合上 5 次重连后
+# `stream disconnected before completion`，正向用例（C1/C4/C5）全挂而负向（C2/C3）全绿；
+# 同提示换 glm-5.3-flash 一次过（回执 version 0.5.30）。定责=网关侧模型，不是插件。
+# 处置=套件支持 `--model` 临时覆盖（只改这一轮的 argv），**不改宿主配置文件**。
+def test_s188_codex_model_override_goes_before_prompt():
+    cmd = e2e.host_cmd("codex", "帮我记录反馈：x", model="glm-5.3-flash")
+    assert cmd[:3] == ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox"]
+    assert cmd[-3:] == ["-m", "glm-5.3-flash", "帮我记录反馈：x"], "prompt 必须留在最后一位"
+
+
+def test_s188_no_model_keeps_previous_argv():
+    assert e2e.host_cmd("codex", "p") == ["codex", "exec",
+                                          "--dangerously-bypass-approvals-and-sandbox", "p"]
+
+
+def test_s188_opencode_uses_long_flag():
+    cmd = e2e.host_cmd("opencode", "p", model="glm-5.3-flash")
+    assert cmd[:2] == ["opencode", "run"]
+    assert cmd[-3:] == ["--model", "glm-5.3-flash", "p"]
+
+
+def test_s188_unknown_host_fails_loudly():
+    try:
+        e2e.host_cmd("nohost", "p")
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("未知宿主必须显式失败，不能静默跑错宿主")
