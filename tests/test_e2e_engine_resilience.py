@@ -136,3 +136,51 @@ def test_s188_unknown_host_fails_loudly():
         pass
     else:
         raise AssertionError("未知宿主必须显式失败，不能静默跑错宿主")
+
+
+# --- S189：回合无产出不得记违规（harness 伪影与模型违约分开）--------------------
+# 实测（2026-11-17 真机，glm-5.3 掉流那轮）：C1/C4/C5 的 codex 回合以
+# `stream disconnected before completion` 结束、`last_agent_message=null`，run_host 拿到空
+# stdout、引擎 0 行——旧实现把这判成「原话被改写 5 项 + 回显缺失 15 项」记进熔断计数器，
+# 一轮环境故障等于给模型记了 6 笔违规。判据：**空回复 + 零落库 = 不可判**，既不记违规
+# 也不记 PASS；有落库时照常判（提交确实发生了，内容仍要查）。
+def _cfg():
+    return {"threshold": 2, "window_days": 7, "action": "report"}
+
+
+def test_s189_empty_reply_and_no_rows_is_indeterminate(monkeypatch):
+    rec = []
+    monkeypatch.setattr(e2e, "run_host", lambda *a, **kw: "")
+    monkeypatch.setattr(e2e, "_await_engine_rows", lambda *a, **kw: [])
+    monkeypatch.setattr(e2e, "record_violation",
+                        lambda host, kind, days=7: rec.append(kind) or 1)
+    case = dict(e2e.SUITE[0])            # C1：expect_rows=1
+    res = e2e.run_case("codex", case, _cfg())
+    assert res.get("indeterminate"), "空回复 + 零落库必须标不可判"
+    assert rec == [], f"不可判不许记违规：{rec}"
+    assert res["fails"] == [], res["fails"]
+
+
+def test_s189_rows_present_still_judged(monkeypatch):
+    rec = []
+    monkeypatch.setattr(e2e, "run_host", lambda *a, **kw: "")
+    monkeypatch.setattr(e2e, "_await_engine_rows",
+                        lambda *a, **kw: [{"id": "V1", "content": "被我改写的内容"}])
+    monkeypatch.setattr(e2e, "record_violation",
+                        lambda host, kind, days=7: rec.append(kind) or 1)
+    case = dict(e2e.SUITE[0])
+    res = e2e.run_case("codex", case, _cfg())
+    assert not res.get("indeterminate"), "有落库就不能标不可判"
+    assert "content_rewritten" in rec, "落库内容要照常判改写"
+
+
+def test_s189_normal_reply_no_rows_still_fails(monkeypatch):
+    rec = []
+    monkeypatch.setattr(e2e, "run_host", lambda *a, **kw: "我已经记录好了")
+    monkeypatch.setattr(e2e, "_await_engine_rows", lambda *a, **kw: [])
+    monkeypatch.setattr(e2e, "record_violation",
+                        lambda host, kind, days=7: rec.append(kind) or 1)
+    case = dict(e2e.SUITE[0])
+    res = e2e.run_case("codex", case, _cfg())
+    assert not res.get("indeterminate"), "有回复就该判（模型说了提交却没落库=真缺陷）"
+    assert any("未产生落库" in f for f in res["fails"]), res["fails"]
