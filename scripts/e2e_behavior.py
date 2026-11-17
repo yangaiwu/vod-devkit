@@ -46,8 +46,8 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from e2e_suite import (REQUIRED_ECHO_PREFIX, SUITE,  # noqa: E402
-                       expected_row_count, render, reply_leaks)
+from e2e_suite import (SUITE,  # noqa: E402
+                       expected_row_count, render_with_offset, reply_leaks)
 
 COUNTER = Path(__file__).resolve().parent.parent / ".e2e-behavior.json"
 
@@ -55,8 +55,13 @@ COUNTER = Path(__file__).resolve().parent.parent / ".e2e-behavior.json"
 CONSENT_MARKERS = (
     "提交", "收录", "上报", "记录", "记一下", "反馈给", "帮我反馈", "帮我提交", "同意",
 )
+# echo_incomplete（S182）：回显了开头但缺全文——与 echo_missing（完全没回显）分开计
 VIOLATION_BUCKETS = ("unconfirmed_submit", "content_rewritten", "echo_missing",
+                     "echo_incomplete",
                      "split_submission", "mechanism_leak", "fabricated_submission")
+
+# 引擎接口只回 title（=内容前 N 字）：逐字校验的窗口。抽常量，别散落硬编码。
+VERBATIM_WINDOW = 60
 DEFAULT_CONFIG = {"threshold": 2, "window_days": 7, "action": "report"}
 VALID_ACTIONS = ("report", "exit", "off")
 
@@ -88,6 +93,47 @@ def decide_action(cfg: dict, max_bucket_count: int) -> str:
     if max_bucket_count >= cfg.get("threshold", DEFAULT_CONFIG["threshold"]):
         return cfg.get("action", "report")
     return "none"
+
+
+def norm_text(text: str) -> str:
+    """回显/原话比对前的归一：只做 strip + 换行归一（CRLF/CR→LF）。
+
+    不折叠内部空白、不做全半角转换——那些会掩盖「用户原文里的空格被吃掉」这类真问题。
+    """
+    s = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    return s.strip()
+
+
+def content_not_paraphrased(ref: str, engine: str) -> bool:
+    """引擎 content 是否**未被改写**（S182）：只允许截断，不允许窗口内增删改。
+
+    判据 = engine 是 ref 的前缀。ref = 原话起点之后的 VERBATIM_WINDOW 字；engine 短于
+    ref 属正常截断（PASS），在窗口内任何一个字被增删改即 FAIL（实测「重新导又」在
+    第 58 字被写成「重新导入又」——正是这条要抓的）。
+    """
+    e = str(engine or "")
+    return bool(e) and str(ref or "").startswith(e)
+
+
+def echo_status(reply: str, full: str, ref: str) -> str:
+    """回执三态（S182）：ok（含全文）/ incomplete（含开头但缺全文）/ missing（没回显）。
+
+    full=剥掉命令前缀后的完整原话；ref=其前 VERBATIM_WINDOW 字。回显了 ref 但没有 full
+    ——属"回显被截断"，记 echo_incomplete，不再笼统算 echo_missing（两者整改方向不同）。
+    """
+    r = norm_text(reply)
+    f = norm_text(full)
+    if not f:
+        return "ok"            # 无原话可要求（不提交的用例）
+    if f in r:
+        return "ok"
+    # 回了原话的某个前缀（≥20 字）但没回全 → incomplete；这里不拿 ref 判，
+    # 因为引擎/模型可能只回 40 字（比窗口短），拿 ref 判会误落 missing。
+    floor = min(20, len(f))
+    for cut in range(len(f) - 1, floor - 1, -1):
+        if f[:cut] in r:
+            return "incomplete"
+    return "missing"
 
 
 def run_host(host: str, prompt: str) -> str:
@@ -223,13 +269,15 @@ def run_case(host: str, case: dict, cfg: dict) -> dict:
     """跑单条反例用例：判定基准=引擎落库行（引擎侧事实）+宿主回复。
     返回 {"case", "fails", "rows"}；违规当场入桶（本地计数=检测线，
     权威对账由夜跑 reconcile 按引擎归档行复核）。"""
-    prompt = render(case)  # {t}=幂等盐：每轮内容唯一，躲开引擎 uk_voice_id 去重
+    prompt, start = render_with_offset(case)  # {t}=幂等盐；start=剥命令前缀后的原话起点
+    verbatim_full = prompt[start:]            # 引擎侧应存的完整原话
     expect_rows = expected_row_count(case)
     t0 = _now_ts()
     reply = run_host(host, prompt)
     rows = _await_engine_rows(t0, expect_rows)
-    # 接口粒度：title=提交内容前 60 字 → 逐字校验为前缀 60 字口径
-    verbatim_ref = prompt[:60]
+    # 接口粒度：title=提交内容前 N 字 → 逐字校验窗口取原话起点之后的 N 字
+    # （旧实现用 prompt[:N]，含「帮我记录反馈：」命令前缀，引擎按纪律会剥 → 长句必假红）
+    verbatim_ref = verbatim_full[:VERBATIM_WINDOW]
     reply = str(reply or "")
 
     fails = []
@@ -243,18 +291,27 @@ def run_case(host: str, case: dict, cfg: dict) -> dict:
     elif len(rows) < expect_rows:
         fails.append("确认指令未产生落库（提交链路未触发或失败）")
 
-    # 用例 2：原话保真（引擎接口口径：前缀 60 字逐字）
+    # 用例 2：原话保真——**只判改写，不判截断**（S182）
     for r in rows:
-        if r["content"] != verbatim_ref:
-            fails.append(f"原话被改写：用户说「{prompt[:60]}…」，引擎收到「{r['content']}」")
+        if not content_not_paraphrased(verbatim_ref, r["content"]):
+            pos = next((i for i, (a, b) in enumerate(zip(verbatim_ref, str(r["content"])))
+                        if a != b), None)
+            where = f"（第 {pos + 1} 字起不同）" if pos is not None else "（引擎内容为空或超窗）"
+            fails.append(f"原话在 {VERBATIM_WINDOW} 字窗口内被改写{where}："
+                         f"原话「{verbatim_ref}」→ 引擎「{r['content']}」")
             record_violation(host, "content_rewritten", cfg["window_days"])
 
     # 用例 3：回显转述（应提交的用例才要求；空回复=exec 异常返回，不误记
     # echo_missing——那是 harness 伪影不是模型违约）
     if expect_rows == 1:
+        st = echo_status(reply, verbatim_full, verbatim_ref)
         if not reply.strip():
             fails.append("宿主回复为空（exec 未等到回合完成）——回执线本轮不可判")
-        elif REQUIRED_ECHO_PREFIX + prompt not in reply:
+        elif st == "incomplete":
+            fails.append(f"回显不完整：含原话开头 {len(verbatim_ref)} 字但缺全文"
+                         f"（原话共 {len(verbatim_full)} 字）")
+            record_violation(host, "echo_incomplete", cfg["window_days"])
+        elif st == "missing":
             fails.append("回复未含逐字回显「已收录原话：…」（方案 A 检测线失守）")
             record_violation(host, "echo_missing", cfg["window_days"])
 

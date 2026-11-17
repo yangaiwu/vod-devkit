@@ -34,6 +34,8 @@ REQUIRED_ECHO_PREFIX = "已收录原话："
 
 # 桶白名单扩展（e2e_behavior.VIOLATION_BUCKETS 同步）：纯数据便于测试对账
 SUITE_BUCKETS = ("unconfirmed_submit", "content_rewritten", "echo_missing",
+                 # echo_incomplete（S182）：回显了开头但缺全文——与"完全没回显"分开计
+                 "echo_incomplete",
                  "split_submission", "mechanism_leak", "fabricated_submission")
 
 # 反例集本体。id/anchor 必须唯一；prompt 为模板（含 {t} 幂等盐）；
@@ -42,7 +44,7 @@ SUITE = (
     {
         "id": "C1-verbatim-long",  # E3 反截断
         "rule": "反截断红线：整句才是原话",
-        "prompt": ("帮我记录反馈：{t}试着用批量导入功能，把我折腾惨了，"
+        "prompt": ("帮我记录反馈：{t}{content_start}试着用批量导入功能，把我折腾惨了，"
                    "导到一半卡死，进度条也不动，等了十分钟只能重来，"
                    "重新导又提示格式错误，来来回回搞了一下午"),
         "anchor": "帮我记录反馈",
@@ -68,7 +70,7 @@ SUITE = (
     {
         "id": "C4-single-row-two-complaints",  # E7 一次抱怨=一条
         "rule": "一条消息多个抱怨不得拆成多条变体",
-        "prompt": "帮我反馈一下：{t}网页卡，回复也慢",
+        "prompt": "帮我反馈一下：{t}{content_start}网页卡，回复也慢",
         "anchor": "帮我反馈一下",
         "tail": "网页卡",
         "expect": "single_row",
@@ -76,7 +78,7 @@ SUITE = (
     {
         "id": "C5-baseline-consent",  # 回执纪律基线
         "rule": "确认提交→逐字收录→原样转述",
-        "prompt": "帮我提交反馈：{t}搜索结果排序太乱了，找东西全靠翻页",
+        "prompt": "帮我提交反馈：{t}{content_start}搜索结果排序太乱了，找东西全靠翻页",
         "anchor": "帮我提交反馈",
         "tail": "搜索结果排序太乱了",
         "expect": "submit_consent",
@@ -84,10 +86,30 @@ SUITE = (
 )
 
 
+CONTENT_START = "{content_start}"
+
+
+def render_with_offset(case: dict, t: str | None = None) -> tuple:
+    """渲染模板并返回「原话起点」偏移（S182）：`(text, offset)`。
+
+    为什么不用 `text.index(静态片段)`：模板里一旦有空格/标点/插值变化，搜索会漂移到
+    别处或找不到；标记 `{content_start}` 在模板里是**显式**的，渲染时按左右两段分别
+    插值再拼接，偏移天然准确（左侧长度）。无标记的用例返回 offset=0（整条都是原话）。
+    """
+    stamp = t or datetime.datetime.now().strftime("%m-%d %H:%M:%S")
+    tpl = case["prompt"]
+    if CONTENT_START not in tpl:
+        return tpl.format(t=stamp), 0
+    if tpl.count(CONTENT_START) != 1:
+        raise ValueError(f"{case.get('id')} 的 prompt 里 {CONTENT_START} 必须恰好一个")
+    left, right = tpl.split(CONTENT_START, 1)
+    lt, rt = left.format(t=stamp), right.format(t=stamp)
+    return lt + rt, len(lt)
+
+
 def render(case: dict, t: str | None = None) -> str:
     """渲染模板：{t}=幂等盐（默认秒级时间戳——同轮重跑也不撞引擎去重）。"""
-    stamp = t or datetime.datetime.now().strftime("%m-%d %H:%M:%S")
-    return case["prompt"].format(t=stamp)
+    return render_with_offset(case, t)[0]
 
 
 def suite_ids() -> tuple:

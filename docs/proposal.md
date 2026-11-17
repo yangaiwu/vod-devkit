@@ -1910,3 +1910,13 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | # | 场景 | 断言 |
 |---|---|---|
 | S181 | 合成 hermes config.yaml 四态（无文件 / 无条目 / enabled:false / 健康） | `host_matrix._hermes_effective_entry()` 与 `host_verify.problems("hermes")` 的可用性判定逐态一致 |
+
+## 行为回归判定口径与话术分型（S182-S184，2026-11-17）
+
+**背景**：C1 长期报"原话被改写"，实测是三种故障混在一句报文里：①比较基线用 `prompt[:60]`
+（含「帮我记录反馈：」命令前缀，引擎按纪律会剥）→ 长句必假红；②引擎只回 title 前 60 字，
+把"截断"也算成"改写"；③真实改写（「重新导又」在第 58 字被写成「重新导入又」）淹没在前两条里。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S182 | e2e 判定口径 | `content_not_paraphrased`：引擎 content 必须是「剥前缀原话取前 60 字」的**前缀**（截断 PASS，窗口内增删改 FAIL）；`echo_status` 三态 ok/incomplete/missing，incomplete 单独记 `echo_incomplete` 桶；模板用 `{content_start}` 标记算 offset，不靠字符串搜索 |
