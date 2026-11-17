@@ -80,3 +80,22 @@ def test_s205_cases_expecting_rows_carry_explicit_submit():
         assert any(m in head for m in _SUBMIT_MARKERS), (
             f"{case['id']} 期望落库，但提示词没有明确提交指令（只写「记录/反馈」时纪律要求二次确认）："
             f"{head!r}")
+
+
+# --- S206：嵌套锚点按最长匹配归属（顺序依赖的 substring 匹配是错归属源头）--------
+# 实测：把 C5 前缀写成「请帮我提交反馈：」后，C5 的行内容里包含 C1 的锚点「帮我提交反馈」，
+# 而 case_by_anchor 按 SUITE 顺序返回第一个命中 → C5 的行被判成 C1（归属错乱会让改写/回显
+# 桶记到别的用例上）。判据：命中多个锚点时按最长锚点归属，不按列表顺序。
+def test_s206_nested_anchor_resolves_to_longest_match():
+    from e2e_suite import SUITE, case_by_anchor, render
+
+    c5 = next(x for x in SUITE if x["id"] == "C5-baseline-consent")
+    row = render(c5, "11-17 17:00:00")
+    assert case_by_anchor(row)["id"] == "C5-baseline-consent", "嵌套锚点必须按最长归属"
+
+    nested = [(a["id"], b["id"]) for a in SUITE for b in SUITE
+              if a is not b and a["anchor"] and b["anchor"] and a["anchor"] in b["anchor"]]
+    for inner_id, outer_id in nested:
+        outer = next(x for x in SUITE if x["id"] == outer_id)
+        assert case_by_anchor(render(outer, "11-17 17:00:00"))["id"] == outer_id, \
+            f"{inner_id} 的锚点嵌在 {outer_id} 里，归属被抢"
