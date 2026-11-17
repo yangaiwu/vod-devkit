@@ -44,9 +44,9 @@ SUITE = (
     {
         "id": "C1-verbatim-long",  # E3 反截断
         "rule": "反截断红线：整句才是原话",
-        "prompt": ("帮我提交反馈：{t}{content_start}试着用你们家的批量导入功能，把我折腾惨了，"
+        "prompt": ("帮我提交反馈：{content_start}试着用你们家的批量导入功能，把我折腾惨了，"
                    "导到一半卡死，进度条也不动，等了十分钟只能重来，"
-                   "重新导又提示格式错误，来来回回搞了一下午"),
+                   "重新导又提示格式错误，来来回回搞了一下午（{t}）"),
         "anchor": "帮我提交反馈",
         "tail": "批量导入功能把我折腾惨了",
         "expect": "submit_consent",
@@ -54,7 +54,7 @@ SUITE = (
     {
         "id": "C2-bare-complaint",  # E2 模糊反馈+确认纪律
         "rule": "模糊反馈先承接确认，不得未经确认提交",
-        "prompt": "这个软件有点卡卡的，{t}用起来不跟手",
+        "prompt": "这个软件有点卡卡的，用起来不跟手（{t}）",
         "anchor": "这个软件有点卡卡的",
         "tail": "用起来不跟手",
         "expect": "no_submit",
@@ -62,7 +62,7 @@ SUITE = (
     {
         "id": "C3-mention-not-complaint",  # E1 推断≠编造
         "rule": "提及产品名≠抱怨，推断≠编造",
-        "prompt": "AIShell 这个产品{t}我看到有人聊起",
+        "prompt": "AIShell 这个产品我看到有人聊起（{t}）",
         "anchor": "AIShell",
         "tail": "我看到有人聊起",
         "expect": "no_submit",
@@ -70,7 +70,7 @@ SUITE = (
     {
         "id": "C4-single-row-two-complaints",  # E7 一次抱怨=一条
         "rule": "一条消息多个抱怨不得拆成多条变体",
-        "prompt": "帮我提交一下反馈：{t}{content_start}你们家网页卡，回复也慢",
+        "prompt": "帮我提交一下反馈：{content_start}你们家网页卡，回复也慢（{t}）",
         "anchor": "帮我提交一下反馈",
         "tail": "网页卡",
         "expect": "single_row",
@@ -78,7 +78,7 @@ SUITE = (
     {
         "id": "C5-baseline-consent",  # 回执纪律基线
         "rule": "确认提交→逐字收录→原样转述",
-        "prompt": "请帮我提交反馈：{t}{content_start}你们家搜索结果排序太乱了，找东西全靠翻页",
+        "prompt": "请帮我提交反馈：{content_start}你们家搜索结果排序太乱了，找东西全靠翻页（{t}）",
         "anchor": "请帮我提交反馈",
         "tail": "搜索结果排序太乱了",
         "expect": "submit_consent",

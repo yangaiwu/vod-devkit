@@ -602,13 +602,28 @@
       "carrier": "tests/test_router_corpus.py"
     },
     "S204": {
-      "carrier": "tests/test_e2e_suite_basis.py"
+      "carrier": "docs/design.md"
     },
     "S205": {
       "carrier": "tests/test_e2e_suite_basis.py"
     },
     "S206": {
       "carrier": "tests/test_e2e_suite_basis.py"
+    },
+    "S207": {
+      "carrier": "tests/test_e2e_suite_basis.py"
+    },
+    "S208": {
+      "carrier": "tests/test_info_binding.py"
+    },
+    "S209": {
+      "carrier": "tests/test_info_binding.py"
+    },
+    "S210": {
+      "carrier": "tests/test_host_matrix.py"
+    },
+    "S211": {
+      "carrier": "tests/test_router_corpus.py"
     },
     "U1": {
       "carrier": "tests/test_skeleton.py"

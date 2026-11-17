@@ -1934,6 +1934,11 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S204 | 绑定兜在工具回执 | `vod_search_products` 在有安装绑定时回 `installBinding` + `nextStep`（自指命中直接用、不要再追问；不要拿 catalog-default 无分候选问用户）；无绑定不给 |
 | S205 | 用例基准的提交指令 | 期望落库的用例（submit_consent/single_row）提示词头部必须含明确提交指令（提交/收录/上报）——只写「记录/反馈」时纪律要求二次确认，用例永远达不到 |
 | S206 | 锚点归属 | 命中多个 anchor 时按**最长**归属（不按 SUITE 顺序）；嵌套锚点必须归到外层用例，配套「任一 anchor 是别人的子串 → 归属仍正确」的参数化断言 |
+| S207 | 盐不落进原话区 | 模板把 `{t}` 放到提示词末尾（原话区保持纯正文）；渲染后 offset 之前只有命令前缀，且 `text[off:]` 不以盐开头 |
+| S208 | 回执不许复制真源词表 | `nextStep` 不得出现 `attribution.SELF_REFERENCE` 任一词（举例会被当穷举，收窄模型行为） |
+| S209 | 回执字段进契约 | `vod_search_products.output` 登记 `installBinding`/`nextStep`；用例断言handler 返回键 ⊆ 契约 properties |
+| S210 | 巡检按 commitSha 对账 | `_payload_drift()`：版号相等不算对账，载荷 commitSha ∉ 账本该版本的 sha 集 → DRIFT（同版号换内容必须报） |
+| S211 | 第二判定路径 | `DISABLE_WORDS`（用不了/没法用/挂了/闪退/丢了/空的/没动静/不相关/难用/不回/转圈/自动刷新）+ TRIGGER 任一命中即采集意图；META 且无 ANCHOR 仍零注入 |
 | S192 | 退出码与回执不可判 | 0 全绿 / 1 违规 / 2 熔断 / 3 不可判 / 4 鉴权或引擎 4xx（优先级 1>2>3>4）；空回复+有落库 → `reply_indeterminate` 不进 fails、内容判据照跑；横幅打 model+argv、收尾打 `e2e[exit]` |
 | S193 | 路由词表并表 | `TRIGGER_WORDS` ⊇ SKILL 的 S184 现象词（失败/打不开/超时/崩）+ 口语词；裸「卡」加边界；META 移出共用词（接口/配置/字段/日志/版本）、改收工程动作词 |
 | S194 | 不可判只管网线 | 回执不可判不清空 fails（内容线结论保留）；单出口 `decide_exit` 让异常路径带已收违规（有违规 exit 1）；异常报文逐条打 FAIL、未完成数取剩余 |

@@ -49,9 +49,10 @@ def search_products(params: dict) -> dict:
     binding = provenance.install_binding()
     if binding:
         out["installBinding"] = binding
-        out["nextStep"] = (f"本机安装绑定={binding}：原话含自指（你们家/这个产品/本平台）时"
-                           f"直接用 installBinding 归因，不要再追问产品；"
-                           f"也不要拿 catalog-default 的无分候选去问用户。")
+        # S208：不复制自指词表（真源 attribution.SELF_REFERENCE 有十几个词，这里举三个例子
+        # 会被模型当成穷举，行为反而变窄）。只给事实 + 一句处置。
+        out["nextStep"] = (f"本机安装绑定={binding}：原话含自指时直接用 installBinding 归因，"
+                           f"不要再追问产品；也不要拿 catalog-default 的无分候选去问用户。")
     return out
 
 

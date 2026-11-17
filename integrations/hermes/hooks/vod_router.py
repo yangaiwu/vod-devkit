@@ -68,6 +68,15 @@ ANCHOR_WORDS = (
     "功能", "按钮", "菜单", "搜索框", "输入框", "登录", "上传", "下载", "导出",
     "加载", "速度", "打开", "点击", "点了", "体验",
 )
+# S211：第二条判定路径——失能/否定词。词表路线（TRIGGER）只能覆盖"我们想得到的说法"；
+# 用户常用的是「挂了/用不了/闪退/丢了/空的/没动静/转圈/不回/难用/自动刷新」这类**失能描述**，
+# 它们几乎不出现在工程语境里（工程师说"排查/重构/构建失败"）。命中即进入采集意图，
+# 工程搭配仍由 META 优先排除（META 且无 ANCHOR → 零注入）。
+DISABLE_WORDS = (
+    "用不了", "没法用", "不能用", "挂了", "闪退", "丢了", "空的", "没动静",
+    "不相关", "太难用", "难用", "不回", "转圈", "自动刷新",
+)
+
 _STRONG_PREFIX = "提交反馈"
 
 def _trigger_pattern(words=TRIGGER_WORDS) -> str:
@@ -78,6 +87,7 @@ def _trigger_pattern(words=TRIGGER_WORDS) -> str:
 _COMPLAINT_RE = re.compile(_trigger_pattern())
 _META_RE = re.compile("|".join(re.escape(w) for w in META_WORDS))
 _ANCHOR_RE = re.compile("|".join(re.escape(w) for w in ANCHOR_WORDS))
+_DISABLE_RE = re.compile("|".join(re.escape(w) for w in DISABLE_WORDS))
 
 DIRECTIVE = (
     "[vod-router] 确定性意图路由命中：本消息匹配产品反馈采集意图（规则命中，非模型判断）。"
@@ -127,15 +137,16 @@ def route_detail(text) -> dict:
         return {**base, "decision": "strong", "reason": "strong-prefix",
                 "directive": STRONG_DIRECTIVE}
     m = _COMPLAINT_RE.search(text)
-    if not m:
+    d = _DISABLE_RE.search(text)
+    if not m and not d:
         return {**base, "reason": "no-trigger"}
-    hit = m.group(0)
+    hit = (m or d).group(0)
     meta = _META_RE.search(text)
     if meta and not _ANCHOR_RE.search(text):
         return {**base, "reason": "meta-discussion", "trigger": hit,
                 "meta": meta.group(0)}
-    return {**base, "decision": "inject", "reason": "trigger", "trigger": hit,
-            "directive": DIRECTIVE}
+    return {**base, "decision": "inject", "reason": "trigger" if m else "disable",
+            "trigger": hit, "directive": DIRECTIVE}
 
 
 def route(text) -> str | None:

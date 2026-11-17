@@ -73,8 +73,10 @@ def test_s193_engineering_discussion_stays_silent():
 
 def test_s193_bare_ka_has_boundary():
     """裸「卡」不得命中卡片类名词；口语抱怨（网页卡/卡住了）仍要命中。"""
-    for msg in ("帮我把卡片组件的样式调一下", "卡号填错了要重来", "卡券用不了"):
+    for msg in ("帮我把卡片组件的样式调一下", "卡号填错了要重来", "卡券有效期到年底"):
         assert router.route(msg) is None, f"「卡」子串误命中：{msg}"
+    # 加了失能词就是真抱怨（第二条路径），别被上面那条"卡券"负例误解
+    assert router.route_detail("卡券用不了")["reason"] == "disable"
     for msg in ("网页卡", "卡住了", "太卡了"):
         assert router.route(msg) is not None, f"口语抱怨漏判：{msg}"
 
@@ -114,15 +116,17 @@ def test_s195_polite_mafan_is_not_complaint():
 # 重复项）没有断言就会静默漂移。这里锁的是词表本身的不变量，与语料互补。
 def test_s199_word_tables_have_no_overlap_or_junk():
     tables = {"TRIGGER": router.TRIGGER_WORDS, "META": router.META_WORDS,
-              "ANCHOR": router.ANCHOR_WORDS}
+              "ANCHOR": router.ANCHOR_WORDS, "DISABLE": router.DISABLE_WORDS}
     for name, words in tables.items():
         assert len(words) == len(set(words)), f"{name} 有重复项"
         for w in words:
             assert isinstance(w, str) and w and w == w.strip(), f"{name} 含空串/带空格的词：{w!r}"
-    tri, meta, anch = (set(tables[k]) for k in ("TRIGGER", "META", "ANCHOR"))
+    tri, meta, anch, dis = (set(tables[k]) for k in ("TRIGGER", "META", "ANCHOR", "DISABLE"))
     assert not (tri & meta), f"同一个词不能既算抱怨又算工程语汇：{sorted(tri & meta)}"
     assert not (tri & anch), f"触发词与锚点重叠会让优先级失效：{sorted(tri & anch)}"
     assert not (meta & anch), f"元语汇与锚点重叠会让排除判据自相矛盾：{sorted(meta & anch)}"
+    assert not (dis & meta), f"失能词与元语汇重叠会让排除面失效：{sorted(dis & meta)}"
+    assert not (dis & anch), f"失能词与锚点重叠会让第二条路径失去意义：{sorted(dis & anch)}"
 
 
 def test_s199_ka_guard_is_the_only_special_case():

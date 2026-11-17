@@ -548,6 +548,20 @@
           },
           "total": {
             "type": "integer"
+          },
+          "installBinding": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "本机安装期绑定的产品名（无绑定/多绑定为 null）"
+          },
+          "nextStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "有绑定时的处置提示：原话含自指可直接用它归因，不再追问（不复制自指词表）"
           }
         },
         "required": [

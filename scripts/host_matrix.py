@@ -174,6 +174,10 @@ def _run_install(env, host, extra=()):
     return r
 
 
+# 账本里"该版本允许的 commitSha"（S210）：由 audit 入口从 manifest 填一次，_probe 只读。
+_EXPECT_SHAS: dict = {}
+
+
 def _payload_version(argv: list):
     """entry 指向的载荷目录里的 build-info 版本（载荷自证，不看 server 自述）。
 
@@ -190,6 +194,41 @@ def _payload_version(argv: list):
                 except (OSError, ValueError):
                     return None
     return None
+
+
+def _payload_provenance(argv: list) -> dict:
+    """entry 指向的载荷目录的 build-info（版本 + commitSha）。判据同 _payload_version 的适用面。"""
+    for a in argv:
+        if str(a).endswith("vod_mcp/server.py"):
+            bi = Path(str(a)).parent.parent / "build-info.json"
+            if bi.is_file():
+                try:
+                    d = json.loads(bi.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    return {}
+                return {"version": d.get("version"), "commitSha": d.get("commitSha")}
+    return {}
+
+
+def _payload_drift(argv: list, expect_version: str,
+                   expect_shas=None) -> tuple:
+    """载荷自证是否漂移（S210）：**版号相等不算对账**——同版本号换内容必须 DRIFT。
+
+    事故：用仓内入口 install 把 payloads/0.5.32 就地重打成含未发版提交的内容，版号仍是 0.5.32，
+    而 npm 上的 0.5.32 是另一个提交；巡检只比 version 字符串 → 照旧 10 PASS，对账面全错。
+    `expect_shas` = 账本里该版本允许的 commitSha 集合（None=不判；空集=不判）。
+    """
+    prov = _payload_provenance(argv)
+    if not prov:
+        return True, ""                       # 无文件判据：调用方另行标注，不在这里假装通过
+    ver, sha = prov.get("version"), prov.get("commitSha")
+    if expect_version and ver and ver != expect_version:
+        return False, f"载荷版本 {ver} ≠ 期望 {expect_version}"
+    shas = expect_shas or set()
+    if sha and shas and sha not in shas:
+        return False, (f"载荷内容与账本不一致（同版号 {ver}，载荷 commitSha {str(sha)[:12]} ≠ 账本 "
+                       f"{'/'.join(sorted({str(x)[:12] for x in shas}))}）——版本号相同不代表代码相同")
+    return True, ""
 
 
 def _probe(entry: dict, expect_version: str) -> tuple:
@@ -215,8 +254,9 @@ def _probe(entry: dict, expect_version: str) -> tuple:
     # 仓根版本，文件版本不会——这是"巡检假绿"暴露后补的独立证据。
     pv = _payload_version(argv)
     no_file_evidence = "" if pv else "（无载荷文件判据：入口非 …/vod_mcp/server.py 形态，仅 server 自述）"
-    if pv and expect_version and pv != expect_version:
-        return False, f"载荷版本 {pv} ≠ 期望 {expect_version}{tail}"
+    ok_drift, drift_msg = _payload_drift(argv, expect_version, _EXPECT_SHAS.get(str(expect_version)))
+    if not ok_drift:
+        return False, f"{drift_msg}{tail}"
     env = os.environ.copy()
     entry_env = {k: str(v) for k, v in (entry.get("env") or entry.get("environment") or {}).items()}
     # 巡检子进程必须让"被装的那份载荷"自证，不能继承本进程为跑 CLI 钉的根：
@@ -690,6 +730,11 @@ def main():
     home.mkdir()
     results = {}
     if a.audit:
+        # S210：按账本填"该版本允许的 commitSha"——版号相等不算对账，同版号换内容必须 DRIFT
+        _EXPECT_SHAS.clear()
+        for _r in (_raw_manifest(Path.home()).get("installs") or []):
+            if _r.get("version") and _r.get("commitSha"):
+                _EXPECT_SHAS.setdefault(str(_r["version"]), set()).add(str(_r["commitSha"]))
         for h in hosts:
             if EXPECT.get(h, {}).get("skip"):
                 results[h] = "SKIP"

@@ -34,7 +34,8 @@ def test_s182_render_offset_marks_content_start():
     text, off = _suite.render_with_offset(case, "11-17 12:00:00")
     assert "{content_start}" not in text, "标记必须被移除"
     assert off > 0 and text[off:].startswith("试着用你们家的批量导入功能"), text
-    assert text[:off].endswith("11-17 12:00:00"), "offset 之前的只有命令前缀+盐"
+    assert text[:off] == "帮我提交反馈：", f"offset 之前只能是命令前缀：{text[:off]!r}"
+    assert text.endswith("（11-17 12:00:00）"), "盐在提示词末尾（不许落进原话区）"
 
 
 def test_s182_truncation_is_not_rewrite():
