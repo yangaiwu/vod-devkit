@@ -274,7 +274,7 @@ def install(args, packs: str) -> Path:
     if not (mp_root / "vod-devkit" / "vod_mcp").is_dir():
         _sync = ROOT / "scripts" / "sync_plugin.py"
         if _sync.is_file():
-            r = subprocess.run([sys.executable, str(_sync)], cwd=ROOT,
+            r = subprocess.run([sys.executable, str(_sync), "--no-build-info"], cwd=ROOT,
                                capture_output=True, text=True, timeout=300)
             if r.returncode != 0:
                 print(f"[vod-devkit] 生成插件副本失败：{r.stderr[-300:]}", file=sys.stderr)
