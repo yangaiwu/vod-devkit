@@ -17,3 +17,14 @@ def test_s183_draft_display_declares_missing_fields():
     assert "只缺一个就只点名那一个" in COMPACT
     assert "禁止写进content" in COMPACT and "禁止上送引擎" in COMPACT
     assert "推测句" in COMPACT, "必须显式禁止补写推测"
+
+
+def test_s184_feedback_triage_and_suggestion_script():
+    """S184：分型规则的优先级与建议型话术必须逐字在文里（模型照读的就是这段）。"""
+    assert "现象词优先" in COMPACT or "现象词优先" in SKILL.replace(" ", "")
+    assert "报错" in COMPACT and "卡死" in COMPACT and "没反应" in COMPACT
+    assert "判不了按缺陷型" in COMPACT, "兜底必须保守"
+    assert "这条更像改进建议" in COMPACT
+    assert "希望它变成" in COMPACT
+    assert "禁止索要操作步骤" in COMPACT
+    assert "不写problem_type标签" in COMPACT or "不写 problem_type 标签" in SKILL
