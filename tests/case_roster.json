@@ -538,6 +538,9 @@
     "S182": {
       "carrier": "tests/test_behavior_assertions.py"
     },
+    "S183": {
+      "carrier": "tests/test_skill_display_rules.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },
