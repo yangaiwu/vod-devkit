@@ -211,3 +211,91 @@ def test_s169_sync_missing_copy_burns_head_not_root(tmp_path, monkeypatch):
     pkg = json.loads((repo / "plugins/vod-devkit/build-info.json").read_text(encoding="utf-8"))
     assert pkg["commitSha"] == "b" * 40, f"副本应标当前 HEAD，实际 {pkg['commitSha']}"
     assert (repo / "build-info.json").read_bytes() == root_before, "根 build-info 不许被改"
+
+
+def test_s170_local_mcp_add_must_be_read_back(monkeypatch, tmp_path):
+    """S170：本地注册不能只看 rc==0——交互确认被跳过时 hermes 仍 exit 0 但不落配置。
+
+    实测（2026-11-17）：PATH 里桩 hermes 对 `mcp add` 返回 0 且不改 config.yaml，install 仍
+    rc=0 并打印「已注册」，config.yaml 只有 hooks 段 → 用户侧「工具连不上、自检全绿」。
+    远端点（install_remote）早有读回 + exit 1，本地这条缺同款。
+    """
+    import os
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from vod_mcp.host_adapters import hermes
+
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    fake = stub / "hermes"
+    fake.write_text(
+        "#!/bin/sh\ncase \"$1 $2\" in\n  \"config get\") echo \"\" ;;\nesac\nexit 0\n",
+        encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(stub) + os.pathsep + os.environ.get("PATH", ""))
+    args = types.SimpleNamespace(java_api_base="https://vod.example")
+
+    with pytest.raises(SystemExit) as exc:
+        hermes.install(args, "core,collect")
+    assert exc.value.code == 1, "rc=0 但配置无条目 → 必须非零退出，不能静默成功"
+
+
+def test_s171_remote_readback_uses_spec_profile_config(monkeypatch, tmp_path):
+    """S171：读回函数必须走 _spec()["profileConfig"]，不许再用 Path.home()/.hermes。
+
+    实测：HOME=…/home、HERMES_HOME=…/home/custom-hermes、config.yaml 里有 url 条目，
+    读回仍返回 False —— 自定义 HERMES_HOME（隔离/容器/数据盘）时远程安装被自己判失败。
+    """
+    from vod_mcp.host_adapters import hermes
+
+    home = tmp_path / "home"
+    hh = home / "custom-hermes"
+    hh.mkdir(parents=True)
+    url = "http://127.0.0.1:9528/mcp"
+    (hh / "config.yaml").write_text(
+        f"mcp_servers:\n  vod-devkit:\n    url: {url}\n    enabled: true\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("HERMES_HOME", str(hh))
+    assert hermes._hermes_registration_is_remote(url) is True
+
+
+def test_s172_doctor_flags_missing_hermes_entry(monkeypatch, tmp_path):
+    """S172：doctor 必须校验 configPath 里真有 mcp_servers.vod-devkit。
+
+    无 CLI 的降级安装只写备片 + hooks，config.yaml 没有 mcp_servers —— 旧 doctor 报 OK，
+    用户看到「自检全绿但工具连不上」。处置取「检测 + 报告」：不自动写宿主主配置（那条写入
+    目前非原子，半截 YAML 会让宿主起不来）。
+    """
+    from vodkit_cli import doctor
+
+    home = tmp_path / "home"
+    (home / ".hermes").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    mf = {"target": "hermes", "installs": [{"target": "hermes"}]}
+
+    problem = doctor._host_verify_problems(mf)
+    assert problem and any("mcp_servers" in p for p in problem), problem
+
+    (home / ".hermes" / "config.yaml").write_text(
+        "mcp_servers:\n  vod-devkit:\n    command: x\n", encoding="utf-8")
+    assert doctor._host_verify_problems(mf) == []
+
+
+def test_s173_degraded_install_exits_zero_but_says_missing(monkeypatch, tmp_path, capsys):
+    """S173：无 CLI 的降级安装仍是 rc=0（片段已写），但必须**明说**没注册。
+
+    与 S170 分界：没有写入动作发生（无 CLI）≠ 写入动作发生了却没落盘。
+    前者不该让 install 失败（用户可能压根没装宿主），但静默成功正是本轮 bug 的一半；
+    文案与 doctor 同源（host_verify 的 missing 码），两侧不会各说一套。
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))   # 空目录：没有 hermes CLI
+    from vod_mcp.host_adapters import hermes, host_verify
+
+    args = types.SimpleNamespace(java_api_base="https://vod.example")
+    conf = hermes.install(args, "core,collect")          # 不许抛 SystemExit
+    err = capsys.readouterr().err
+    assert conf.is_file(), "降级也要写出备片 JSON"
+    assert "缺 mcp_servers.vod-devkit" in err and "手工" in err, err
+    assert host_verify.problems("hermes", degraded=True)[0]["code"] == "missing"

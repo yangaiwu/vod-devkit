@@ -25,6 +25,30 @@ class _R:
         self.returncode, self.stdout, self.stderr = rc, out, err
 
 
+def _run_writing_cfg(cfg):
+    """桩 subprocess.run：`mcp add` 必须像真 CLI 那样把条目写进 config.yaml。
+
+    S170 之后安装器会读回 configPath；桩只回 rc=0 不落配置 = 交互确认被跳过的形态，
+    install 会（正确地）非零退出，用例就会红得像产品坏了。
+    """
+    from pathlib import Path
+
+    cfg = Path(cfg)
+
+    def fake(cmd, **kw):
+        if list(cmd[1:3]) == ["mcp", "add"]:
+            cfg.parent.mkdir(parents=True, exist_ok=True)
+            text = cfg.read_text(encoding="utf-8") if cfg.exists() else ""
+            if "  vod-devkit:" not in text:
+                if "mcp_servers:" not in text:
+                    text += "mcp_servers:\n"
+                text += "  vod-devkit:\n    command: stub\n"
+                cfg.write_text(text, encoding="utf-8")
+        return _R(out="")
+
+    return fake
+
+
 @pytest.fixture(autouse=True)
 def fake_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -98,7 +122,8 @@ def test_s128d_remove_hook_only_ours():
 # ── S128e ────────────────────────────────────────────────
 
 def test_s128e_install_writes_hook_and_cleans_legacy(fake_home, monkeypatch, capsys):
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _R(out=""))
+    cfg = fake_home / ".hermes" / "config.yaml"
+    monkeypatch.setattr(subprocess, "run", _run_writing_cfg(cfg))
     monkeypatch.setattr(hermes, "server_entry", lambda: "/payload/vod_mcp/server.py")
     legacy = fake_home / ".hermes" / "plugins" / hermes.LEGACY_PLUGIN
     legacy.mkdir(parents=True)
@@ -118,9 +143,9 @@ def test_s128e_install_writes_hook_and_cleans_legacy(fake_home, monkeypatch, cap
 
 
 def test_s128e_install_keeps_existing_config(fake_home, monkeypatch):
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _R(out=""))
-    monkeypatch.setattr(hermes, "server_entry", lambda: "/payload/vod_mcp/server.py")
     cfg = fake_home / ".hermes" / "config.yaml"
+    monkeypatch.setattr(subprocess, "run", _run_writing_cfg(cfg))
+    monkeypatch.setattr(hermes, "server_entry", lambda: "/payload/vod_mcp/server.py")
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text("model: keep-me\n", encoding="utf-8")
 

@@ -84,8 +84,23 @@ def env(tmp_path, engine_stub):
     stub.mkdir()
     calls = tmp_path / "hermes-calls.log"
     stub_hermes = stub / "hermes"
+    # 桩必须像真 CLI 那样**写进 config.yaml 的 mcp_servers**（S170）：只 `exit 0` 不落配置，
+    # 正是 hermes 交互确认被跳过（Cancelled 仍 rc=0）的形态——那样安装器会按「注册未落盘」
+    # 非零退出，一堆既有用例会红得像产品坏了。真 CLI 会写，桩就写。
     stub_hermes.write_text(
-        "#!/bin/sh\necho \"$@\" >> " + shq(calls) + "\nexit 0\n")
+        "#!/bin/sh\n"
+        "echo \"$@\" >> " + shq(calls) + "\n"
+        "if [ \"$1 $2\" = \"mcp add\" ]; then\n"
+        "  cfg=\"${HERMES_HOME:-$HOME/.hermes}/config.yaml\"\n"
+        "  mkdir -p \"$(dirname \"$cfg\")\"\n"
+        "  grep -q '^mcp_servers:' \"$cfg\" 2>/dev/null || echo 'mcp_servers:' >> \"$cfg\"\n"
+        "  if ! grep -q '^  vod-devkit:' \"$cfg\" 2>/dev/null; then\n"
+        "    echo '  vod-devkit:' >> \"$cfg\"\n"
+        "    echo '    command: stub-hermes' >> \"$cfg\"\n"
+        "    echo '    enabled: true' >> \"$cfg\"\n"
+        "  fi\n"
+        "fi\n"
+        "exit 0\n")
     stub_hermes.chmod(0o755)
     # 桩 codex / vod-devkit：D-codex-agents-1 原生插件路径的调用记录
     codex_calls = tmp_path / "codex-calls.log"
