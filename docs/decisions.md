@@ -2521,3 +2521,39 @@ VDPL202611170030/0031，走同一提交路径）：查询接口在 +0s 就返回
 
 部署侧配套：README/README.en 增加「同机不要同时启用两个采集技能，或明确告知模型通道分工」。
 回归锁：`tests/test_channel_boundary.py`（段落存在 + 三条判据 + 优先级声明 + 双语须知）。
+
+## D-boundary-1 插件边界：不托管宿主进程生命周期（2026-11-17）
+
+**问题**：本机一次收尾用 transient unit 前台包 `hermes gateway restart`，把常驻 gateway
+变成一次性编排单元的子进程——stop/回收会带走 listener、reboot 不回来；随后讨论中出现
+"插件应当把宿主 systemd 化 / 用 socket activation 托管"的提议。
+
+**决策：插件不碰宿主生命周期。**
+1. 插件职责固定三件：写宿主配置、落载荷与技能、doctor 读回版本。不声明 unit、不探测进程
+   管理方式、不重启宿主进程。
+2. 用户可见生效话术只有一句「重启宿主会话后生效」。对照样本
+   `huaweicloud-devkit @adfd826` 的 README 对 9 个宿主用同一句（OpenCode/Codex/
+   Codex Desktop/CodeArts/CodeArts Work/WorkBuddy/DSH/Hermes/AtomCode），
+   单一样本，结论只限该样本的设计形态。
+3. 证据（可复现）：install 侧零 `systemctl|systemd|restart` 调用（`grep -rn` src/ 为证）；
+   gateway 属宿主——本机三份各属不同 `HERMES_HOME`（`/root/.hermes`、`/home/yangaiwu/.hermes`、
+   `/root/.cache/hermes-acp-homes/…`）与不同端口；宿主自带托管语义
+   （unit 内 `HERMES_SUPERVISED_CHILD=1`、`SuccessExitStatus=75`、`RestartPreventExitStatus=78`，
+   `hermes_cli/gateway.py:4334` 的 `_guard_supervised_gateway_conflict` 会挡"第二 dispatcher"）。
+   宿主由谁托管是宿主所有者的事，插件最多在运维笔记里记录，不进产品文档。
+4. 已知宿主行为照实登记、不当产品约束：运行中的 gateway 按会话冻结 `mcp_servers` 快照
+   （`docs/host-realverify.md:66-71`）。hermes 表现为"新会话才拿到工具面"，dsh 表现为
+   "重启实例 + 刷新页面"。
+5. 载荷固化保留，成立理由只有一个：入口稳定（npx 缓存可变、会被清）+ preset/离线分发
+   （`install.py:344` D-payload-1、本文件 preset 禁自更新条）。
+
+**已否决**：socket activation（本机端口动态分配，叠加后是第三个所有权模型，且不解决会话
+快照断点）；npx/git+sha 依赖化（dsh 之外 9 个宿主只吃 command+args，仍需 materialize；
+preset 形态不可联 registry）。
+
+**挂账（可选后续，与生命周期无关）**：多版本并存 + 人工 prune 收敛为"升级即替换 + 保留
+最近 1 份"，doctor 报文同步改。
+
+**Falsifier**：若宿主提供 `tools/list_changed` 或会话内重连，可只换工具面而不重启进程，
+第 2 条话术可删；若部署面恒可访问 registry 且无 preset/离线需求，载荷固化与账本可退化为
+包依赖 + lockfile，第 5 条随之失效。

@@ -556,6 +556,21 @@ manifest（归一化 HOME/REPO/ORIGIN/SHA/installedAt，skillHashes 值不锁—
 error 字段分流的教训入注释），pack 门控补真实装配层锁（stdio probe 对
 VOD_PACKS 两种取值的 tools/list 断言）。
 
+## 九·五、插件边界：不托管宿主生命周期（D-boundary-1，2026-11-17）
+
+- 插件只做三件：写宿主配置（config.yaml / opencode.json / cordis.patch.yml…）、落载荷与
+  技能、doctor 读回版本。不声明 unit、不探测进程管理方式、不重启宿主进程。
+- 生效口径一句话：**重启宿主会话后生效**（对照样本 huaweicloud-devkit @adfd826：9 个宿主
+  同一句）。宿主何时重读配置是宿主的语义，不写成产品约束。
+- 已知宿主行为照实登记：常驻 gateway 按会话冻结 `mcp_servers` 快照
+  （`docs/host-realverify.md:66-71`），换配置必须重启 gateway 或开新会话——hermes 上表现为
+  "新会话才拿到工具面"，dsh 上表现为"重启实例 + 刷新页面"。
+- 载荷固化的唯一成立理由：入口稳定（npx 缓存可变、会被清）+ preset/离线分发
+  （`install.py:344`、D-payload-1、本文件 preset 禁自更新）。多版本并存与 prune 是这笔设计
+  的运维债，挂账收敛为"升级即替换 + 保留最近 1 份"。
+- 不采纳：由插件侧用 systemd / socket activation 托管宿主——越界，且本机端口动态分配、
+  会话快照断点不因托管方式改变。
+
 ## 承载补充：followupStatus 插件对接（S74-S76，2026-11-08）
 
 - 单源：_followup_fields 扩展（submit 主路径/draft 暂存共用）——三态白名单
