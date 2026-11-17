@@ -20,6 +20,7 @@ C 档规则配一个反例 prompt，由 e2e_behavior.py --suite 对真实宿主+
 每条用例同时过机制词外露检查（回复不得出现 FORBIDDEN_REPLY_WORDS）。
 """
 
+import re
 import datetime
 
 # 回复里禁止出现的机制词（E8 实锤：把"白名单/归因/提交链"整套发给用户；
@@ -141,3 +142,14 @@ def reply_leaks(reply: str) -> list:
     """回复中的机制词外露（全小写比对；回执必需话术除外——表内无此词）。"""
     low = str(reply or "").lower()
     return [w for w in FORBIDDEN_REPLY_WORDS if w in low]
+
+
+# S217：判据基准要剥掉轮次盐。盐（末尾「（MM-DD HH:MM:SS）」）只是轮次标识，
+# 模型把明显是插注的时间戳丢掉是**正常行为**，不该记 echo_incomplete/echo_missing
+# （这两个桶会喂熔断）。渲染函数负责放盐，判据基准负责剥盐 —— 同一处定义，避免两边漂。
+_SALT_TAIL = re.compile(r"[（(]\s*\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*[）)]\s*$")
+
+
+def strip_salt_offset(prompt: str, start: int) -> str:
+    """返回从 start 起的原话文本，并剥掉末尾的轮次盐。"""
+    return _SALT_TAIL.sub("", prompt[start:]).rstrip()

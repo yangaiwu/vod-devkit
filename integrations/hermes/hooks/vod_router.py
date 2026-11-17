@@ -73,14 +73,23 @@ ANCHOR_WORDS = (
 # 它们几乎不出现在工程语境里（工程师说"排查/重构/构建失败"）。命中即进入采集意图，
 # 工程搭配仍由 META 优先排除（META 且无 ANCHOR → 零注入）。
 DISABLE_WORDS = (
-    "用不了", "没法用", "不能用", "挂了", "闪退", "丢了", "空的", "没动静",
+    "用不了", "没法用", "不能用", "挂了", "闪退", "丢了", "没了", "空的", "没动静",
     "不相关", "太难用", "难用", "不回", "转圈", "自动刷新",
+)
+
+# S218：工程对象词。失能词路径（S211）如果不排除工程对象，「配置文件丢了」「这个字段是空的」
+# 「日志是空的」「缓存丢了」这类工程师自述会被当成用户抱怨——用户视角优先仍然成立：
+# 命中 ANCHOR（页面/按钮/导出…）就不排除。
+ENGINE_OBJ_WORDS = (
+    "配置文件", "配置项", "字段", "数据集", "缓存", "模板", "日志", "索引",
+    "库表", "数据库", "表结构", "服务", "进程", "脚本", "证书", "密钥", "集群",
 )
 
 # S212：网关/框架信封不是用户原话。内部通知、后台进程回执、压缩摘要、prior context 里
 # 天然含「失败/改写/工具数」这类词，注入只会污染当轮上下文（实测连续多次）。
 # 注意：`[OUT-OF-BAND USER MESSAGE …]` 是**用户本人**的消息包装，不在本表——里面照旧判定。
 ENVELOPE_MARKERS = (
+    "【内部通知】", "【系统通知】", "【后台任务】",
     "[INTERNAL NOTIFICATION",
     "[IMPORTANT: Background process",
     "[PRIOR CONTEXT",
@@ -99,6 +108,27 @@ _COMPLAINT_RE = re.compile(_trigger_pattern())
 _META_RE = re.compile("|".join(re.escape(w) for w in META_WORDS))
 _ANCHOR_RE = re.compile("|".join(re.escape(w) for w in ANCHOR_WORDS))
 _DISABLE_RE = re.compile("|".join(re.escape(w) for w in DISABLE_WORDS))
+_ENG_OBJ_RE = re.compile("|".join(re.escape(w) for w in ENGINE_OBJ_WORDS))
+
+# S219：信封要"剥掉再判"，不能"含标记就整条判死"——否则信封后面跟的用户显式指令
+# 会被一起吞掉（实测 3/3）。剥完的余文里若出现"用户在说话"的标记，继续走正常判定。
+_USER_INTENT_RE = re.compile("提交反馈|帮我|我要|我这边|我们|麻烦你|你们家|我试|我点|我觉得")
+
+
+def _strip_envelopes(text: str) -> str:
+    """去掉信封标记行及其载荷行，返回可能的用户余文。"""
+    out = []
+    skipping = False
+    for line in text.splitlines():
+        hit = next((m for m in ENVELOPE_MARKERS if m in line), None)
+        if hit:
+            skipping = True
+            continue
+        if skipping and (line.lstrip().startswith("[") or not line.strip()):
+            continue
+        skipping = False
+        out.append(line)
+    return "\n".join(out).strip()
 
 DIRECTIVE = (
     "[vod-router] 确定性意图路由命中：本消息匹配产品反馈采集意图（规则命中，非模型判断）。"
@@ -145,7 +175,10 @@ def route_detail(text) -> dict:
     if not isinstance(text, str) or not text.strip():
         return {**base, "reason": "empty"}
     if any(marker in text for marker in ENVELOPE_MARKERS):
-        return {**base, "reason": "envelope"}
+        rest = _strip_envelopes(text)
+        if not rest or not _USER_INTENT_RE.search(rest):
+            return {**base, "reason": "envelope"}
+        text = rest      # 剥完还有用户在说话 → 按正常判定
     if text.lstrip().startswith(_STRONG_PREFIX):
         return {**base, "decision": "strong", "reason": "strong-prefix",
                 "directive": STRONG_DIRECTIVE}
@@ -154,6 +187,10 @@ def route_detail(text) -> dict:
     if not m and not d:
         return {**base, "reason": "no-trigger"}
     hit = (m or d).group(0)
+    # S218：纯失能词（无强抱怨触发词）+ 工程对象 + 无用户视角锚点 → 工程师在说代码
+    if d and not m and _ENG_OBJ_RE.search(text) and not _ANCHOR_RE.search(text):
+        return {**base, "reason": "engineering-object", "trigger": hit,
+                "meta": _ENG_OBJ_RE.search(text).group(0)}
     meta = _META_RE.search(text)
     if meta and not _ANCHOR_RE.search(text):
         return {**base, "reason": "meta-discussion", "trigger": hit,

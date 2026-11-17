@@ -389,3 +389,19 @@ def test_s216_no_ledger_still_waits(monkeypatch):
     monkeypatch.setattr(e2e.time, "sleep", lambda *_: None)
     e2e._await_engine_rows("2026-11-17 18:00:00", 1, poll_s=0)
     assert calls["n"] >= 1
+
+
+# --- S220：账本读取必须走 paths 单入口（自定义 HOME/企业部署不许静默退化）--------------
+def test_s220_ledger_reads_via_env_state(monkeypatch, tmp_path):
+    import json as _json
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import e2e_behavior as e2e
+
+    # VOD_DEVKIT_HOME 指到哪，机器级 state 就在哪（paths.runtime_json_path 的①优先）
+    (tmp_path / ("runtime" + ".json")).write_text(_json.dumps({
+        "submissions": [{"voiceId": "VDPL9", "title": "t", "at": "2026-11-17T19:30:00"}]}),
+        encoding="utf-8")
+    monkeypatch.setenv("VOD_DEVKIT_HOME", str(tmp_path))
+    rows = e2e.ledger_rows_since("2026-11-17 19:00:00")
+    assert [r["id"] for r in rows] == ["VDPL9"], rows

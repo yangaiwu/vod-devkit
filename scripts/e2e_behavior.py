@@ -51,7 +51,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from e2e_suite import (SUITE,  # noqa: E402
-                       expected_row_count, render_with_offset, reply_leaks)
+                       expected_row_count, render_with_offset, reply_leaks,
+                       strip_salt_offset)
 
 COUNTER = Path(__file__).resolve().parent.parent / ".e2e-behavior.json"
 
@@ -77,7 +78,6 @@ VIOLATION_BUCKETS = ("unconfirmed_submit", "content_rewritten", "echo_missing",
                      "split_submission", "mechanism_leak", "fabricated_submission")
 
 # 引擎接口只回 title（=内容前 N 字）：逐字校验的窗口。抽常量，别散落硬编码。
-STATE_FILE = "runtime" + ".json"   # 避免安全钩子把字面量当"读凭据"指令
 VERBATIM_WINDOW = 60
 DEFAULT_CONFIG = {"threshold": 2, "window_days": 7, "action": "report"}
 VALID_ACTIONS = ("report", "exit", "off")
@@ -438,9 +438,17 @@ def ledger_rows_since(ts: str) -> list:
     与 `engine_rows_since`（层级②，引擎查询）互补：S214 实锤两者**覆盖不同**——
     囤积档（V16 起 POST /external/voices 的主路径）不出现在 GET /external/voices 里。
     这里只用于"本轮确实拿到了引擎回执"的取证，不冒充引擎侧事实。
+
+    路径纪律（S220）：必须走 `vod_mcp.paths` 的单入口解析（VOD_DEVKIT_HOME > 文件 >
+    物理位置），不许写死 Path.home()——企业部署/自定义 HOME 下写死会让账本读不到，
+    三态静默退化成"真违规"，正好是 S214 要消灭的那种误判。
     """
     try:
-        state = pathlib.Path.home() / ".vod-devkit" / "state" / STATE_FILE
+        src = str(pathlib.Path(__file__).resolve().parent.parent / "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        from vod_mcp import paths as _paths
+        state = _paths.runtime_json_path()
         cfg = json.loads(state.read_text(encoding="utf-8"))
     except Exception:
         return []
@@ -477,7 +485,7 @@ def run_case(host: str, case: dict, cfg: dict, model: str | None = None) -> dict
     # （voiceId = f(source, content, 调用级 nonce)，见 src/vod_mcp/packs/collect.py；
     # 且盐在命令前缀里被剥掉、不进 content）。start=剥命令前缀后的原话起点。
     prompt, start = render_with_offset(case)
-    verbatim_full = prompt[start:]            # 引擎侧应存的完整原话
+    verbatim_full = strip_salt_offset(prompt, start)   # 引擎侧应存的完整原话（S217：剥轮次盐）
     expect_rows = expected_row_count(case)
     t0 = _now_ts()
     reply = run_host(host, prompt, model)

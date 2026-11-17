@@ -640,6 +640,18 @@
     "S216": {
       "carrier": "tests/test_e2e_engine_resilience.py"
     },
+    "S217": {
+      "carrier": "tests/test_e2e_suite_basis.py"
+    },
+    "S218": {
+      "carrier": "tests/test_router_corpus.py"
+    },
+    "S219": {
+      "carrier": "tests/test_router_corpus.py"
+    },
+    "S220": {
+      "carrier": "tests/test_e2e_engine_resilience.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

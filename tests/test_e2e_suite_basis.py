@@ -124,3 +124,30 @@ def test_s207_rendered_ref_starts_with_user_words():
             continue
         ref = text[off:]
         assert not ref.startswith("11-17 "), f"{case['id']} 的原话区以盐开头：{ref[:30]!r}"
+
+
+# --- S217：回显判据必须剥轮次盐（否则正常行为被记违规）-----------------------------
+# 实测（2026-11-17 评审）：盐挪到原话末尾后，模型把它当插注元数据丢掉是**正常行为**，
+# 但判据基准 verbatim_full/ref 仍含「（MM-DD HH:MM:SS）」→ 自然回显被判 incomplete/missing，
+# 这两个桶喂熔断（记的是产品违规，实际是判据把盐当原话）。
+def test_s217_echo_basis_has_no_salt():
+    from e2e_suite import SUITE, render_with_offset, strip_salt_offset
+    for cid in ("C1", "C4", "C5"):
+        case = next(c for c in SUITE if c["id"].startswith(cid))
+        prompt, start = render_with_offset(case, "11-17 18:20:00")
+        assert "18:20:00" in prompt, "前提：盐确实渲染进了提示词"
+        assert "18:20:00" not in strip_salt_offset(prompt, start), f"{cid} 的判据基准仍含盐"
+
+
+def test_s217_natural_echo_is_ok():
+    """模型只丢掉末尾括号时间戳（原话一字不差）→ 必须判 ok，不许 incomplete/missing。"""
+    from e2e_behavior import echo_status
+    from e2e_suite import SUITE, render_with_offset, strip_salt_offset
+
+    for cid, window in (("C1", 60), ("C4", 60), ("C5", 60)):
+        case = next(c for c in SUITE if c["id"].startswith(cid))
+        prompt, start = render_with_offset(case, "11-17 18:20:00")
+        full = strip_salt_offset(prompt, start)
+        reply = "已收录原话：" + full
+        status = echo_status(reply, full, full[:window])
+        assert status == "ok", f"{cid} 自然回显被判 {status}"
