@@ -558,3 +558,19 @@
 - c19206c fix(diagnose): provenance 判据改读载荷 build-info（S158，D-doctor-provenance-1）
 - 72aa299 test(门禁先行): S158 doctor provenance 判据应以载荷为准
 
+
+## v0.5.29（2026-11-17）
+
+- fd41761 fix(host_verify): no-entry 文案覆盖无 CLI 形态（doctor 侧无从得知降级来源）
+- 6c859d9 fix(codex/install): 装插件时 sync 不重烧根 build-info（沿用 S169 口径）
+- c7673f6 fix(hermes/doctor): 注册态读回 + 判据收敛到 host_verify（S170-S173）
+- 35735fe test(门禁先行): S170-S173 hermes 注册读回/落点同源/doctor 校验/降级可见
+- d1fe5e4 fix(hermes/sync): 落点三分支 + 副本 provenance 按 HEAD（S168/S169）
+- 07183c4 test(门禁先行): S168 三分支落点 / S169 副本 provenance 按 HEAD
+- 9864d83 fix(diagnose): explain 收录「上游返回 429」→ 上游层/稍后重试（S167）
+- 7dcff45 test(门禁先行): S167 explain 收录引擎 429（重试口径，非本机配置）
+- ab4f7ca fix(review-r2): 落点不变量/门禁口径/provenance 严格性/CLI 超时/删死守卫（S162-S166）
+- f952b6e test(门禁先行): S162-S166 评审第二轮（落点不变量/门禁口径/provenance/超时/死守卫）
+- d49f424 refactor(common/hosts): 安装行/行视图/hermes 落点收敛到单一入口（S160/S161）
+- 3335564 test(门禁先行): S160/S161 共享语义收敛到单一入口
+
