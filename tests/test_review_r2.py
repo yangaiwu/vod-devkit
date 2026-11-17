@@ -430,3 +430,64 @@ def test_s175_3_register_hooks_replaces_old_command(monkeypatch, tmp_path):
     assert "python3.12" not in text, text
     assert str(hermes._hook_script()) in text
     assert text.count(str(hermes._hook_script())) == 1, "不许插成两条"
+
+
+def test_s177_codex_and_dsh_home_follow_env(monkeypatch, tmp_path):
+    """S177：CODEX_HOME / DSH_HOME 必须被适配层认（不许写死 ~/.codex、~/.dsh）。
+
+    宿主认的是这两个变量；写死 Path.home() 时设了变量的机器上「写 A 读 B」，
+    且 doctor/巡检读同一份错落点，自洽地错。
+    """
+    from vod_mcp import hosts, paths
+
+    cx, ds = tmp_path / "cx", tmp_path / "ds"
+    monkeypatch.setenv("CODEX_HOME", str(cx))
+    monkeypatch.setenv("DSH_HOME", str(ds))
+    assert hosts.load("codex")["configPath"] == cx / "config.toml"
+    assert hosts.load("dsh", "web")["configPath"] == ds / "profiles" / "web" / "cordis.patch.yml"
+    assert paths.host_home("CODEX_HOME", ".codex") == cx
+
+    monkeypatch.delenv("CODEX_HOME")
+    monkeypatch.delenv("DSH_HOME")
+    assert hosts.load("codex")["configPath"] == paths.Path.home() / ".codex" / "config.toml"
+    assert paths.host_home("DSH_HOME", ".dsh") == paths.Path.home() / ".dsh"
+
+
+def test_s178_json_hosts_must_be_read_back(monkeypatch, tmp_path):
+    """S178：JSON 合并型宿主（opencode/atomcode/workbuddy/codeartswork/codeartsdoer）要读回。
+
+    旧形态：合并器写完即打印成功；被覆盖/写成 enabled:false/指向的 server.py 被删，
+    install 与 doctor 都看不见（只有 audit 报 DRIFT）。
+    """
+    import json
+    from vod_mcp.host_adapters import host_verify
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    cfg = tmp_path / ".config" / "opencode" / "opencode.json"
+
+    assert host_verify.problems("opencode")[0]["code"] == "no-entry"
+
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text(json.dumps({"mcp": {"vod-devkit": {"command": ["/py", "/x/server.py"],
+                                                       "enabled": False}}},
+                              ensure_ascii=False), encoding="utf-8")
+    assert host_verify.problems("opencode")[0]["code"] == "disabled"
+
+    missing = tmp_path / "gone" / "server.py"
+    cfg.write_text(json.dumps({"mcp": {"vod-devkit": {"command": ["/py", str(missing)],
+                                                       "enabled": True}}},
+                              ensure_ascii=False), encoding="utf-8")
+    assert host_verify.problems("opencode")[0]["code"] == "mismatch"
+    with pytest.raises(SystemExit) as exc:
+        host_verify.require_ok("opencode")
+    assert exc.value.code == 1
+
+    good = tmp_path / "ok" / "server.py"
+    good.parent.mkdir()
+    good.write_text("", encoding="utf-8")
+    cfg.write_text(json.dumps({"mcp": {"vod-devkit": {"command": ["/py", str(good)],
+                                                      "enabled": True}}},
+                              ensure_ascii=False), encoding="utf-8")
+    assert host_verify.problems("opencode") == []
+    host_verify.require_ok("opencode")      # 不抛

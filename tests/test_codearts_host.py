@@ -24,7 +24,11 @@ def home(tmp_path, monkeypatch):
     cfg = tmp_path / ".codeartsdoer" / "codearts_cli.json"
     cfg.write_text(json.dumps({"$schema": "x", "provider": {"deepseek": {}},
                                "model": "deepseek-chat", "mcp": {}}), encoding="utf-8")
-    monkeypatch.setattr(base, "_PAYLOAD_DIR", None)
+    # S178 起安装收尾会读回条目并校验 server.py 真实存在：给夹具一个真载荷
+    payload = tmp_path / "payloads" / "0.0.0"
+    (payload / "vod_mcp").mkdir(parents=True)
+    (payload / "vod_mcp" / "server.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(base, "_PAYLOAD_DIR", payload)
     return tmp_path
 
 

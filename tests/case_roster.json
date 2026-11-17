@@ -520,6 +520,12 @@
     "S176": {
       "carrier": "tests/test_review_r2.py"
     },
+    "S177": {
+      "carrier": "tests/test_review_r2.py"
+    },
+    "S178": {
+      "carrier": "tests/test_codearts_host.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

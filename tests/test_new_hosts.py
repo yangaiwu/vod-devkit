@@ -27,6 +27,12 @@ class Args:
 def fake_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("ATOMCODE_HOME", raising=False)
+    # S178 起安装收尾会读回条目并校验 server.py 真实存在：给夹具一个真文件
+    fake = tmp_path / "payload" / "vod_mcp" / "server.py"
+    fake.parent.mkdir(parents=True, exist_ok=True)
+    fake.write_text("", encoding="utf-8")
+    for mod in (atomcode, codeartswork, workbuddy, codex_desktop):
+        monkeypatch.setattr(mod, "server_entry", lambda: str(fake))
     return tmp_path
 
 

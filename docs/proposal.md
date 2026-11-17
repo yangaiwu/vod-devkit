@@ -1867,3 +1867,22 @@ Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此�
 | S175-1 | 同 mark 的 hook 行存在但命令不同 | 替换该行命令并返回 `updated`（不再 `unchanged`） |
 | S175-2 | doctor 校验 hook 命令里的脚本路径 == 当前装好的 hook 脚本 | 不一致 / 脚本不存在 → FAIL 指向重跑 install |
 | S176 | 账本多行时 doctor 的宿主体检（hermes hook / codex 形态 / codearts 冒烟） | 按 `install_rows` 的 target 集合判，不许用顶层 `target`（多宿主机器上它恒为最后一次安装的宿主，整段体检会不执行而报 OK） |
+
+## 宿主家目录重定向与 JSON 宿主读回（S177/S178，D-host-home-verify-2，2026-11-17 真机）
+
+**背景**：
+
+1. 适配层与 CLI 里有 20 余处写死 `Path.home()/".codex"`、`Path.home()/".dsh"`——宿主自己认
+   `CODEX_HOME` / `DSH_HOME`。设了变量的机器上「我们写 A、宿主读 B」，写对了却看不见；更糟的是
+   doctor/巡检读同一份错落点，自洽地错。
+2. opencode / atomcode / workbuddy / codeartswork / codeartsdoer 是 JSON 合并写入：写完就打印成功，
+   没有读回。被别的进程覆盖、写成 enabled:false、指向的 server.py 被删，install 与 doctor 都看不见
+   （只有 `host_matrix --audit` 会报 DRIFT）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S177 | 设 `CODEX_HOME` / `DSH_HOME` | `hosts.load()` 的 configPath 与 `paths.host_home()` 都跟随变量；不设时回落 `~/<sub>` |
+| S178-1 | JSON 宿主配置无 `vod-devkit` 条目 | `host_verify.problems(host)[0].code == "no-entry"`；`require_ok` 非零退出 |
+| S178-2 | 条目 `enabled: false` | code == "disabled"（宿主不会加载） |
+| S178-3 | 条目指向的 server.py 不存在 | code == "mismatch"（载荷被删/路径写错） |
+| S178-4 | 条目健康 | 返回 `[]`（不误报） |
