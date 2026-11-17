@@ -393,13 +393,26 @@ def install(args, packs: str) -> Path:
     legacy = remove_legacy_plugin()
     if legacy:
         print(f"已清理旧插件形态（避免与新 hook 双份注入）：{legacy}")
-    if r is None:
-        pass  # 无 CLI：上面已经给过指引
-    elif r.returncode == 0:
+    registered = mcp_entry_present()
+    if registered:
         print("已注册 Hermes MCP（hermes mcp list 可见；重启会话生效）")
+    elif r is None:
+        # 无 CLI / 超时：降级（片段已写），但缺口必须可见——文案与 doctor 同源（S172）
+        from vod_mcp.host_adapters import host_verify
+
+        for p in host_verify.problems("hermes", degraded=True):
+            print(f"[vod-devkit] {p['message']}", file=sys.stderr)
+    elif r.returncode == 0:
+        # S170：rc=0 但配置无条目 = 交互确认被跳过（Cancelled 仍 exit 0）→ 必须非零退出
+        print(f"[vod-devkit] Hermes MCP 注册未落盘：hermes mcp add rc=0 但 "
+              f"{Path(_spec()['profileConfig'])} 里没有 mcp_servers.vod-devkit"
+              "（交互确认被跳过即静默取消）\n"
+              f"  可手工把 {conf} 并入该配置的 mcp_servers，或重跑 install（逐问回答 y）",
+              file=sys.stderr)
+        sys.exit(1)
     else:
         print(f"提示：hermes mcp add 未成功（{r.stderr.strip()[:150]}）；"
-              f"可将 {conf} 内容并入 Hermes 配置")
+              f"可将 {conf} 内容并入 Hermes 配置", file=sys.stderr)
     return conf
 
 
@@ -452,21 +465,56 @@ def install_remote(args, url, token):
     return conf
 
 
-def _hermes_registration_is_remote(url: str) -> bool:
-    """读回 hermes 内部注册真源（config.yaml mcp_servers），断言 vod-devkit 是远程条目。
+def _scan_mcp_entry_detail(cfg: Path) -> dict:
+    """扫描 config.yaml 的 mcp_servers.vod-devkit：{present, enabled_false, url}（D-host-verify-1）。"""
+    out: dict = {"present": False, "enabled_false": False, "url": None}
+    if not cfg.is_file():
+        return out
+    in_section = False
+    in_entry = False
+    for raw_line in cfg.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        indented = raw_line[0] == " "
+        stripped = raw_line.strip()
+        if not indented:
+            in_section = stripped.startswith("mcp_servers:")
+            in_entry = False
+            continue
+        if not in_section:
+            continue
+        if stripped.startswith("vod-devkit:"):
+            out["present"] = True
+            in_entry = True
+            continue
+        if in_entry and stripped.endswith(":") and not raw_line.startswith(" " * 4):
+            in_entry = False        # 下一个一级条目
+            continue
+        if in_entry and stripped.startswith("enabled:"):
+            out["enabled_false"] = stripped.split(":", 1)[1].strip().lower() in ("false", "no", "0")
+        elif in_entry and stripped.startswith("url:"):
+            out["url"] = stripped.split(":", 1)[1].strip().strip("\"'")
+    return out
 
-    hermes mcp add 写 ~/.hermes/config.yaml 的 mcp_servers.vod-devkit（url 字段
-    为远程形态标志）；Cancelled 的假绿在这里现形。无 yaml 依赖红线：远端
-    安装器零第三方依赖，这里用受限文本扫描（顶层 mcp_servers: 段下缩进块内
-    找 vod-devkit 与 url 行），而非完整 yaml 解析。
+
+def mcp_entry_state(path: Path | None = None) -> dict:
+    """configPath 里 vod-devkit 条目的形态（present / enabled_false / url）。"""
+    return _scan_mcp_entry_detail(path or Path(_spec()["profileConfig"]))
+
+
+def _scan_mcp_entry(cfg: Path, url: str | None = None) -> bool:
+    """在 config.yaml 的 mcp_servers 段里找 vod-devkit 条目（给了 url 就要求该行含它）。
+
+    单一扫描实现：本地注册读回（`mcp_entry_present`）与远程读回
+    （`_hermes_registration_is_remote`）共用，避免两份文本解析各自演化。
+    无 yaml 依赖红线：受限文本扫描（顶层 `mcp_servers:` 段下缩进块），不引 PyYAML。
     """
-    cfg = Path.home() / ".hermes" / "config.yaml"
     if not cfg.is_file():
         return False
     in_section = False
     saw_entry = False
     saw_url = False
-    for raw_line in cfg.read_text(encoding="utf-8").splitlines():
+    for raw_line in cfg.read_text(encoding="utf-8", errors="replace").splitlines():
         if not raw_line.strip() or raw_line.lstrip().startswith("#"):
             continue
         indented = raw_line[0] == " "
@@ -476,14 +524,32 @@ def _hermes_registration_is_remote(url: str) -> bool:
             continue
         if not in_section:
             continue
-        # mcp_servers 段内的行：条目名（一级缩进）与字段（更深缩进）
         if stripped.startswith("vod-devkit:"):
             saw_entry = True
         elif saw_entry and stripped.startswith("url:"):
-            if url in stripped:
+            if url is None or url in stripped:
                 saw_url = True
             break
         elif saw_entry and not raw_line.startswith("  vod-devkit") and stripped.endswith(":"):
-            if not raw_line.startswith(" " * 4):  # 下一个一级条目：停止
+            if not raw_line.startswith(" " * 4):      # 下一个一级条目：停止
                 break
-    return saw_entry and saw_url
+    return saw_entry if url is None else (saw_entry and saw_url)
+
+
+def mcp_entry_present(path: Path | None = None) -> bool:
+    """configPath（= `_spec()["profileConfig"]`）里有没有 mcp_servers.vod-devkit（S170）。
+
+    为什么必须有：`hermes mcp add` 在交互确认被跳过（Cancelled）时仍 exit 0 且不写配置；
+    只看 rc 就会打印「已注册」，而用户侧是「工具连不上、自检全绿」（2026-11-17 实测）。
+    """
+    return _scan_mcp_entry(path or Path(_spec()["profileConfig"]))
+
+
+def _hermes_registration_is_remote(url: str) -> bool:
+    """读回 hermes 内部注册真源，断言 vod-devkit 是**远程**条目（url 匹配）。
+
+    S171：落点必须与 `_spec()` 同源（configPath/profileConfig），不再用
+    `Path.home()/.hermes` —— 自定义 HERMES_HOME（隔离/容器/数据盘）时旧写法会把
+    正常注册判成失败并 exit 1（实测）。
+    """
+    return _scan_mcp_entry(Path(_spec()["profileConfig"]), url)

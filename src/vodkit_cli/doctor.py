@@ -204,6 +204,26 @@ def _provenance_problem(mf: dict) -> str | None:
     return "无法核验 provenance（载荷与仓根都没有可读的 build-info）"
 
 
+def _host_verify_problems(mf: dict) -> list:
+    """装了 hermes/codex 但注册没落盘 → 报出来（S172，判据统一在 host_verify）。
+
+    为什么是「报告」而不是「自动补写」：无 CLI 的降级安装只写备片，而自动把
+    mcp_servers 块插进 config.yaml 需要写宿主主配置——那条写入目前非原子（P1），
+    半截 YAML 会让宿主直接起不来，破坏半径远大于「工具连不上」。
+    """
+    from vod_mcp.host_adapters import host_verify
+
+    seen, out = set(), []
+    for row in common.install_rows(mf):
+        target = (row.get("target") or "").strip()
+        if target not in host_verify.SUPPORTED or target in seen:
+            continue
+        seen.add(target)
+        for p in host_verify.problems(target):
+            out.append(f"{target}: {p['message']}（{p['code']}）")
+    return out
+
+
 def _preset_provenance_problems(mf: dict) -> list:
     """preset 完整性：**逐行**判 manifest 与该行载荷是否同源（S164-2）。
 
@@ -350,6 +370,8 @@ def cmd_doctor(args=None):
         prov = _provenance_problem(mf)
         if prov:
             problems.append(prov)
+        for hp in _host_verify_problems(mf):
+            problems.append(hp)
         if (mf.get("source") or {}).get("released") is False:
             print("[doctor] 提示：安装期提交不在任何 tag 里（非发布构建）——版本号相同，"
                   "内容可能与该版本的 npm 包不同（R10-2）；要一字不差请用 "
