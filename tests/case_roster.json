@@ -602,7 +602,13 @@
       "carrier": "tests/test_router_corpus.py"
     },
     "S204": {
-      "carrier": "tests/test_info_binding.py"
+      "carrier": "tests/test_e2e_suite_basis.py"
+    },
+    "S205": {
+      "carrier": "tests/test_e2e_suite_basis.py"
+    },
+    "S206": {
+      "carrier": "tests/test_e2e_suite_basis.py"
     },
     "U1": {
       "carrier": "tests/test_skeleton.py"

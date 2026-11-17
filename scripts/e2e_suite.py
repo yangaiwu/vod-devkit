@@ -44,10 +44,10 @@ SUITE = (
     {
         "id": "C1-verbatim-long",  # E3 反截断
         "rule": "反截断红线：整句才是原话",
-        "prompt": ("帮我记录反馈：{t}{content_start}试着用你们家的批量导入功能，把我折腾惨了，"
+        "prompt": ("帮我提交反馈：{t}{content_start}试着用你们家的批量导入功能，把我折腾惨了，"
                    "导到一半卡死，进度条也不动，等了十分钟只能重来，"
                    "重新导又提示格式错误，来来回回搞了一下午"),
-        "anchor": "帮我记录反馈",
+        "anchor": "帮我提交反馈",
         "tail": "批量导入功能把我折腾惨了",
         "expect": "submit_consent",
     },
@@ -70,16 +70,16 @@ SUITE = (
     {
         "id": "C4-single-row-two-complaints",  # E7 一次抱怨=一条
         "rule": "一条消息多个抱怨不得拆成多条变体",
-        "prompt": "帮我反馈一下：{t}{content_start}你们家网页卡，回复也慢",
-        "anchor": "帮我反馈一下",
+        "prompt": "帮我提交一下反馈：{t}{content_start}你们家网页卡，回复也慢",
+        "anchor": "帮我提交一下反馈",
         "tail": "网页卡",
         "expect": "single_row",
     },
     {
         "id": "C5-baseline-consent",  # 回执纪律基线
         "rule": "确认提交→逐字收录→原样转述",
-        "prompt": "帮我提交反馈：{t}{content_start}你们家搜索结果排序太乱了，找东西全靠翻页",
-        "anchor": "帮我提交反馈",
+        "prompt": "请帮我提交反馈：{t}{content_start}你们家搜索结果排序太乱了，找东西全靠翻页",
+        "anchor": "请帮我提交反馈",
         "tail": "搜索结果排序太乱了",
         "expect": "submit_consent",
     },
@@ -121,9 +121,11 @@ def case_by_anchor(content: str):
     的静态片段，均全套件唯一。双锚点根因（首夜实锤）：模型普遍剥掉指令
     前缀（「帮我提交反馈：」等），行内只剩 tail——单靠 anchor 会把剥前缀行
     误归 fabricated；tail 兜住后，剥前缀行正确归属并计 content_rewritten。"""
-    for c in SUITE:
-        if c["anchor"] and c["anchor"] in content:
-            return c
+    # S206：嵌套锚点按**最长**归属——顺序依赖的 substring 匹配会把「请帮我提交反馈：」
+    # 的行判给锚点「帮我提交反馈」的用例（实测），改写/回显桶就记到别人头上。
+    hits = [c for c in SUITE if c["anchor"] and c["anchor"] in content]
+    if hits:
+        return max(hits, key=lambda c: len(c["anchor"]))
     for c in SUITE:
         if c.get("tail") and c["tail"] in content:
             return c

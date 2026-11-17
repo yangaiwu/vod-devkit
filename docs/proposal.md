@@ -1932,6 +1932,8 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S202 | 元语汇只收工程搭配 | META 去掉裸「发布」「环境」，改收 发布流水线/发布流程/环境变量/测试环境/预发环境/构建产物；补「登录不上/登录不了/登不上」现象词；用户视角句（刚发布的版本打不开 / 生产环境卡死了）必须注入 |
 | S203 | 判定可解释 | `route_detail()` 返回 decision（strong/inject/silent）+ reason（strong-prefix/trigger/no-trigger/meta-discussion/empty）+ 命中的 trigger/meta 词；`route()` 是薄包装——单一判定路径 |
 | S204 | 绑定兜在工具回执 | `vod_search_products` 在有安装绑定时回 `installBinding` + `nextStep`（自指命中直接用、不要再追问；不要拿 catalog-default 无分候选问用户）；无绑定不给 |
+| S205 | 用例基准的提交指令 | 期望落库的用例（submit_consent/single_row）提示词头部必须含明确提交指令（提交/收录/上报）——只写「记录/反馈」时纪律要求二次确认，用例永远达不到 |
+| S206 | 锚点归属 | 命中多个 anchor 时按**最长**归属（不按 SUITE 顺序）；嵌套锚点必须归到外层用例，配套「任一 anchor 是别人的子串 → 归属仍正确」的参数化断言 |
 | S192 | 退出码与回执不可判 | 0 全绿 / 1 违规 / 2 熔断 / 3 不可判 / 4 鉴权或引擎 4xx（优先级 1>2>3>4）；空回复+有落库 → `reply_indeterminate` 不进 fails、内容判据照跑；横幅打 model+argv、收尾打 `e2e[exit]` |
 | S193 | 路由词表并表 | `TRIGGER_WORDS` ⊇ SKILL 的 S184 现象词（失败/打不开/超时/崩）+ 口语词；裸「卡」加边界；META 移出共用词（接口/配置/字段/日志/版本）、改收工程动作词 |
 | S194 | 不可判只管网线 | 回执不可判不清空 fails（内容线结论保留）；单出口 `decide_exit` 让异常路径带已收违规（有违规 exit 1）；异常报文逐条打 FAIL、未完成数取剩余 |

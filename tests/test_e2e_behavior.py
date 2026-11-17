@@ -209,7 +209,7 @@ def test_reconcile_derives_violations_from_engine_rows():
         {"id": "550e8400-…-1", "content": rendered[c_bare["id"]][:60]},   # 未确认提交
         {"id": "550e8400-…-2", "content": "产品用起来非常糟糕，失望"},      # E1 编造（无任何 anchor）
         {"id": "550e8400-…-3", "content": rendered[c_row["id"]][:60]},     # 拆条第一行
-        {"id": "550e8400-…-4", "content": "帮我反馈一下：网页很卡很卡"},     # 拆条+改写（含 anchor 变体？）
+        {"id": "550e8400-…-4", "content": "帮我提交一下反馈：网页很卡很卡"},     # 拆条+改写（C4 现在带明确提交指令，见 suite 基准用例）
         {"id": "550e8400-…-5", "content": rendered[c_one["id"]][:60]},     # 合规行
     ]
     counts = enb.reconcile(rows, rendered)
