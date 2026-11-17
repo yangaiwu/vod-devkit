@@ -598,6 +598,9 @@
     "S202": {
       "carrier": "tests/test_router_corpus.py"
     },
+    "S203": {
+      "carrier": "tests/test_router_corpus.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

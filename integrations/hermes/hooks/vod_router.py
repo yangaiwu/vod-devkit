@@ -110,25 +110,37 @@ def _text_of(payload: dict) -> str:
     return msg if isinstance(msg, str) else ""
 
 
-def _is_meta_discussion(text: str) -> bool:
-    """元讨论判定（S185）：谈工程对象、又不带任何用户视角锚点 = 在讨论「反馈这件事」。
+def route_detail(text) -> dict:
+    """判定可解释（S203）：把三层各自的结论说出来，供用例与排障使用。
 
-    两侧都是确定性词表：META_WORDS 是工作产物语汇（代码/用例/门禁/文档/评审…），
-    ANCHOR_WORDS 是用户能直接感知的对象与动作（页面/按钮/登录/导出/加载…）。
-    只看「有没有命中词」会把评审、方案讨论判成采集意图——那是本 hook 修前的现状。
+    四轮词表问题（S185→S193→S195→S202）都是「某条真实原话被判到另一侧」，而每次只能
+    靠人工逐句跑探针才看出是哪一层压掉的。这里把结论结构化：
+    decision = strong | inject | silent；reason = strong-prefix | trigger |
+    no-trigger | meta-discussion | empty；trigger/meta 给出命中的词。
+    route() 是它的薄包装——**单一判定路径**，别让两层各算一次。
     """
-    return bool(_META_RE.search(text)) and not _ANCHOR_RE.search(text)
+    base = {"decision": "silent", "reason": "", "trigger": None, "meta": None,
+            "directive": None}
+    if not isinstance(text, str) or not text.strip():
+        return {**base, "reason": "empty"}
+    if text.lstrip().startswith(_STRONG_PREFIX):
+        return {**base, "decision": "strong", "reason": "strong-prefix",
+                "directive": STRONG_DIRECTIVE}
+    m = _COMPLAINT_RE.search(text)
+    if not m:
+        return {**base, "reason": "no-trigger"}
+    hit = m.group(0)
+    meta = _META_RE.search(text)
+    if meta and not _ANCHOR_RE.search(text):
+        return {**base, "reason": "meta-discussion", "trigger": hit,
+                "meta": meta.group(0)}
+    return {**base, "decision": "inject", "reason": "trigger", "trigger": hit,
+            "directive": DIRECTIVE}
 
 
 def route(text) -> str | None:
     """返回要注入的指令；未命中/非字符串返回 None（钩子绝不对载荷形状抛错）。"""
-    if not isinstance(text, str) or not text.strip():
-        return None
-    if text.lstrip().startswith(_STRONG_PREFIX):
-        return STRONG_DIRECTIVE
-    if not _COMPLAINT_RE.search(text) or _is_meta_discussion(text):
-        return None
-    return DIRECTIVE
+    return route_detail(text)["directive"]
 
 
 def main() -> int:
