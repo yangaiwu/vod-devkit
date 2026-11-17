@@ -167,6 +167,21 @@ def exit_code(fails, action: str, *, indeterminate: bool = False,
     return 0
 
 
+def decide_exit(fails, action: str, *, indeterminate: bool = False,
+                auth_error: bool = False) -> int:
+    """所有出口（正常收尾 / 引擎异常）共用的判定（S194）。
+
+    异常路径也必须带上已收集的 fails：第 1 条真违规 + 第 2 条遇 502 时，
+    结论是「有违规」（exit 1），不是「没结论」（exit 3）。
+    """
+    return exit_code(fails, action, indeterminate=indeterminate, auth_error=auth_error)
+
+
+def remaining_cases(total: int, processed: int) -> int:
+    """异常报文里的「未完成 N 条」——剩余数，不是计划总数（S194）。"""
+    return max(0, int(total) - int(processed))
+
+
 def print_run_banner(host: str, model: str | None, argv: list) -> None:
     """运行横幅（S192）：模型与 argv 必须进日志——带 --model 的结论事后要能审计。"""
     print(f"[e2e] host={host} model={model or '（宿主默认）'} argv={' '.join(map(str, argv))}")
@@ -408,13 +423,13 @@ def run_case(host: str, case: dict, cfg: dict, model: str | None = None) -> dict
         fails.append(f"回复外露机制词：{leaks}")
         record_violation(host, "mechanism_leak", cfg["window_days"])
 
+    # S194：回执不可判只管**回显线**——内容线已经得出的结论（改写等）必须留在 fails 里，
+    # 否则 exit_code 会把它当「没结论」，真违规不可见（评审实测 exit 3 吞掉 content_rewritten）。
+    out = {"case": case["id"], "rule": case["rule"], "fails": fails, "prompt": prompt,
+           "rows": [{"id": r["id"], "content": r["content"]} for r in rows]}
     if reply_indeterminate:
-        return {"case": case["id"], "rule": case["rule"], "fails": [],
-                "prompt": prompt, "reply_indeterminate": True,
-                "rows": [{"id": r["id"], "content": r["content"]} for r in rows]}
-    return {"case": case["id"], "rule": case["rule"], "fails": fails,
-            "prompt": prompt,
-            "rows": [{"id": r["id"], "content": r["content"]} for r in rows]}
+        out["reply_indeterminate"] = True
+    return out
 
 
 def main() -> None:
@@ -447,37 +462,48 @@ def main() -> None:
             print("[grade] prompt 含明确同意语 → 合规指令，提交不计违规")
 
     all_fails, total_rows, indeterminate, reply_unjudged = [], 0, [], []
+    processed = 0
     try:
         for case in cases:
             res = run_case(a.host, case, cfg, a.model)
+            processed += 1
             total_rows += len(res["rows"])
             if res.get("indeterminate"):
                 indeterminate.append(res["case"])
                 print(f"[不可判] {res['case']}（{res['rule']}）：{res['indeterminate']}")
                 continue
-            if res.get("reply_indeterminate"):
+            reply_bad = res.get("reply_indeterminate")
+            if reply_bad:
                 reply_unjudged.append(res["case"])
                 print(f"[回执不可判] {res['case']}（{res['rule']}）rows={len(res['rows'])}"
-                      f"：宿主回复为空，内容判据已跑（见 FAIL 行），回显线本轮无结论")
-                all_fails.extend(res["fails"])
-                continue
+                      f"：宿主回复为空，回显线本轮无结论（内容线结论见下）")
             status = "PASS" if not res["fails"] else "FAIL"
             print(f"[{status}] {res['case']}（{res['rule']}）rows={len(res['rows'])}")
-            for f in res["fails"]:
+            for f in res["fails"]:                    # S194：内容线结论照打，不许静默吞掉
                 print(f"  FAIL: {f}")
             all_fails.extend(res["fails"])
     except EngineUnavailable as e:
-        # 环境故障：单案已跑过不等于有结论，本轮不可判（禁止写成产品回归）
-        print(f"不可判：{e}")
-        print(f"已跑用例落库 {total_rows} 行，未完成 {len(cases)} 条计划——引擎恢复后重跑，"
-              f"不要按本轮判违规（S187 / D-engine-502-1）")
-        print(f"e2e[exit]=3 reason=engine-unavailable model={a.model or 'default'}")
-        sys.exit(3)
+        # 环境故障（S194）：已收到的违规不受影响——有真违规先报违规，别被「没结论」盖住
+        code = decide_exit(all_fails, "report", indeterminate=True)
+        print(f"引擎不可用：{e}")
+        print(f"已跑 {processed} 条、落库 {total_rows} 行，未完成 {remaining_cases(len(cases), processed)} 条")
+        for f in all_fails:
+            print(f"  FAIL(异常前已判): {f}")
+        if code == 1:
+            print(f"e2e[exit]=1 reason=violations(异常前已判) model={a.model or 'default'}")
+        else:
+            print(f"e2e[exit]=3 reason=engine-unavailable model={a.model or 'default'}")
+        sys.exit(code)
     except EngineAuthError as e:
         # 4xx：鉴权档/设备绑定/契约漂移是判定依据，不是环境故障、也不是产品违规
+        code = decide_exit(all_fails, "report", auth_error=True)
         print(f"鉴权/契约拒绝：{e}")
-        print(f"e2e[exit]=4 reason=engine-4xx model={a.model or 'default'}")
-        sys.exit(4)
+        print(f"已跑 {processed} 条、未完成 {remaining_cases(len(cases), processed)} 条")
+        for f in all_fails:
+            print(f"  FAIL(异常前已判): {f}")
+        print(f"e2e[exit]={code} reason={'violations(异常前已判)' if code == 1 else 'engine-4xx'} "
+              f"model={a.model or 'default'}")
+        sys.exit(code)
 
     # 熔断判定（配置化；默认 report=只报告不改行为）
     counts = bucket_counts(json.loads(COUNTER.read_text()) if COUNTER.exists() else {},
@@ -491,7 +517,7 @@ def main() -> None:
               f"不得计入熔断、不得写成产品回归；环境恢复后重跑（S189）")
     print(f"用例 {len(cases)} 条，落库 {total_rows} 行，违规 {len(all_fails)} 项；"
           f"分桶计数 {counts}；熔断动作={action}（计数见 .e2e-behavior.json）")
-    code = exit_code(all_fails, action,
+    code = decide_exit(all_fails, action,
                      indeterminate=bool(indeterminate or reply_unjudged))
     reason = ("violations" if code == 1 else "fuse" if code == 2
               else "indeterminate" if code == 3 else "ok")
