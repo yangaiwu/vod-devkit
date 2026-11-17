@@ -238,3 +238,39 @@ def test_s192_banner_prints_model_and_argv(capsys):
     e2e.print_run_banner("codex", "glm-5.3-flash", e2e.host_cmd("codex", "p", "glm-5.3-flash"))
     out = capsys.readouterr().out
     assert "model=glm-5.3-flash" in out and "argv=" in out, out
+
+
+# --- S194：回执不可判不得吞内容违规；异常路径不得丢已收违规（2026-11-17 评审 P1/P2）---
+# 评审实测：C1 引擎内容被改写 + 宿主回复为空 → reply_indeterminate=True、fails=[]、
+# 本地记账 ['content_rewritten']、exit 3。也就是「不可判」把**内容线已得出的结论**一起吞了，
+# 自动化只读退出码与报文 → 真违规看不见。这正是 S189/S192 自己写的红线：
+# 不可判只该管回执线，不得兜住真缺陷。
+def test_s194_rewritten_content_survives_reply_indeterminate(monkeypatch):
+    rec = []
+    prompt, start = e2e.render_with_offset(dict(e2e.SUITE[0]))
+    rows = [{"id": "V1", "content": "被我改写过的内容"}]          # 内容≠原话前缀
+    monkeypatch.setattr(e2e, "run_host", lambda *a, **kw: "")
+    monkeypatch.setattr(e2e, "_await_engine_rows", lambda *a, **kw: rows)
+    monkeypatch.setattr(e2e, "record_violation",
+                        lambda host, kind, days=7: rec.append(kind) or 1)
+    res = e2e.run_case("codex", dict(e2e.SUITE[0]),
+                       {"threshold": 2, "window_days": 7, "action": "report"})
+    assert res.get("reply_indeterminate"), "空回复仍要标回执不可判"
+    assert res["fails"], "内容被改写必须留在 fails 里（不可判只管回显线）"
+    assert any("改写" in f for f in res["fails"]), res["fails"]
+    assert e2e.exit_code(res["fails"], "report", indeterminate=True) == 1, \
+        "有真违规 → exit 1（优先级 1 > 3）"
+
+
+def test_s194_exception_path_keeps_collected_violations():
+    """异常路径（引擎 5xx / 4xx）不得把已经收到的违规冲成「没结论」。"""
+    assert e2e.decide_exit(["真缺陷"], "report", indeterminate=False,
+                           auth_error=True) == 1
+    assert e2e.decide_exit([], "report", indeterminate=False, auth_error=True) == 4
+    assert e2e.decide_exit([], "report", indeterminate=True) == 3
+
+
+def test_s194_remaining_count_is_not_total():
+    """异常报文里的「未完成 N 条」必须是剩余数，不是计划总数。"""
+    assert e2e.remaining_cases(total=5, processed=2) == 3
+    assert e2e.remaining_cases(total=5, processed=5) == 0

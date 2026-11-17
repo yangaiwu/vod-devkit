@@ -80,3 +80,26 @@ def test_s193_shared_vocabulary_not_in_meta():
     """接口/配置/字段/日志/版本 是用户与工程师共用词，放进 META 等于压掉用户视角。"""
     for w in ("接口", "配置", "字段", "日志", "版本"):
         assert w not in router.META_WORDS, f"共用词「{w}」不该进元讨论词表"
+
+# --- S195：工程第二层 + 礼貌「麻烦」的误注入（2026-11-17 评审 P2b）----------------
+# 并表修好了上一轮 9 条，但「同病换词」：工程第二层（构建/编译/发布/流水线）不在 META，
+# 「麻烦」当触发词太宽（礼貌句被当抱怨）。另：评审那条消息本身就被路由注入了，属同类现场。
+ENGINEERING_LAYER = (
+    "构建失败，帮我查下 CI 日志",
+    "编译失败了看下报错",
+    "发布失败了回滚吧",
+    "流水线超时了",
+)
+
+
+def test_s195_engineering_second_layer_stays_silent():
+    for msg in ENGINEERING_LAYER:
+        assert router.route(msg) is None, f"工程第二层被误注入：{msg}"
+
+
+def test_s195_polite_mafan_is_not_complaint():
+    for msg in ("麻烦你重发一下邮件", "麻烦确认下会议时间", "谢谢，麻烦你了"):
+        assert router.route(msg) is None, f"礼貌句被当抱怨：{msg}"
+    # 真抱怨仍要命中
+    for msg in ("操作太麻烦了", "这个流程麻烦死了"):
+        assert router.route(msg) is not None, f"真实抱怨漏判：{msg}"
