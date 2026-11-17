@@ -542,7 +542,7 @@
       "carrier": "tests/test_skill_display_rules.py"
     },
     "S184": {
-      "carrier": "tests/test_skill_display_rules.py"
+      "carrier": "tests/test_router_corpus.py"
     },
     "S185": {
       "carrier": "tests/test_router.py"
@@ -564,6 +564,12 @@
     },
     "S191": {
       "carrier": "tests/test_skill_display_rules.py"
+    },
+    "S192": {
+      "carrier": "tests/test_e2e_engine_resilience.py"
+    },
+    "S193": {
+      "carrier": "tests/test_router_corpus.py"
     },
     "U1": {
       "carrier": "tests/test_skeleton.py"

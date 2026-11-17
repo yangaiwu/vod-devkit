@@ -64,10 +64,18 @@ def test_r6_multiline_combined_message():
 
 
 def test_r7_regex_assembled_from_trigger_table():
-    """R7：单一事实源——正则由 TRIGGER_WORDS 自动组装，无第二处硬编码。"""
+    """R7：单一事实源——正则由 TRIGGER_WORDS 自动组装，无第二处硬编码。
+
+    本轮起裸「卡」在装配时加边界（卡片/卡号/卡券…不是抱怨），所以逐词 re.escape 的
+    结果会有**且仅有**这一处差异；装配函数就是唯一真源，别的词仍必须逐字一致。
+    """
     import re as _re
-    expected = _re.compile("|".join(_re.escape(w) for w in router.TRIGGER_WORDS))
-    assert expected.pattern == router._COMPLAINT_RE.pattern
+    assert _re.compile(router._trigger_pattern()).pattern == router._COMPLAINT_RE.pattern
+    for w in router.TRIGGER_WORDS:
+        if w == "卡":
+            continue
+        assert _re.escape(w) in router._COMPLAINT_RE.pattern, w
+    assert "卡(?!片" in router._COMPLAINT_RE.pattern, "裸「卡」必须带边界"
     # 表内每个词都能命中
     for w in router.TRIGGER_WORDS:
         if w == "提交反馈":

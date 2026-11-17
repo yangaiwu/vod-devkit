@@ -427,7 +427,19 @@ def test_s175_3_register_hooks_replaces_old_command(monkeypatch, tmp_path):
 
     hermes._register_hooks(cfg)          # 不许 KeyError
     text = cfg.read_text(encoding="utf-8")
-    assert "python3.12" not in text, text
+    # S192 评审修正：不许断言版本串——测试解释器是 3.12 时，`"python3.12" not in text`
+    # 会把**正确替换后的**命令也判红（本地核验因此误判成产品回归）。改判形态：
+    # ① 旧路径没了 ② 命令指向当前 hook 脚本 ③ 两条 hook 同一解释器（且就是当前解释器）。
+    import re as _re
+    import sys as _sys
+    cmds = _re.findall(r'command:\s*"([^"]+)"', text)
+    assert len(cmds) == 2, text
+    assert not any("/old/hooks/" in c for c in cmds), text
+    assert any(c.split()[-1].endswith("vod_guard.py") for c in cmds), text
+    assert any(c.split()[-1].endswith("vod_router.py") for c in cmds), text
+    interps = {c.split()[0] for c in cmds}
+    assert len(interps) == 1, f"两条 hook 必须同一解释器：{interps}"
+    assert interps.pop() == _sys.executable, "解释器必须是当前运行的那一个（不是写死的版本）"
     assert str(hermes._hook_script()) in text
     assert text.count(str(hermes._hook_script())) == 1, "不许插成两条"
 

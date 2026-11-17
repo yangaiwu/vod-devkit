@@ -1927,6 +1927,8 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S189 | 回合无产出 | 回复为空且零落库 → `indeterminate`：无 fails、零记账、`[不可判]` 打印并 exit 2（与违规 exit 1 分档）；有落库或有回复照常判 |
 | S190 | 用例基准的自指前提 | 正向用例（submit_consent/single_row）必须含 `attribution.SELF_REFERENCE` 任一词；负向用例不得被判成 explicit_consent；自指词表单一真源、用例文件不复制 |
 | S191 | 自指命中后不追问产品 | 原话含自指词（attribution.SELF_REFERENCE）且安装绑定过产品 → 按安装先验归因、不再问产品；草稿回执 `attribution.source=install_binding` 为佐证；自指与先验都没有才追问 |
+| S192 | 退出码与回执不可判 | 0 全绿 / 1 违规 / 2 熔断 / 3 不可判 / 4 鉴权或引擎 4xx（优先级 1>2>3>4）；空回复+有落库 → `reply_indeterminate` 不进 fails、内容判据照跑；横幅打 model+argv、收尾打 `e2e[exit]` |
+| S193 | 路由词表并表 | `TRIGGER_WORDS` ⊇ SKILL 的 S184 现象词（失败/打不开/超时/崩）+ 口语词；裸「卡」加边界；META 移出共用词（接口/配置/字段/日志/版本）、改收工程动作词 |
 
 ## 预采集路由的判定口径（S185/S186，D-router-scope-1，2026-11-17）
 

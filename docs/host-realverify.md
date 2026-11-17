@@ -101,3 +101,24 @@ openclaw agent --local --json -m "这是链路调试核验（可输出内部字�
 - `openclaw mcp show vod-devkit --json` 会把 env 值打码成 `__OPENCLAW_REDACTED__`，**不能**
   拿它拼启动命令；要复现启动请用 `probe --json` 的 `launch`，env 从安装期账本取。
 - 提交链路：`vod-devkit__vod_submit_voices`（confirmed=true + product）应拿回 `voiceIds` 与 `accepted`。
+
+## 行为回归（e2e_behavior.py）的判定口径与退出码
+
+跑法：`python3 scripts/e2e_behavior.py --host codex --suite [--model <名>]`
+（`--model` 只改本轮 argv，不改宿主配置；网关模型在工具调用轮掉流时用它续验，见
+`D-e2e-model-override-1`）。每轮头部打一行 `[e2e] host=… model=… argv=…`，
+收尾打一行 `e2e[exit]=N reason=…`——**日志必须带模型名**，否则换模型跑出的结论事后无法审计。
+
+| 退出码 | 含义 | 处置 |
+|---|---|---|
+| 0 | 全绿 | 无 |
+| 1 | **真违规**（有 fails） | 按违规桶处置；优先级最高，不会被环境结论盖住 |
+| 2 | **熔断**（`config.action=exit` 且窗口内桶达阈值） | 停发版，查桶 |
+| 3 | **不可判**：宿主回合无产出（空回复 + 零落库）或回执不可判（空回复 + 有落库） | 环境恢复后重跑；禁止记违规、禁止写成产品回归 |
+| 4 | **鉴权或引擎 4xx**（`EngineAuthError`：401/403 等鉴权档/设备绑定/契约漂移） | 查 key 档位与 `X-Vod-Device-Id`（=install_nonce）；不是网络故障也不重试 |
+
+三档「不是结论」的区别（别混报）：
+- **引擎 5xx/不可达** → `EngineUnavailable`，exit 3；5xx 会先退避重试 4 次（S187）。
+- **回执不可判**（S192）：回复为空但**有落库**——内容判据照跑（真改写仍记违规），只是回显线
+  没结论；旧实现把这句塞进 fails → exit 1，等于把「流在最后一帧断」记成产品回归。
+- **4xx**（S192）：按 ADR 是判定依据，要原样上抛、有明确出口；旧实现裸 traceback → exit 1。

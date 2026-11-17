@@ -92,8 +92,8 @@ def test_s187_4xx_is_judgement_data_not_retried(monkeypatch):
     monkeypatch.setattr(e2e.time, "sleep", lambda *_: None)
     try:
         e2e.engine_rows_since("2000-01-01 00:00:00")
-    except urllib.error.HTTPError as e:
-        assert e.code == 401
+    except e2e.EngineAuthError as e:      # S192：4xx 改抛专用异常（语义仍是「原样上抛、不吞」）
+        assert "401" in str(e)
     else:
         raise AssertionError("401 必须原样抛出（鉴权/设备判定依据）")
     assert len(calls) == 1, "4xx 不得重试（重试只会放大鉴权压力）"
