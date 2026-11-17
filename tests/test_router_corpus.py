@@ -127,3 +127,35 @@ def test_s199_ka_guard_is_the_only_special_case():
     pattern = router._trigger_pattern()
     assert pattern.count("(?!") == 1, "出现了第二处边界规则，需在词表纪律里显式登记"
     assert router._KA_GUARD in pattern
+
+
+# --- S202：第三轮"同病换词"——"发布/环境"把用户视角压掉 ---------------------------
+# 实测（评审语料，2026-11-17）："你们刚发布的版本打不开"/"生产环境卡死了"/"升级环境之后白屏了"
+# 全部零注入，因为 META 收了裸词「发布」「环境」——而同一份提交里的 hermes-router.md 明写
+# 「共用词（接口/配置/字段/日志/版本）不算元语汇」。文档与实现自相矛盾。
+# 判据：META 只收**工程搭配**（发布流水线/发布流程/环境变量/测试环境/预发环境/构建产物），
+# 不收裸词；用户视角句必须注入。
+USER_PERSPECTIVE = (
+    "你们刚发布的版本打不开",
+    "生产环境卡死了，整个流程走不下去",
+    "升级环境之后白屏了",
+    "版本发布后登录不上了",
+)
+
+
+def test_s202_release_and_env_are_not_meta_words():
+    for w in ("发布", "环境"):
+        assert w not in router.META_WORDS, f"共用词「{w}」不该进元讨论词表（文档与实现要一致）"
+    for w in ("发布流水线", "环境变量", "测试环境"):
+        assert w in router.META_WORDS, f"工程搭配「{w}」应在 META 里（工程语境才该排除）"
+
+
+def test_s202_user_perspective_sentences_still_inject():
+    for msg in USER_PERSPECTIVE:
+        assert router.route(msg) is not None, f"用户视角被压掉：{msg}"
+
+
+def test_s202_engineering_release_contexts_stay_silent():
+    for msg in ("发布流水线挂了，看下日志", "环境变量没配对，构建失败了",
+                "测试环境连不上，排查一下"):
+        assert router.route(msg) is None, f"工程语境误注入：{msg}"

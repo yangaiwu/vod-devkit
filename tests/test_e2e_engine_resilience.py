@@ -301,3 +301,29 @@ def test_s197_tee_writes_both_streams(tmp_path):
     tee.flush()
     f.close()
     assert "hello" in (tmp_path / "x.log").read_text(encoding="utf-8")
+
+
+# --- S201：日志必须"写即可见"，且被 kill 也要能看出跑到第几案 --------------------
+# 评审现场（2026-11-17 16:50 那轮）：`.e2e-runs/*.log` 全程 0 字节，而调用方重定向的同轮日志
+# 有 610 字节、没有 e2e[exit] 收尾行。根因=`Tee.write` 只转发不 flush，文件按块缓冲；
+# `atexit` 只覆盖正常退出，被 kill 时缓冲全丢。旧用例先手动 `tee.flush()` 再读，测的是
+# 生产路径不会发生的调用顺序——所以绿着失效。
+def test_s201_tee_is_visible_without_manual_flush(tmp_path):
+    f = (tmp_path / "x.log").open("w", encoding="utf-8")
+    tee = e2e.Tee(sys.stdout, f)
+    tee.write("line-without-flush\n")          # 不调 flush
+    assert "line-without-flush" in (tmp_path / "x.log").read_text(encoding="utf-8"), \
+        "Tee.write 必须立即落盘（否则被 kill 的轮次留下 0 字节日志）"
+    f.close()
+
+
+def test_s201_run_suite_prints_case_heartbeat(monkeypatch, capsys):
+    """每案开始先打一行心跳：进程被 kill 时也能看出跑到第几案。"""
+    monkeypatch.setattr("e2e_behavior.run_case",
+                        lambda host, case, cfg, model=None: {"case": case["id"], "rule": "r",
+                                                             "fails": [], "rows": []})
+    cases = [{"id": "c1", "rule": "r", "prompt": "p", "expect": "submit_consent"},
+             {"id": "c2", "rule": "r", "prompt": "p", "expect": "submit_consent"}]
+    e2e.run_suite("codex", cases, {"threshold": 2, "window_days": 7, "action": "report"})
+    out = capsys.readouterr().out
+    assert "[case 1/2] c1" in out and "[case 2/2] c2" in out, out
