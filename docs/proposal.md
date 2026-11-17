@@ -1939,6 +1939,7 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S209 | 回执字段进契约 | `vod_search_products.output` 登记 `installBinding`/`nextStep`；用例断言handler 返回键 ⊆ 契约 properties |
 | S210 | 巡检按 commitSha 对账 | `_payload_drift()`：版号相等不算对账，载荷 commitSha ∉ 账本该版本的 sha 集 → DRIFT（同版号换内容必须报） |
 | S211 | 第二判定路径 | `DISABLE_WORDS`（用不了/没法用/挂了/闪退/丢了/空的/没动静/不相关/难用/不回/转圈/自动刷新）+ TRIGGER 任一命中即采集意图；META 且无 ANCHOR 仍零注入 |
+| S212 | 框架信封零注入 | 内部通知/后台回执/压缩摘要/prior context（`[INTERNAL NOTIFICATION`、`[IMPORTANT: Background process`、`[PRIOR CONTEXT`、`[CONTEXT COMPACTION`、gateway 自述）→ `reason=envelope` 静默；`[OUT-OF-BAND USER MESSAGE …]` 是用户本人消息，仍正常判定 |
 | S192 | 退出码与回执不可判 | 0 全绿 / 1 违规 / 2 熔断 / 3 不可判 / 4 鉴权或引擎 4xx（优先级 1>2>3>4）；空回复+有落库 → `reply_indeterminate` 不进 fails、内容判据照跑；横幅打 model+argv、收尾打 `e2e[exit]` |
 | S193 | 路由词表并表 | `TRIGGER_WORDS` ⊇ SKILL 的 S184 现象词（失败/打不开/超时/崩）+ 口语词；裸「卡」加边界；META 移出共用词（接口/配置/字段/日志/版本）、改收工程动作词 |
 | S194 | 不可判只管网线 | 回执不可判不清空 fails（内容线结论保留）；单出口 `decide_exit` 让异常路径带已收违规（有违规 exit 1）；异常报文逐条打 FAIL、未完成数取剩余 |

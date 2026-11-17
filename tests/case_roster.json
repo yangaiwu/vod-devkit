@@ -625,6 +625,9 @@
     "S211": {
       "carrier": "tests/test_router_corpus.py"
     },
+    "S212": {
+      "carrier": "tests/test_router_corpus.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },
