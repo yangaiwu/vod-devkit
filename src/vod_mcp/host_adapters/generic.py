@@ -16,6 +16,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from vod_mcp import paths as _paths
 from vod_mcp.host_adapters.base import server_env, server_entry
 
 HOST = "generic"
@@ -86,9 +87,7 @@ def merge_mcp_servers(path: Path, entry: dict, name: str = ENTRY_NAME) -> str:
         shutil.copyfile(path, str(path) + ".bak")
     servers[name] = entry
     cfg["mcpServers"] = servers
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8")
+    _paths.atomic_write_text(path, json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
     return action
 
 

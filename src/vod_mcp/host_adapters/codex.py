@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vod_mcp import paths as _paths
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import ROOT, server_env, server_entry
 
@@ -213,8 +214,7 @@ def rewrite_plugin_mcp(mcp_path, python: str = "", entry: str = "", env: dict | 
     merged.update(want_env)
     srv["env"] = merged
     try:
-        path.write_text(json.dumps(mj, ensure_ascii=False, indent=2) + "\n",
-                        encoding="utf-8")
+        _paths.atomic_write_text(path, json.dumps(mj, ensure_ascii=False, indent=2) + "\n")
     except OSError as e:
         raise PluginMcpRewriteError("not-writable", f"{path}: {e}") from e
     try:
@@ -256,7 +256,7 @@ def install(args, packs: str) -> Path:
             print(f"[vod-devkit] {e}。安装中止，未改动该文件。", file=sys.stderr)
             sys.exit(2)
         if cleaned != text.rstrip():
-            conf.write_text(cleaned + "\n", encoding="utf-8")
+            _paths.atomic_write_text(conf, cleaned + "\n")
             print(f"已移除旧 config.toml MCP 段（原生插件取代）：{conf}")
     agents = _codex_home() / "AGENTS.md"
     if agents.exists():  # 历史遗留：AGENTS.md 技能块已被原生 skill 取代
@@ -279,7 +279,7 @@ def install(args, packs: str) -> Path:
             agents.unlink()          # 整份都是我们的注入 → 文件本身也不留
             print(f"已删除空的 AGENTS.md（内容全为旧注入）：{agents}")
         elif cleaned != text.rstrip():
-            agents.write_text(cleaned + "\n", encoding="utf-8")
+            _paths.atomic_write_text(agents, cleaned + "\n")
             print(f"已移除旧 AGENTS.md 技能块（原生 skill 取代）：{agents}")
     mp_root = ROOT / "plugins"
     # 插件副本是生成物（v0.5.9 起零提交，见 .gitignore）。仓内直跑安装时若还没生成，

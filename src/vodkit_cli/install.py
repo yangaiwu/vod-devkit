@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from vod_mcp import hosts as host_specs
+from vod_mcp.paths import atomic_write_text as _atomic_write_text
 from vod_mcp import packs as packs_mod
 from vod_mcp.host_adapters import REGISTRY as HOST_ADAPTERS
 
@@ -260,7 +261,7 @@ def cmd_install(args):
     # 错归会进引擎幂等/判重域。候选只走 vod_search_products，这里不再写 host_product。
     cfg["java_base"] = args.java_api_base
     rt.parent.mkdir(parents=True, exist_ok=True)
-    rt.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_text(rt, json.dumps(cfg, ensure_ascii=False, indent=2))
     try:                      # 含 key/锚点：立刻收紧（与运行期写盘同口径）
         os.chmod(rt, 0o600)
     except OSError:

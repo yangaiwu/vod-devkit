@@ -17,6 +17,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from vod_mcp import paths as _paths
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import server_env, server_entry
 
@@ -63,8 +64,7 @@ def _read_json(path: Path) -> dict:
 def _write_json(path: Path, data: dict) -> None:
     if path.exists():
         shutil.copyfile(path, str(path) + ".bak")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _paths.atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
 
 def skills_dir(args):
@@ -88,11 +88,11 @@ def _write_mcp_entry(entry: dict) -> Path:
 def _register_plugin(pdir: Path) -> None:
     manifest = pdir / ".codex-plugin" / "plugin.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
-    manifest.write_text(json.dumps({
+    _paths.atomic_write_text(manifest, json.dumps({
         "name": NAME, "version": _version(),
         "description": "VOD 用户声音采集插件（MCP + 技能）",
         "skills": ["skills"],
-    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    }, ensure_ascii=False, indent=2) + "\n")
 
     mp_path = marketplace_path()
     mp = _read_json(mp_path)

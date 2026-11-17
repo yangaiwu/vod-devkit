@@ -18,6 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vod_mcp import paths as _paths
 from vod_mcp import hosts as host_specs
 
 
@@ -320,8 +321,7 @@ def upsert_patch(patch: Path, block: str) -> bool:
     old_text = patch.read_text(encoding="utf-8") if patch.exists() else ""
     if new_text == old_text:
         return False
-    patch.parent.mkdir(parents=True, exist_ok=True)
-    patch.write_text(new_text, encoding="utf-8")
+    _paths.atomic_write_text(patch, new_text)
     return True
 
 
@@ -343,9 +343,8 @@ def remove_patch_block(patch: Path) -> bool:
     start, end = find_dsh_block(lines)
     if start is None:
         return False
-    patch.write_text(
-        "\n".join(lines[:start] + lines[end:]).rstrip("\n") + "\n",
-        encoding="utf-8")
+    _paths.atomic_write_text(
+        patch, "\n".join(lines[:start] + lines[end:]).rstrip("\n") + "\n")
     return True
 
 

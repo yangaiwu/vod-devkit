@@ -319,7 +319,7 @@ def _write_packs(row: dict, new_packs: tuple, apply: bool) -> tuple:
     shutil.copyfile(path, str(path) + ".bak")
     env["VOD_PACKS"] = want
     entry[env_key] = env
-    path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    common.atomic_write_text(path, json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
     # 写后读回：写成功 ≠ 落盘就是我们要的（并发改写/宿主升级会改回去）
     back = json.loads(path.read_text(encoding="utf-8"))
     hit2 = _locate_entry(back)

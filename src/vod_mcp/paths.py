@@ -173,8 +173,7 @@ def migrate_state_once() -> dict:
             os.chmod(state, 0o700)
         except OSError:
             pass
-        marker.write_text(json.dumps({"from": str(legacy), "migrated": True}) + "\n",
-                          encoding="utf-8")
+        atomic_write_text(marker, json.dumps({"from": str(legacy), "migrated": True}) + "\n")
         return {"migrated": True, "from": str(legacy), "reason": None}
     except OSError:
         return {"migrated": False, "from": None, "reason": "io-error"}
@@ -232,6 +231,14 @@ def atomic_write_text(path: Path | str, text: str, mode: int | None = None) -> N
     配置里有用户自己的其它 server 条目，权限不许因改写而放宽。
     """
     p = Path(path)
+    # 符号链接：os.replace 换的是链接本身（会把用户的 dotfiles 软链变成普通文件），
+    # 而 write_text 是跟随链接写的。落点先解析到真实目标，行为与旧写法一致（S180）。
+    if p.is_symlink():
+        p = p.resolve()
+    # 只读目标（无 owner 写位）在 tmp+replace 下会被静默覆盖（目录可写即可 replace），
+    # 与旧 write_text 的 PermissionError 语义不同——用户 chmod 444 就是要保护，先拒（S180）。
+    if p.exists() and not (p.stat().st_mode & 0o200):
+        raise PermissionError(30, "目标文件没有写权限（chmod 444 保护）", str(p))
     p.parent.mkdir(parents=True, exist_ok=True)
     if mode is None:
         try:

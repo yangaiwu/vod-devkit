@@ -35,7 +35,7 @@ def _remove_managed_mcp_entry(target: str, path: Path) -> None:
             cfg.pop(section, None)
         else:
             cfg[section] = block
-        path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        common.atomic_write_text(path, json.dumps(cfg, ensure_ascii=False, indent=2))
         print(f"removed {section}.vod-devkit: {path}")
         return
     cli: str | None = None

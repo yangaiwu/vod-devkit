@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vod_mcp import paths as _paths
 from vod_mcp import hosts as host_specs
 from vod_mcp import paths
 from vod_mcp.host_adapters.base import server_env, server_entry
@@ -318,7 +319,7 @@ def _register_hooks(cfg_path: Path) -> None:
         if state != "unchanged":
             try:
                 cfg_path.parent.mkdir(parents=True, exist_ok=True)
-                cfg_path.write_text(new_text, encoding="utf-8")
+                _paths.atomic_write_text(cfg_path, new_text)
             except OSError as e:
                 print(f"[vod-devkit] warn: {label}写入失败（{e}）", file=sys.stderr)
                 continue
@@ -364,10 +365,10 @@ def install(args, packs: str) -> Path:
     """Hermes：官方途径 hermes mcp add（config.yaml mcp_servers）。"""
     conf = Path(_spec()["configPath"]).parent / "vod-devkit.json"
     conf.parent.mkdir(parents=True, exist_ok=True)
-    conf.write_text(json.dumps({
+    _paths.atomic_write_text(conf, json.dumps({
         "name": "vod-devkit", "command": sys.executable,
         "args": [server_entry()], "env": server_env(args, packs),
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    }, ensure_ascii=False, indent=2))
     env_args = []
     for k, v in server_env(args, packs).items():
         env_args.extend([k + "=" + v])
@@ -466,7 +467,7 @@ def install_remote(args, url, token):
     payload = {"name": "vod-devkit", "url": url}
     if token:   # 无 token 时不写 headers：请求不带 Bearer，走服务端匿名令牌
         payload["headers"] = {"Authorization": "Bearer ${MCP_VOD_DEVKIT_API_KEY}"}
-    conf.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _paths.atomic_write_text(conf, json.dumps(payload, ensure_ascii=False, indent=2))
     print(f"已注册 Hermes 远程 MCP（{url}；token 存 ~/.hermes/.env，配置内只留引用）")
     return conf
 
