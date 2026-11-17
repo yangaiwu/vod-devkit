@@ -563,7 +563,7 @@
       "carrier": "tests/test_e2e_suite_basis.py"
     },
     "S191": {
-      "carrier": "tests/test_skill_display_rules.py"
+      "carrier": "tests/test_info_binding.py"
     },
     "S192": {
       "carrier": "tests/test_e2e_engine_resilience.py"
@@ -576,6 +576,9 @@
     },
     "S195": {
       "carrier": "tests/test_router_corpus.py"
+    },
+    "S196": {
+      "carrier": "tests/test_info_binding.py"
     },
     "U1": {
       "carrier": "tests/test_skeleton.py"
