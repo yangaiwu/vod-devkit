@@ -37,7 +37,8 @@ def _hermes_problems(*, degraded: bool) -> list:
     if not st["present"]:
         code = "missing" if degraded else "no-entry"
         tail = ("手工把 <vod-devkit 备片> 并入该配置的 mcp_servers（无 CLI 时安装器只写备片）"
-                if degraded else "重跑 install（逐问回答 y）")
+                if degraded else
+                "重跑 install（有 hermes CLI 时逐问回答 y）；没有 CLI 则手工把备片并入 mcp_servers")
         return [{"code": code, "target": "hermes",
                  "message": f"hermes config.yaml 缺 mcp_servers.vod-devkit（{cfg}）——{tail}"}]
     if st["enabled_false"]:
