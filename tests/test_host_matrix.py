@@ -258,3 +258,44 @@ def test_s150_payload_version_helper_reads_payload_build_info(tmp_path):
         json.dumps({"version": "0.5.11"}), encoding="utf-8")
     assert m._payload_version(["/usr/bin/python3", str(p / "server.py")]) == "0.5.11"
     assert m._payload_version(["/usr/bin/python3"]) is None
+
+# --- S210：巡检必须按 commitSha 对账，不能只比版号 --------------------------------
+# 事故（2026-11-17）：用仓内入口 install 把 payloads/0.5.32 就地重打成含未发版提交（S204）的内容，
+# 版本号仍是 0.5.32、npm 上的 0.5.32 是另一个提交；巡检照旧 10 PASS，因为它只比 version 字符串。
+# 后果=对账面全错（registry_reconcile / publish_verify / 用户自查 / 巡检都按版号判"装的是 0.5.32"）。
+def test_s210_payload_drift_flags_same_version_different_commit(tmp_path):
+    import json as _json
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import host_matrix as hm
+
+    payload = tmp_path / "payloads" / "0.5.32"
+    (payload / "vod_mcp").mkdir(parents=True)
+    (payload / "vod_mcp" / "server.py").write_text("", encoding="utf-8")
+    (payload / "build-info.json").write_text(_json.dumps(
+        {"version": "0.5.32", "commitSha": "a20bcf820b8de1b8b6a2313bb0dffe9560c929e5"}),
+        encoding="utf-8")
+    argv = ["python3", str(payload / "vod_mcp" / "server.py")]
+
+    ok, msg = hm._payload_drift(argv, "0.5.32", expect_shas={"6905f04f88568bfcbd1698d8a788f6ccd492a20a"})
+    assert not ok, "同版号不同提交必须 DRIFT"
+    assert "commitSha" in msg or "内容" in msg, msg
+
+    ok2, _ = hm._payload_drift(argv, "0.5.32",
+                               expect_shas={"a20bcf820b8de1b8b6a2313bb0dffe9560c929e5"})
+    assert ok2, "同提交必须放行"
+
+
+def test_s210_payload_drift_keeps_version_check(tmp_path):
+    import json as _json
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import host_matrix as hm
+
+    payload = tmp_path / "p" / "vod_mcp"
+    payload.mkdir(parents=True)
+    (payload / "server.py").write_text("", encoding="utf-8")
+    (payload.parent / "build-info.json").write_text(
+        _json.dumps({"version": "0.5.9", "commitSha": None}), encoding="utf-8")
+    ok, msg = hm._payload_drift(["py", str(payload / "server.py")], "0.5.32", expect_shas=set())
+    assert not ok and "0.5.9" in msg, msg

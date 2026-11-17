@@ -193,3 +193,38 @@ def test_s203_route_is_a_thin_wrapper_over_route_detail():
     for msg in ("提交反馈：x", "页面白屏了", "建议增加一条门禁用例",
                 "生产环境卡死了", "看下日志", None, ""):
         assert route(msg) == route_detail(msg)["directive"], msg
+
+
+# --- S211：第二条判定路径——「用户视角锚点 + 失能/否定词」 ------------------------
+# 评审实测 12 条常见说法里 11 条零注入（这个功能今天直接挂了 / 点进去就闪退 / 数据丢了 /
+# 导出的表格是空的 / 提交按钮点了完全没动静 / 搜索出来一堆不相关的东西 / 这个版本太难用了 /
+# 客服一直不回我 / 等了半小时还在转圈 / 更新完以后就没法用了 / 这个页面老是自动刷新）。
+# 这是词表路线的固有覆盖率问题：补的是"我们想得到的说法"。第二条路径：
+# ANCHOR 命中（页面/按钮/搜索/导出/上传/登录…）+ 失能词（用不了/没法用/挂了/闪退/丢了/
+# 空的/没动静/转圈/不回/难用…）→ 注入；纯工程语境（有 META 且无 ANCHOR）仍零注入。
+COMMON_USER_WORDINGS = (
+    "这个功能今天直接挂了",
+    "用不了，点进去就闪退",
+    "数据丢了，重导也恢复不了",
+    "导出的表格是空的",
+    "提交按钮点了完全没动静",
+    "搜索出来一堆不相关的东西",
+    "你们这个版本太难用了",
+    "客服一直不回我",
+    "等了半小时都还在转圈",
+    "更新完以后就没法用了",
+    "这个页面老是自动刷新",
+    "批量上传超过 50 个就报错",
+)
+
+
+def test_s211_common_user_wordings_are_injected():
+    for msg in COMMON_USER_WORDINGS:
+        decision = router.route_detail(msg)
+        assert decision["decision"] != "silent", f"常见用户说法未命中：{msg}（reason={decision['reason']}）"
+
+
+def test_s211_engineering_context_still_silent():
+    for msg in ("数据库连接池卡住了，排查一下", "发布流水线挂了，看下日志",
+                "构建失败，帮我查下 CI 日志", "帮我把卡片组件的样式调一下"):
+        assert router.route(msg) is None, f"工程语境误注入：{msg}"

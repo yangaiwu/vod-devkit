@@ -79,3 +79,42 @@ def test_s204_no_binding_means_no_hint(monkeypatch):
     out = core.search_products({"query": "批量导入"})
     assert "installBinding" not in out and "nextStep" not in out, \
         "没绑定就不要给药方（缺证据仍按纪律先问一次）"
+
+
+# --- S208：nextStep 不许复制自指词表（第三处副本会收窄模型行为）-------------------
+# 评审实测：core.py 的 nextStep 硬编码「你们家/这个产品/本平台」三个例子，而真源
+# attribution.SELF_REFERENCE 有 16 个。模型很可能把这 3 个当穷举 → 行为变窄；
+# 而 S190 立过「不许复制自指词表」的纪律，这里没有锁。
+def test_s208_next_step_does_not_duplicate_self_reference_table():
+    from vod_mcp import attribution
+    from vod_mcp.packs import core
+    import unittest.mock as m
+
+    with m.patch.object(core.provenance, "install_binding", lambda: "CodeArts"), \
+         m.patch.object(core.net, "_load_meta",
+                        lambda: {"catalog": [{"id": "1", "name": "CodeArts"}]}):
+        out = core.search_products({"query": "批量导入"})
+    hint = out["nextStep"]
+    leaked = [w for w in attribution.SELF_REFERENCE if w in hint]
+    assert not leaked, f"nextStep 复制了自指词表举例（第二真源）：{leaked}"
+
+
+# --- S209：工具回执字段必须在契约里登记 -------------------------------------------
+# 评审实测：契约 vod_search_products.output 只有 candidates/total，S204 新增的
+# installBinding/nextStep 没登记——该文件自称「python/MCP 单一事实源」，账面缺字段且无门禁。
+def test_s209_contract_registers_every_search_products_field():
+    import json
+    from pathlib import Path
+    from vod_mcp.packs import core
+    import unittest.mock as m
+
+    contract = json.loads((Path(__file__).resolve().parent.parent
+                           / "assets" / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
+    props = contract["tools"]["vod_search_products"]["output"]["properties"]
+    with m.patch.object(core.provenance, "install_binding", lambda: "CodeArts"), \
+         m.patch.object(core.net, "_load_meta",
+                        lambda: {"catalog": [{"id": "1", "name": "CodeArts"}]}):
+        returned = set(core.search_products({"query": "x"}))
+    assert returned <= set(props), f"回执字段未登记进契约：{sorted(returned - set(props))}"
+    for k in ("installBinding", "nextStep"):
+        assert k in props, f"契约缺 {k}"
