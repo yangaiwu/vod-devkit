@@ -8,24 +8,41 @@ doctor 不查 configPath，于是出现「install rc=0 + doctor OK，工具却�
   no-entry  有 CLI 且写入动作发生过，读回没有条目 → **重跑 install**（install 非零退出）
   missing   降级（无 CLI / 超时 / rc!=0）本就没写 → **手工并入备片**（install rc=0，doctor 红）
   disabled  条目在但 enabled: false → 宿主不会加载（改回 true 或重跑 install）
+  mismatch  条目在但指向的 server.py 不存在（载荷被删/路径写错）
 
-范围：0.5.29 只接 **hermes**（本轮实测有 bug 的那条链：`hermes mcp add` 交互确认被跳过时
-rc=0 却不落配置）。codex 的注册态已由 doctor 既有的「.mcp.json 形态三分类」覆盖
-（payload / placeholder / cli，走 `plugin_mcp_form()`），此处**不得再报一次**：同一宿主
-两套判据必然长成「一侧 OK 一侧 DRIFT」。其余宿主（opencode / atomcode / workbuddy /
-codeartswork / codeartsdoer / generic）与 `audit` 侧同样待下一轮迁移到本模块。
+范围（S178 扩面）：
+  - hermes：`hermes mcp add` 交互被跳过时 rc=0 却不落配置（0.5.29 修）。
+  - opencode / atomcode / workbuddy / codeartswork / codeartsdoer：JSON 配置型宿主。
+    共同盲区是「合并器写完就打印成功」，被别的进程覆盖/写坏时 install 与 doctor 都看不见。
+  - codex 不在此（已由 doctor 的 `.mcp.json` 形态三分类 `plugin_mcp_form()` 判）；
+    同一宿主两套判据必然长成「一侧 OK 一侧 DRIFT」，所以这里不重复报。
+  - generic：配置路径由 `--mcp-config` 现给，没有稳定 spec，留待单独的「显式路径」判据。
 """
-SUPPORTED = ("hermes",)
+import json
+from pathlib import Path
+
+SUPPORTED = ("hermes", "opencode", "atomcode", "workbuddy", "codeartswork", "codeartsdoer")
+
+# host → (配置里的段名, command 是否为数组)
+_JSON_HOSTS = {
+    "opencode": ("mcp", True),
+    "codeartswork": ("mcp", True),
+    "codeartsdoer": ("mcp", True),
+    "atomcode": ("mcpServers", False),
+    "workbuddy": ("mcpServers", False),
+}
 
 
 def problems(host: str, *, degraded: bool = False) -> list:
     """返回 [] 表示注册可用；否则 [{"code", "target", "message"}]。
 
-    `degraded=True` 由调用方在「无 CLI / 命令超时 / CLI rc!=0」时传——
-    此时没有写入动作发生过，码是 missing（引导手工并入），不是 no-entry（引导重装）。
+    `degraded=True` 由调用方在「无 CLI / 命令超时 / CLI rc!=0」时传——此时没有写入
+    动作发生过，码是 missing（引导手工并入），不是 no-entry（引导重装）。
     """
     if host == "hermes":
         return _hermes_problems(degraded=degraded)
+    if host in _JSON_HOSTS:
+        return _json_problems(host, degraded=degraded)
     return []
 
 
@@ -46,3 +63,74 @@ def _hermes_problems(*, degraded: bool) -> list:
                  "message": f"hermes 的 mcp_servers.vod-devkit 被 enabled: false 关掉（{cfg}）"
                             "——改回 true 或重跑 install"}]
     return []
+
+
+def _entry_server_path(entry: dict) -> str:
+    """从条目里取出 server.py 的路径（两种形态：command 数组 / command+args）。"""
+    cand: list = []
+    cmd = entry.get("command")
+    if isinstance(cmd, list):
+        cand.extend(str(x) for x in cmd)
+    elif cmd:
+        cand.append(str(cmd))
+    cand.extend(str(x) for x in (entry.get("args") or []))
+    for c in cand:
+        if c.endswith(".py"):
+            return c
+    return ""
+
+
+def _json_problems(host: str, *, degraded: bool) -> list:
+    from vod_mcp import hosts as host_specs
+    from vod_mcp.host_adapters import REGISTRY
+
+    section, _ = _JSON_HOSTS[host]
+    try:
+        mod = REGISTRY[host]
+        # 落点必须与 install 同一来源（codeartswork 有新旧目录之分）
+        cfg = (mod.config_path() if hasattr(mod, "config_path")
+               else Path(host_specs.load(host)["configPath"]))
+    except (KeyError, ValueError):      # 未知宿主/路径缺 profile：不归本模块管
+        return []
+    data = {}
+    if cfg.is_file():
+        try:
+            data = json.loads(cfg.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return [{"code": "mismatch", "target": host,
+                     "message": f"{host} 的配置不是合法 JSON（{cfg}）——拒绝改写，先人工修"}]
+    block = data.get(section) if isinstance(data, dict) else None
+    entry = block.get("vod-devkit") if isinstance(block, dict) else None
+    if not isinstance(entry, dict):
+        code = "missing" if degraded else "no-entry"
+        return [{"code": code, "target": host,
+                 "message": f"{host} 配置里没有 {section}.vod-devkit（{cfg}）——"
+                            + ("手工按备片片段并入" if degraded else "重跑 install")}]
+    if entry.get("enabled") is False:
+        return [{"code": "disabled", "target": host,
+                 "message": f"{host} 的 {section}.vod-devkit 是 enabled: false（{cfg}）"
+                            "——改回 true 或重跑 install"}]
+    if entry.get("url") or entry.get("type") == "remote":
+        # 远程形态（streamable-http）：没有 server.py 参数，判据是 url 非空
+        if str(entry.get("url") or "").strip():
+            return []
+        return [{"code": "mismatch", "target": host,
+                 "message": f"{host} 的 {section}.vod-devkit 是远程形态但 url 为空（{cfg}）"
+                            "——重跑 install"}]
+    server = _entry_server_path(entry)
+    if not server or not Path(server).exists():
+        return [{"code": "mismatch", "target": host,
+                 "message": f"{host} 的 {section}.vod-devkit 指向的 server 不存在"
+                            f"（{server or '未找到 .py 参数'}）——重跑 install 重建载荷/条目"}]
+    return []
+
+
+def require_ok(host: str, *, degraded: bool = False) -> None:
+    """安装收尾用：读回不通过就非零退出（绝不打印成功）。"""
+    import sys
+
+    bad = problems(host, degraded=degraded)
+    for p in bad:
+        print(f"[vod-devkit] {p['message']}", file=sys.stderr)
+    if bad:
+        sys.exit(1)

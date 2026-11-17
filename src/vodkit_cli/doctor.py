@@ -267,7 +267,7 @@ def _hermes_host_problems() -> list:
                    "——重跑 install（或升级载荷）")
     out.extend(_hermes_hook_command_problems(
         text, _hermes._hook_script(), paths_mod.guard_script()))
-    if (Path.home() / ".hermes" / "plugins" / _hermes.LEGACY_PLUGIN).exists():
+    if (Path(_hermes._profile_config()).parent / "plugins" / _hermes.LEGACY_PLUGIN).exists():
         out.append("旧插件形态仍在（~/.hermes/plugins/vod-feedback-router）"
                    "= 与 hook 双份注入——重跑 install --target hermes 清理")
     return out
@@ -548,7 +548,8 @@ def cmd_doctor(args=None):
             print(f"[doctor] 载荷残留（无 payload.json）：{res}——可手动删除")
         # 旧一代 AGENTS.md 注入（2026-11-05 之前的 one-liner）：教模型跳过同意 +
         # 归因由安装绑定。实测 1705 个 codex 会话带着它 → 不动它就等于红线失效。
-        legacy_agents = Path.home() / ".codex" / "AGENTS.md"
+        from vod_mcp.host_adapters import codex as _codex
+        legacy_agents = _codex.codex_home() / "AGENTS.md"
         if legacy_agents.exists() and "vod-submit-one-liner" in legacy_agents.read_text(
                 encoding="utf-8"):
             problems.append(f"AGENTS.md 仍含旧一代注入（教模型跳过同意）：{legacy_agents}"

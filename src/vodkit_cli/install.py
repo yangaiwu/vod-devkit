@@ -10,6 +10,12 @@ from pathlib import Path
 from vod_mcp import hosts as host_specs
 from vod_mcp import packs as packs_mod
 from vod_mcp.host_adapters import REGISTRY as HOST_ADAPTERS
+
+
+def _codex_home():
+    """codex 家目录（CODEX_HOME 优先，S177）：标记文件必须与宿主同一落点。"""
+    from vod_mcp.host_adapters import codex as _cx
+    return _cx.codex_home()
 from vod_mcp.host_adapters import generic as generic_host
 from vod_mcp import paths
 from vodkit_cli import common, remote
@@ -195,7 +201,7 @@ def cmd_install(args):
     # 若产品校验/安装中途失败，熔断不得已被解除）。
     pending_ack = False
     if target == "codex" and "collect" in (packs or "").replace(" ", "").split(","):
-        marker = Path.home() / ".codex" / "vod-collect-suspended.json"
+        marker = _codex_home() / "vod-collect-suspended.json"
         if marker.is_file() and getattr(args, "ack_suspension", False):
             pending_ack = True  # 解除后置：安装成功才落
         elif marker.is_file():
@@ -313,10 +319,10 @@ def cmd_install(args):
     # P1-4 修正：ack 解除后置——安装全部成功才落（解除先于安装=失败安装
     # 也绕过了恢复门禁语义）
     if pending_ack:
-        marker = Path.home() / ".codex" / "vod-collect-suspended.json"
+        marker = _codex_home() / "vod-collect-suspended.json"
         if marker.is_file():
             marker.unlink()
-        audit = Path.home() / ".codex" / "vod-collect-suspension-audit.log"
+        audit = _codex_home() / "vod-collect-suspension-audit.log"
         with audit.open("a", encoding="utf-8") as f:
             f.write(f"{datetime.datetime.now().isoformat(timespec='seconds')}\t"
                     f"ack_suspension\tpacks={packs}\n")

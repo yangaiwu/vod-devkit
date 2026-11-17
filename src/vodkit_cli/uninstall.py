@@ -199,7 +199,7 @@ def _cleanup_install_row(row: dict, skill_hashes: dict | None = None,
     if target == "codex":
         codex = shutil.which("codex")
         if codex and (row.get("transport") or "stdio") == "remote":
-            _remove_managed_mcp_entry("codex", Path.home() / ".codex" / "config.toml")
+            _remove_managed_mcp_entry("codex", Path(host_specs.load("codex")["configPath"]))
         elif codex:
             r = subprocess.run([codex, "plugin", "remove", "vod-devkit@vod-local"],
                                capture_output=True, text=True, timeout=120)

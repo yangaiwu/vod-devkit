@@ -9,6 +9,19 @@ from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import ROOT, server_env, server_entry
 
 HOST = "codex"
+
+
+def codex_home() -> Path:
+    """codex 家目录（CODEX_HOME 优先，S177）。
+
+    宿主自己认的是 CODEX_HOME；写死 `Path.home()/.codex` 时设了变量的机器上会出现
+    「配置写给我们以为的落点、宿主读另一处」，且 doctor/巡检读同一份错落点，自洽地错。
+    """
+    from vod_mcp import paths
+    return paths.host_home("CODEX_HOME", ".codex")
+
+
+_codex_home = codex_home   # 兼容内部旧叫法
 SUPPORTS_REMOTE = True
 _AGENTS_MARKER_BEGIN = "<!-- vod-devkit:feedback-skill BEGIN -->"
 # 更早一代注入（2026-11-05 之前）：AGENTS.md 里教模型"立即提交 confirmed=true、
@@ -109,7 +122,7 @@ def locate_plugin_mcp(mp_name: str | None = "vod-local"):
     import glob as _glob
     mkt = mp_name or "*"
     hits = sorted(
-        _glob.glob(str(Path.home() / ".codex" / "plugins" / "cache"
+        _glob.glob(str(_codex_home() / "plugins" / "cache"
                        / mkt / "vod-devkit" / "*" / ".mcp.json")),
         key=lambda p: Path(p).stat().st_mtime, reverse=True)
     return Path(hits[0]) if hits else None
@@ -245,7 +258,7 @@ def install(args, packs: str) -> Path:
         if cleaned != text.rstrip():
             conf.write_text(cleaned + "\n", encoding="utf-8")
             print(f"已移除旧 config.toml MCP 段（原生插件取代）：{conf}")
-    agents = Path.home() / ".codex" / "AGENTS.md"
+    agents = _codex_home() / "AGENTS.md"
     if agents.exists():  # 历史遗留：AGENTS.md 技能块已被原生 skill 取代
         text = agents.read_text(encoding="utf-8")
         cleaned = text
@@ -293,8 +306,8 @@ def install(args, packs: str) -> Path:
     mp_name = "vod-local"
     # devkit 卫生实践：stale cache 先清——codex 插件缓存不自动失效，不清则
     # 重装/升级后旧版本残留（marketplace 指向与 cache 内容漂移）
-    for stale in (Path.home() / ".codex" / "plugins" / "marketplaces" / mp_name,
-                  Path.home() / ".codex" / "plugins" / "cache" / mp_name):
+    for stale in (_codex_home() / "plugins" / "marketplaces" / mp_name,
+                  _codex_home() / "plugins" / "cache" / mp_name):
         if stale.exists():
             shutil.rmtree(stale)
             print(f"已清理 stale 插件缓存：{stale}")
@@ -354,7 +367,7 @@ def install_remote(args, url, token):
         print(f"[vod-devkit] codex mcp add（remote）失败：{(r.stderr or r.stdout).strip()[-200:]}",
               file=sys.stderr)
         sys.exit(1)
-    stale = Path.home() / ".codex" / "plugins"
+    stale = _codex_home() / "plugins"
     if stale.exists():
         print("提示：codex 若曾用插件形态安装过 vod-devkit，请先 "
               "`codex plugin remove vod-devkit@vod-local` 避免双注册（stdio 插件 .mcp.json "

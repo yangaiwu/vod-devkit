@@ -35,12 +35,23 @@ def skills_dir(args):
     return Path(d) if d else None
 
 
+def config_path() -> Path:
+    """本宿主生效配置落点（单一来源，S178）：install 写哪里，读回就判哪里。
+
+    codeartswork 有新旧两套目录（~/.codearts/mcp 优先），host_verify 若按 host.json
+    的默认值判，会把「装到新目录」误报成 no-entry。
+    """
+    return _config_path()
+
+
 def install(args, packs):
     conf = _config_path()
     entry = {"command": [sys.executable, server_entry()],
              "environment": server_env(args, packs)}
     action = merge_json_mcp(conf, entry, section="mcp")
     print(f"已{_VERB[action]} CodeArts Work 配置：{conf}（重启 CodeArts Work 会话生效）")
+    from vod_mcp.host_adapters import host_verify
+    host_verify.require_ok(HOST)      # S178：写完读回，形态不对就非零退出
     return conf
 
 

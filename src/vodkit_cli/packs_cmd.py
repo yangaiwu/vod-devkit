@@ -15,7 +15,9 @@ import sys
 from pathlib import Path
 
 from vod_mcp import packs as packs_mod
+from vod_mcp import paths
 from vodkit_cli import common
+from vod_mcp.host_adapters import codex as _codex
 
 _ENV_KEYS = ("env", "environment")
 
@@ -54,7 +56,7 @@ def _dsh_rows() -> list:
     （node_modules/dsh-vod-devkit/package.json）；取不到才回落声明的 spec
     ——spec 是意图（可能是 `file:…tgz` 或范围号），实际跑的是装下来的版本。
     """
-    base = Path.home() / ".dsh" / "profiles"
+    base = paths.host_home("DSH_HOME", ".dsh") / "profiles"
     if not base.is_dir():
         return []
     out = []
@@ -106,7 +108,7 @@ def _dsh_effective(row: dict) -> tuple:
     旧实现见 .yml 就报 `unsupported 不是 JSON 形态`，把可读的 YAML 说成读不了（D1）。
     """
     prof = str(row.get("profile") or row.get("dshProfile") or "")
-    patch = Path.home() / ".dsh" / "profiles" / prof / "cordis.patch.yml"
+    patch = paths.host_home("DSH_HOME", ".dsh") / "profiles" / prof / "cordis.patch.yml"
     if not prof or not patch.exists():
         return ("missing", None, f"dsh profile patch 不存在：{patch}")
     try:
@@ -183,7 +185,7 @@ def _config_path(row: dict) -> Path | None:
         if ver:
             # 优先读"与 manifest 记录同版本"的缓存目录：多版本残留时按 mtime 取最新
             # 会把 0.5.5 的配置当成 0.5.9 的（实测本机就是这样）
-            p = Path.home() / ".codex" / "plugins" / "cache" / "vod-local" / "vod-devkit" / ver / ".mcp.json"
+            p = _codex.codex_home() / "plugins" / "cache" / "vod-local" / "vod-devkit" / ver / ".mcp.json"
             if p.exists():
                 return p
         return codex.locate_plugin_mcp(None)
@@ -239,7 +241,7 @@ def _read_effective(row: dict) -> tuple:
     stale = ""
     if row.get("target") == "codex" and row.get("version"):
         # manifest 记的版本与缓存目录不一致时说出来：实际跑的是哪个版本，别让人自己猜
-        want = (Path.home() / ".codex" / "plugins" / "cache" / "vod-local" / "vod-devkit"
+        want = (_codex.codex_home() / "plugins" / "cache" / "vod-local" / "vod-devkit"
                 / str(row["version"]) / ".mcp.json")
         if not want.exists():
             stale = f"（manifest 记 {row['version']}，cache 无该版本目录，读到的是残留副本）"

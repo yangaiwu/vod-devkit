@@ -15,6 +15,15 @@ def skills_dir(args):
     return Path(d) if d else None
 
 
+def config_path() -> Path:
+    """本宿主生效配置落点（单一来源，S178）：install 写哪里，读回就判哪里。
+
+    codeartswork 有新旧两套目录（~/.codearts/mcp 优先），host_verify 若按 host.json
+    的默认值判，会把「装到新目录」误报成 no-entry。
+    """
+    return Path(host_specs.load("opencode")["configPath"])   # 调用期现读（HOME 可能被隔离）
+
+
 def install(args, packs: str) -> Path:
     """OpenCode：~/.config/opencode/opencode.json 的 mcp 段无损合并。
 
@@ -39,6 +48,8 @@ def install(args, packs: str) -> Path:
         dest.write_text(Path(g["template"]).read_text(encoding="utf-8"),
                         encoding="utf-8")
         print(f"已写入 OpenCode 自检命令：/vod-doctor（{dest}）")
+    from vod_mcp.host_adapters import host_verify
+    host_verify.require_ok(HOST)      # S178：写完读回，形态不对就非零退出
     return conf
 
 

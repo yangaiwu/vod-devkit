@@ -202,6 +202,18 @@ def guard_script() -> Path:
     return hook_script("vod_guard.py")
 
 
+def host_home(var: str, subdir: str) -> Path:
+    """宿主家目录：环境变量（CODEX_HOME / DSH_HOME）优先，否则 `~/<subdir>`。
+
+    S177：宿主自己认的是这两个变量（codex 的 CODEX_HOME、dsh 的 DSH_HOME）；适配层
+    写死 `Path.home()/.codex` 时，设了变量的机器上会出现「写 A 读 B」——配置写对了、
+    宿主看不见，且 doctor/巡检读同一份错落点，自洽地错。宿主的 configPath 统一定义在
+    host.json，解析走 hosts._resolve() 同一规则；此函数给代码里必须自己拼路径的地方用。
+    """
+    v = (os.environ.get(var) or "").strip()
+    return Path(v).expanduser() if v else Path.home() / subdir
+
+
 def describe() -> dict:
     """诊断用：把"当前是哪两个根"打出来（doctor/explain 排障时不再靠猜）。"""
     return {"srcRoot": str(SRC_ROOT), "distRoot": str(DIST_ROOT), "assets": str(ASSETS),

@@ -12,6 +12,7 @@
 - `{profile}` 是 dsh 的占位符，必须由调用方显式代入（缺省不猜）。
 """
 import json
+import os
 import platform
 from pathlib import Path
 
@@ -44,7 +45,17 @@ def _resolve(path_str, profile: str | None = None) -> Path:
             raise ValueError(f"路径 {path_str} 需要 profile 名（dsh 按 profile 组织）")
         path_str = path_str.replace("{profile}", profile)
     if path_str.startswith("~"):
-        return Path.home() / path_str[2:] if path_str.startswith("~/") else Path.home()
+        rest = path_str[2:] if path_str.startswith("~/") else ""
+        # 宿主家目录重定向（S177）：CODEX_HOME / DSH_HOME 是宿主自己认的根，装到
+        # `~/.codex` 而宿主读 `$CODEX_HOME` 就是「配置写对了、宿主看不见」。
+        # hermes 的 HERMES_HOME 由适配层 _spec() 单独处理（含三分支归属判定）。
+        var = {".codex": "CODEX_HOME", ".dsh": "DSH_HOME"}.get(rest.split("/")[0] if rest else "")
+        if var:
+            root = (os.environ.get(var) or "").strip()
+            if root:
+                tail = rest.split("/", 1)[1] if "/" in rest else ""
+                return Path(root).expanduser() / tail if tail else Path(root).expanduser()
+        return Path.home() / rest if rest else Path.home()
     return Path(path_str)
 
 

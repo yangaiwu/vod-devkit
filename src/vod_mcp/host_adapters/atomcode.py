@@ -36,6 +36,15 @@ def skills_dir(args):
     return _spec()["skillsDir"]
 
 
+def config_path() -> Path:
+    """本宿主生效配置落点（单一来源，S178）：install 写哪里，读回就判哪里。
+
+    codeartswork 有新旧两套目录（~/.codearts/mcp 优先），host_verify 若按 host.json
+    的默认值判，会把「装到新目录」误报成 no-entry。
+    """
+    return Path(_spec()["configPath"])
+
+
 def install(args, packs):
     spec = _spec()
     entry = {"command": sys.executable, "args": [server_entry()],
@@ -50,4 +59,6 @@ def install_remote(args, url, token):
     entry = {"url": url, "headers": {"Authorization": f"Bearer {token}"}}
     action = merge_mcp_servers(conf, entry)
     print(f"已{_VERB[action]} AtomCode 远程 MCP：{conf}（token 明文，注意文件权限）")
+    from vod_mcp.host_adapters import host_verify
+    host_verify.require_ok(HOST)      # S178：写完读回，形态不对就非零退出
     return conf
