@@ -608,3 +608,12 @@
 - ae1c0f3 test(对账门禁): S181 巡检与 host_verify 同结论
 - 082e924 docs(adr/design): S174-S180 三条 ADR + 读回与写入纪律表
 
+
+## v0.5.32（2026-11-17）
+
+- 32dab91 feat(e2e): 每轮日志自动落盘 .e2e-runs/（S197，D-e2e-runlog-1）
+- e9a01b6 feat(info): manifestSummary 暴露安装绑定产品 + SKILL 按字段执行（S196，D-attrib-binding-1 补充二）
+- ca00e9c test(门禁先行): S196 安装绑定必须可观测（manifestSummary.product）+ SKILL 点名字段
+- aa99092 fix(e2e/router): 不可判不再吞内容违规 + 异常路径带违规；路由收窄工程第二层（S194/S195）
+- 9ed7fd8 test(门禁先行): S194 不可判不得吞内容违规 + 异常路径不丢违规；S195 工程第二层/礼貌麻烦
+
