@@ -1899,3 +1899,14 @@ atomic（同目录 tmp → fsync → chmod → replace），其余十余处仍�
 | S179 | 扫描 `src/vod_mcp/host_adapters/*.py`、`paths.py`、`vodkit_cli/{install,uninstall,packs_cmd}.py` | 除 `atomic_write_text` / `tmp.` / `bak.` / `dest.` / `# atomic-ok` 之外不得出现裸 `.write_text(` |
 | S180 | 目标文件是符号链接（dotfiles 场景） | 先 `resolve()` 再 tmp+replace：软链保持、真实文件被更新（不许把链接换成普通文件） |
 | S180-2 | 目标文件是 chmod 444（用户显式保护） | 抛 PermissionError、内容不变（tmp+replace 会绕过 write_text 的旧语义） |
+
+## 巡检与 doctor 的判据一致性（S181，D-two-judges-1，2026-11-17）
+
+**背景**：`host_verify`（doctor/install 面）与 `scripts/host_matrix.py --audit`（巡检面）各判一次
+同一份宿主配置。两侧曾出现相反结论（audit DRIFT / doctor OK），根因就是两套判据各自演化。
+doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server 自证"不能直接替换，先落
+**同结论门禁**：同一份合成配置上，两侧不得一个说可用、一个说不可用。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S181 | 合成 hermes config.yaml 四态（无文件 / 无条目 / enabled:false / 健康） | `host_matrix._hermes_effective_entry()` 与 `host_verify.problems("hermes")` 的可用性判定逐态一致 |

@@ -548,3 +548,51 @@ def test_s180_readonly_target_is_refused(tmp_path):
     with pytest.raises(PermissionError):
         atomic_write_text(p, "clobber\n")
     assert p.read_text(encoding="utf-8") == "keep\n"
+
+
+def _load_host_matrix():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("host_matrix_mod", ROOT / "scripts" / "host_matrix.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_s181_audit_and_host_verify_agree(monkeypatch, tmp_path):
+    """S181：同一份配置上，巡检（audit）与 host_verify 不得给出相反结论。
+
+    两者曾长期各判一套（audit DRIFT / doctor OK）；doctor 侧已收口到 host_verify，
+    audit 侧还要按配置拉起 server 自证，短期不能替换——先锁「同结论」，任何一边改判据都要对账。
+    """
+    from vod_mcp.host_adapters import host_verify
+    hm = _load_host_matrix()
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    cfg = tmp_path / ".hermes" / "config.yaml"
+
+    # 1) 没有文件
+    entry, _ = hm._hermes_effective_entry(tmp_path)
+    assert entry is None
+    assert host_verify.problems("hermes"), "audit 判不可用，host_verify 也必须有意见"
+
+    # 2) 有文件但没有我们的条目
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text("mcp_servers:\n  other:\n    command: x\n", encoding="utf-8")
+    entry, _ = hm._hermes_effective_entry(tmp_path)
+    assert entry is None
+    assert host_verify.problems("hermes")
+
+    # 3) enabled: false
+    cfg.write_text("mcp_servers:\n  vod-devkit:\n    command: x\n    enabled: false\n",
+                   encoding="utf-8")
+    entry, _ = hm._hermes_effective_entry(tmp_path)
+    assert entry is None
+    assert host_verify.problems("hermes")
+
+    # 4) 健康条目：两侧都必须说可用
+    cfg.write_text("mcp_servers:\n  vod-devkit:\n    command: x\n    enabled: true\n",
+                   encoding="utf-8")
+    entry, _ = hm._hermes_effective_entry(tmp_path)
+    assert entry is not None
+    assert host_verify.problems("hermes") == []

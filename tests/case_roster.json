@@ -532,6 +532,9 @@
     "S180": {
       "carrier": "tests/test_review_r2.py"
     },
+    "S181": {
+      "carrier": "tests/test_review_r2.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },
