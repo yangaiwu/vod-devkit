@@ -29,6 +29,9 @@ from pathlib import Path
 
 from test_router import router   # 复用同一加载方式（importlib，进程边界外的真实文件）
 
+# 别名：判定可解释入口（S203 起 route() 是 route_detail() 的薄包装）
+vod_router_detail = router
+
 _REPO = Path(__file__).resolve().parent.parent
 _SKILL = (_REPO / "assets" / "skills" / "vod-feedback-collect" / "SKILL.md").read_text(encoding="utf-8")
 
@@ -159,3 +162,34 @@ def test_s202_engineering_release_contexts_stay_silent():
     for msg in ("发布流水线挂了，看下日志", "环境变量没配对，构建失败了",
                 "测试环境连不上，排查一下"):
         assert router.route(msg) is None, f"工程语境误注入：{msg}"
+
+
+# --- S203：判定必须可解释（四轮词表问题的收敛手段）--------------------------------
+# 背景：S185→S193→S195→S202 四轮都是「某条真实原话被判成另一侧」，而每次只能靠人工
+# 逐句跑探针才看出是哪一层压掉的。判据必须能自述：命中哪个触发词、被哪个元语汇压、
+# 还是压根没触发词——否则下一轮仍然靠猜。
+def test_s203_route_detail_explains_each_layer():
+    route_detail = router.route_detail
+
+    strong = route_detail("提交反馈：搜索框没联想")
+    assert strong["decision"] == "strong" and strong["directive"]
+
+    trig = route_detail("你们刚发布的版本打不开")
+    assert trig["decision"] == "inject"
+    assert trig["trigger"] == "打不开", trig          # 用户视角句必须指出命中的现象词
+
+    meta = route_detail("这个报错的文案要改，代码里写死了中文")
+    assert meta["decision"] == "silent" and meta["reason"] == "meta-discussion", meta
+    assert "代码" in (meta["meta"] or ""), meta
+
+    none = route_detail("帮我部署一下服务")
+    assert none["decision"] == "silent" and none["reason"] == "no-trigger", none
+    assert route_detail("")["reason"] == "empty"
+    assert route_detail(None)["reason"] == "empty"
+
+
+def test_s203_route_is_a_thin_wrapper_over_route_detail():
+    route, route_detail = router.route, router.route_detail
+    for msg in ("提交反馈：x", "页面白屏了", "建议增加一条门禁用例",
+                "生产环境卡死了", "看下日志", None, ""):
+        assert route(msg) == route_detail(msg)["directive"], msg
