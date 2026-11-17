@@ -1848,3 +1848,22 @@ Windows/macOS/HarmonyOS 客户端，本机 Linux 属「无对象」。两者此�
 | S168-2 | 隔离 HOME + HERMES_HOME 在真实家目录之下（网关派生的 `/root/.hermes`） | 两边都跟随 `<HOME>/.hermes`（泄漏面继续挡住） |
 | S168-3 | 隔离 HOME + HERMES_HOME 在该 HOME 之内 | 两边都用它（矩阵/显式钉根） |
 | S169 | 副本缺失 + `--no-build-info` | 副本按**当前 HEAD** 烧，根 build-info 字节不变 |
+
+## 安装期读回缺口的第二轮收口（S174/S175，D-install-readback-2，2026-11-17 真机）
+
+**背景**（v0.5.29 发版后的真机复验）：
+
+1. `dsh plugin add dsh-vod-devkit@<ver>` 在 registry 尚未传播时失败 → 代码回落「不带版本」
+   → pnpm 认为依赖已满足直接跳过 → profile 里的壳仍停在旧版本，而 `install` 三条 RC 全 0、
+   账本写入新版本号。本轮实锤：0.5.29 装完两个 dsh profile 壳仍是 0.5.28，只有
+   `host_matrix --audit` 报 DRIFT 才暴露。
+2. `upsert_hook` 的幂等判据是「同 mark 的行存在即 unchanged」→ 解释器/脚本路径变了永不更新。
+   本轮实锤：真机 `pre_tool_call` 用 `/usr/local/bin/python3.12`、`pre_llm_call` 用 Hermes 3.14
+   venv，两条 hook 停在两个解释器上，而 doctor 只判 mark 存在 → 全绿。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S174 | dsh 装壳：版本化 add 失败回落成功、但 profile 壳版本 ≠ 目标版本 | `install` 必须非零退出（不许账本写新版、壳停旧版），且不写 patch |
+| S175-1 | 同 mark 的 hook 行存在但命令不同 | 替换该行命令并返回 `updated`（不再 `unchanged`） |
+| S175-2 | doctor 校验 hook 命令里的脚本路径 == 当前装好的 hook 脚本 | 不一致 / 脚本不存在 → FAIL 指向重跑 install |
+| S176 | 账本多行时 doctor 的宿主体检（hermes hook / codex 形态 / codearts 冒烟） | 按 `install_rows` 的 target 集合判，不许用顶层 `target`（多宿主机器上它恒为最后一次安装的宿主，整段体检会不执行而报 OK） |

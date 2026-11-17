@@ -299,3 +299,134 @@ def test_s173_degraded_install_exits_zero_but_says_missing(monkeypatch, tmp_path
     assert conf.is_file(), "降级也要写出备片 JSON"
     assert "缺 mcp_servers.vod-devkit" in err and "手工" in err, err
     assert host_verify.problems("hermes", degraded=True)[0]["code"] == "missing"
+
+
+def test_s174_dsh_shell_version_must_match_target(monkeypatch, tmp_path):
+    """S174：dsh 装壳回落「不带版本」时 pnpm 认为已满足 → 壳停旧版而 install 报成功。
+
+    实测（v0.5.29 真机）：registry 未传播时版本化 add 失败 → 回落 → 两个 profile 壳仍是
+    0.5.28，install 三条 RC 全 0、账本写 0.5.29，只有 host_matrix --audit 报 DRIFT。
+    判据：add 之后必须读回 profile 的壳版本 == 安装器版本，不等就非零退出（且不写 patch）。
+    """
+    import os
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from vod_mcp.host_adapters import dsh
+
+    prof = tmp_path / ".dsh" / "profiles" / "web"
+    pkg = prof / "node_modules" / "dsh-vod-devkit"
+    pkg.mkdir(parents=True)
+    (pkg / "package.json").write_text('{"version": "0.4.0"}', encoding="utf-8")
+
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    fake = stub / "dsh"
+    # 版本化 add 失败（registry 未传播）→ 回落不带版本的成功（pnpm 不升级），这就是现场
+    fake.write_text(
+        "#!/bin/sh\n"
+        "for a in \"$@\"; do case \"$a\" in dsh-vod-devkit@*) exit 1;; esac; done\n"
+        "exit 0\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(stub) + os.pathsep + os.environ.get("PATH", ""))
+
+    args = types.SimpleNamespace(dsh_profile="web", java_api_base="https://vod.example",
+                                 product="CodeArts")
+    with pytest.raises(SystemExit) as exc:
+        dsh.install(args, "core,collect")
+    assert exc.value.code == 1, "壳版本与目标不一致必须非零退出"
+    assert not (prof / "cordis.patch.yml").exists(), "失败前不许写 patch（半装状态）"
+
+
+def test_s175_hook_command_change_replaces_existing_mark():
+    """S175-1：同 mark 的行存在但命令不同 → 必须替换。
+
+    实测：真机 pre_tool_call 停在 /usr/local/bin/python3.12、pre_llm_call 停在 Hermes 3.14
+    venv；旧实现「同 mark 即 unchanged」，换解释器/换脚本路径后永不更新（doctor 只判 mark 存在）。
+    """
+    from vod_mcp.host_adapters import hermes
+
+    text = ("hooks:\n"
+            "  pre_tool_call:\n"
+            '    - command: "/usr/local/bin/python3.12 /old/vod_guard.py"\n'
+            "      timeout: 5\n")
+    new, state = hermes.upsert_hook(
+        text, "pre_tool_call", '"/new/py /new/vod_guard.py"', 5,
+        hermes.GUARD_MARK)
+    assert state == "updated", state
+    assert "/new/vod_guard.py" in new and "/old/vod_guard.py" not in new
+    assert new.count("/new/vod_guard.py") == 1, "不许插成两条"
+
+
+def test_s175_2_doctor_flags_hook_command_drift(tmp_path):
+    """S175-2：doctor 必须判「hook 命令指向的脚本/解释器」而不只是「mark 存在」。
+
+    真机现场：pre_tool_call 停在 python3.12、pre_llm_call 停在 3.14 venv，两条 hook 各跑
+    一个解释器；旧 doctor 只判 mark → 全绿。
+    """
+    from vodkit_cli import doctor
+
+    want_router = tmp_path / "payload" / "hooks" / "vod_router.py"
+    want_guard = tmp_path / "payload" / "hooks" / "vod_guard.py"
+    text = ("hooks:\n"
+            "  pre_tool_call:\n"
+            "    - command: \"/usr/local/bin/python3.12 /old/hooks/vod_guard.py\"\n"
+            "      timeout: 5\n"
+            "  pre_llm_call:\n"
+            "    - command: \"/hermes/py /old/hooks/vod_router.py\"\n"
+            "      timeout: 10\n")
+    probs = doctor._hermes_hook_command_problems(text, want_router, want_guard)
+    assert any("旧脚本" in p for p in probs), probs
+    assert any("不同解释器" in p for p in probs), probs
+
+    good = (f"hooks:\n  pre_tool_call:\n    - command: \"/hermes/py {want_guard}\"\n"
+            f"  pre_llm_call:\n    - command: \"/hermes/py {want_router}\"\n")
+    assert doctor._hermes_hook_command_problems(good, want_router, want_guard) == []
+
+
+def test_s176_doctor_host_checks_follow_ledger_rows(monkeypatch, tmp_path):
+    """S176：多宿主账本下 doctor 的宿主体检必须按 installs[] 判，不许用顶层 target。
+
+    真机实锤：11 行账本的顶层 target=dsh，于是 hermes hook / codex 形态 / codearts 冒烟
+    三段整段不执行——hermes 两条 hook 停在两个解释器上，doctor 却报 OK。
+    """
+    from vodkit_cli import doctor
+
+    mf = {"target": "dsh", "installs": [{"target": "hermes"}, {"target": "dsh"}]}
+    assert "hermes" in doctor._installed_targets(mf)
+    assert {"codex", "codex-desktop"} & doctor._installed_targets(mf) == set()
+
+    needle = {"target": "codex-desktop", "installs": [{"target": "codex-desktop"}]}
+    assert "codex-desktop" in doctor._installed_targets(needle)
+
+    # hermes 体检本身在「没注册」时要红（隔离 HOME 里没有 config.yaml）
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    probs = doctor._hermes_host_problems()
+    assert any("未注册" in p for p in probs), probs
+
+
+def test_s175_3_register_hooks_replaces_old_command(monkeypatch, tmp_path):
+    """S175-3：`_register_hooks` 必须接受 `updated` 状态并真的替换旧命令。
+
+    真机实锤（本轮）：upsert_hook 返回 updated 后，_register_hooks 的 verb 字典只有
+    created/added/unchanged → KeyError，安装器在「已替换命令」这一步崩掉（虽然写已经落盘）。
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    from vod_mcp.host_adapters import hermes
+
+    cfg = tmp_path / ".hermes" / "config.yaml"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text("hooks:\n"
+                   "  pre_tool_call:\n"
+                   '    - command: "/usr/local/bin/python3.12 /old/hooks/vod_guard.py"\n'
+                   "      timeout: 5\n"
+                   "  pre_llm_call:\n"
+                   '    - command: "/usr/local/bin/python3.12 /old/hooks/vod_router.py"\n'
+                   "      timeout: 10\n", encoding="utf-8")
+
+    hermes._register_hooks(cfg)          # 不许 KeyError
+    text = cfg.read_text(encoding="utf-8")
+    assert "python3.12" not in text, text
+    assert str(hermes._hook_script()) in text
+    assert text.count(str(hermes._hook_script())) == 1, "不许插成两条"
