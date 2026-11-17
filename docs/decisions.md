@@ -2158,3 +2158,76 @@ S164-1/2、S165（桩 CLI sleep 5 + timeout 1 → <3.5s 返回且片段在）、
 
 **验证**：S168-1..3（假 real 隔离，避免 tmp_path 干扰）、S169（副本=HEAD、根字节不变）；
 host_adapters / hermes_hooks / installer / distribution 全量仍绿。
+
+## D-install-readback-2：dsh 壳版本与 hook 命令必须读回（2026-11-17 真机，S174/S175/S176）
+
+**背景**（v0.5.29 发版后的真机复验，三件同源）：
+
+1. `dsh plugin add dsh-vod-devkit@<ver>` 在 registry 未传播时失败 → 代码回落「不带版本」→
+   pnpm 认为依赖已满足直接跳过 → profile 里壳仍停旧版，而 install 三条 RC 全 0、账本写新版本号；
+   只有 `host_matrix --audit` 报 DRIFT。壳版本错位正是「patch 写了 registerTools:false 而壳里没
+   这个字段」那类双注册现场的来源。
+2. `upsert_hook` 幂等键是「同 mark 的行存在即 unchanged」→ 解释器/脚本路径变了永不更新。
+   真机实锤：pre_tool_call 停在 `/usr/local/bin/python3.12`、pre_llm_call 停在 Hermes 3.14 venv，
+   doctor 只判 mark 存在 → 全绿。
+3. doctor 的逐宿主体检（hermes hook / codex 形态 / codearts 冒烟）用 `mf.get("target")` 判——
+   那是**最近一次安装**的宿主。11 行账本时顶层恒为 dsh，整段体检不执行，doctor 却 OK
+   （这就是第 2 条长期没被发现的直接原因）。
+
+**决定**：
+
+- `dsh.install` 在 add 之后读回 profile 的 `node_modules/dsh-vod-devkit/package.json`：
+  读到且 ≠ 目标版本 → 非零退出且**不写 patch**；完全读不到（该 dsh 版本无此布局）→ 只告警不阻断。
+- `upsert_hook` 改「同 mark 但 command 不同 → 替换该行」，返回新增状态 `updated`；
+  `_register_hooks` 的 verb 字典同步加键（真机第一次重装就 KeyError 炸在这里，已补用例）。
+- doctor 的宿主体检改按 `common.install_rows(mf)` 的 target 集合判；hermes 段抽成
+  `_hermes_host_problems()`，并新增「两条 hook 是否同一解释器 / 命令是否指向当前脚本」判据。
+
+**代价**：dsh 装机器多一次 package.json 读；doctor 多两段文本扫描（毫秒级）。
+**残余**：壳版本读不到时只告警（不同 dsh 版本的 node_modules 布局差异，不能一刀切判死）。
+**验证**：S174 / S175-1 / S175-2 / S175-3 / S176。
+
+## D-host-home-verify-2：宿主家目录单入口 + JSON 宿主写完读回（2026-11-17 真机，S177/S178）
+
+**背景**：
+
+1. 20 余处写死 `Path.home()/".codex"`、`~/.dsh`，而宿主认的是 `CODEX_HOME` / `DSH_HOME`。
+   设了变量的机器上「我们写 A、宿主读 B」，且 doctor/巡检读同一份错落点，自洽地错。
+2. opencode / atomcode / workbuddy / codeartswork / codeartsdoer 是 JSON 合并写入：写完就打印
+   成功，没有读回。被覆盖成 `enabled:false`、指向的 server.py 被删，install 与 doctor 都看不见。
+
+**决定**：
+
+- `hosts._resolve()` 对 `~/.codex`、`~/.dsh` 前缀按环境变量重定向；`paths.host_home(var, sub)`
+  给代码里必须自拼路径的地方用；codex 适配器暴露 `codex_home()`。hermes 的 HERMES_HOME 仍走
+  它自己的三分支归属判定（D-hermes-root-3way-1），不并入这套。
+- `host_verify.SUPPORTED` 扩到上述五个 JSON 宿主：`require_ok()` 在 install 收尾读回配置，
+  判据四档 no-entry / disabled / mismatch（server.py 不存在）/ 远程形态 url 为空。
+  落点走适配器的 `config_path()`（codeartswork 有新旧两套目录），不另读 host.json 默认值。
+- codex 不并入（已有 `plugin_mcp_form()` 三分类）：同一宿主两套判据必然长成「一侧 OK 一侧 DRIFT」。
+  generic（`--mcp-config` 显式路径）同样留待单独判据。
+
+**代价**：每次 JSON 宿主安装多一次读+解析；`config_path()` 必须与 install 用同一来源（已内建）。
+**残余**：generic 宿主无读回；audit 侧仍是自己一套判据（见设计债）。
+**验证**：S177 / S178-1..4；真机 `install --target atomcode` rc=0 作为端到端证据。
+
+## D-atomic-host-writes-1：宿主主配置与共享 JSON 全量原子写（2026-11-17 真机，S179/S180）
+
+**背景**：裸 `write_text` 写宿主主配置（config.yaml / cordis.patch.yml / config.toml / 共享
+JSON）是「半截文件」制造机——中断或磁盘满时宿主拿到残缺配置**直接起不来**，而 install 早已
+把账本写成「装好了」。此前只有账本、openclaw、officeace、merge_json_mcp 走原子写。
+
+**决定**：
+
+- 全部换 `paths.atomic_write_text`（同目录 tmp → fsync → chmod → os.replace）；
+  门禁 S179 扫 `host_adapters/*.py`、`paths.py`、`vodkit_cli/{install,uninstall,packs_cmd}.py`，
+  白名单只留 atomic / tmp / bak / dest / `# atomic-ok`。
+- 原子写自身补两条旧语义（否则是新的破坏面）：
+  ①目标是符号链接 → 先 `resolve()`（os.replace 会把用户 dotfiles 的软链换成普通文件）；
+  ②目标无 owner 写位（chmod 444 显式保护）→ 抛 PermissionError（目录可写时 replace 会绕过
+  旧 write_text 的权限失败语义；root 下 `os.access` 恒 True，判据取 mode 位）。
+
+**代价**：每次写宿主配置多一次 fsync；测试注入点从 `Path.write_text` 迁到 `paths.atomic_write_text`
+（已在 test_mcp_manifest_a3 改好，属必要同步）。
+**残余**：备份副本（`bak.`）与随装生成的文档（`dest.`）仍是非原子写——不承载宿主配置语义。
+**验证**：S179（扫描门禁）/ S180（软链）/ S180-2（只读目标）。

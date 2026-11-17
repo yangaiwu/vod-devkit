@@ -1367,3 +1367,15 @@ uninstall 的安装行读法少了 `target` 判据（空账本被当有安装）
 | 不可核验 ≠ 通过 | 载荷与仓根都无 build-info → 「无法核验 provenance」 | S164-1 |
 | preset 完整性覆盖全行 | 逐 `install_rows()` 行判，报文带 target | S164-2 |
 | 外部 CLI 调用必须有超时 | `_CLI_TIMEOUT`（默认 60s），超时走降级分支 | S165 |
+
+## 安装期读回与写入纪律（D-install-readback-2 / D-host-home-verify-2 / D-atomic-host-writes-1，2026-11-17 真机）
+
+| 面 | 判据 | 落点/兜底 |
+|---|---|---|
+| dsh 壳版本 | profile 的 `node_modules/dsh-vod-devkit/package.json` == 安装器版本 | 读到且不等 → install 非零退出、不写 patch；完全读不到 → 告警不阻断 |
+| hermes hook | 行存在 → 命令指向当前 hook 脚本 → 两条同一解释器 | 任一条不满足 doctor FAIL；install 侧「同 mark 命令不同即替换」 |
+| JSON 宿主注册 | install 收尾 `host_verify.require_ok()`：条目在、enabled≠false、server.py 存在、远程 url 非空 | 落点走适配器 `config_path()`（codeartswork 新旧目录） |
+| 宿主体检的遍历面 | `common.install_rows(mf)` 的 target 集合 | **禁用 `mf["target"]`**：它是最近一次安装的宿主，多宿主机器上整段体检会不执行 |
+| 写入 | 宿主主配置/共享 JSON/状态一律 `atomic_write_text` | 软链先 resolve；owner 写位缺失抛 PermissionError；bak/dest 例外 |
+
+对应用例见 `docs/proposal.md` 同名章节（用例编号只在 tests/ 与 proposal 里出现，避免本文件抢走承载）。
