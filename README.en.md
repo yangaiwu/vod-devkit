@@ -11,13 +11,18 @@ Three rules that matter more than the skeleton:
 - **Collect only**: the plugin's single write action is an engine HTTP call
   (`POST /external/voices`). Persistence, quotas, audit and identity checks all
   live server-side; there is no database code path in this repo.
-- **Identity travels with the request**: stdio uses the local anonymous token;
-  the remote face reads Bearer from the request header and **never mints an
-  identity** (missing key = reject).
-- **Attribution never asks the user**: the product is parsed from the user's own
-  words against the engine catalog aliases; only an unambiguous single hit is
-  accepted, multiple hits become UNKNOWN for a human to resolve. `--product` at
-  install time is an optional prior only.
+- **Identity travels with the request**: stdio uses the machine-level anonymous
+  token (one per machine, shared across hosts and versions); the remote face
+  prefers a Bearer header and, when absent, mints/reuses that same machine-level
+  anonymous token — missing key is **not** a hard reject (`vod_auth_ensure`
+  makes the state explicit). Same semantics locally and remotely.
+- **Attribution is parsed, not asked away**: the product comes from the user's own
+  words against the engine catalog aliases (only an unambiguous single hit is
+  accepted; ambiguity stays UNKNOWN). `--product` at install time is an optional
+  prior and applies **only when the message contains a self-reference**
+  ("this product / your product / this platform"); with no evidence the skill asks
+  once instead of guessing. The bound product is visible as
+  `manifestSummary.product` in the `vod_devkit_info` reply.
 
 ## Prerequisites
 
@@ -220,7 +225,7 @@ misfired (quoting vs reading are different acts).
 
 ```bash
 python3 -m pytest tests/ -q        # full: unit + guardrails + packs + installer matrix + real-HTTP + stdio
-python3 -m pyflakes vod_mcp/*.py tests/*.py scripts/*.py bin/vod-devkit
+python3 -m pyflakes src/vod_mcp src/vodkit_cli integrations/hermes/hooks tests
 python3 -m mypy                    # scope in pyproject [tool.mypy]
 python3 scripts/secret_scan.py
 python3 scripts/sync_case_roster.py --check

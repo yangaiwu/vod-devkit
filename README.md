@@ -423,7 +423,7 @@ npx -y vod-devkit@latest install --target codex    --mcp-url https://<网关>/mc
 
 ```bash
 python3 -m pytest tests/ -q        # 全量（单元 + 护栏 + packs + 安装器矩阵 + 协议级真 HTTP + stdio 回环）
-python3 -m pyflakes vod_mcp/*.py tests/*.py scripts/*.py bin/vod-devkit
+python3 -m pyflakes src/vod_mcp src/vodkit_cli integrations/hermes/hooks tests
 python3 -m mypy                    # 作用域见 pyproject [tool.mypy]（新增纯逻辑模块）
 python3 scripts/secret_scan.py
 python3 scripts/sync_case_roster.py --check   # docs 与花名册对账

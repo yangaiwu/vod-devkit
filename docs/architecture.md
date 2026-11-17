@@ -98,7 +98,8 @@ npm/cli.js  bin/vod-devkit     ← 薄壳：找解释器 + 显式设两个根 + 
 scripts/                       ← 生成器与校验器成对（sync_plugin ↔ verify_copies，case_roster 等）
 tests/                         ← pytest（含结构/范围/用例花名册门禁）
 docs/                          ← architecture(本文件) / design / proposal / decisions /
-                                 safety-model / hooks / host-realverify / scheme-overview
+                                 safety-model / hooks / hermes-router / host-realverify /
+                                 dsh-plugin-install / dsh-ui-collect / scheme-overview
 ```
 
 根目录保留的条目（这就是"预算"，见门禁 S129）：

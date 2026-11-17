@@ -1,4 +1,4 @@
-# dsh 采集 UI（笑脸入口）设计 v1.0
+# dsh 采集 UI（笑脸入口）设计 v1.0（2026-11-04 设计记录；现状见 design.md / dsh-plugin-install.md）
 
 引擎侧对应文档：VOD-Project docs/vod-issue-sync/{proposal,design}.md。
 拍板 A1-A4 见引擎 proposal §二（bot 代提交/匿名过审实名自动/单仓/囤积端点）。
@@ -40,7 +40,7 @@ POST /external/voices（囤积，不触发分析）→ 引擎按档建 issue
    的 snapshot 模式对接（details/avatar/状态），凭据文件指纹（层2）
    降为未登录时的兜底，自愿留名（层3）不变。知情同意纪律不变。
 
-## 三、插件包结构（dsh/dsh-vod-devkit 扩展）
+## 三、插件包结构（当时写作 `dsh/`；现为 `packages/dsh/`，本节目录名保留历史形态）
 
 ```
 dsh/src/client.jsx      # 源码：😊 按钮+弹窗表单+提交逻辑+账本（React）

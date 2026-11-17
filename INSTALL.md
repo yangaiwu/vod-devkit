@@ -21,7 +21,10 @@ npx --yes vod-devkit install --target opencode --product codearts
   `generic` | `all` | `auto`（auto=探测已装宿主，0/1/N 个时提示；all=装到所有探测到的宿主，
   缺 CLI 的跳过；generic=任意 MCP 宿主，配 `--mcp-config <文件>`）
 - `--product`：**可选先验**，采集反馈的默认归属产品（给了就必须命中名录，否则 fail fast；
-  不给则运行期按"用户明确回答 → 原话唯一命中 → 会话记忆 → 安装先验"归因，都没有就拒绝提交）
+  不给则运行期按"用户明确回答 → 原话唯一命中 → 会话记忆 → 安装先验"归因）。
+  安装先验只在**原话出现自指**（"你们家/这个产品/本平台…"）时生效——这是为了防错归；
+  自指+已绑定 = 不问产品（模型可通过 `vod_devkit_info` 回执的 `manifestSummary.product`
+  自查本机绑定），两者都没有才按纪律先问一次、不猜不提交）
 - `--java-api-base`：VOD 平台地址（缺省 `https://vod-dev.topxtopx.com`；本机同机部署可用 `http://127.0.0.1:<port>`——传输守卫只拦"非回环明文 http"）
 - `--distribution preset`：产品随 agent 分发形态（禁 key 随包/禁自更新/客户机首启重生成状态；自装运维不要用）
 - 不传 key = 匿名档（推荐）：首次提交自动签发零字段匿名令牌，无 key 配置、无凭据托管。legacy 共用 key 已随 VOD-KEY 上线进入兼容收尾（引擎 `external.legacy.enabled=false` 即关闭），自装场景不应也不会再拿到它——装了即匿名档。

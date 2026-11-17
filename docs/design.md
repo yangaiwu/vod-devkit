@@ -1,9 +1,8 @@
 # vod-devkit 插件化技术设计
 
-- 需求：docs/vod-devkit-plugin/proposal.md（VOD-PLUGIN）
-- 版本：v0.1（2026-11-03）
-- 状态：待评审
-- 参考实现：huaweicloud-devkit v2（55f53ad0）
+- 需求：docs/proposal.md（本仓，随实现演进增补 S 号）
+- 状态：**现行设计**（结构以 docs/architecture.md 为准；本文保留各轮决策与判据）
+- 参考实现：huaweicloud-devkit v2（55f53ad0，2026-11 初版对标；差异见 decisions.md）
 
 ---
 
@@ -12,27 +11,20 @@
 一个引擎，两张脸；插件是薄壳，不复制业务。
 
 ```
-vod-devkit（可分发插件包，目录随本设计落仓）
-├── bin/vod-devkit            # 安装器 CLI
-├── vod_mcp/                  # MCP server（stdio，薄壳；双后端出口见下）
-│   ├── server.py             # 工具注册与调度（握手时记录 clientInfo）
-│   ├── tools.py              # 工具注册与调度（契约唯一事实源 assets/contract/tools.schema.json）
-│   ├── packs.py              # VOD_PACKS 裁剪：core/workflow/kb
-│   └── provenance.py         # build-info 读取 + 宿主身份（clientInfo）
-├── build-info.json           # 构建时烧录（git commitSHA/version/time）
-├── skills/
-│   ├── vod-core/SKILL.md     # 元技能：路由入口（对齐 huaweicloud-core）
-│   ├── vod-category-matching/
-│   ├── vod-problem-classification/
-│   └── vod-scoring-rules/
-├── safety/
-│   ├── policy.json           # 声明式护栏（对齐 devkit safety/policy.json）
-│   └── rules/vod-risk-rules.json
-├── contract/
-│   └── tools.schema.json     # 工具契约唯一事实源（JSON Schema，实现侧生成/校验）
-└── integrations/
-    ├── hermes/               # manifest + hooks（首个目标）
-    └── opencode/ codex/      # 有真实消费者再补
+vod-devkit（可分发插件包；仓内布局 vs 载荷布局见 architecture.md）
+├── bin/vod-devkit            # 薄壳入口：找解释器 + 显式设两个根 + 透传子命令
+├── npm/cli.js                # npx 引导器（同一薄壳）
+├── src/vod_mcp/              # 运行时（MCP server、适配器、packs 包、provenance…）
+├── src/vodkit_cli/           # 安装器 CLI（install/status/doctor/verify/update/…）
+├── assets/                   # 项目级资产真源：skills/ contract/ safety/
+├── integrations/<host>/      # 宿主规格 host.json + 宿主侧 hook 脚本（hermes/hooks）
+├── packages/dsh/             # dsh 壳（独立 npm 包：Node 半 + 浏览器半）
+├── plugins/vod-devkit/       # 发布树（生成物，零提交）
+├── scripts/                  # 生成器与门禁（sync_plugin ↔ verify_copies、巡检、发布…）
+└── tests/                    # pytest（含结构/范围/用例花名册/声明对账门禁）
+
+载荷/发布布局仍是根级平铺（vod_mcp/ skills/ contract/ safety/ hooks/），
+由 paths.ASSETS 与 sync_plugin 物化——改仓内布局不要连带改载荷布局。
 ```
 
 单上游出口（方案 A 收敛后）：
@@ -1453,5 +1445,7 @@ argv，不改宿主配置），所以日志必须带模型名，否则事后无�
 可执行性前提：模型必须能**看到**本机绑定。`vod_devkit_info` 的 `manifestSummary.product`
 = 安装期绑定产品（runtime state 优先、回落 manifest 唯一绑定、多绑定/未绑定返回 null——
 多绑定不许挑一个）。SKILL 据此三分支：有值+自指 → 不问产品、直接建草稿；有值无自指 → 按
-候选追问一次；为空 → 追问一次、不许自己挑。缺这个字段时那句纪律在真机上不可执行（实测：
+候选追问一次；为空 → 追问一次、不许自己挑。**顺序是硬约束**：采集流程第 0 步的首个动作
+就是调一次 `vod_devkit_info` 看这个字段——有值+自指时**禁止**先调 `vod_search_products`
+或追问（真机实测：不写死顺序时模型会按自己的计划先查名录，拿 score 0 的候选回头追问）。缺这个字段时那句纪律在真机上不可执行（实测：
 0.5.31 里模型看不到绑定，于是每条正向用例都停在「这条是哪个产品的？」）。

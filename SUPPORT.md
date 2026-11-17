@@ -4,8 +4,8 @@
 
 ## 自助排查（先走这条）
 
-1. `bin/vod-devkit doctor` —— 环境自检（python 版本 / 配置 / 令牌状态）
-2. `bin/vod-devkit status` —— 安装状态与 build-info（版本 + commitSHA）
+1. `npx --yes vod-devkit doctor`（仓内自装可用 `bin/vod-devkit doctor`） —— 环境自检（python 版本 / 配置 / 令牌状态）
+2. `npx --yes vod-devkit status` —— 安装状态与 build-info（版本 + commitSHA）
 3. [QUICKSTART.md](QUICKSTART.md) —— 各 MCP 客户端手动配置片段 + 故障排查表
    （上游不可达 / -32012 鉴权 / 工具不出现）
 4. [SECURITY.md](SECURITY.md) —— 疑似安全漏洞走私有通道，不开公开 issue

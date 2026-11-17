@@ -43,3 +43,17 @@ def test_s191_self_reference_skips_product_ask():
     assert "别再问产品" in COMPACT or "不再问产品" in COMPACT, \
         "必须明确写：自指命中安装先验时不再追问产品"
     assert "install_binding" in COMPACT, "要给出可佐证的来源标记（草稿回执里能看到）"
+
+
+def test_s200_binding_check_is_step_zero_before_search():
+    """S200：自指场景的第一步必须是看本机绑定，且在之前不许调搜索/追问。
+
+    真机实证（0.5.32，C1）：原话「……你们家的批量导入功能……」→ 模型直接
+    `vod_search_products`（回 score=0.0 的 catalog-default 候选）→ 追问「这条反馈是哪个产品的？」。
+    `manifestSummary.product` 这个字段已经存在（S196），但话术没有把「先看绑定」排成第一步，
+    模型按自己的计划（先查名录）走了。三次纯措辞补丁（S191/S196）都没制止这个顺序，
+    所以这次把规则写成**硬序**并用文本锁钉住：先看绑定 → 有值+自指 → 不许搜索、不许追问。
+    """
+    assert "第一步" in COMPACT and "manifestSummary.product" in COMPACT
+    assert "禁止先调" in COMPACT or "不许先调" in COMPACT, "必须禁止在建草稿前先搜索/追问"
+    assert "vod_search_products" in COMPACT, "要明确点名被禁止的那个调用的工具名"

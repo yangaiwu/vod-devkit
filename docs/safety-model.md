@@ -1,4 +1,4 @@
-# 安全模型（声明式护栏 v0.1.0）
+# 安全模型（声明式护栏 · 现状版）
 
 本插件假设 agent 会误做三件事：在用户明确同意之前把反馈写进共享库、把内部机制
 （表名/库直连/凭据）带进对外内容、把凭据读出来打印。v0.1 因此在工具面与文本面
@@ -16,21 +16,22 @@
 
 | 规则载体 | 执行点 | 作用面 |
 |---|---|---|
-| `safety/policy.json`（4 条规则） | — | 硬词汇表，唯一事实源 |
-| `vod_mcp/policy.py:check_tool_call` | `vod_mcp/server.py` 的 `tools/call` 前置 | 工具参数（confirm / 批上限） |
-| `vod_mcp/policy.py:check_text` | 同上，扫 `guard_scope(args)` 序列化串 | 文本类 deny（DB 直连 / 凭据意图） |
-| `vod_mcp/policy.py:guard_scope` | 文本规则扫描面裁剪 | 剔除 `voices[].content` 与 `data`——用户原话不进文本规则，防误杀"反馈里引用凭据串" |
-| 两段式 `vod_draft_voices` → `vod_commit_voices` | `vod_mcp/tools.py` | 审计链：一次性令牌 + payloadSha256 防调包；绕过可被账本 `stage` 检测 |
-| codex 采集熔断 | `vod_mcp/packs.py:BREAKER_MARKERS` + `bin/vod-devkit` 安装门禁 | 未确认提交 ≥2 次后强制摘除 collect pack |
-| 分发红线（key 不随包） | `bin/vod-devkit:cmd_install` `--distribution preset` | `VOD_JAVA_API_KEY` 从 env 摘除且不写宿主配置 |
-| 技能拷贝漂移 | `bin/vod-devkit:_skill_hashes/_drifted_skills`（D-drift-lock） | 安装期记录 sha256，doctor/verify 逐落点比对 |
-| 远程面护栏 | `vod_mcp/guardrails.py`（stdio 与 HTTP 共用同一判定） | 新增传输不新增策略：deny/confirm/文本规则两面一致 |
-| 远程面工具面 | `vod_mcp/packs.py:REMOTE_WITHHELD` | 只摘 `vod_packs_configure`（进程内开关）；draft/commit/ledger 与本地一致，草稿落 `owner` 按宿主隔离（D-token-machine-1，2026-11-16） |
-| 远程面身份 | `vod_mcp/tools.py:_REQ_KEY/_SERVER_FACE` | 请求头 Bearer 优先、逐请求生效；无 Bearer 时与本地同链：领/复用机器级匿名令牌（D-token-machine-1；旧"不代签身份"口径已废除） |
+| `assets/safety/policy.json`（真源；载荷物化为 `<payload>/safety/policy.json`） | — | 硬词汇表，唯一事实源 |
+| `src/vod_mcp/policy.py:check_tool_call` | `src/vod_mcp/server.py` 的 `tools/call` 前置 | 工具参数（confirm / 批上限） |
+| `src/vod_mcp/policy.py:check_text` | 同上，扫 `guard_scope(args)` 序列化串 | 文本类 deny（DB 直连 / 凭据意图） |
+| `src/vod_mcp/policy.py:guard_scope` | 文本规则扫描面裁剪 | 剔除 `voices[].content` 与 `data`——用户原话不进文本规则，防误杀"反馈里引用凭据串" |
+| 两段式 `vod_draft_voices` → `vod_commit_voices` | `src/vod_mcp/tools.py` | 审计链：一次性令牌 + payloadSha256 防调包；绕过可被账本 `stage` 检测 |
+| codex 采集熔断 | `src/vod_mcp/packs/__init__.py`（BREAKER_MARKERS）+ `src/vodkit_cli/install.py` 安装门禁 | 未确认提交 ≥2 次后强制摘除 collect pack |
+| 分发红线（key 不随包） | `src/vodkit_cli/install.py:cmd_install` 的 `--distribution preset` | `VOD_JAVA_API_KEY` 从 env 摘除且不写宿主配置 |
+| 技能拷贝漂移 | `src/vodkit_cli/common.py:_skill_hashes` + doctor 逐落点比对（D-drift-lock） | 安装期记录 sha256，doctor/verify 逐落点比对 |
+| 远程面护栏 | `src/vod_mcp/guardrails.py`（stdio 与 HTTP 共用同一判定） | 新增传输不新增策略：deny/confirm/文本规则两面一致 |
+| 远程面工具面 | `src/vod_mcp/packs/__init__.py`（REMOTE_WITHHELD） | 只摘 `vod_packs_configure`（进程内开关）；draft/commit/ledger 与本地一致，草稿落 `owner` 按宿主隔离（D-token-machine-1，2026-11-16） |
+| 远程面身份 | `src/vod_mcp/tools.py`（请求头优先 + 机器级令牌） | 请求头 Bearer 优先、逐请求生效；无 Bearer 时与本地同链：领/复用机器级匿名令牌（D-token-machine-1；旧"不代签身份"口径已废除） |
 
-错误码约定（宿主/模型可据此分流）：`-32010` deny、`-32011` confirm、`-32012`
-认证（缺 key 且令牌不可得）、`-32014` 传输（非回环 http）。归因不走错误码：
-`-32013` 已废除，改为运行期引导（无证据就先问用户一次，不猜）。
+错误码约定（宿主/模型可据此分流）：`-32010` deny、`-32011` confirm/草稿令牌不符、
+`-32012` 认证（缺 key 且令牌不可得）、`-32014` 传输（非回环 http）、`-32015` 上游拒绝
+（引擎 4xx/契约漂移）。归因不走错误码：`-32013` 已废除，改为运行期引导
+（无证据就先问一次，不猜）。查表用 `vod-devkit explain <码>`——表由用例锁住与代码 raise 点同步。
 
 ## 写操作路径
 
@@ -38,7 +39,7 @@
 600s），回执逐字回显 `contents`；`vod_commit_voices` 校验一次性令牌与
 `payloadSha256` 后复用既有提交链。采集语义下 `vod_submit_voices` 仍然保留
 （幂等 + 审核闸 + 不可破坏），断回合续提交走 pending 队列
-（`vod_mcp/pending.py`，幂等键条级 + 原话多行必填）。
+（`src/vod_mcp/pending.py`，幂等键条级 + 原话多行必填）。
 
 ## 已接受风险（都是有意留下的，不是漏配）
 
