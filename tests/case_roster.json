@@ -652,6 +652,9 @@
     "S220": {
       "carrier": "tests/test_e2e_engine_resilience.py"
     },
+    "S221": {
+      "carrier": "tests/test_e2e_engine_resilience.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

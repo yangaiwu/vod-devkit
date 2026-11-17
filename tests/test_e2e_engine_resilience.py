@@ -405,3 +405,26 @@ def test_s220_ledger_reads_via_env_state(monkeypatch, tmp_path):
     monkeypatch.setenv("VOD_DEVKIT_HOME", str(tmp_path))
     rows = e2e.ledger_rows_since("2026-11-17 19:00:00")
     assert [r["id"] for r in rows] == ["VDPL9"], rows
+
+
+# --- S221：空回复（宿主回合无产出）不许等满 600s 观察窗 ---------------------------------
+# 实测（2026-11-17 19:41 codex 会话）：task_complete.last_agent_message=None = 流断开/早退，
+# 但套件仍按 poll_s=600 等引擎行 → 每条这样的回合空烧 10 分钟（整轮 30 分钟超时）。
+def test_s221_empty_reply_uses_short_poll(monkeypatch):
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import e2e_behavior as e2e
+
+    seen = {}
+
+    def fake_await(ts, expect, poll_s=600):
+        seen["poll_s"] = poll_s
+        return []
+
+    monkeypatch.setattr(e2e, "_await_engine_rows", fake_await)
+    monkeypatch.setattr(e2e, "run_host", lambda host, prompt, model=None: "")
+    import copy as _copy
+    case = _copy.deepcopy(next(c for c in e2e.SUITE if c["id"].startswith("C1")))
+    res = e2e.run_case("codex", case, {"threshold": 2, "window_days": 7, "action": "report"})
+    assert seen["poll_s"] <= 60, f"空回复不许等满 600s：{seen['poll_s']}"
+    assert res.get("indeterminate"), "空回合必须记不可判而不是违规"

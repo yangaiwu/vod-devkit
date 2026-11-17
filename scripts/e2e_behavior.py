@@ -489,7 +489,11 @@ def run_case(host: str, case: dict, cfg: dict, model: str | None = None) -> dict
     expect_rows = expected_row_count(case)
     t0 = _now_ts()
     reply = run_host(host, prompt, model)
-    rows = _await_engine_rows(t0, expect_rows)
+    # S221：空回复=宿主回合没产出（实测 codex 会话 task_complete.last_agent_message=None，
+    # 属流断开/早退）。此时再等满 poll_s(600s) 拿不到任何新证据，只会把套件拖成 30 分钟——
+    # 给一个短观察窗即可（仍查一次账本与引擎，判据不变）。
+    poll_budget = 30 if not str(reply or "").strip() else 600
+    rows = _await_engine_rows(t0, expect_rows, poll_s=poll_budget)
     # 接口粒度：title=提交内容前 N 字 → 逐字校验窗口取原话起点之后的 N 字
     # （旧实现用 prompt[:N]，含「帮我记录反馈：」命令前缀，引擎按纪律会剥 → 长句必假红）
     verbatim_ref = verbatim_full[:VERBATIM_WINDOW]
