@@ -353,3 +353,39 @@ def test_s214_engine_rows_present_keep_strict_judging():
     from e2e_behavior import _row_verdict
     fails, indet = _row_verdict(expect_rows=1, engine_rows=[{"id": "VDPL1"}], ledger_rows=[])
     assert not fails and not indet
+
+
+# --- S216：等待引擎行时，账本已证明提交发生就提前收工（不许空等 600s）--------------
+# 实测（2026-11-17）：引擎查询不覆盖囤积档时，正向用例每条都要空等到 poll_s=600 秒，
+# 一个 5 条用例的套件因此跑到 30 分钟以上；而账本（引擎回执写下）早在 1 分钟内就有行。
+# 判据不变（仍由 _row_verdict 出三态），只是**等待**这条线要看两个源。
+def test_s216_await_returns_early_when_ledger_proves_submission(monkeypatch):
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import e2e_behavior as e2e
+
+    monkeypatch.setattr(e2e, "engine_rows_since", lambda ts, **kw: [])
+    monkeypatch.setattr(e2e, "ledger_rows_since", lambda ts: [{"id": "VDPL1", "content": "x"}])
+    monkeypatch.setattr(e2e.time, "sleep", lambda *_: None)
+    t0 = __import__("time").time()
+    rows = e2e._await_engine_rows("2026-11-17 18:00:00", 1, poll_s=600)
+    assert __import__("time").time() - t0 < 5, "账本已有回执时不许继续空等"
+    assert rows == []
+
+
+def test_s216_no_ledger_still_waits(monkeypatch):
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import e2e_behavior as e2e
+
+    calls = {"n": 0}
+
+    def slow_engine(ts, **kw):
+        calls["n"] += 1
+        return []
+
+    monkeypatch.setattr(e2e, "engine_rows_since", slow_engine)
+    monkeypatch.setattr(e2e, "ledger_rows_since", lambda ts: [])
+    monkeypatch.setattr(e2e.time, "sleep", lambda *_: None)
+    e2e._await_engine_rows("2026-11-17 18:00:00", 1, poll_s=0)
+    assert calls["n"] >= 1

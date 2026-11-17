@@ -397,6 +397,11 @@ def _await_engine_rows(ts: str, expect_rows: int, poll_s: int = 600) -> list:
     deadline = time.time() + poll_s
     last, stable = rows, 0
     while time.time() < deadline:
+        # S216：账本已有引擎回执（voiceId）就说明提交发生了，本轮的落库线已可交
+        # _row_verdict 判三态——不再空等 poll_s（实测每条正向用例空等 600s，
+        # 5 条套件跑 30 分钟以上）。判据不变，只是等待看两个源。
+        if len(ledger_rows_since(ts)) >= expect_rows:
+            return engine_rows_since(ts)
         newer = engine_rows_since(ts)
         if newer and len(newer) == len(last):
             stable += 1
