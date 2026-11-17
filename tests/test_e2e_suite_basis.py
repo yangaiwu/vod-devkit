@@ -21,7 +21,7 @@ _SCRIPTS = _REPO / "scripts"
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_REPO / "src"))
 
-from e2e_suite import SUITE  # noqa: E402
+from e2e_suite import SUITE, expected_row_count  # noqa: E402
 from vod_mcp.attribution import SELF_REFERENCE  # noqa: E402
 
 
@@ -62,3 +62,21 @@ def test_s190_self_reference_table_is_the_single_source():
     src = (_SCRIPTS / "e2e_suite.py").read_text(encoding="utf-8")
     assert "SELF_REFERENCE" not in src, "用例文件不该复制自指词表；需要校验就用本用例"
     assert "你们家" in SELF_REFERENCE
+
+# --- S205：要验"落库"的用例必须带明确提交指令，否则模型按纪律只建草稿 ------------
+# 实测（2026-11-17，0.5.32+S204 装机）C1：「帮我记录反馈：……」→ 模型归因正确（从 search_products
+# 的 installBinding 拿到 CodeArts）、建了草稿、内容逐字，然后停在「确认提交吗？」。
+# 那是**纪律要求**的二次确认（D-resume-commit-1 的另一面）："记录/反馈"只算承接意愿。
+# 但 C1/C4 的期望是落库（反截断/单条），于是用例永远达不到——第三次用例基准问题（前两次 S190/S205 同源）。
+_SUBMIT_MARKERS = ("提交", "收录", "上报")
+
+
+def test_s205_cases_expecting_rows_carry_explicit_submit():
+    for case in SUITE:
+        rows = expected_row_count(case)
+        if rows == 0:
+            continue
+        head = case["prompt"].split("{content_start}")[0]
+        assert any(m in head for m in _SUBMIT_MARKERS), (
+            f"{case['id']} 期望落库，但提示词没有明确提交指令（只写「记录/反馈」时纪律要求二次确认）："
+            f"{head!r}")
