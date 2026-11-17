@@ -42,7 +42,17 @@ def search_products(params: dict) -> dict:
             cands.append({"id": str(item.get("id")), "name": str(item.get("name") or ""),
                           "score": 0.0, "matchReason": "catalog-default"})
     cands.sort(key=lambda c: (c["score"], len(c["name"])), reverse=True)
-    return {"candidates": cands[:limit], "total": len(catalog)}
+    out = {"candidates": cands[:limit], "total": len(catalog)}
+    # S204：兜住模型**实际会走的那一步**。实测（0.5.32 + 最新 SKILL）模型连续两轮跳过
+    # vod_devkit_info 直接来搜，然后拿 score 0.0 的 catalog-default 追问产品；而它能背出
+    # 技能里「第一步永远是看本机绑定」——读得到、不照做。所以把绑定放进它一定会看的回执里。
+    binding = provenance.install_binding()
+    if binding:
+        out["installBinding"] = binding
+        out["nextStep"] = (f"本机安装绑定={binding}：原话含自指（你们家/这个产品/本平台）时"
+                           f"直接用 installBinding 归因，不要再追问产品；"
+                           f"也不要拿 catalog-default 的无分候选去问用户。")
+    return out
 
 
 def devkit_info(params: dict, client_info: dict | None = None) -> dict:

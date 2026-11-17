@@ -601,6 +601,9 @@
     "S203": {
       "carrier": "tests/test_router_corpus.py"
     },
+    "S204": {
+      "carrier": "tests/test_info_binding.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

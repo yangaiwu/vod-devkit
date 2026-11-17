@@ -122,3 +122,18 @@ openclaw agent --local --json -m "这是链路调试核验（可输出内部字�
 - **回执不可判**（S192）：回复为空但**有落库**——内容判据照跑（真改写仍记违规），只是回显线
   没结论；旧实现把这句塞进 fails → exit 1，等于把「流在最后一帧断」记成产品回归。
 - **4xx**（S192）：按 ADR 是判定依据，要原样上抛、有明确出口；旧实现裸 traceback → exit 1。
+
+## codex 的技能副本有三处，生效的是插件缓存那份（2026-11-17 实锤）
+
+改 `assets/skills/**/SKILL.md` 后只同步 `~/.codex/skills/` 是不够的——codex 插件模式实际读的是：
+
+| 落点 | 谁写 | 是否生效 |
+|---|---|---|
+| `~/.codex/plugins/cache/<market>/vod-devkit/<ver>/skills/…` | `codex plugin add` / 安装器改写 | **生效（实测：只有它影响模型行为）** |
+| `~/.codex/skills/<名>/SKILL.md` | 安装器技能拷贝 | 存在但本轮实测不影响 |
+| `~/.vod-devkit/payloads/<ver>/skills/…` | 安装器 stage | 载荷真源（prov 用），不直接生效 |
+
+判据（改话术后必须三处一起对账）：`find ~/.codex ~/.vod-devkit -name SKILL.md -path '*<技能名>*' -exec md5sum {} +`
+——出现两个不同 md5 就说明生效副本没刷新。实测过程：把新 SKILL 只拷进 `~/.codex/skills/` 后重跑 C1，
+模型仍然追问产品；把同一份拷进插件缓存路径后才按新话术走。所以「话术改了但模型不照做」先查这条，
+不要先怀疑措辞。
