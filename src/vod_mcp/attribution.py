@@ -347,10 +347,31 @@ def attribute(text: str, meta: dict, memory: dict | None = None,
 
     if len(grouped) == 1:
         hit = next(iter(grouped.values()))
-        return {"product": str(hit["id"]) if hit["id"] else hit["product"],
-                "productName": hit["product"], "source": "user_input",
+        if hit["id"]:
+            return {"product": str(hit["id"]),
+                    "productName": hit["product"], "source": "user_input",
+                    "evidence": [{"product": hit["product"], "alias": hit["alias"],
+                                   "snippet": hit["snippet"]}]}
+        if not (meta.get("catalog") or []):
+            # 老引擎/目录不可用：保留 name 兼容通道（引擎侧按产品名解析），
+            # 但证据写明这不是主键——对外对账口径以平台签发 ID 为准（S231）。
+            return {"product": hit["product"], "productName": hit["product"],
+                    "source": "user_input",
+                    "evidence": [{"product": hit["product"], "alias": hit["alias"],
+                                   "snippet": hit["snippet"], "reason": "name_legacy"}]}
+        entry = next((c for c in (meta.get("catalog") or [])
+                      if str(c.get("name") or "").lower() == hit["product"].lower()), None)
+        if entry is not None and entry.get("id") is None:
+            # 目录里确实有这条但没主键（半坏目录）：不拿名字冒充 productId（S231）
+            return {"product": None, "productName": None, "source": "unknown",
+                    "evidence": [{"product": hit["product"], "alias": hit["alias"],
+                                   "snippet": hit["snippet"], "reason": "id_unresolved"}]}
+        # 展示名只在 meta.products 里（catalog 用另一套库名，如 OBS vs 对象存储服务 OBS）：
+        # 名字通道仍旧成立，但证据标 name_only，人工对账时看得见"这条没有主键"。
+        return {"product": hit["product"], "productName": hit["product"],
+                "source": "user_input",
                 "evidence": [{"product": hit["product"], "alias": hit["alias"],
-                               "snippet": hit["snippet"]}]}
+                               "snippet": hit["snippet"], "reason": "name_only"}]}
 
     if len(grouped) > 1:
         # P1-A：歧义一律 UNKNOWN，全部命中留痕（人工归因要有上下文）

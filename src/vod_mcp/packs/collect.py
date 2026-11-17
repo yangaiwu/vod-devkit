@@ -73,6 +73,15 @@ def _attribute_product(items: list, params: dict, client_info: dict | None = Non
                     "evidence": [{"reason": "unmatched-answer", "rawText": answer}],
                     "ignored": None}
         name = hit[0].get("name")
+        if hit[0].get("id") is None:
+            # S231：目录条目没有主键（老引擎/半坏目录）→ 不能拿名字冒充 productId
+            # （str(None) 会写成 "None"，更要拦），交给模型按候选再问一次。
+            cands = core.search_products({"query": answer, "limit": 5})["candidates"]
+            return {"product": None, "productName": None, "source": "unknown",
+                    "confidence": "low", "rawText": answer, "unmatched_answer": answer,
+                    "candidates": cands,
+                    "evidence": [{"reason": "id_unresolved", "rawText": answer}],
+                    "ignored": None}
         return {"product": str(hit[0].get("id")), "productName": name,
                 "source": "user_answer", "confidence": "high", "rawText": answer,
                 "evidence": [{"product": name, "alias": "用户回答", "snippet": answer}],

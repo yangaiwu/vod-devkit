@@ -10,13 +10,29 @@ from vod_mcp import net, provenance
 
 
 def search_products(params: dict) -> dict:
-    """产品候选检索（只读）：给模型 3-5 个候选去问用户，而不是从名录里瞎猜。
-    名录=引擎 meta 接口的 productCatalog（长度随运营变更，插件不内置）。"""
+    """产品候选检索（给模型 3-5 个候选去问用户，而不是从名录里瞎猜）。
+
+    名录=引擎 meta 接口的 productCatalog（长度随运营变更，插件不内置）。
+    S231：目录为空时懒领一次匿名令牌再取——否则独立部署冷启动（无 token/无缓存）
+    恒返回 0 候选，"缺产品先给 3-5 候选问一次"（D-product-ask-1）不成立。
+    这是本工具唯一的写盘例外（ensure 落 state），且只在目录为空时触发。
+    """
     query = str(params.get("query") or "").strip()
     limit = int(params.get("limit") or 5)
     limit = max(1, min(limit, 20))
     meta = net._load_meta()
     catalog = meta.get("catalog") or []
+    if not catalog:
+        try:
+            auth_ensure({})
+        except Exception:          # 领不到令牌不是本工具的错，下面照实报不可用
+            pass
+        meta = net._load_meta(force=True)
+        catalog = meta.get("catalog") or []
+    if not catalog:
+        # 不静默给空：回执要能让模型改问法（直接问产品名/ID），而不是编候选
+        return {"candidates": [], "total": 0, "reason": "catalog_unavailable",
+                "hint": "产品名录不可达（引擎或令牌不可用）：直接问用户产品名或 ID，不要编造候选"}
     if not query:
         return {"candidates": [], "total": len(catalog)}
     idx = _attrib.build_alias_index(meta)

@@ -682,6 +682,9 @@
     "S230": {
       "carrier": "tests/test_docs_path_hygiene.py"
     },
+    "S231": {
+      "carrier": "docs/design.md"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

@@ -1958,6 +1958,7 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S228 | 插件不托管宿主生命周期 | 插件职责固定三件（写宿主配置/落载荷与技能/doctor 读回）；`src/` 零 `systemctl|systemd|launchctl|restart`，用户文案不出现宿主命令行；边界写入 design 九·五 + D-boundary-1（含 Falsifier）；门禁 `tests/test_boundary_host_lifecycle.py::test_s228_*`（含反向锁：用户文案不许教人跑 systemctl） |
 | S229 | 生效口径单一真源 | 用户可见「重启…生效」只由 `vod_mcp.msgs` 拼：11 个宿主适配器 + doctor/update/packs/auth 全部改走它（措辞逐字不变，golden 不动）；门禁断言除 msgs.py 外无第二拼写点，且每个适配器都必须 import 并调用 msgs |
 | S230 | 现役文档路径卫生 | 现役文档（README/README.en/RELEASING/docs 现役篇）零坏链；不得出现旧布局裸路径（`contract/…`、`safety/…`、`skills/vod-core/…`、`hooks/vod_*.py`），须写 `assets/…` 或 `integrations/hermes/hooks/…`（载荷平铺语境与历史台账 decisions.md/CHANGELOG 不追溯）；门禁 `tests/test_docs_path_hygiene.py` |
+| S231 | 冷启动目录与主键纪律 | 独立部署冷启动时 `vod_search_products` 先懒领一次匿名令牌再取目录（本工具唯一写盘例外，仅目录为空时触发）；仍不可用 → 回执 `reason=catalog_unavailable` + 处置提示，不静默给空；`productId` 禁止用产品名冒充主键：目录有该条但无 id → `source=unknown`+`evidence.reason=id_unresolved`，展示名只在 products（catalog 用库名，如 OBS vs 对象存储服务 OBS）→ 保留并标 `name_only`，老引擎（无 catalog）→ `name_legacy`；用户回答命中无主键 → 回候选而非写 `"None"`；门禁 `tests/test_s231_catalog_cold.py`（5 条） |
 | S192 | 退出码与回执不可判 | 0 全绿 / 1 违规 / 2 熔断 / 3 不可判 / 4 鉴权或引擎 4xx（优先级 1>2>3>4）；空回复+有落库 → `reply_indeterminate` 不进 fails、内容判据照跑；横幅打 model+argv、收尾打 `e2e[exit]` |
 | S193 | 路由词表并表 | `TRIGGER_WORDS` ⊇ SKILL 的 S184 现象词（失败/打不开/超时/崩）+ 口语词；裸「卡」加边界；META 移出共用词（接口/配置/字段/日志/版本）、改收工程动作词 |
 | S194 | 不可判只管网线 | 回执不可判不清空 fails（内容线结论保留）；单出口 `decide_exit` 让异常路径带已收违规（有违规 exit 1）；异常报文逐条打 FAIL、未完成数取剩余 |

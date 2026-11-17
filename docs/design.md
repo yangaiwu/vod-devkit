@@ -733,6 +733,19 @@ D-attrib-A 的「只认安装绑定」→ 绑定降为第三顺位先验，模�
 - 记忆是机器级（runtime.json），同机换人/换项目靠 30 分钟 TTL 收敛；回执
   productSource=memory 且 evidence 回指历史命中，便于追污染（负责人风险 #2）。
 
+### 冷启动目录可达性与主键纪律（S231，2026-11-17 真机）
+
+单独部署（standalone，无宿主装机、无 key）实测：冷启动态 `vod_search_products` 恒返回 0 候选；
+先 `vod_auth_ensure` 领匿名令牌后同一次查询返回 3 候选 / total=103。即目录要靠令牌才取得到，
+「缺产品先给 3-5 候选问一次」在冷态不成立。定稿三条：
+
+- `search_products` 目录为空时**懒领一次匿名令牌**再取（本工具唯一写盘例外，仅目录为空时触发）；
+  仍取不到 → 回执 `reason=catalog_unavailable` + 处置提示，不静默给空、不编候选。
+- `productId` 不许用名字冒充主键：目录里有该条但无 `id` → `source=unknown` + `evidence.reason=id_unresolved`；
+  展示名只在 `products` 里（catalog 用另一套库名，如 OBS vs 对象存储服务 OBS）→ 名字通道保留，证据标 `name_only`；
+  老引擎（无 catalog）→ `name_legacy`。
+- 用户回答命中目录项但无主键 → 同口径回 `unmatched_answer` 交候选，绝不写 `"None"`。
+
 ### 别名索引与误命中判定例
 
 数据源全部来自引擎 meta（单一真源，插件零手写别名表）：
