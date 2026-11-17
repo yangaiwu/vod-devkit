@@ -574,3 +574,13 @@
 - d49f424 refactor(common/hosts): 安装行/行视图/hermes 落点收敛到单一入口（S160/S161）
 - 3335564 test(门禁先行): S160/S161 共享语义收敛到单一入口
 
+
+## v0.5.30（2026-11-17）
+
+- 29fa85e fix(writes): 宿主主配置与共享 JSON 全量原子写 + 软链/只读目标保护（S179/S180）
+- 65c5328 test(门禁先行): S179/S180 宿主配置写入原子化 + 软链/只读语义
+- b323848 fix(hosts): CODEX_HOME/DSH_HOME 单入口 + JSON 宿主写完读回（S177/S178）
+- a02d2fb test(门禁先行): S177/S178 宿主家目录重定向 + JSON 宿主安装读回
+- 1effa63 fix(install/doctor): dsh 壳版本读回 + hook 命令随安装更新 + 宿主体检按账本行（S174-S176）
+- 8aac845 test(门禁先行): S174-S176 壳版本读回/hook 命令替换/多行宿主体检
+
