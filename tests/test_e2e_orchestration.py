@@ -70,7 +70,7 @@ def test_s198_run_suite_abort_keeps_collected_fails(monkeypatch, capsys):
 
     assert s.abort == "engine-unavailable"
     assert s.fails == ["真缺陷"], "异常前已判的违规必须留在聚合里"
-    assert s.processed == 2
+    assert s.processed == 1, "processed=已完成条数（抛异常那条没跑完，不算）"
     assert exit_code(s.fails, "report", indeterminate=True) == 1
     out = capsys.readouterr().out
     assert "FAIL(异常前已判)" in out, "异常报文要把已判违规打出来"

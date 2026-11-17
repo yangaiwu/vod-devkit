@@ -583,6 +583,12 @@
     "S197": {
       "carrier": "tests/test_e2e_engine_resilience.py"
     },
+    "S198": {
+      "carrier": "tests/test_e2e_orchestration.py"
+    },
+    "S199": {
+      "carrier": "tests/test_router_corpus.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

@@ -45,6 +45,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -168,16 +169,6 @@ def exit_code(fails, action: str, *, indeterminate: bool = False,
     return 0
 
 
-def decide_exit(fails, action: str, *, indeterminate: bool = False,
-                auth_error: bool = False) -> int:
-    """所有出口（正常收尾 / 引擎异常）共用的判定（S194）。
-
-    异常路径也必须带上已收集的 fails：第 1 条真违规 + 第 2 条遇 502 时，
-    结论是「有违规」（exit 1），不是「没结论」（exit 3）。
-    """
-    return exit_code(fails, action, indeterminate=indeterminate, auth_error=auth_error)
-
-
 class Tee:
     """把 stdout 同时写进运行日志（S197）：kill 掉的一轮也要留下已产生的行。"""
 
@@ -194,7 +185,7 @@ class Tee:
 
 
 def run_log_path(host: str, model: str | None, root: Path | None = None) -> Path:
-    """每轮一份日志：`<repo>/.e2e-runs/<ts>-<host>-<model>.log`（评审第 5 条：结论要能审）。"""
+    """每轮一份日志：`<repo>/.e2e-runs/<ts>-<host>-<model>.log`（结论要能审）。"""
     base = root or (Path(__file__).resolve().parent.parent / ".e2e-runs")
     base.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -205,6 +196,56 @@ def run_log_path(host: str, model: str | None, root: Path | None = None) -> Path
 def remaining_cases(total: int, processed: int) -> int:
     """异常报文里的「未完成 N 条」——剩余数，不是计划总数（S194）。"""
     return max(0, int(total) - int(processed))
+
+
+@dataclass
+class Summary:
+    """一轮套件的聚合结果（S198）：编排与判定分开，异常路径也走同一个形状。"""
+
+    fails: list = field(default_factory=list)
+    indeterminate: list = field(default_factory=list)
+    reply_unjudged: list = field(default_factory=list)
+    total_rows: int = 0
+    processed: int = 0
+    abort: str | None = None          # "engine-unavailable" | "engine-auth"
+    abort_detail: str = ""
+
+
+def run_suite(host: str, cases, cfg: dict, model: str | None = None) -> Summary:
+    """逐案跑完整套；把「打印」与「聚合」放一起，把「退出码」留给 main 唯一处（S198）。"""
+    s = Summary()
+    try:
+        for case in cases:
+            res = run_case(host, case, cfg, model)
+            s.processed += 1
+            s.total_rows += len(res["rows"])
+            if res.get("indeterminate"):
+                s.indeterminate.append(res["case"])
+                print(f"[不可判] {res['case']}（{res['rule']}）：{res['indeterminate']}")
+                continue
+            if res.get("reply_indeterminate"):
+                s.reply_unjudged.append(res["case"])
+                print(f"[回执不可判] {res['case']}（{res['rule']}）rows={len(res['rows'])}"
+                      f"：宿主回复为空，回显线本轮无结论（内容线结论见下）")
+            status = "PASS" if not res["fails"] else "FAIL"
+            print(f"[{status}] {res['case']}（{res['rule']}）rows={len(res['rows'])}")
+            for f in res["fails"]:           # S194：内容线结论照打，不许静默吞掉
+                print(f"  FAIL: {f}")
+            s.fails.extend(res["fails"])
+    except EngineUnavailable as e:
+        s.abort, s.abort_detail = "engine-unavailable", str(e)
+        print(f"引擎不可用：{e}")
+        print(f"已跑 {s.processed} 条、落库 {s.total_rows} 行，"
+              f"未完成 {remaining_cases(len(cases), s.processed)} 条")
+        for f in s.fails:
+            print(f"  FAIL(异常前已判): {f}")
+    except EngineAuthError as e:
+        s.abort, s.abort_detail = "engine-auth", str(e)
+        print(f"鉴权/契约拒绝：{e}")
+        print(f"已跑 {s.processed} 条、未完成 {remaining_cases(len(cases), s.processed)} 条")
+        for f in s.fails:
+            print(f"  FAIL(异常前已判): {f}")
+    return s
 
 
 def print_run_banner(host: str, model: str | None, argv: list) -> None:
@@ -491,69 +532,37 @@ def main() -> None:
         if grade == "explicit_consent":
             print("[grade] prompt 含明确同意语 → 合规指令，提交不计违规")
 
-    all_fails, total_rows, indeterminate, reply_unjudged = [], 0, [], []
-    processed = 0
-    try:
-        for case in cases:
-            res = run_case(a.host, case, cfg, a.model)
-            processed += 1
-            total_rows += len(res["rows"])
-            if res.get("indeterminate"):
-                indeterminate.append(res["case"])
-                print(f"[不可判] {res['case']}（{res['rule']}）：{res['indeterminate']}")
-                continue
-            reply_bad = res.get("reply_indeterminate")
-            if reply_bad:
-                reply_unjudged.append(res["case"])
-                print(f"[回执不可判] {res['case']}（{res['rule']}）rows={len(res['rows'])}"
-                      f"：宿主回复为空，回显线本轮无结论（内容线结论见下）")
-            status = "PASS" if not res["fails"] else "FAIL"
-            print(f"[{status}] {res['case']}（{res['rule']}）rows={len(res['rows'])}")
-            for f in res["fails"]:                    # S194：内容线结论照打，不许静默吞掉
-                print(f"  FAIL: {f}")
-            all_fails.extend(res["fails"])
-    except EngineUnavailable as e:
-        # 环境故障（S194）：已收到的违规不受影响——有真违规先报违规，别被「没结论」盖住
-        code = decide_exit(all_fails, "report", indeterminate=True)
-        print(f"引擎不可用：{e}")
-        print(f"已跑 {processed} 条、落库 {total_rows} 行，未完成 {remaining_cases(len(cases), processed)} 条")
-        for f in all_fails:
-            print(f"  FAIL(异常前已判): {f}")
-        if code == 1:
-            print(f"e2e[exit]=1 reason=violations(异常前已判) model={a.model or 'default'}")
-        else:
-            print(f"e2e[exit]=3 reason=engine-unavailable model={a.model or 'default'}")
-        sys.exit(code)
-    except EngineAuthError as e:
-        # 4xx：鉴权档/设备绑定/契约漂移是判定依据，不是环境故障、也不是产品违规
-        code = decide_exit(all_fails, "report", auth_error=True)
-        print(f"鉴权/契约拒绝：{e}")
-        print(f"已跑 {processed} 条、未完成 {remaining_cases(len(cases), processed)} 条")
-        for f in all_fails:
-            print(f"  FAIL(异常前已判): {f}")
-        print(f"e2e[exit]={code} reason={'violations(异常前已判)' if code == 1 else 'engine-4xx'} "
-              f"model={a.model or 'default'}")
+    summary = run_suite(a.host, cases, cfg, a.model)
+    if summary.abort:
+        code = exit_code(summary.fails, "report",
+                         indeterminate=(summary.abort == "engine-unavailable"),
+                         auth_error=(summary.abort == "engine-auth"))
+        reason = ("violations(异常前已判)" if code == 1
+                  else "engine-unavailable" if summary.abort == "engine-unavailable"
+                  else "engine-4xx")
+        print(f"e2e[exit]={code} reason={reason} model={a.model or 'default'}")
         sys.exit(code)
 
     # 熔断判定（配置化；默认 report=只报告不改行为）
     counts = bucket_counts(json.loads(COUNTER.read_text()) if COUNTER.exists() else {},
                            a.host, cfg["window_days"])
     action = decide_action(cfg, max(counts.values()) if counts else 0)
-    if reply_unjudged:
-        print(f"回执不可判 {len(reply_unjudged)} 条（{', '.join(reply_unjudged)}）——回复为空，"
-              f"回显线无结论（内容判据已判）；不得当成「回显缺失」记违规（S192）")
-    if indeterminate:
-        print(f"不可判 {len(indeterminate)} 条（{', '.join(indeterminate)}）——宿主回合无产出，"
-              f"不得计入熔断、不得写成产品回归；环境恢复后重跑（S189）")
-    print(f"用例 {len(cases)} 条，落库 {total_rows} 行，违规 {len(all_fails)} 项；"
+    if summary.reply_unjudged:
+        print(f"回执不可判 {len(summary.reply_unjudged)} 条"
+              f"（{', '.join(summary.reply_unjudged)}）——回复为空，回显线无结论"
+              f"（内容判据已判）；不得当成「回显缺失」记违规")
+    if summary.indeterminate:
+        print(f"不可判 {len(summary.indeterminate)} 条（{', '.join(summary.indeterminate)}）"
+              f"——宿主回合无产出，不得计入熔断、不得写成产品回归；环境恢复后重跑")
+    print(f"用例 {len(cases)} 条，落库 {summary.total_rows} 行，违规 {len(summary.fails)} 项；"
           f"分桶计数 {counts}；熔断动作={action}（计数见 .e2e-behavior.json）")
-    code = decide_exit(all_fails, action,
-                     indeterminate=bool(indeterminate or reply_unjudged))
+    code = exit_code(summary.fails, action,
+                     indeterminate=bool(summary.indeterminate or summary.reply_unjudged))
     reason = ("violations" if code == 1 else "fuse" if code == 2
               else "indeterminate" if code == 3 else "ok")
     print(f"e2e[exit]={code} reason={reason} model={a.model or 'default'} "
-          f"violations={len(all_fails)} indeterminate={len(indeterminate)} "
-          f"reply_indeterminate={len(reply_unjudged)}")
+          f"violations={len(summary.fails)} indeterminate={len(summary.indeterminate)} "
+          f"reply_indeterminate={len(summary.reply_unjudged)}")
     sys.exit(code)
 
 

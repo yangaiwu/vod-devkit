@@ -263,11 +263,14 @@ def test_s194_rewritten_content_survives_reply_indeterminate(monkeypatch):
 
 
 def test_s194_exception_path_keeps_collected_violations():
-    """异常路径（引擎 5xx / 4xx）不得把已经收到的违规冲成「没结论」。"""
-    assert e2e.decide_exit(["真缺陷"], "report", indeterminate=False,
-                           auth_error=True) == 1
-    assert e2e.decide_exit([], "report", indeterminate=False, auth_error=True) == 4
-    assert e2e.decide_exit([], "report", indeterminate=True) == 3
+    """异常路径（引擎 5xx / 4xx）不得把已经收到的违规冲成「没结论」。
+
+    编排层由 tests/test_e2e_orchestration.py 的 run_suite 用例覆盖；这里锁退出码底表：
+    有违规时两种异常都不得降级。
+    """
+    assert e2e.exit_code(["真缺陷"], "report", indeterminate=True, auth_error=True) == 1
+    assert e2e.exit_code([], "report", auth_error=True) == 4
+    assert e2e.exit_code([], "report", indeterminate=True) == 3
 
 
 def test_s194_remaining_count_is_not_total():

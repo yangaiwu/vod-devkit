@@ -103,3 +103,27 @@ def test_s195_polite_mafan_is_not_complaint():
     # 真抱怨仍要命中
     for msg in ("操作太麻烦了", "这个流程麻烦死了"):
         assert router.route(msg) is not None, f"真实抱怨漏判：{msg}"
+
+
+# --- S199：词表不变量（新增词时的机械护栏，不依赖某条语料）---------------------
+# 为什么需要：S185/S193/S195 三轮都是「修一条、换词又长一条」。语料用例只能钉住**已知**
+# 的误判；新增词时的结构性问题（同一个词既算抱怨又算元语汇、词表里塞空串/带空格、
+# 重复项）没有断言就会静默漂移。这里锁的是词表本身的不变量，与语料互补。
+def test_s199_word_tables_have_no_overlap_or_junk():
+    tables = {"TRIGGER": router.TRIGGER_WORDS, "META": router.META_WORDS,
+              "ANCHOR": router.ANCHOR_WORDS}
+    for name, words in tables.items():
+        assert len(words) == len(set(words)), f"{name} 有重复项"
+        for w in words:
+            assert isinstance(w, str) and w and w == w.strip(), f"{name} 含空串/带空格的词：{w!r}"
+    tri, meta, anch = (set(tables[k]) for k in ("TRIGGER", "META", "ANCHOR"))
+    assert not (tri & meta), f"同一个词不能既算抱怨又算工程语汇：{sorted(tri & meta)}"
+    assert not (tri & anch), f"触发词与锚点重叠会让优先级失效：{sorted(tri & anch)}"
+    assert not (meta & anch), f"元语汇与锚点重叠会让排除判据自相矛盾：{sorted(meta & anch)}"
+
+
+def test_s199_ka_guard_is_the_only_special_case():
+    """装配正则里只允许裸「卡」一处特殊处理——别悄悄长出第二套规则。"""
+    pattern = router._trigger_pattern()
+    assert pattern.count("(?!") == 1, "出现了第二处边界规则，需在词表纪律里显式登记"
+    assert router._KA_GUARD in pattern
