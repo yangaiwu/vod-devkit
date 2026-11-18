@@ -89,6 +89,155 @@ function ledgerAppend(entries) {
     saveRuntime({ submissions: [...subs, ...entries].slice(-LEDGER_CAP) });
 }
 
+// 回显段（方案 A，与 vod_mcp _echo_plan 逐字段同构）：提交回执强制携带原话回显。
+// 检测型防线——宿主模型改写用户原话（实锤："体验不好"→"不友好"）在回执处当场可见，
+// agent 必须原样转述，改写露馅。voiceId 为空（未拿到回执）的条目不进回显。
+function echoPlan(hoard, vids) {
+    const ok = [];
+    for (let i = 0; i < vids.length && i < hoard.length; i += 1) {
+        const vid = vids[i];
+        if (vid) ok.push({ voiceId: String(vid), content: String(hoard[i]?.content ?? '') });
+    }
+    return {
+        requiresUserEcho: ok.length > 0,
+        instruction: '请向用户原样转述已收录内容：每条以「已收录原话：」开头，'
+            + '后接 content 全文。禁止改写、概括、增删字词。',
+        contents: ok,
+    };
+}
+
+// ── tags 分类白名单（与 vod_mcp _allowed_tags/_filter_tags 逐条同构）──
+// 引擎约定：分类标注写 problem_type:<值>，值域=meta.problemTypes。其它语义的 tag
+// 不参与分类校验、原样保留；只有 problem_type 的值会被白名单过滤——脏值丢弃
+// 不拒收声音（对标 vod-skill 的 check_classification）。
+// 引擎契约变更（2026-11-12）：problemTypes 不再随无参 meta 下发，改为
+// GET /external/meta?productId=<id> 按产品下发（真源 t_vod_problem_category 按
+// product_id 分组，不同产品分类集不同）。
+const PROBLEM_TYPE_PREFIX = 'problem_type:';
+const PTYPE_TTL_MS = 24 * 3600 * 1000;
+let _ptypeCache = null;   // {at, by: {productId: [types]}}
+
+// 取不到（无 productId / 老引擎 / 该产品无分类 / 网络异常）→ 空集=不知道值域
+// → 不过滤：宁可放行也不误杀采集。
+async function allowedTags(productId, cfg, signal) {
+    const pid = String(productId || '').trim();
+    if (!pid || !/^\d+$/.test(pid)) return new Set();
+    const cache = _ptypeCache || { at: 0, by: {} };
+    const by = { ...(cache.by || {}) };
+    if (Date.now() - Number(cache.at || 0) < PTYPE_TTL_MS && Array.isArray(by[pid])) {
+        return new Set(by[pid]);
+    }
+    try {
+        const out = await http('GET', `${META_PATH}?productId=${encodeURIComponent(pid)}`,
+            undefined, { ...cfg, signal, timeoutSec: 10 });
+        const data = out?.data?.data || out?.data || {};
+        const types = (Array.isArray(data.problemTypes) ? data.problemTypes : [])
+            .map((t) => String(t).trim()).filter(Boolean);
+        by[pid] = types;
+        _ptypeCache = { at: Date.now(), by };
+        return new Set(types);
+    } catch (e) {
+        // 任何取不到 = 不知道值域 → 不过滤，绝不阻断提交
+        return new Set(Array.isArray(by[pid]) ? by[pid] : []);
+    }
+}
+
+function filterTags(tags, allowed) {
+    const kept = [], dropped = [];
+    for (const t of Array.isArray(tags) ? tags : []) {
+        let s = String(t ?? '').trim();
+        if (!s) continue;
+        if (allowed.size && s.startsWith(PROBLEM_TYPE_PREFIX)) {
+            const val = s.slice(PROBLEM_TYPE_PREFIX.length).trim();
+            if (!allowed.has(val)) { dropped.push(s); continue; }
+            s = PROBLEM_TYPE_PREFIX + val;   // 归一（去多余空白）
+        }
+        if (!kept.includes(s)) kept.push(s);
+    }
+    return { kept, dropped };
+}
+
+// ── 产品候选检索（与 vod_mcp/packs/core.py search_products 同算法）──
+// 给模型 3-5 个候选去问用户，而不是从名录里瞎猜。名录=引擎 meta 的 productCatalog。
+const UNRESOLVED_CODE = -32010;   // 「需要先问用户是哪个产品」的可执行错误码
+
+function searchProducts(query, meta, limit = 5) {
+    const catalog = Array.isArray(meta?.catalog) ? meta.catalog : [];
+    const lim = Math.max(1, Math.min(20, Number(limit) || 5));
+    if (!catalog.length) {
+        return { candidates: [], total: 0, reason: 'catalog_unavailable',
+            hint: '产品名录不可达（引擎或令牌不可用）：直接问用户产品名或 ID，不要编造候选' };
+    }
+    const q = String(query || '').trim();
+    if (!q) {
+        return { candidates: [], total: catalog.length, reason: 'empty_query',
+            hint: '入参名是 query（其它名字会被当成空查询）；本次没有按任何关键词匹配' };
+    }
+    const idx = buildAliasIndex(meta);
+    const hits = matchProducts(q, idx);
+    const seen = new Set(), cands = [];
+    for (const h of hits) {
+        const pid = String(h?.id ?? '');
+        if (!pid || seen.has(pid)) continue;
+        seen.add(pid);
+        cands.push({ id: pid, name: h.product,
+            score: Math.round(Math.min(1, String(h.alias || '').length / Math.max(q.length, 1)) * 100) / 100,
+            matchReason: `alias:${h.alias}` });
+    }
+    if (!cands.length) {   // 别名没命中：退回名字子串（用户可能打错/只说一半）
+        const low = q.toLowerCase();
+        for (const item of catalog) {
+            const name = String(item?.name ?? '');
+            if (low && (name.toLowerCase().includes(low) || low.includes(name.toLowerCase()))) {
+                cands.push({ id: String(item?.id), name, score: 0.5, matchReason: 'name-substring' });
+            }
+        }
+    }
+    if (!cands.length) {   // 完全无关联词：给名录前 N 个当「可选项」（问用户用）
+        for (const item of catalog.slice(0, lim)) {
+            cands.push({ id: String(item?.id), name: String(item?.name ?? ''),
+                score: 0, matchReason: 'catalog-default' });
+        }
+    }
+    cands.sort((a, b) => (b.score - a.score) || (b.name.length - a.name.length));
+    return { candidates: cands.slice(0, lim), total: catalog.length };
+}
+
+// 候选串的唯一拼写点（S233 同口径）：`名字（主键）` 顿号分隔。
+function formatCandidates(cands, empty = '（名录为空）') {
+    const items = (Array.isArray(cands) ? cands : []).filter((c) => c && typeof c === 'object');
+    return items.map((c) => `${c.name}（${c.id}）`).join('、') || empty;
+}
+
+// 缺产品时先问一次（D-product-ask-1，对齐 Python _require_product_or_ask 的可执行错误
+// 形态）。dsh 壳没有 product/productNotSpecified 入参（工具面故意不暴露 product——
+// 防模型自报，见 ux-sync 锁），因此只走「按原话检索候选 → 请模型问一次」这一条路径。
+// 追问轮次上限 2 次，之后明确终止——避免用户连续给两个都查不到的名字时无限重问。
+function askProductOrFail(attr, hoard, runtime, meta) {
+    if (attr.product) return null;
+    // 歧义（多产品命中）不追问：引擎 UNKNOWN 池接得住，且追问会让用户被迫二选一
+    // （对齐 Python：ambiguous 不带 product 直接提交，只有 no-evidence 才问）。
+    if (attr.source === 'unknown' && (attr.evidence || []).some((e) => e && e.reason === 'ambiguous')) {
+        return null;
+    }
+    // 计数封顶 3（2 次追问 + 1 次终止）：不封顶的话 state 里会一直累加，
+    // 跨会话永远进不了「重新开始」的状态。提交成功时归零（见下方 saveRuntime）。
+    const fails = Math.min(Number(runtime.productAskFailures || 0) + 1, 3);
+    const stop = fails > 2;
+    const tail = '（已追问 2 次仍未确认：别再问了，直接告诉用户这条反馈因为没有产品归属而不提交）';
+    const text = hoard.map((h) => h.content).join('\n');
+    const hint = formatCandidates(searchProducts(text, meta).candidates,
+        '（名录未命中，可问用户直接说产品名）');
+    return {
+        error: '这条反馈还没确定是哪个产品：请先问用户一次『这条是哪个产品的反馈？』，'
+            + '让他说产品名或 ID，然后原样重提这条反馈（不要自己填产品）。'
+            + `候选：${hint}` + (stop ? tail : ''),
+        code: UNRESOLVED_CODE,
+        needsProductAsk: true,
+        askFailures: fails,
+    };
+}
+
 // ── HTTP ──
 // ── 传输守卫（与 vod_mcp tools.py -32014 同构）：Bearer key/匿名令牌不得明文过公网 ──
 function transportError(base) {
@@ -158,6 +307,14 @@ const ATTR_SHORT_ALIAS = 5;            // <5 字符短别名只认大小写精�
 const ATTR_BOUNDARY = /[A-Za-z0-9_-]/;
 const ATTR_HISTORY_CAP = 10;
 let _metaCache = null;                 // {at, data}
+
+// 测试用：清进程内 meta/分类白名单缓存。产品运行时不需要调用（TTL 自然过期），
+// 但测试里同一进程连着跑多个场景时，缓存会把前一个场景的 meta 带进后一个，
+// 造成「本该发请求却没发」的假失败。
+export function __clearCaches() {
+    _metaCache = null;
+    _ptypeCache = null;
+}
 
 function emptyMeta() {
     return { products: [], catalog: [], aliases: {}, nameAliases: {} };
@@ -618,7 +775,8 @@ export function apply(ctx, config) {
             description: '[VOD-unique] Submit agent-product user feedback voices to VOD (write). '
                 + 'PRECONDITION (overrides everything below): obtain the user\'s explicit consent to submit THIS feedback before calling; '
                 + 'the user merely stating a complaint is NOT consent; never pass confirmed=true without it. '
-                + 'ON FAILURE: tell the user in plain words only (e.g. 已暂存，稍后自动重试). '
+                + 'ON FAILURE: tell the user in plain words only (e.g. 这次没有提交成功，需要的话我再提一次). '
+                + 'NEVER say 已暂存/稍后自动重试 — the plugin has no local queue; that would be a false claim. '
                 + 'NEVER expose HTTP status codes, apiKeyFingerprint, tokenTier, stack traces, '
                 + 'tool names (say 提交反馈, never vod_submit_voices) or mechanism words '
                 + '(调用/被拒/护栏/参数) to the user - they are internal diagnostics. '
@@ -630,14 +788,15 @@ export function apply(ctx, config) {
                 + 'content MUST be a faithful transcription of the user\'s own words - '
                 + 'NEVER invent sentiment (e.g. 体验不好) or fabricate content the user did not say. '
                 +                'A bare product name or a question is NOT feedback - ask what the user wants to report. ' +
-                'Attribution comes from the user\'s own words; config product is only a fallback. NEVER ask or invent a product. ' +
+                + 'Attribution comes from the user\'s own words; config product is only a fallback. NEVER invent a product. '
+                + 'If attribution finds no product, the tool returns needsProductAsk: ask the user once which product this is about (offer the candidates in the error), then resubmit the same feedback verbatim — do not fill in product yourself. ' +
                 'Fixed one-time follow-up at confirmation, verbatim: 「方便的话，补充一下遇到这个问题时的操作步骤或期望的表现吗？不方便回复"没有"，我直接提交。」' +
                 'Answer → reproSteps/expectedBehavior verbatim excerpt, never into content; "没有/跳过"=omit both. ' +
                 'Batch ≤50. Returns voiceIds (reconciliation key) + taskIds.',
             parameters: buildParameters({
                 voices: {
                     type: 'array', required: true,
-                    description: 'Array of 1-50 voices: {content (required, ≤2000), userType (optional 企业|个人|未知), reproSteps/expectedBehavior (optional 用户追问补充, only when the fixed one-time follow-up got an answer; never merge into content)}',
+                    description: 'Array of 1-50 voices: {content (required, ≤2000), userType (optional 企业|个人|未知), tags (optional 采集层分类标注，写 problem_type:<六类之一>，白名单外值由插件丢弃并在回执 invalidTags 报出，不拒收声音), reproSteps/expectedBehavior (optional 用户追问补充, only when the fixed one-time follow-up got an answer; never merge into content)}',
                 },
             }),
             output: { schema: { type: 'object', additionalProperties: true }, render: renderText },
@@ -664,7 +823,10 @@ export function apply(ctx, config) {
                 const userTurns = rgMode === 'off' ? null : collectUserTurns(exec?.agent?.session);
                 const rgVerdict = new Map(); // index → verified|fuzzy|mismatch|unavailable
                 const accepted = [], taskIds = [], rejected = [];
+                const invalidTags = [];
                 let key = c.key;
+                // 分类白名单按产品取（引擎 ?productId= 下发）；product 非数字 id 时取不到→不过滤
+                const allowed = await allowedTags(product, c, exec?.signal);
                 // V16 切换（囤积端点）：批量一次 POST，title=原文截取、content=用户原话
                 // （新端点无 10 字下限，不做模板补齐——P1 数据完整性）。404=引擎未部署 → 回落旧单条
                 const hoard = [];
@@ -684,6 +846,14 @@ export function apply(ctx, config) {
                         }
                     }
                     const hv = { title: content.slice(0, 128), content }; // R3：title=用户原文
+                    // tags（采集层三分类 problem_type:值）→ 按产品白名单过滤后正式入库；
+                    // 白名单外的 problem_type 值丢弃不拒收，回执 invalidTags 报出（对齐 vod_mcp）
+                    if (Array.isArray(v.tags) && v.tags.length) {
+                        const { kept, dropped } = filterTags(v.tags, allowed);
+                        if (kept.length) hv.tags = kept;
+                        if (dropped.length) invalidTags.push({ index: i, tags: dropped });
+                    }
+                    if (v.userType) hv.userType = String(v.userType);
                     // D-followup-impl-2 追问补充透传：仅 trim 非空才含键（未追问/答"没有"=键集合与旧流程一致）；引擎同口径截 2000
                     // followupStatus（评审八点 #3）：三态白名单归一透传，白名单外省键（desc 无预算不宣讲，行为对齐 vod_mcp 单源）
                     const DECLINES = new Set(['没有', '无', '没有。', '没了', '跳过', '不方便', '不用了', '不用', '不补充', '算了', '没有了', '没有了。', '不方便说', 'no', 'none', 'skip', 'n/a']);
@@ -694,6 +864,15 @@ export function apply(ctx, config) {
                     const st = String(v.followupStatus ?? '').trim().toLowerCase();
                     if (['not_asked', 'declined', 'answered'].includes(st)) hv.followupStatus = st;
                     hoard.push(hv);
+                }
+                // 缺产品先问一次（D-product-ask-1）：与其裸提交进引擎 UNKNOWN 池，
+                // 不如让模型问用户一句。追问计数落 runtime，超 2 次明确终止。
+                if (hoard.length) {
+                    const ask = askProductOrFail(attr, hoard, loadRuntime(), meta);
+                    if (ask) {
+                        saveRuntime({ productAskFailures: ask.askFailures });
+                        return textResult(ask);
+                    }
                 }
                 if (hoard.length) {
                     const hoardBody = { voices: hoard, ...(product ? { product } : {}) };
@@ -732,6 +911,8 @@ export function apply(ctx, config) {
                         if (receiptOk) {
                             // 只有真拿到回执才记账 + 记归因记忆，否则账本被空 voiceId 污染
                             rememberAttribution(attr); // 只记有字面证据的唯一命中
+                            // 提交成功 → 追问计数归零（下一轮反馈重新从第 1 次问起）
+                            if (loadRuntime().productAskFailures) saveRuntime({ productAskFailures: 0 });
                             ledgerAppend(hoard.map((h, i) => ({
                                 voiceId: ids[i] || '', taskId: null,
                                 title: h.title.slice(0, 40), product,
@@ -747,9 +928,13 @@ export function apply(ctx, config) {
                             voiceIds: receiptOk ? accepted : [],
                             taskIds, rejected: mergedRejected, path: 'hoarding',
                             analysis: 'deferred',
+                            // 回显段（方案 A，与 vod_mcp _echo_plan 同构）：检测型防线——
+                            // 宿主模型改写用户原话在回执处当场可见，agent 必须原样转述。
+                            echo: echoPlan(hoard, receiptOk ? ids : []),
                             ...(receiptOk ? {} : { receiptIncomplete: true }),
                             productSource: attr.source,
                             ...(attr.evidence && attr.evidence.length ? { productEvidence: attr.evidence } : {}),
+                            ...(invalidTags.length ? { invalidTags } : {}),
                             ...(rgMode !== 'off' ? { receiptGuard: rgGuardSummary(rgVerdict, hoard.length) } : {}),
                             ...(d.productRegistered !== undefined ? { productRegistered: d.productRegistered } : {}),
                         });
@@ -778,6 +963,7 @@ export function apply(ctx, config) {
                 return textResult({ accepted: 0, voiceIds: [], taskIds: [], rejected,
                     productSource: attr.source,
                     ...(attr.evidence && attr.evidence.length ? { productEvidence: attr.evidence } : {}),
+                    ...(invalidTags.length ? { invalidTags } : {}),
                     ...(rgMode !== 'off' ? { receiptGuard: rgGuardSummary(rgVerdict, voices.length) } : {}) });
             },
         },

@@ -260,9 +260,7 @@ product（归因安装绑定层）/confirmWrites/timeoutSec。
 同调用幂等跨调用保声量——与引擎端 VOD-VOI 确定性键是**分层而非分叉**：客户端
 键=本地对账主键+重试幂等，引擎 /external/voices 忽略 body.voiceId 自算确定性
 键查重 V9）、传输守卫同构（-32014：非 https 且非本机回环拒绝，Bearer 不得明
-文过公网，2026-11-03 深审 D-dsh-1 落码）、PRODUCT_MAP 归一
-（codearts→CodeArts，引擎大小写敏感实测；注：dsh 形态不拉 /external/meta，
-PRODUCT_MAP 硬编码需随引擎 VodExternalProducts 手工同步——D-dsh-3）、归因三
+文过公网，2026-11-03 深审 D-dsh-1 落码）、归因三
 层、批量/长度护栏、
 无 key→匿名令牌兜底→-32012 引导、本地账本（data/runtime.json，cap 200
 读改写只动目标键）。
@@ -443,6 +441,24 @@ exit 1 附可照抄的手动修复格式。manifest 增 dshProfile 键（golden 
   回执/账本/分析时机分叉，且老链自带第二套 voiceId 与 source 命名空间逻辑。现口径：囤积端点
   404 → `ToolError(-32016)`「本条未提交」，不假装成功、不换链；回执恒 `path=hoarding`
   （dsh 薄壳同步删除旧单条链与本地 voiceId 键，失败码/措辞与 Python 侧对齐，见 S241 用例）
+- 两形态采集语义收敛（S242/S243）：S241 删老链后 dsh 侧仍与 vod_mcp 有四处分叉，逐项补齐：
+  ① **回执完整**——引擎侧 `rejected` 合并透出（此前被吞，用户被告知「已收录」而实际未入库）；
+  `voiceIds` 缺失时 `accepted=0` + `receiptIncomplete=true` 且**不写账本/不记归因**
+  （此前按空回执记账，本地账本被空 voiceId 污染）；
+  ② **echo 回显**——契约 `output.required` 含 `echo`，dsh 此前不返回。现按 `_echo_plan` 同构
+  补 `{requiresUserEcho, instruction, contents[]}`，回显原话供用户当场发现模型改写；
+  ③ **tags 采集层三分类**——dsh 工具面新增 `tags`；`problem_type:<值>` 按产品白名单过滤
+  （`GET /external/meta?productId=<id>` 取 problemTypes，24h 缓存；取不到=不过滤、绝不误杀），
+  白名单外值丢弃不拒收、回执 `invalidTags` 报出；
+  ④ **缺产品先问一次**——此前 dsh 直接裸提交进引擎 UNKNOWN 池。现与 D-product-ask-1 同口径：
+  无产品归属时返回 `code=-32010` + `needsProductAsk=true` + 候选串，让模型问用户一次再原样重提；
+  追问计数封顶 3（2 次追问 + 1 次终止），提交成功归零。**歧义（多产品命中）不追问**——引擎
+  UNKNOWN 池接得住，追问等于逼用户二选一。
+  ⑤ **失败话术不再谎报暂存**——dsh 壳无本地 pending 队列（只有 vod_mcp 侧有），失败回执加
+  `notStored=true` + `userFacingHint`；SKILL 明确区分「有插件但提交失败」与「插件未安装走
+  无通道落盘」两种情形，前者禁止说「已暂存/稍后自动重试」。
+  门禁：`packages/dsh/test/receipt-integrity.test.mjs`（S242，5 条）+
+  `packages/dsh/test/parity-collect.test.mjs`（S243，6 条），均含行为级 stub 断言。
 - 面向用户的用语纪律是**禁词表**，不只是「别科普」（S237）：技能里原有「不向用户解释机制」
   只是职责边界，模型仍会说「已按 X 归因」（真机 C3/C5 实测）。现口径：技能写死禁词表
   （归因/白名单/令牌/配额/幂等/引擎/端点/提交链/囤积/草稿/主键/名单/voiceId/插件/MCP）+
