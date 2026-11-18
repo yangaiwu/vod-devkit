@@ -140,8 +140,18 @@ async function allowedTags(productId, cfg, signal) {
         return new Set(by[pid]);
     }
     try {
-        const out = await http('GET', `${META_PATH}?productId=${encodeURIComponent(pid)}`,
+        let out = await http('GET', `${META_PATH}?productId=${encodeURIComponent(pid)}`,
             undefined, { ...cfg, signal, timeoutSec: 10 });
+        // 同 D-meta-anon-1：未配 key 时该请求也 401 → tags 值域恒空 → 白名单校验失效
+        // （自造值会绕过过滤直接上送）。401 先领令牌再重试一次。
+        if (out.status === 401) {
+            const token = await fetchAnonToken({ ...cfg, key: '', signal });
+            if (token) {
+                saveRuntime({ java_key: token, token_tier: 'anonymous' });
+                out = await http('GET', `${META_PATH}?productId=${encodeURIComponent(pid)}`,
+                    undefined, { ...cfg, key: token, signal, timeoutSec: 10 });
+            }
+        }
         const data = out?.data?.data || out?.data || {};
         const types = (Array.isArray(data.problemTypes) ? data.problemTypes : [])
             .map((t) => String(t).trim()).filter(Boolean);
@@ -323,9 +333,12 @@ let _metaCache = null;                 // {at, data}
 // 测试用：清进程内 meta/分类白名单缓存。产品运行时不需要调用（TTL 自然过期），
 // 但测试里同一进程连着跑多个场景时，缓存会把前一个场景的 meta 带进后一个，
 // 造成「本该发请求却没发」的假失败。
+// 同时重置 runtimePath：它在模块加载期由 VOD_DSH_RUNTIME 定死，测试中途改环境
+// 变量原本无效 → 前一用例写入的 attribution_memory 会串到后一用例（S243-③ 假失败实锤）。
 export function __clearCaches() {
     _metaCache = null;
     _ptypeCache = null;
+    runtimePath = process.env.VOD_DSH_RUNTIME || RUNTIME;
 }
 
 function emptyMeta() {
@@ -335,7 +348,19 @@ function emptyMeta() {
 async function loadMeta(cfg, signal) {
     if (_metaCache && Date.now() - _metaCache.at < META_TTL_MS) return _metaCache.data;
     try {
-        const out = await http('GET', META_PATH, undefined, { ...cfg, signal });
+        let out = await http('GET', META_PATH, undefined, { ...cfg, signal });
+        // D-meta-anon-1（2026-11-18 端到端真机实锤）：未配 key 的默认形态下，
+        // meta 请求先于「提交时 401 才领令牌」的逻辑发生 → auth=false → 平台 401
+        // → catch 吞掉 → 名录恒空 → 归因必失败 → needsProductAsk 死循环
+        // （领令牌要提交成功，提交成功要归因成功，归因成功要 meta，meta 要令牌）。
+        // 修法与提交侧 i0Anon 重试对称：401 先领匿名令牌，带 key 重试一次。
+        if (out.status === 401) {
+            const token = await fetchAnonToken({ ...cfg, key: '', signal });
+            if (token) {
+                saveRuntime({ java_key: token, token_tier: 'anonymous' });
+                out = await http('GET', META_PATH, undefined, { ...cfg, key: token, signal });
+            }
+        }
         const d = out?.data?.data || out?.data || {};
         const meta = {
             products: Array.isArray(d.products) ? d.products : [],
@@ -653,6 +678,41 @@ export function collectUserTurns(session) {
     return turns.length ? turns : null;
 }
 
+/** D-drift-1：跑题期留底判定（纯函数，可单测）。
+ *
+ *  真机反例：用户抱怨「产品体验不友好」→ 被追问两轮 → 反问「你是什么技能」
+ *  → agent 顺着介绍 5 分钟能力 → 那句抱怨永久丢失。
+ *
+ *  本函数只做三件确定性判断，不做语义理解（语义归 agent）：
+ *   ① 该不该拉回：用户在跑题、且本轮尚未拉回过 → 拉一次；已拉过 → 不再拉
+ *   ② 缓冲区：历次用户轮里"像反馈的"原话按序保留，回来时不必重说
+ *   ③ 回来判定：仅在「发生过跑题」之后回到话题时成立 → 用缓冲区继续；
+ *      正常流程（从未跑题）不算 resume，避免误判。
+ *
+ *  @param {object} p
+ *  @param {string[]} p.userTurns  会话里全部用户轮逐字文本（collectUserTurns）
+ *  @param {boolean}  p.pulledBack 本会话是否已拉回过（调用方持有）
+ *  @param {boolean}  p.offTopic   最后一个用户轮是否判定为跑题（语义判定，agent 给）
+ *  @returns {{shouldPullBack:boolean, buffer:string[], resume:boolean, reason:string}}
+ */
+export function planDriftHandling({ userTurns, pulledBack = false, offTopic = false } = {}) {
+    const turns = Array.isArray(userTurns) ? userTurns.filter((t) => typeof t === 'string' && t.trim()) : [];
+    // 像反馈的原话：含抱怨/建议词，或带可感知的量级描述（"两分钟""半小时"这类
+    // 用户描述成本的表达——不含任何关键词但确实是反馈，漏掉就是真丢声音）。
+    // 刻意保守：宁可多留，不可丢。
+    const SIGNAL = /慢|卡|错|崩|挂|失败|打不开|没反应|不能用|不好用|难用|不方便|体验|希望|建议|能不能|为什么不|太.{0,3}(复杂|繁琐|慢|难)|bug|报错|超时|等了|半天|好久|长时间|[一二三四五六七八九十两几\d]+\s*(秒|分钟|小时|天)/;
+    const buffer = turns.filter((t) => SIGNAL.test(t));
+    // 一次拉回：只在"当前跑题"且"还没拉过"时拉；拉过就放弃（不重复追问）。
+    const shouldPullBack = !!offTopic && !pulledBack;
+    // 回来：只有「曾跑题（已拉回）」且现在不跑题，才算回到话题、用缓冲区续。
+    // 正常流程（从未跑题）不算 resume —— 否则每次对话都误判成"续用缓冲区"。
+    const resume = !offTopic && !!pulledBack && buffer.length > 0;
+    const reason = shouldPullBack ? 'off-topic-first-pull'
+        : offTopic && pulledBack ? 'off-topic-already-pulled'
+            : resume ? 'resumed-with-buffer' : 'normal';
+    return { shouldPullBack, buffer, resume, reason };
+}
+
 /** 单条 content 判定：规范化整串命中任一用户轮=verified；跨轮忠实聚合按拼接语料命中；
  *  字符二元组相似度 ≥0.5 且规范化长度 ≥10=fuzzy（短内容必须逐字，防止相似度阈值吞掉短改写）；
  *  否则 mismatch；原文不可得=unavailable。 */
@@ -789,20 +849,17 @@ export function apply(ctx, config) {
                 // 必须在最前面，其余机制纪律放窗口外（模型仍可读到全文的宿主不受影响）。
                 + 'PRECONDITION: obtain the user\'s explicit consent to submit THIS feedback before calling; '
                 + 'a complaint alone is NOT consent; never pass confirmed=true without it. '
+                + 'BEFORE any user-facing wording, call vod_retrieve_skill (vod-feedback-collect) for the full wording rules: follow-up at most once / one question at a time / verbatim script / never a debugging interrogation. '
                 + 'NO PRODUCT FOUND → the tool returns needsProductAsk: ask the user once which product this is about (use the candidates in the error), then resubmit the same feedback verbatim; NEVER invent a product for them. '
                 + 'ON FAILURE: say in plain words only (e.g. 这次没有提交成功，需要的话我再提一次). '
                 + 'NEVER say 已暂存/稍后自动重试 — no local queue exists; that would be a false claim. '
-                + 'content MUST be a faithful transcription of the user\'s own words (≤2000 chars); '
-                + 'NEVER invent sentiment or fabricate content the user did not say. A bare product name or a question is NOT feedback -- ask what they want to report. '
+                + 'content MUST be a faithful transcription of the user\'s own words (≤2000); NEVER invent sentiment or content they did not say. A bare product name or a question is NOT feedback -- ask what to report. '
                 + 'Each voice = one user feedback. '
-                + 'NEVER expose HTTP status codes, fingerprints, tokenTier, stack traces, tool names '
-                + '(say 提交反馈, never vod_submit_voices) or mechanism words (调用/被拒/护栏/参数/配额) — internal diagnostics. '
-                + 'Attribution comes from the user\'s own words; config product is only a fallback. '
-                + 'Anonymous tier has NO credentials by design. '
-                + 'OUTPUT: to the user, cover only 收录状态与后续跟进; never explain 声音来源/渠道字段、计数规则、归因. '
+                + 'NEVER expose status codes, fingerprints, tokenTier, stacks (say 提交反馈, never vod_submit_voices) or mechanism words (调用/被拒/护栏/配额). '
+                + 'Attribution: user\'s own words first, config product is fallback. OUTPUT: only 收录状态与后续跟进; never explain 声音来源/渠道/计数/归因. '
                 + 'Fixed one-time follow-up at confirmation, verbatim: 「方便的话，补充一下遇到这个问题时的操作步骤或期望的表现吗？不方便回复"没有"，我直接提交。」'
                 + 'Answer → reproSteps/expectedBehavior verbatim excerpt, never into content; "没有/跳过"=omit both. '
-                + 'Batch ≤50. Returns voiceIds (reconciliation key) + taskIds.',
+                + 'Batch ≤50. Returns voiceIds + taskIds.',
             parameters: buildParameters({
                 voices: {
                     type: 'array', required: true,
