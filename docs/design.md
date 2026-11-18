@@ -1294,9 +1294,13 @@ tmp→`os.replace` + 0600），并发不会丢更新、不会写坏文件。
 - 工具面：`REMOTE_WITHHELD` 收窄到只剩 `vod_packs_configure`（进程内开关，HTTP 每请求现造
   server、多 agent 共用会互相影响）。`vod_draft_voices` / `vod_commit_voices` /
   `vod_list_submitted` 远程同样可用。
-- 两段式放开的前置是**草稿归属隔离**：草稿落盘时记 `owner = _session_key(client_info)`
-  （宿主名 + 身份 hash），commit 校验归属，不同 clientInfo 提交一律 -32011
-  （"这份草稿不属于当前客户端"）。旧草稿无 owner 字段 → 兼容放行（升级不断回合）。
+- 两段式放开的前置是**草稿归属隔离**：草稿落盘时记 `owner = _draft_owner(client_info)`
+  —— **只认会话/进程边界**（远程面 `sess:<sid>`，stdio 面 `proc:<pid|home>[|name]`），
+  **不认 `X-Vod-Agent-Id`**，commit 校验归属，不同会话提交一律 -32011。
+  （2026-11-19 审查 ④ 修正：旧口径 `owner = _session_key` 会把自我声明的 agent 头
+  当归属依据 —— 带同一个头的另一条连接能提交别人的草稿，实测放行。）
+  话术分档：两侧都是 `sess:` 且无 agent 摘要 → 「草稿绑定了原会话（重连/进程重启），
+  请重新暂存」；其余 → 「这份草稿不属于当前客户端」。旧草稿无 owner 字段 → 兼容放行。
 - **匿名代领护栏**：回环绑定（同机部署默认 `127.0.0.1`）与本地一致、可代领；
   非回环绑定（`--host 0.0.0.0` 或可能被反代触达）**默认关闭代领**，调用方必须带
   Authorization，确需开启用 `--allow-anon-mint`（`net.ANON_MINT_DISABLED` 进程级开关，

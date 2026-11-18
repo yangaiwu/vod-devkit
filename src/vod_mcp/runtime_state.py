@@ -8,6 +8,7 @@ net ↔ runtime_state 的循环。
 import datetime
 import json
 import os
+import re
 import shutil
 import stat
 import sys
@@ -359,8 +360,17 @@ def _resolve_scope(client_info) -> dict:
     prod = str(ci.get("product") or "").strip()
     remote = _is_remote_face()
 
-    # ① 请求级身份（多 agent 共用远程进程）：显式 agent 头优先于会话
-    if agent and not agent.startswith("session:"):
+    # ⓪ 兜底用的"哨兵会话"（审查 ⑤）：它是**共享**会话，不是调用方自己的会话。
+    #    若照常分桶，所有裸客户端会共用一个记忆桶（从"一人一桶"退化成"大家一桶"）。
+    #    这里强制降级成 key=None —— 读写皆禁，业务行为与旧实现（每请求新会话、
+    #    每次 key=None）完全一致，但会话池占用从 O(请求数) 降到 O(1)。
+    if ci.get("sideless"):
+        return _degraded_scope("no_session_id", prod)
+
+    # ① 请求级身份（多 agent 共用远程进程）：显式 agent 头优先于会话。
+    #    2026-11-19（审查 ⑥）：头必须过格式约束——它是"分桶提示"不是身份凭证，
+    #    非法值（换行/空格/中文/超长）**忽略并降级**到会话，不报错、不中断采集。
+    if agent and not agent.startswith("session:") and agent_id_accepted(agent):
         return {"key": f"agent:{agent}", "grain": "request", "id_source": "agent",
                 "product": prod, "product_prior": False,
                 "degraded": False, "degraded_reason": None}
@@ -420,6 +430,69 @@ def _session_key(client_info):
     返回 str  = 隔离键（记忆/追问计数共用）。
     """
     return _resolve_scope(client_info)["key"]
+
+
+# agent 头格式约束（审查 ⑥）：只接受 URL/header 安全的短标识。
+# 允许字母数字与 . _ : -（≤64）；其它（换行、空格、中文、超长）一律**忽略并降级**，
+# 不报错——它本来就只是"分桶提示"，不是身份凭证，为它中断一次采集不值得。
+_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+
+
+def agent_id_accepted(agent: str) -> bool:
+    """agent 头是否可用作分桶身份。空值/非法值 → False（调用方降级到会话）。"""
+    a = str(agent or "").strip()
+    if not a or a.startswith("session:"):
+        return False
+    return bool(_AGENT_ID_RE.match(a))
+
+
+def _draft_owner(client_info) -> str | None:
+    """草稿归属指纹（审查 ④）：**只认会话/进程边界，永不认 `X-Vod-Agent-Id`**。
+
+    为什么不能复用 `_session_key`：agent 头在 _resolve_scope 里**优先于**会话，
+    于是带着同一个 `X-Vod-Agent-Id` 的另一条连接（另一台机器、另一个 agent）
+    会得到同一个 key → 能提交别人的草稿（2026-11-19 实测 DID NOT RAISE）。
+    草稿是"这一次对话里刚跟用户确认过的内容"，归属就该跟对话（会话）走，
+    而不是跟一个自我声明的头走。
+
+    两类原因由此可分（话术见 collect.commit_voices）：
+      会话漂移（重连/进程重启）      → 前后 owner 都是 sess: 前缀且都无 agent 摘要 = 自己
+      跨 agent 冒用（agent 头不一致）→ agent 摘要不同 / 一方 sess: 一方 proc: / 旧草稿 sess: 而对方是 agent: = 可疑
+    """
+    ci = client_info or {}
+    sid = str(ci.get("session_id") or "").strip()
+    if not sid:
+        aid = str(ci.get("agent_id") or "")
+        if aid.startswith("session:"):
+            sid = aid[len("session:"):].strip()
+    if sid:
+        owner = f"sess:{sid}"
+        # agent 头（通过格式约束时）是"另一个维度的声明"。带上时把摘要并进指纹：
+        #   · 同会话 + 同头       → 正常（同一个对话）
+        #   · 同会话 + 不同头     → 不同 agent 抢同一会话，不认
+        #   · 不同会话 + 同头     → 跨连接复用头，**不得**因此变回"同类"（否则
+        #     话术分档会把冒用说成"你自己重连了"，等于给出错误的排查方向）
+        # 摘要进指纹还顺带保证：即便 _resolve_scope 因格式放行，草稿归属也不看它。
+        aid = str(ci.get("agent_id") or "")
+        if aid and not aid.startswith("session:") and agent_id_accepted(aid):
+            owner += f"|agent:{aid}"
+        return owner
+    if _is_remote_face():
+        return None                      # 远程面拿不到会话：不设 owner（与 key=None 同源降级）
+    # stdio 面：进程身份 + 可选 name 后缀（与 _resolve_scope 的 ③ 分支同口径）。
+    # 为什么保留 name：同一进程内编排多个逻辑宿主（test_s145_draft_* 既有契约）时，
+    # name 是唯一能区分"谁暂存的草稿"的维度；但 name 是自我声明、不跨进程可靠，
+    # 所以**只在 stdio 面**采用，远程面永不采信（那正是 ④ 冒用的入口）。
+    home = str(os.environ.get("VOD_DEVKIT_HOME") or "").strip()
+    try:
+        pid = os.getpid()
+    except Exception:                    # pragma: no cover - 理论不可达
+        return None
+    base = f"proc:@{home}" if home else f"proc:{pid}"
+    name = str(ci.get("name") or "").strip()
+    if name and name != "http-remote":
+        base += f"|{name}"
+    return base
 
 
 def _memory_get(client_info) -> dict:

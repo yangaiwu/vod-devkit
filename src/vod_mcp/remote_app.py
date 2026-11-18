@@ -24,6 +24,7 @@ from mcp import types
 from mcp.server.lowlevel import Server
 
 from vod_mcp import guardrails, packs, skills_registry, tools
+from vod_mcp import runtime_state as rt
 
 REMOTE_INSTRUCTIONS = (
     "vod-devkit 采集资产与纪律（远程面）：技能 vod-feedback-collect 处理用户对"
@@ -39,6 +40,9 @@ REMOTE_INSTRUCTIONS = (
 
 
 MCP_SESSION_HEADER = "mcp-session-id"
+# 内部标记头：兜底补的"哨兵会话"专属。客户端不会发它（服务端内部自己加），
+# 作用是让业务侧知道"这个 session 不是你的，别拿它分桶"（审查 ⑤）。
+SIDELESS_MARK_HEADER = "x-vod-sideless"
 
 
 def _req_scope(ctx, remote: bool = True) -> dict:
@@ -66,6 +70,17 @@ def _req_scope(ctx, remote: bool = True) -> dict:
     sid = h.get(MCP_SESSION_HEADER, "").strip()
     aid = h.get("x-vod-agent-id", "").strip()
     prod = h.get("x-vod-product", "").strip()
+    # 审查 ⑥：非法 agent 头忽略并降级（与 runtime_state._resolve_scope 同一判据）。
+    # 头只是分桶提示：换行/空格/超长/中文都会污染 key（日志伪造、桶名失控），
+    # 且它不是认证凭证，没必要为一个格式错误中断整次采集。
+    if aid and not rt.agent_id_accepted(aid):
+        aid = ""
+    # 审查 ⑤：兜底补的哨兵会话是**共享**会话，不是调用方自己的会话。
+    # 若不标记，_resolve_scope 会给出 sess:<哨兵> → 所有裸客户端共用一个记忆桶
+    # （从"一人一桶"退化成"大家一桶"，比现状更坏）。标记后强制 key=None。
+    sideless = bool(h.get(SIDELESS_MARK_HEADER, "").strip())
+    if sideless:
+        sid = ""
     return {
         "name": "http-remote",
         "version": "1",
@@ -74,6 +89,7 @@ def _req_scope(ctx, remote: bool = True) -> dict:
         "agent_id": aid or (f"session:{sid}" if sid else ""),
         "product": prod,
         "session_id": sid,
+        "sideless": sideless,
     }
 
 

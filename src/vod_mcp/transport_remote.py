@@ -27,6 +27,7 @@ import sys
 import threading
 
 from vod_mcp import net, paths
+from vod_mcp.remote_app import SIDELESS_MARK_HEADER
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DEFAULT_HOST = "127.0.0.1"
@@ -224,8 +225,20 @@ async def _ensure_session_for_sideless(manager, scope: dict):
 
     标准行为（SDK）是直接 400「Missing session ID」。但存在自研裸 HTTP 客户端
     不握手直接 POST tools/call。兜底在内部走一次 initialize 取得会话 id，返回
-    补好头的新 scope —— 后续仍由 manager 按标准路径处理，客户端无感，且这次
-    调用落到独立会话（不与其它会话共桶，故不串味）。
+    补好头的新 scope —— 后续仍由 manager 按标准路径处理，客户端无感。
+
+    🔴 审查 ⑤（2026-11-19）：**必须复用同一个"哨兵会话"，不能每次新建。**
+    旧实现每次调用都内部 initialize 一次，SDK 的会话不随请求结束销毁（靠
+    session_idle_timeout 1800s 回收）→ 裸客户端 1 req/s 就常驻 1800 个会话，
+    持续 5.6 req/s 打满默认上限 10000，之后**所有**客户端（含标准客户端）
+    拿 503「Too many open sessions」——一个不守规矩的客户端能打挂守规矩的。
+    现在会话池占用从 O(请求数) 降到 O(1)。
+
+    ⚠️ 复用带来一个必须同时处理的副作用：哨兵会话是**共享**的，若让它照常
+    进分桶，所有裸客户端会共用一个记忆桶（"一人一桶"退化成"大家一桶"，
+    比新建成独立会话更坏）。所以补 sid 时**同时**打 `x-vod-sideless` 标记，
+    remote_app._req_scope 见到它就把会话清空 → key=None（读写皆禁），
+    业务行为与旧实现完全一致：无 session 请求就是无记忆。
 
     返回 None = 不需兜底或兜底失败（调用方用原 scope，标准错误照常返回，
     不掩盖真实问题）。initialize 本身不拦：那是建会话的入口。
@@ -248,6 +261,100 @@ async def _ensure_session_for_sideless(manager, scope: dict):
     if not isinstance(payload, dict) or payload.get("method") == "initialize":
         return None                               # initialize 原样交给 manager
 
+    sid = await _sentinel_session(manager, scope)
+    if not sid:
+        return None                               # 握手没给会话 → 退回标准拒绝路径
+
+    new_scope = dict(scope)
+    new_scope["headers"] = [(k, v) for k, v in (scope.get("headers") or [])
+                            if (k.decode() if isinstance(k, bytes) else k).lower()
+                            not in ("mcp-session-id", SIDELESS_MARK_HEADER)] \
+        + [(b"mcp-session-id", sid.encode()),
+           (SIDELESS_MARK_HEADER.encode(), b"1")]
+    return new_scope
+
+
+# 哨兵会话登记（进程级）：按 manager 实例绑定 {id(manager): {"sid":..., "at":...}}
+# 🔴 必须按 manager 绑定，不能只存一份全局 sid：会话归属 manager 实例
+#    （它的 _server_instances），进程内新建一个 manager（重启/重建 runtime、
+#    多实例测试）后旧 sid 一律 404。本会话实测：只存全局 → 同进程第二个
+#    runtime 起来后第一发就吃「Session not found」。
+_SENTINEL: dict = {}
+_SENTINEL_LOCK: threading.Lock = threading.Lock()
+# 与 SDK 的 session_idle_timeout 同源（SCOPE_TTL_SEC）。留一半余量：
+# 哨兵在"半个 TTL 内没被用过"就先自己重建，避免拿着一条已被回收的 sid
+# 让客户端吃 404「Session not found」。
+_SENTINEL_FRESH_SEC = None       # None = 用运行时算出的默认值（见 _sentinel_ttl）
+
+
+def _sentinel_ttl() -> float:
+    if _SENTINEL_FRESH_SEC:
+        return float(_SENTINEL_FRESH_SEC)
+    try:
+        from vod_mcp import runtime_state as _rts
+        return max(30.0, float(_rts.SCOPE_TTL_SEC) / 2)
+    except Exception:                             # pragma: no cover
+        return 900.0
+
+
+def _reset_sideless_state(keep_sid: str | None = None, manager=None) -> None:
+    """清空哨兵登记。
+
+    - 测试隔离用；生产路径不需要调用（失效由时间戳 + manager 绑定自己处理）。
+    - keep_sid：模拟"登记的 sid 已在 manager 侧被 TTL 回收"（时间戳置远古）。
+    - manager 省略时对**所有** manager 生效。
+    """
+    with _SENTINEL_LOCK:
+        if manager is None:
+            _SENTINEL.clear()
+            if keep_sid:
+                _SENTINEL["__global__"] = {"sid": keep_sid, "at": -1e12}
+        else:
+            _SENTINEL.pop(id(manager), None)
+            if keep_sid:
+                _SENTINEL[id(manager)] = {"sid": keep_sid, "at": -1e12}
+
+
+def _sentinel_peek(manager=None) -> dict:
+    """读当前哨兵登记（诊断/测试用）。"""
+    with _SENTINEL_LOCK:
+        if manager is None:
+            return dict(_SENTINEL.get("__global__") or {})
+        return dict(_SENTINEL.get(id(manager)) or {})
+
+
+async def _sentinel_session(manager, scope: dict) -> str:
+    """取（必要时创建一次）哨兵会话 id。失败返回空串。
+
+    并发保护：ThreadingHTTPServer + 单事件循环，协程 await 之间可能交错。
+    "先查后建"可能多建一两个，但不会退化成每请求一个——多建一个只是多占
+    一个会话位，代价可忽略；而每请求一个就是本审查要消灭的 503 根因。
+    """
+    import time as _time
+
+    ttl = _sentinel_ttl()
+    key = id(manager)
+    with _SENTINEL_LOCK:
+        rec = _SENTINEL.get(key) or {}
+        sid = str(rec.get("sid") or "")
+        at = float(rec.get("at") or 0)
+        if sid and (_time.monotonic() - at) < ttl:
+            _SENTINEL[key] = {"sid": sid, "at": _time.monotonic()}
+            return sid
+
+    sid = await _handshake_once(manager, scope)
+    if not sid:
+        return ""
+    with _SENTINEL_LOCK:
+        _SENTINEL[key] = {"sid": sid, "at": _time.monotonic()}
+    sys.stderr.write("[vod-devkit] 兼容模式：已建立/复用兜底会话（compat-sideless）\n")
+    return sid
+
+
+async def _handshake_once(manager, scope: dict) -> str:
+    """内部握手一次，拿会话 id（不建则返回空串）。"""
+    import json as _json
+
     init_payload = {"jsonrpc": "2.0", "id": "__compat_init__", "method": "initialize",
                     "params": {"protocolVersion": "2025-06-18", "capabilities": {},
                                "clientInfo": {"name": "compat-sideless", "version": "1"}}}
@@ -268,21 +375,12 @@ async def _ensure_session_for_sideless(manager, scope: dict):
     init_scope = dict(scope)
     init_scope["headers"] = [(k, v) for k, v in (scope.get("headers") or [])
                              if (k.decode() if isinstance(k, bytes) else k).lower()
-                             != "mcp-session-id"]
+                             not in ("mcp-session-id", SIDELESS_MARK_HEADER)]
     try:
         await manager.handle_request(init_scope, init_receive, init_send)
     except Exception:
-        return None
-    sid = (captured.get("sid") or "").strip()
-    if not sid:
-        return None                               # 握手没给会话 → 退回标准拒绝路径
-
-    new_scope = dict(scope)
-    new_scope["headers"] = [(k, v) for k, v in (scope.get("headers") or [])
-                            if (k.decode() if isinstance(k, bytes) else k).lower()
-                            != "mcp-session-id"] + [(b"mcp-session-id", sid.encode())]
-    sys.stderr.write("[vod-devkit] 兼容模式：无 session 请求已内部握手（compat-sideless）\n")
-    return new_scope
+        return ""
+    return (captured.get("sid") or "").strip()
 
 
 class _StreamSink:

@@ -1640,8 +1640,9 @@ MCP server 独立部署"）：远程与本地是同一套效果，不是多租�
    的 -32012 硬守卫与 `auth_ensure` 的远程拒绝一并废除）。
 2. 工具面：`REMOTE_WITHHELD` 收窄为只剩 `vod_packs_configure`；`vod_draft_voices` /
    `vod_commit_voices` / `vod_list_submitted` 远程同样可用。
-3. 两段式放开的前置：草稿落 `owner = _session_key(client_info)`，commit 校验归属，
-   跨 clientInfo 一律 -32011（旧草稿无 owner → 兼容放行）。
+3. 两段式放开的前置：草稿落 `owner = _draft_owner(client_info)`（2026-11-19 审查 ④ 修正，
+   原为 `_session_key`），只认会话/进程边界、不认 `X-Vod-Agent-Id`，commit 校验归属，
+   跨会话一律 -32011（旧草稿无 owner → 兼容放行）。话术分档见 D-draft-owner-1。
 4. `vod_packs_configure` 仍不暴露：它是进程内状态，HTTP 每请求现造 server、多 agent
    共用会互相影响——这不是"隔离"能解决的问题。
 5. **匿名代领护栏**（采纳评审 P0-2 的 A 半）：回环绑定开启代领（同机默认）；
@@ -2722,3 +2723,66 @@ dsh 侧（`loadMeta`）此前已修过一次；Python 侧（`net._load_meta`）�
 **Falsifier**：若引擎把 `/external/meta` 改为匿名可读（查询类不需要鉴权），
 本重试逻辑可退化为单次请求；若平台提供公开的产品名录镜像，则可完全去掉该链。
 **纪律（本仓第 2 次踩）**：凡"两端各有一份实现"的逻辑，修一端后必须 grep 另一端。
+
+## D-draft-owner-1 草稿归属只认会话/进程，不认 agent 头（2026-11-19，审查 ④）
+
+**触发**：2026-11-18 审查指出「草稿 owner 跟着作用域漂」。核对代码后确认它比审查描述的
+更严重：不只是"自己的草稿失效"，而是**别人的草稿能被提交**。
+
+**根因**：`owner` 与校验都用 `rt._session_key()`（= `_resolve_scope().key`），而
+`_resolve_scope` 的第 ① 分支把 `X-Vod-Agent-Id` 排在会话**之前** —— 该头无签名、
+无绑定、用户可任意填写。于是：
+
+```
+A（session:s1，头 alice）draft  → owner = "agent:alice"
+C（session:s9，头 alice）commit → _session_key = "agent:alice" → 相等 → 放行
+```
+
+实测（`tests/test_review_456.py::test_draft_owner_ignores_agent_header`，修复前
+`DID NOT RAISE ToolError`）。同一字段承担了两种职责（隔离边界 + 找回凭据），职责混用。
+
+**决策**：
+1. 新增 `runtime_state._draft_owner(client_info)`，**只认会话/进程边界**：
+   远程面 `sess:<sid>`；stdio 面 `proc:<pid|home>`（+ 既有 `|name` 后缀，保持
+   同进程多逻辑宿主的既有契约）。`X-Vod-Agent-Id` 只作为**摘要附加**进指纹
+   （`sess:<sid>|agent:<aid>`），既不让同头跨会话互认，也不让同会话不同头互认。
+2. 话术分档（同错误码 -32011，不泄露存在性）：
+   - 两侧都是 `sess:` 且无 agent 摘要 → 「草稿绑定了原会话（重连/进程重启会换会话），
+     请重新 vod_draft_voices 暂存」——用户是"接着刚才那件事提交"，不是被人截了；
+   - 其余（含 agent 摘要不同、`sess`↔`proc` 跨形态、任一侧为空）→
+     「这份草稿不属于当前客户端」。
+3. 旧草稿无 `owner` 字段仍兼容放行（升级不断回合）。
+
+**代价**：`agent` 头跨会话共享**记忆**的能力不受影响（记忆仍走 `_session_key`）；
+但"跨会话续草稿"不再支持 —— 草稿本就 10 分钟 TTL + 一次性消费，绑会话是正确语义。
+
+**验证**：`tests/test_review_456.py` 3 例（跨 agent 拒绝 / 会话漂移分档 / 同会话正常提交），
+另 `tests/test_token_machine_scope.py::test_s145_draft_is_owned_by_creating_client` 保持绿。
+
+**Falsifier**：若将来引入签名身份（如 `agent:<sha256(token)[:8]>:<aid>`），
+agent 头可作为可信归属维度重新参与 owner；在那之前它只能是提示。
+
+## D-scope-guard-1 agent 头格式约束 + 哨兵会话（2026-11-19，审查 ⑤⑥）
+
+**⑥ agent 头**：`X-Vod-Agent-Id` 直接当分桶 key，无格式约束 → 换行/空格/中文/超长值
+会污染 key（日志伪造、桶名失控）。决策：`^[A-Za-z0-9._:-]{1,64}$`，非法值**忽略并降级**
+到会话分桶，不报错（它只是提示不是凭证，没必要为格式错误中断采集）。
+`remote_app._req_scope` 与 `runtime_state._resolve_scope` 两处同判据（双保险）。
+
+**⑤ 无 session 兜底**：旧实现每次裸请求都内部 `initialize` 一次，SDK 会话不随请求销毁
+（idle TTL 1800s）→ 1 req/s 常驻 1800 个会话，持续 5.6 req/s 打满上限 10000 后
+**所有客户端（含标准客户端）503**。决策：进程内维护**一个共享哨兵会话**
+（`_sentinel_session`，按 manager 实例绑定），补 sid 时同时打 `x-vod-sideless` 标，
+`_resolve_scope` 见到该标强制 `key=None` —— 会话池占用 O(请求数) → O(1)，
+业务行为与旧实现一致（无记忆），不会退化成"所有裸客户端共用一个记忆桶"。
+
+**实测踩坑（写进代码注释了）**：哨兵登记最初只存一份全局 sid，同进程建第二个
+runtime 后第一发就 404「Session not found」（会话归属 manager 的 `_server_instances`）。
+现在按 `id(manager)` 绑定，registry 变更即自动失效。
+
+**验证**：`tests/test_review_456.py`（⑤ 4 例 + ⑥ 6 例）；
+`test_compat_vendor_sideless_direct_call` / `_multiple_calls` 保持绿（真 SDK 链路上
+3 次裸调用只握手 1 次）。
+
+**Falsifier**：若 SDK 提供 stateless 旁路（同一 manager 内按请求分流），哨兵可去掉；
+若平台侧改为统一签名身份，⑥ 的格式约束可升级为强校验。

@@ -572,7 +572,10 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
             # 同机多个 agent 共用一个远程 server 时草稿池是共享的，
             # 记录创建者、commit 时校验，避免"A 的草稿被 B 提交"。
             # 旧草稿无 owner 字段 → commit 兼容放行（升级不断回合）。
-            "owner": rt._session_key(client_info),
+            # 🔴 审查 ④（2026-11-19）：用 _draft_owner（只认会话/进程）而非
+            # _session_key —— 后者优先认 X-Vod-Agent-Id，同头的另一个连接能提交
+            # 别人的草稿（实测放行）。归属跟对话走，不跟自我声明的头走。
+            "owner": rt._draft_owner(client_info),
             # D-resume-commit-1：token 明文随草稿落盘（runtime.json 0600，与 java_key
             # 同级保护）。token 的威胁模型是"防载荷改写"而非"同意凭证"——落盘不放大
             # 风险，换断回合可续：agent 回合中断后凭 draftId 即可恢复提交（此前
@@ -605,6 +608,28 @@ def draft_voices(params: dict, client_info: dict | None = None) -> dict:
     return out
 
 
+def _same_owner_kind(a: str | None, b: str | None) -> bool:
+    """两个草稿归属指纹是否属于"同一个人自己漂了"（审查 ④ 话术分档判据）。
+
+    只有**两个都只是会话标识**（`sess:<sid>`，无 agent 摘要）才算同类 ——
+    那对应"同一条连接重连/进程重启换了会话"，用户只是接着刚才那件事提交。
+
+    其余情况一律按"不属于当前客户端"回（不泄露存在性也无妨，因为错误码相同）：
+      · 任一侧带 agent 摘要   → 两个不同的对话在抢同一份草稿，不能暗示"你自己重连了"
+      · sess:* 与 proc:*      → 传输形态都变了，不是"重连"
+      · 任一侧为空            → 无法判断，保守
+    """
+    sa = str(a or "")
+    sb = str(b or "")
+    if not sa or not sb:
+        return False
+    if "|agent:" in sa or "|agent:" in sb:
+        return False
+    ka = sa.split(":", 1)[0]
+    kb = sb.split(":", 1)[0]
+    return ka == kb == "sess"
+
+
 def commit_voices(params: dict, client_info: dict | None = None) -> dict:
     """两段式第二步：令牌校验→单次消费→复用 submit_voices 既有提交链。
 
@@ -630,7 +655,17 @@ def commit_voices(params: dict, client_info: dict | None = None) -> dict:
             raise net.ToolError("草稿不存在或已过期（10 分钟 TTL），请重新 vod_draft_voices",
                                 code=-32011)
         owner = draft.get("owner")
-        if owner and owner != rt._session_key(client_info):
+        cur_owner = rt._draft_owner(client_info)
+        if owner and owner != cur_owner:
+            # 两类原因回同一错误码（不泄露"存在性"），但话术必须分档（审查 ④）：
+            #   前缀同类（sess:/proc: 都是自己的边界）→ 会话漂移：重连/进程重启，
+            #     用户只是"接着刚才那件事提交"，要告诉他重新暂存即可，不是被人截了。
+            #   前缀不同类 / 一方是 agent: → 不是同一个对话，保持"不属于当前客户端"。
+            if _same_owner_kind(owner, cur_owner):
+                raise net.ToolError(
+                    "草稿绑定了原会话（重连/进程重启会换会话），这份草稿已不能提交："
+                    "请重新调用 vod_draft_voices 暂存后再提交（内容按刚才确认的原样）",
+                    code=-32011)
             raise net.ToolError(
                 "这份草稿不属于当前客户端（草稿按宿主/会话隔离：只能由创建它的那个 agent 提交）",
                 code=-32011)
