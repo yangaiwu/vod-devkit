@@ -597,6 +597,7 @@ vod-feedback-collect、vod-problem-classification-rules、vod-scoring-rules）�
 - 钩子规则：[docs/hooks.md](docs/hooks.md) ｜ 安全边界：[docs/safety-model.md](docs/safety-model.md)
 - 一页纸：[docs/scheme-overview.md](docs/scheme-overview.md) ｜ 安全边界：[docs/safety-model.md](docs/safety-model.md)
 - 决策台账：[docs/decisions.md](docs/decisions.md) ｜ 规则真源：[docs/rules-provenance.json](docs/rules-provenance.json)
+- 架构缺陷台账（五维走查）：[docs/architecture-defects.md](docs/architecture-defects.md) ｜ 整改方案：[docs/architecture-remediation.md](docs/architecture-remediation.md)
 - 手动配置与排障：[QUICKSTART.md](QUICKSTART.md) ｜ 分宿主细节：[INSTALL.md](INSTALL.md)
 - 贡献：[CONTRIBUTING.md](CONTRIBUTING.md) ｜ 安全策略：[SECURITY.md](SECURITY.md) ｜ 行为准则：[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 

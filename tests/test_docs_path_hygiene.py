@@ -22,6 +22,8 @@ CURRENT = [
     "docs/architecture.md", "docs/design.md", "docs/proposal.md",
     "docs/hooks.md", "docs/safety-model.md", "docs/dsh-ui-collect.md",
     "docs/dsh-plugin-install.md", "docs/hermes-router.md", "docs/host-realverify.md",
+    # issue #1：架构缺陷台账与整改方案（五维走查产物，长期现役）
+    "docs/architecture-defects.md", "docs/architecture-remediation.md",
 ]
 
 # 旧布局裸路径（左侧不得紧跟 / 或字母，避免误伤 assets/… 与 integrations/…）
