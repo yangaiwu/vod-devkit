@@ -57,40 +57,62 @@
 
 五维共 **32** 条（P0 2 / P1 18 / P2 12），合计约 **55.5 人日**（BLD-02 的 release.sh 半步已由 `95217f1` 修复，工作量相应核减 1.0）。
 
-| 编号 | 标题 | 级别 | 人日 |
-|---|---|---|---|
-| ARCH-DEP-01 | `net` ↔ `runtime_state` 双向依赖，靠函数内懒导入破环 | P2 | 2.0 |
-| ARCH-DEP-02 | `host_adapters` 急切聚合导入 12 个适配器，与载荷边界冲突 | P1 | 3.0 |
-| ARCH-DEP-03 | 知识披露层反向依赖网络出口层（`skills_registry`/`packs.knowledge` → `net`） | P2 | 1.5 |
-| ARCH-DEP-04 | 入口设根契约覆盖不全，`serve` 双分派两条路径根来源不同 | P1 | 2.0 |
-| ARCH-DEP-05 | 运行期安装代码依赖构建脚本 `sync_plugin.py` | P1 | 1.0 |
-| ARCH-DEP-06 | 路径常量 import 期冻结，违反 `paths.py` 自陈纪律 | P2 | 1.0 |
-| ARCH-CALL-01 | stdio 与 remote 两面各写一套 `tools/call` 管线，错误呈现层级不一 | P1 | 3.0 |
-| ARCH-CALL-02 | `initialize` instructions 双份硬编码，用例只锁关键词 | P1 | 1.0 |
-| ARCH-CALL-03 | 远程面哨兵会话以 `id(manager)` 登记，与 SDK 内部语义强耦合 | P2 | 3.0 |
-| ARCH-CALL-04 | `collect` pack 单模块承载七件事（692 行 vs `knowledge` 17 行） | P2 | 4.0 |
-| ARCH-CALL-05 | 协议面裸造 JSON-RPC，`protocolVersion` 与错误码多处硬编码 | P2 | 1.0 |
-| ARCH-CALL-06 | 引擎可达性判定两套实现（`net.probe_key` vs `doctor._probe_engine`） | P1 | 2.0 |
-| ARCH-ERR-01 | 护栏读取位于异常保护之外，`policy.json` 缺失/损坏直接打死 server | **P0** | 1.0 |
-| ARCH-ERR-02 | 每次工具调用重读 policy 且无 schema 校验（坏规则 → `KeyError`） | P1 | 1.5 |
-| ARCH-ERR-03 | 上游 HTTP 状态码进入 JSON-RPC `code` 域，explain 表与门禁均覆盖不到 | P1 | 2.0 |
-| ARCH-ERR-04 | 26 处 `except` 体只有 `pass`，主链失败痕迹被吞 | P1 | 3.0 |
-| ARCH-ERR-05 | 可观测性＝固定 `/tmp` 文本日志：无级别、无请求关联、远程面请求日志静默 | P1 | 3.0 |
-| ARCH-ERR-06 | `explain` 按文案正则归层，错误码与文案双轨 | P2 | 2.0 |
-| ARCH-CFG-01 | `pending-feedback.jsonl` 存用户原话却未收紧 0600 | **P0** | 1.0 |
-| ARCH-CFG-02 | 远程面 `CORS *` + 无 Host 校验 + 无内建鉴权 → 浏览器可跨域驱动本机端点 | P1 | 2.0 |
-| ARCH-CFG-03 | 三套原子写实现并存，fsync/权限/符号链接语义不一致 | P1 | 2.0 |
-| ARCH-CFG-04 | `secret_scan.py` 覆盖边界：只扫 tracked、无超时、git 失败即崩 | P1 | 1.0 |
-| ARCH-CFG-05 | 凭据三入口（env / runtime / 请求头），优先级判据散落四处 | P2 | 2.0 |
-| ARCH-CFG-06 | 机器级 state 目录权限只在迁移路径收紧 0700 | P2 | 0.5 |
-| ARCH-CFG-07 | `guard_scope` 字段剔除靠"新字段记得加" | P2 | 1.0 |
-| ARCH-BLD-01 | 双 CI 定义漂移：GitCode 只覆盖 3/9 门禁，且两者都只在 `main` 触发 | P1 | 2.0 |
-| ARCH-BLD-02 | 开发基线 `dev` 而 update/测试夹具仍钉 `main`（release.sh 半步已由 `95217f1` 修复） | P1 | 1.0 |
-| ARCH-BLD-03 | 版本六处落点，根 `plugin.json` 永久停在 `0.1.0` | P1 | 1.0 |
-| ARCH-BLD-04 | 根 `build-info.json` 快照落后 HEAD，却被 install 与 provenance 当权威 | P1 | 1.5 |
-| ARCH-BLD-05 | `.githooks/pre-push` 未接线，且含作者机绝对路径 | P1 | 1.0 |
-| ARCH-BLD-06 | `package.json` 的 `files` 逐文件枚举，靠发版后断言兜底 | P2 | 2.0 |
-| ARCH-BLD-07 | `sync_plugin.py` 用字符串切分解析 `__version__`，用例已打桩绕过 | P2 | 0.5 |
+> **整改状态**（2026-11-19 起维护，`✅完整` / `◐部分` / `⬜未动`）——查"哪条修了"看这一列，
+> 不要翻决策记录反推。本轮落地的代码提交：`2b8bc15`（首批）、`fde04d0`（BLD-03）。
+
+| 编号 | 标题 | 级别 | 人日 | 整改状态 |
+|---|---|---|---|---|
+| ARCH-DEP-01 | `net` ↔ `runtime_state` 双向依赖，靠函数内懒导入破环 | P2 | 2.0 | ✅完整（`2b8bc15`，另修了台账漏记的 hermes↔host_verify 环） |
+| ARCH-DEP-02 | `host_adapters` 急切聚合导入 12 个适配器，与载荷边界冲突 | P1 | 3.0 | ✅完整（惰性注册 + `test_registry_is_lazy`） |
+| ARCH-DEP-03 | 知识披露层反向依赖网络出口层（`skills_registry`/`packs.knowledge` → `net`） | P2 | 1.5 | ⬜未动 |
+| ARCH-DEP-04 | 入口设根契约覆盖不全，`serve` 双分派两条路径根来源不同 | P1 | 2.0 | ⬜未动（**真机实测：`vod-devkit serve` 起不来，见下方实测注**） |
+| ARCH-DEP-05 | 运行期安装代码依赖构建脚本 `sync_plugin.py` | P1 | 1.0 | ⬜未动 |
+| ARCH-DEP-06 | 路径常量 import 期冻结，违反 `paths.py` 自陈纪律 | P2 | 1.0 | ⬜未动 |
+| ARCH-CALL-01 | stdio 与 remote 两面各写一套 `tools/call` 管线，错误呈现层级不一 | P1 | 3.0 | ⬜未动 |
+| ARCH-CALL-02 | `initialize` instructions 双份硬编码，用例只锁关键词 | P1 | 1.0 | ⬜未动 |
+| ARCH-CALL-03 | 远程面哨兵会话以 `id(manager)` 登记，与 SDK 内部语义强耦合 | P2 | 3.0 | ⬜未动 |
+| ARCH-CALL-04 | `collect` pack 单模块承载七件事（692 行 vs `knowledge` 17 行） | P2 | 4.0 | ⬜未动 |
+| ARCH-CALL-05 | 协议面裸造 JSON-RPC，`protocolVersion` 与错误码多处硬编码 | P2 | 1.0 | ⬜未动（实测 **4** 处硬编码，台账写 3 处，漏 `remote.py:98`） |
+| ARCH-CALL-06 | 引擎可达性判定两套实现（`net.probe_key` vs `doctor._probe_engine`） | P1 | 2.0 | ⬜未动 |
+| ARCH-ERR-01 | 护栏读取位于异常保护之外，`policy.json` 缺失/损坏直接打死 server | **P0** | 1.0 | ✅完整（fail-closed + `-32017` + 主循环兜底） |
+| ARCH-ERR-02 | 每次工具调用重读 policy 且无 schema 校验（坏规则 → `KeyError`） | P1 | 1.5 | ◐部分（schema 校验已做；**缓存未做**，仍每次重读） |
+| ARCH-ERR-03 | 上游 HTTP 状态码进入 JSON-RPC `code` 域，explain 表与门禁均覆盖不到 | P1 | 2.0 | ⬜未动 |
+| ARCH-ERR-04 | 26 处 `except` 体只有 `pass`，主链失败痕迹被吞 | P1 | 3.0 | ◐部分（主链 3 点已补；**实测仍剩 25 处**，全量收敛未做） |
+| ARCH-ERR-05 | 可观测性＝固定 `/tmp` 文本日志：无级别、无请求关联、远程面请求日志静默 | P1 | 3.0 | ⬜未动（一行未改） |
+| ARCH-ERR-06 | `explain` 按文案正则归层，错误码与文案双轨 | P2 | 2.0 | ⬜未动 |
+| ARCH-CFG-01 | `pending-feedback.jsonl` 存用户原话却未收紧 0600 | **P0** | 1.0 | ✅完整（实测改前 0644 → 现 0600，含历史文件收紧） |
+| ARCH-CFG-02 | 远程面 `CORS *` + 无 Host 校验 + 无内建鉴权 → 浏览器可跨域驱动本机端点 | P1 | 2.0 | ⬜未动（`transport_remote.py:440` 仍无条件 `*`） |
+| ARCH-CFG-03 | 三套原子写实现并存，fsync/权限/符号链接语义不一致 | P1 | 2.0 | ✅完整（单源 + AST 门禁；遗留：通用路径 `mode=0o600` 会把 0400 放宽） |
+| ARCH-CFG-04 | `secret_scan.py` 覆盖边界：只扫 tracked、无超时、git 失败即崩 | P1 | 1.0 | ⬜未动 |
+| ARCH-CFG-05 | 凭据三入口（env / runtime / 请求头），优先级判据散落四处 | P2 | 2.0 | ⬜未动 |
+| ARCH-CFG-06 | 机器级 state 目录权限只在迁移路径收紧 0700 | P2 | 0.5 | ⬜未动 |
+| ARCH-CFG-07 | `guard_scope` 字段剔除靠"新字段记得加" | P2 | 1.0 | ⬜未动 |
+| ARCH-BLD-01 | 双 CI 定义漂移：GitCode 只覆盖部分门禁，且两者都只在 `main` 触发 | P1 | 2.0 | ⬜未动（实测 GitCode 5 步 / GitHub 10 步，dev 仍零 CI 门禁） |
+| ARCH-BLD-02 | 开发基线 `dev` 而 update/测试夹具仍钉 `main`（release.sh 半步已修） | P1 | 1.0 | ◐半步（release.sh 已于 `95217f1` 修；`update.py` 与测试夹具仍钉 `main`） |
+| ARCH-BLD-03 | 版本六处落点，根 `plugin.json` 永久停在 `0.1.0` | P1 | 1.0 | ✅完整（`fde04d0`，8 处落点现全等） |
+| ARCH-BLD-04 | 根 `build-info.json` 快照落后 HEAD，却被 install 与 provenance 当权威 | P1 | 1.5 | ⬜未动 |
+| ARCH-BLD-05 | `.githooks/pre-push` 未接线，且含作者机绝对路径 | P1 | 1.0 | ⬜未动（脚本内仍有 `/root/.hermes/...` 与 `/tmp` 日志；新 clone 不生效） |
+| ARCH-BLD-06 | `package.json` 的 `files` 逐文件枚举，靠发版后断言兜底 | P2 | 2.0 | ⬜未动（本轮新增模块即被它抓红一次，已手工补白名单——正是本条风险） |
+| ARCH-BLD-07 | `sync_plugin.py` 用字符串切分解析 `__version__`，用例已打桩绕过 | P2 | 0.5 | ⬜未动 |
+
+> **实测注（2026-11-19，本机）——含一次我的误判，如实记录**：
+>
+> ① **`vod-devkit serve` 是正常的**。用真实入口 `python bin/vod-devkit serve` 实测，
+> initialize 正常返回 v0.5.45、工具面完整。我一度报「serve 起不来、装机不可用」，
+> 原因是**我用错了入口**：`src/vodkit_cli/cli.py` 是被 import 的装配模块，
+> **没有 `if __name__ == "__main__"`**，直接 `python cli.py serve` 什么都不会发生
+> （进程正常退出、零输出）。那是测试方法错，不是产品缺陷。
+> 已补 `tests/test_serve_entry.py`（4 条，走真实 `bin/vod-devkit` 端到端）锁住这条路径。
+> **DEP-04 维持「可维护性」定级不变**：两条分派取根来源不同（前置分支 `paths.SRC_ROOT`
+> vs 子命令 `common.ROOT`）在仓内形态同指、在插件/载荷副本形态可能分叉，仍是待修项。
+>
+> ② **真机抓到一条台账未记的缺陷（确认为真）**：`collect` 预设只装 core+collect，
+> `vod_list_skills` / `vod_retrieve_skill` 未注册，而 `vod-core` 技能路由表第一条就教
+> 模型用这两个工具 ⇒ 真模型首跑即失败（只能改去读载荷目录的 SKILL.md）。
+> 这是**装机后第一次真实使用就撞墙**，优先级高于台账里多数 P1，需单独立项。
+>
+> ③ 另一条真机发现：`check_update` 报 `current 0.5.45 vs latest 0.5.43` ——
+> npm registry 滞后于仓内 tag（0.5.44/0.5.45 均未 publish），用户侧更新链路是断的。
 
 ### 2.1 五维一句话判读
 

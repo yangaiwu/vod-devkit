@@ -2792,9 +2792,14 @@ runtime 后第一发就 404「Session not found」（会话归属 manager 的 `_
 台账 `docs/architecture-defects.md`（PR #23，32 条）落地第一批。每项纪律：**先写红用例
 → 再改实现 → 门禁反向验证（人为弄坏确认真的红）**。
 
-- [x] **ARCH-ERR-01/02 护栏 fail-closed**：`policy.try_load_policy()` 永不抛，装载失败/
-  规则非法返回带 `broken` 的占位策略，`guardrails.check` 见到即 `deny` + **新码 -32017**。
-  `server.py` 主循环加兜底 try（返回 -32603 且落日志），进程不再被坏 policy 打死。
+> ⚠️ **口径修正（2026-11-19 复审）**：本条下 `[x]` 只表示**该条目声明的那部分**已落，
+> 不等于台账原条目已全部完成。原条目里没做的部分在每条末尾用「**未做**」显式列出。
+> 曾把 ERR-02/04/05 一并打勾，造成"已修完"的错觉——这是记录失真，已改正。
+
+- [x] **ARCH-ERR-01 护栏 fail-closed**（P0，**已完整落地**）：`policy.try_load_policy()`
+  永不抛，装载失败/规则非法返回带 `broken` 的占位策略，`guardrails.check` 见到即 `deny`
+  + **新码 -32017**。`server.py` 主循环加兜底 try（返回 -32603 且落日志），坏 policy 不再
+  打死 stdio 进程。
   **决策**：**新开 -32017**，与 -32010（缺产品）分开——两者处置动作不同（修 policy 后重启
   vs 去问产品），混用会把排障引向错误方向。
   **为什么不复用 -32013**（2026-11-19 二次修正）：-32013 是**已废除的归因拦截码**
@@ -2803,17 +2808,29 @@ runtime 后第一发就 404「Session not found」（会话归属 manager 的 `_
   且违反"决策只追加不删"——旧文档描述的 -32013 会与新代码打架。旧码字面零改动。
   **Falsifier**：若平台侧已在 -32017 段投产其它语义（-32020.. 段已规划上游映射），
   或引擎侧错误码表占用该值，则换到下一个空位。
-- [x] **ARCH-CFG-01 pending 私有化**：`append_entry` 用 `os.open(..., 0o600)` 新建（不留
-  0644 窗口）+ 写后 stat 回验；历史宽权限文件在下次写入时收紧（**只收紧不放宽**）；
-  WSL/drvfs 忽略 chmod 时只告警不阻断。
-- [x] **ARCH-CFG-03 原子写单源**：`runtime_state._write_cfg_unlocked` 改调
+- [ ] **ARCH-ERR-02 护栏装载：部分完成**。已做：装载期 schema 校验（缺 `severity`/
+  `field=text` 缺 `regex`/`match` 无 `tool` 也无 `field` → 指出 rule id）。
+  **未做**：`load_policy` 的进程内缓存（mtime/size 失效）——**每次 `tools/call` 仍重读
+  一次文件**，热路径 IO 与"人工改规则不用重启"的取舍尚未落地。台账 ERR-02 条目仍为未完成。
+- [x] **ARCH-CFG-01 pending 私有化**（**已完整落地**）：`append_entry` 用
+  `os.open(..., 0o600)` 新建（不留 0644 窗口）+ 写后 stat 回验；历史宽权限文件在下次写入时
+  收紧（**只收紧不放宽**）；WSL/drvfs 忽略 chmod 时只告警不阻断。
+- [x] **ARCH-CFG-03 原子写单源**（**已完整落地**）：`runtime_state._write_cfg_unlocked` 改调
   `paths.atomic_write_text`（补 fsync + 软链解析 + 只读保护）；`pending.save_entries` 同源。
   门禁：`tests/test_runtime_atomic_single.py::test_single_atomic_writer`（AST 断言
   `os.replace(` 只出现在 `paths.py`）。
-- [x] **ARCH-ERR-04 主链三点留痕**：日志出口失败改 stderr 兜底；坏 `runtime.json` 用
-  `_warn` 告警（**延迟绑定**：该函数在 import 期即被调用，那时 `_warn` 尚未定义）；
-  领匿名令牌失败记 code+原因。
-- [x] **ARCH-DEP-01 破两处环**：① `_SERVER_FACE` 真源抽到零依赖的
+  ⚠️ 遗留：`atomic_write_text(mode=0o600)` 会把原本 0400 的文件**放宽**到 0600
+  （"只收紧不放宽"目前只由 `pending._ensure_private` 保证，通用路径没有）。
+- [ ] **ARCH-ERR-04 主链三点留痕：部分完成**。已做：日志出口失败改 stderr 兜底；
+  坏 `runtime.json` 用 `_warn` 告警（**延迟绑定**：该函数在 import 期即被调用，那时
+  `_warn` 尚未定义）；领匿名令牌失败记 code+原因。
+  **未做**：台账原条目是"26 处 `except` 体只有 pass"，本次只补主链 3 点。
+  **2026-11-19 实测剩余 25 处**（原 26 减 1，但本次新增 1 处 `pending.py:54` 的
+  `_warn` 内部兜底 ⇒ 净剩 25）。全量收敛需要 ERR-04 原方案里的"允许吞三白名单 + AST 门禁"。
+- [ ] **ARCH-ERR-05 可观测性：未开始**。结构化日志（JSONL/级别/请求关联）、
+  日志落点可配置、远程面访问日志（`transport_remote.py` 的 `log_message` 仍 `pass`）
+  **一行未动**。台账 ERR-05 条目仍为未完成。
+- [x] **ARCH-DEP-01 破两处环**（**已完整落地**）：① `_SERVER_FACE` 真源抽到零依赖的
   `vod_mcp/server_face.py`，`net` 与 `runtime_state` 都顶层引用；② `host_verify` 新增
   `register_verifier()` 注入点，`hermes` 在 import 期登记取值函数（台账漏记的
   `hermes ↔ host_verify` 环）。门禁 `tests/test_import_graph.py`（AST 建图 + Tarjan SCC，
@@ -2821,9 +2838,12 @@ runtime 后第一发就 404「Session not found」（会话归属 manager 的 `_
   ⚠️ 踩坑写进注释：`_is_remote_face` 若只看 `server_face` 的快照会与
   `net._SERVER_FACE` 的 monkeypatch 桩不一致（三条远程面作用域用例变红），故读取入口
   统一走 `server_face.is_remote()`，它每次现取 net 的实时绑定。
-- [x] **ARCH-DEP-02 host_adapters 惰性注册**：`REGISTRY` 只存模块名，`get()` 走
-  `importlib`；`KeyError` 语义不变；门禁 `test_registry_is_lazy`（子进程验证导入后
-  `sys.modules` 无宿主子模块）。
+- [x] **ARCH-DEP-02 host_adapters 惰性注册**（**已完整落地**）：`REGISTRY` 只存模块名，
+  `get()` 走 `importlib`；`KeyError` 语义不变；门禁 `test_registry_is_lazy`（子进程验证
+  导入后 `sys.modules` 无宿主子模块）。
+- [x] **ARCH-BLD-03 版本落点补根 plugin.json**（**已完整落地**，2026-11-19 追加）：
+  `release.sh` 的 `EXTRA_FILES` 与 `git add` 清单都加 `plugin.json`；该文件自 11-03 起
+  固定在 `0.1.0`，现已随 8 处落点同步到 0.5.45。
 - [x] **台账自身三处要修**（本轮实测确认，见 `architecture-defects.md` 附录 10.2/10.3）：
   ① 附录 10.2 的 `ast` 脚本模块名切错（`str(p)[4:-3]` → `od_mcp.x`），**永远匹配不上、
   跑出"无环"**，以新用例为准；② DEP-01 漏记 `hermes ↔ host_verify`；③ 附录 10.3 的
