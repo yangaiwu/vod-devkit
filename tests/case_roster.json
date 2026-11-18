@@ -700,6 +700,9 @@
     "S237": {
       "carrier": "docs/design.md"
     },
+    "S238": {
+      "carrier": "docs/design.md"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

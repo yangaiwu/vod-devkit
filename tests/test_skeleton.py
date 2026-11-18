@@ -237,24 +237,19 @@ def test_protocol_auth_header_and_paths(monkeypatch):
         jb2 = json.loads(_Recorder.requests[0]["body"])
         assert jb2["product"] == "codearts", "D-product-ask-1：用户回答无绑定也应被采信"
 
-        # 场景二：囤积端点 404（引擎未部署）→ 自动回落老链（过渡语义）
-        _rt._RT["product"] = "CodeArts"  # 恢复绑定（场景二回执 product 断言依赖）
+        # 场景二：囤积端点 404（引擎未部署）→ S238 起明确失败，不再回落老链
+        _rt._RT["product"] = "CodeArts"
         _Recorder.requests = []
         _Recorder.force404 = True
-        out2 = _collect.submit_voices(
-            {"voices": [{"content": "太慢了，希望优化补全速度"}],
-             "product": "codearts", "confirmed": True},
-            client_info={"name": "aishell"})
-        assert out2["accepted"] == 1 and out2["path"] == "legacy-fallback"
+        with pytest.raises(_net.ToolError) as ei:
+            _collect.submit_voices(
+                {"voices": [{"content": "太慢了，希望优化补全速度"}],
+                 "product": "codearts", "confirmed": True},
+                client_info={"name": "aishell"})
+        assert ei.value.code == -32016 and "未提交" in str(ei.value)
         paths = [r["path"] for r in _Recorder.requests]
-        assert any(p.endswith("/external/voices") for p in paths), "先试囤积"
-        assert any(p.endswith("/external/voice/submit") for p in paths), "404 回落老链"
-        fb = json.loads([r for r in _Recorder.requests
-                         if r["path"].endswith("/external/voice/submit")][0]["body"])
-        assert fb["source"].startswith("aishell-") and len(fb["source"].split("-")[-1]) == 8, \
-            "legacy 回落 source 带 per-install nonce（跨用户吞声量修复）"
-        assert fb["voiceId"].startswith("ext_aishell_")
-        assert fb["product"] in ("1", "CodeArts", "codearts")
+        assert paths and all(p.endswith("/external/voices") for p in paths), \
+            f"只许打囤积端点，不许回落老链：{paths}"
     finally:
         srv.shutdown()
 

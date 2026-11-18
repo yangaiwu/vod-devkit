@@ -90,7 +90,8 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
 - [x] **引擎侧已落**（feat/kb-query-auth）：VodExternalProducts.normalizeLoose
       （折叠+别名收编+未知原样收+64 截断）供 /external/voices；老链
       /external/voice/submit 保持 normalizeOrThrow 严格（legacy GTD 兼容，
-      禁新接入）——两口径勿混用。
+      禁新接入）——两口径勿混用。**2026-11-18 修订（S238）：插件侧已删除该老链回落，
+      囤积端点成为唯一提交路径；本条仅保留为引擎侧历史口径记录。**
 - 理由：宿主识别是可信来源（插件装在谁家=用户在用谁），错误归因场景从
   "静默猜默认"变成"锚定当前工具"，白名单反而制造 AIShell 式拒收。
 - 脏值防线：引擎 64 字符截断+UNKNOWN 档人工归因解析兜底，运营侧治理。

@@ -198,9 +198,6 @@ def _merge_ledger(extra: dict | None, attr: dict) -> dict:
 _SUBMIT_HOARDING = "/rest/developer/manager/hdvodmngservice/v1/external/voices"
 
 
-_EXISTING_SUBMIT = "/rest/developer/manager/hdvodmngservice/v1/external/voice/submit"  # 过渡期 404 回落
-
-
 def _voice_id(source: str, content: str, nonce: str) -> str:
     """voiceId = f(source, content, 调用级nonce)。
 
@@ -387,18 +384,17 @@ def _raise_explicit_key_rejected(key: str) -> None:
 
 def submit_voices(params: dict, client_info: dict | None = None,
                   ledger_extra: dict | None = None) -> dict:
-    """V16 切换：主路径=囤积端点 POST /external/voices（Bearer，批式，不触发分析）；
-    引擎未部署（404）自动回落老链 /external/voice/submit（提交即分析，过渡语义，
-    部署后 404 分支自然失效）。
+    """唯一提交路径=囤积端点 POST /external/voices（Bearer，批式，不触发分析）。
 
-    - voiceId：囤积链由引擎确定性计算（per-token/per-install 命名空间），回执
-      voiceIds 为权威对账键；回落老链仍用客户端 nonce id（R1 声量保真）
+    S238：删除过渡期 404 回落老链（/external/voice/submit）——引擎已上线囤积端点，
+    回落分支是死代码，且两套语义（提交即分析 vs 延迟分析）会让同一插件在不同引擎上
+    行为不同。404 现在明确报错（-32016），不假装成功、不偷偷换链。
+
+    - voiceId：由引擎确定性计算（per-token/per-install 命名空间），回执 voiceIds
+      为权威对账键
     - title=用户原文截断；tags=采集层三分类（problem_type:）正式入库通道
-    - source：key 持有者被引擎锚定为 host_name；legacy 共用 key 场景带
-      per-install nonce 后缀（杜绝跨用户共享命名空间吞声量）
+    - source：key 持有者被引擎锚定为 host_name（legacy 共用 key 场景已随 S238 删除）
     """
-    import uuid
-    host = (client_info or {}).get("name") or "unknown-host"
     accepted = 0
     voice_ids: list[str] = []
     task_ids: list[object] = []
@@ -409,23 +405,6 @@ def submit_voices(params: dict, client_info: dict | None = None,
     # 归因（D-product-ask-1）：身份/鉴权优先于产品追问，产品校验放在下面 key 守卫之后
     attr = _attribute_product(items, params, client_info)
     product = attr["product"]
-
-    def _legacy_submit(i, v, content):
-        """过渡回落：老链单条提交（提交即分析语义，仅 404 触发）。"""
-        nonce = uuid.uuid4().hex[:8]  # 调用级：重试复用，跨调用不重复
-        vid = _voice_id(host, content, nonce)
-        desc = content if len(content) >= 10 else f"{content} [vod-devkit]"
-        body = {
-            "voiceId": vid,
-            "title": content[:128],
-            "description": desc,
-            "source": f"{host}-{rt._install_nonce()}",  # per-install 命名空间（legacy 吞声量修复）
-            "customer": v.get("userType"),
-        }
-        if product:
-            body["product"] = product
-        out = net._http("POST", _EXISTING_SUBMIT, body, base=net.JAVA_BASE, key=net._eff_key())
-        return vid, (out.get("data") or {}).get("taskId")
 
     # 服务面（HTTP）：身份优先取请求头 Bearer；没有就同本地一样走机器级匿名令牌
     # （D-token-machine-1 定稿：本地/远程同一套身份语义。远程多租户若需按调用方隔离，
@@ -452,12 +431,15 @@ def submit_voices(params: dict, client_info: dict | None = None,
     if product:  # 无归因不带 product（引擎 UNKNOWN 档），不本地拦截
         body["product"] = product
     out = None
-    fallback = False
     try:
         out = net._http("POST", _SUBMIT_HOARDING, body, base=net.JAVA_BASE, key=net._eff_key())
     except net.ToolError as ex:
         if ex.code == 404:
-            fallback = True  # 囤积端点未部署 → 落到下方 legacy 回落
+            # S238：不再回落老链。引擎未部署囤积端点时如实报错，不假装成功、不换语义
+            raise net.ToolError(
+                "囤积端点未上线（POST /external/voices 返回 404）：本条**未提交**。"
+                "引擎部署该端点后自动可用；不要改用老链 /external/voice/submit。",
+                code=-32016) from ex
         elif not net._eff_key() or ex.code == -32012:
             if net._explicit_key():
                 _raise_explicit_key_rejected(net._eff_key())
@@ -469,74 +451,37 @@ def submit_voices(params: dict, client_info: dict | None = None,
             out = net._http("POST", _SUBMIT_HOARDING, body, base=net.JAVA_BASE, key=net._eff_key())
         else:
             raise  # 网络/413 等如实上抛
-    if not fallback:
-        out = out or {}   # 类型收窄：非回落分支必然已赋值（初值 None 只是失败占位）
-        server_ids = (out.get("voiceIds") or out.get("data", {}).get("voiceIds")
-                      or [])
-        # 引擎侧 rejected（产品校验拒绝等）透出，不吞（对齐 widget rejected 口径）
-        engine_rejected = ((out or {}).get("rejected")
-                           or ((out or {}).get("data") or {}).get("rejected")
-                           or [])
-        if server_ids:
-            accepted = len(server_ids)
-            voice_ids.extend(server_ids)
-        else:
-            # 回执缺失/整批被拒 → 不得兜底计成功（实锤缺陷：空 voiceId 记成功
-            # 且宿主模型据此谎报"已提交"）。accepted 以真实回执为准。
-            accepted = 0
-            voice_ids.extend([""] * len(items))
-            if not engine_rejected:
-                engine_rejected = [{"reason": "引擎回执未含 voiceIds（提交结果未知），请勿视为已收录"}]
-        task_ids.extend([None] * len(items))  # 囤积语义：无即时任务
-        result = {"accepted": accepted, "voiceIds": voice_ids,
-                  "taskIds": task_ids, "rejected": rejected + engine_rejected,
-                  "analysis": "deferred",  # 囤积语义明示（V6 运营批量消费）
-                  "path": "hoarding",
-                  "echo": _echo_plan(items, voice_ids)}
-        if invalid_tags:  # 分类白名单外值被丢弃（不拒收声音，只丢 tag）
-            result["invalidTags"] = invalid_tags
-        if out.get("productRegistered") is not None:
-            result["productRegistered"] = out.get("productRegistered")
-        _attach_attribution(result, attr)      # 来源+证据留痕（S99）
-        rt._remember_attribution(attr, client_info)   # 会话记忆 + 审计（S95/S100）
-        _ledger_submit(items, voice_ids, task_ids, product,
-                        _merge_ledger(ledger_extra, attr))
-        result["pendingFlush"] = _flush_pending(product)
-        return result
-    # ---- 过渡回落：老链单条提交（仅囤积端点 404 触发） ----
-    for i, v, content in items:
-        try:
-            vid, tid = _legacy_submit(i, v, content)
-            accepted += 1
-            voice_ids.append(vid)
-            task_ids.append(tid)
-        except net.ToolError as e:
-            msg = str(e)
-            if "Duplicate entry" in msg:  # 极端重放场景：DB 唯一键兜底
-                accepted += 1
-                voice_ids.append(vid)
-                task_ids.append(None)
-            elif (not net._eff_key() or e.code == -32012) and not voice_ids:
-                if net._explicit_key():
-                    _raise_explicit_key_rejected(net._eff_key())
-                # 零字段匿名令牌：缺 key/401 → 自动取令牌 → 落 runtime.json → 重试一次
-                token = net._acquire_anon_token_or_raise()
-                rt._runtime_update({"java_key": token, "token_tier": "anonymous"})
-                vid, tid = _legacy_submit(i, v, content)
-                accepted += 1
-                voice_ids.append(vid)
-                task_ids.append(tid)
-            else:
-                rejected.append({"index": i, "reason": msg[:120]})
+    out = out or {}   # 类型收窄：非回落分支必然已赋值（初值 None 只是失败占位）
+    server_ids = (out.get("voiceIds") or out.get("data", {}).get("voiceIds")
+                  or [])
+    # 引擎侧 rejected（产品校验拒绝等）透出，不吞（对齐 widget rejected 口径）
+    engine_rejected = ((out or {}).get("rejected")
+                       or ((out or {}).get("data") or {}).get("rejected")
+                       or [])
+    if server_ids:
+        accepted = len(server_ids)
+        voice_ids.extend(server_ids)
+    else:
+        # 回执缺失/整批被拒 → 不得兜底计成功（实锤缺陷：空 voiceId 记成功
+        # 且宿主模型据此谎报"已提交"）。accepted 以真实回执为准。
+        accepted = 0
+        voice_ids.extend([""] * len(items))
+        if not engine_rejected:
+            engine_rejected = [{"reason": "引擎回执未含 voiceIds（提交结果未知），请勿视为已收录"}]
+    task_ids.extend([None] * len(items))  # 囤积语义：无即时任务
     result = {"accepted": accepted, "voiceIds": voice_ids,
-              "taskIds": task_ids, "rejected": rejected,
-              "path": "legacy-fallback",
+              "taskIds": task_ids, "rejected": rejected + engine_rejected,
+              "analysis": "deferred",  # 囤积语义明示（V6 运营批量消费）
+              "path": "hoarding",
               "echo": _echo_plan(items, voice_ids)}
-    _attach_attribution(result, attr)
-    if accepted:
-        rt._remember_attribution(attr, client_info)
+    if invalid_tags:  # 分类白名单外值被丢弃（不拒收声音，只丢 tag）
+        result["invalidTags"] = invalid_tags
+    if out.get("productRegistered") is not None:
+        result["productRegistered"] = out.get("productRegistered")
+    _attach_attribution(result, attr)      # 来源+证据留痕（S99）
+    rt._remember_attribution(attr, client_info)   # 会话记忆 + 审计（S95/S100）
     _ledger_submit(items, voice_ids, task_ids, product,
-                   _merge_ledger(ledger_extra, attr))
+                    _merge_ledger(ledger_extra, attr))
     result["pendingFlush"] = _flush_pending(product)
     return result
 

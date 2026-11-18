@@ -144,7 +144,7 @@
           "echo"
         ]
       },
-      "backend": "java(VOD_JAVA_API_BASE+VOD_JAVA_API_KEY)；现有 /external/voice/submit"
+      "backend": "java(VOD_JAVA_API_BASE+VOD_JAVA_API_KEY)；POST /external/voices（囤积，S238 起唯一路径）"
     },
     "vod_devkit_info": {
       "description": "插件自述（只读，core pack 常驻）：版本/commitSHA/宿主身份/安装信息。",

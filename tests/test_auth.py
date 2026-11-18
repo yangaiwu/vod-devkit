@@ -92,49 +92,42 @@ def test_submit_voices_token_unreachable_gives_guidance(monkeypatch):
             {"voices": [{"content": "反馈内容足够长的一条意见"}],
              "product": "codearts", "confirmed": True},
             client_info={"name": "t"})
-    assert "引导" in str(ei.value) and "自动" in str(ei.value), \
-        "令牌不可用时错误必须带引导步骤"
+    # S238：删除老链回落后，囤积端点 404 = 明确失败（-32016），不许假装已受理
+    assert ei.value.code == -32016
+    assert "未提交" in str(ei.value) and "external/voices" in str(ei.value)
 
 
 def test_voice_volume_preserved_across_calls(monkeypatch):
     monkeypatch.setattr(_net, "_load_meta",
                         lambda force=False: {"products": ["codearts"],
                                              "stale": False, "source": "meta"})
-    """R1 声量保真：不同调用提交同款反馈 → 不同 voiceId，各占一行。
+    """R1 声量保真：不同调用提交同款反馈 → 两次都真发、引擎各自给 id，客户端不去重。
 
-    （曾为缺陷：确定性 voiceId 使第二个用户同款反馈被去重吞掉，
-    声量统计失真——此测试为永久回归锁。）
+    （曾为缺陷：确定性 voiceId 使第二个用户同款反馈被去重吞掉，声量统计失真——
+    此测试为永久回归锁。S238 起老链回落已删，锁点落在唯一路径上。）
     """
-    seen = []
+    calls = []
+    counter = {"n": 0}
 
     def fake_http(method, path, body=None, timeout=30, base=None, key=None):
-        if path.endswith("/external/voices"):
-            # 囤积主路径：voiceId 由引擎按 per-token 命名空间算（server 侧职责），
-            # 客户端锁的是“把完整 content 原样交给引擎”+ 404 回落
-            raise _net.ToolError("上游返回 404: not found", code=404)
-        if path.endswith("/external/voice/submit"):
-            seen.append(body["voiceId"])
-            return {"code": 200, "data": {"taskId": len(seen)}}
-        return {}
+        assert path.endswith("/external/voices"), path
+        calls.append(body["voices"][0]["content"])
+        counter["n"] += 1
+        return {"code": 200, "voiceIds": [f"VDPL-{counter['n']}"],
+                "productRegistered": True}
 
     monkeypatch.setattr(_net, "JAVA_KEY", "k")
     monkeypatch.setattr(_net, "_http", fake_http)
     voice = {"content": "补全响应有点慢，希望优化一下"}
+    ids = []
     for _ in range(2):
         out = _collect.submit_voices({"voices": [voice], "product": "codearts",
-                                   "confirmed": True},
-                                  client_info={"name": "mcp"})
-        assert out["accepted"] == 1 and out["path"] == "legacy-fallback"
-    assert len(set(seen)) == 2, "404 回落老链：同款反馈跨调用必须不去重（R1 声量保真锁）"
-
-    # title 必须是用户原文（R3：分析消费原话；囤积链 voices[].title=content 截断）
-    def fake2(method, path, body=None, timeout=30, base=None, key=None):
-        assert body["voices"][0]["title"] == voice["content"], "title=用户原文，禁止模板污染"
-        return {"code": 200, "voiceIds": ["ext_vod-agent_x"]}
-    monkeypatch.setattr(_net, "_http", fake2)
-    _collect.submit_voices({"voices": [voice], "product": "codearts", "confirmed": True},
-                        client_info={"name": "mcp"})
-
+                                      "confirmed": True}, client_info={"name": "mcp"})
+        assert out["accepted"] == 1 and out["path"] == "hoarding"
+        ids.append(out["voiceIds"][0])
+    assert len(calls) == 2, "同款反馈跨调用必须各发一次（声量保真）"
+    assert set(calls) == {voice["content"]}, "content 必须原样交给引擎"
+    assert len(set(ids)) == 2, "两次提交必须拿到不同 voiceId"
 
 def test_attribution_literal_match_resolves_catalog_id(monkeypatch):
     """D-attrib-B：字面证据（含中文/长别名/短码）→ catalog 主键 id。
@@ -715,7 +708,6 @@ def test_legacy_key_hint_contains_version_and_reinstall_command():
     for _rel in (("vod_mcp", "net.py"), ("vod_mcp", "packs", "collect.py"),
                  ("vod_mcp", "packs", "core.py")):
         src += (Path(_net.__file__).resolve().parent.parent.joinpath(*_rel)).read_text(encoding="utf-8")
-    # 拆分后口径：两条提交失败路径统一走 _raise_explicit_key_rejected
-    # （内部含 hint），它被囤积/legacy 两路径各调用一次 + auth_status 检测位。
-    assert src.count("_raise_explicit_key_rejected(") >= 3  # 定义 + 两条失败路径调用
+    # S238 起只剩囤积一条提交路径：定义 + 一处调用 = 2（legacy 回落已删）
+    assert src.count("_raise_explicit_key_rejected(") >= 2  # 定义 + 囤积失败路径
     assert src.count("_legacy_key_hint()") >= 2  # 助手内 + auth_status 检测位
