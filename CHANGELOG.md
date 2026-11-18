@@ -741,3 +741,16 @@
 - ad893df fix(collect): SKILL.md 压回 cap 内 + 补 retrieve 指令 + 修 meta 匿名档 401 死循环
 - 3d0e645 fix(tests): install 夹具显式钉 main——dev 分支上 update 两条用例恒红、pre-push 卡死
 
+
+## v0.5.45（2026-11-19）
+
+- fde04d0 fix(release): 根 plugin.json 纳入版本落点表（ARCH-BLD-03）
+- 719f76f docs(arch): 同步需求/设计/安全文档到首批整改后的实现口径
+- 2b8bc15 fix(arch): 五维走查首批整改——P0 两条 + 三条放大器 + 两处环
+- 40acb4b docs(#1): 五维架构缺陷台账 + 整改方案（QA F1-F4 修订复核通过）(#23)
+- 793d96b docs(#1): QA 复核修订——基线重钉 dev@ba48d9d/v0.5.44 + F1-F3 证据重钉 + BLD-02 半步核减
+- cdafc49 merge dev (v0.5.44) into feat/issue-1
+- 044f1b6 docs(#1): 五维架构缺陷台账 + 整改方案
+- ba48d9d fix(release): GitHub 镜像推送按 remote 是否存在决定
+- 95217f1 fix(release): 推送当前分支而非硬编码 main
+
