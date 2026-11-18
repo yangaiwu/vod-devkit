@@ -98,6 +98,9 @@ EXTRA_FILES = [
     ("plugins/vod-devkit/.codex-plugin/plugin.json", "json"),
     ("plugins/vod-devkit/build-info.json", "json"),
     ("packages/dsh/package.json", "json"),
+    # 根清单 marketplace 准入文件（2026-11-19 补，ARCH-BLD-03）：此前不在表里，
+    # 自 11-03 写入起永久停在 0.1.0 —— 按 manifest 读版本的外部登记会拿到错版本。
+    ("plugin.json", "json"),
 ]
 for f, kind in EXTRA_FILES:
     try:
@@ -141,7 +144,7 @@ RANGE="${PREV_TAG}..HEAD" && [ -z "$PREV_TAG" ] && RANGE="HEAD"
 
 # 显式文件列表提交（纪律：禁 git add -A——曾误收垃圾文件）
 git add package.json pyproject.toml src/vod_mcp/__init__.py assets/contract/tools.schema.json \
-        plugins/vod-devkit/.codex-plugin/plugin.json packages/dsh/package.json CHANGELOG.md \
+        plugins/vod-devkit/.codex-plugin/plugin.json packages/dsh/package.json plugin.json CHANGELOG.md \
         tests/golden \
         assets/skills docs/decisions.md build-info.json
 # 插件副本不再入库（.gitignore，v0.5.9 零提交）——不再出现在 git add 清单里；
