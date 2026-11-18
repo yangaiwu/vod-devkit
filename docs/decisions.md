@@ -2684,3 +2684,34 @@ DSH 那段的真实损失不是「没把人拉回来」，而是**那 5 分钟�
 - 若客户端普遍不回传 `mcp-session-id`（实测官方 SDK 会回传），则兜底路径成为主路径，
   此时每次调用新建会话 → 受 `max_sessions` 约束，需改回 header 方案或提高上限。
 - 若引擎侧能接受「同内容不同来源」不被合并，则 nonce 派生可简化。
+
+## D-meta-anon-1 匿名档 meta 死循环（2026-11-18，端到端真机暴露）
+
+**触发**：stdio 真机端到端首跑即挂——提交返回 -32010「缺产品」，但候选里明明有
+CodeArts。追查发现产品名录为空。
+
+**根因（跨端同构，两端各有一份 meta 加载）**：
+
+```
+未配 key 的默认形态下，名录加载先于「提交遇 401 才领令牌」发生
+  → GET /external/meta 无 Authorization → 引擎 401
+  → except ToolError: pass（异常被吞）→ 回退空快照
+  → products=0 → 产品归因必失败 → needsProductAsk
+  → 而领令牌要提交成功、提交成功要归因成功 → 一条声音都提交不了
+```
+
+dsh 侧（`loadMeta`）此前已修过一次；Python 侧（`net._load_meta`）漏了同一处。
+**这是「修一端忘另一端」的第二次实锤**（第一次是 `SKILL_CAP` 两侧常量）。
+
+**决策**：Python 侧按 dsh 同构修——401 时先领零字段匿名令牌并落 runtime.json，
+带 key 重试一次（`source=meta-anon`）；仍失败才回退快照，不阻断采集。
+
+**验证**：
+- 修复前 `source=snapshot, stale=True, products=0`
+- 修复后 `source=meta-anon, stale=False, products=103`
+- 单测 `tests/test_meta_anon_mint.py` 3 例（401→重试 / 已配 key 不白领 / 不可达回退）
+- 真机端到端：stdio 10/10、remote 13/13、会话隔离 3/3，voiceId 真实入库
+
+**Falsifier**：若引擎把 `/external/meta` 改为匿名可读（查询类不需要鉴权），
+本重试逻辑可退化为单次请求；若平台提供公开的产品名录镜像，则可完全去掉该链。
+**纪律（本仓第 2 次踩）**：凡"两端各有一份实现"的逻辑，修一端后必须 grep 另一端。

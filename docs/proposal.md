@@ -1238,6 +1238,20 @@ voiceId 必须按作用域隔离，否则静默污染（错归进引擎幂等域
 | S146-8 | TTL 同源 | `session_idle_timeout` 与记忆 TTL 同取 `SCOPE_TTL_SEC`，两者相等由测试锁定 |
 | S146-9 | 无写盘副作用 | `_resolve_scope` 不得调用 `_install_nonce()`（会写盘）；"显式 key 被拒"路径不得污染 runtime.json |
 
+### D-meta-anon-1 匿名档 meta 死循环（2026-11-18 真机实锤，跨端同构）
+
+未配 key 的默认形态下，产品名录加载先于「提交遇 401 才领令牌」发生 →
+meta 401 → 异常被吞 → 回退空快照 → 名录恒空 → 归因必失败（needsProductAsk）→
+而领令牌要提交成功、提交成功要归因成功 → **一条声音都提交不了**。
+dsh 侧先修，Python 侧同构补上。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S147-1 | 无 key 时 meta 401 → 领令牌 → 重试 | 首次 meta 无 auth；随后调 `/external/token`；重试那次带 key；`source=meta-anon` 且名录非空（本轮实测 103 项） |
+| S147-2 | 已配 key 不额外领令牌 | `source=meta`；不调用 `/external/token`；首次 meta 即带 auth |
+| S147-3 | 完全不可达 | `source=snapshot`、`stale=true`，不阻断采集 |
+| S147-4 | 跨端同构 | dsh `loadMeta` 与 Python `_load_meta` 都有 401→领令牌→重试；真机 stdio/remote 均可提交（voiceId 非空） |
+
 
 ## 凭据单入口与技能读取教法（S124-S125，2026-11-15）
 

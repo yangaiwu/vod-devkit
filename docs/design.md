@@ -159,6 +159,15 @@ key 过滤）随 VOD-VOI；层级③用户自助维持 P2（签名回执）。
 （空 body，引擎侧 IP 限频，VOD-KEY 端点）→ 令牌回填运行时 +
 落 runtime.json（token_tier=anonymous）→ 重试提交 → 成功。
 令牌端点不可用 → 结构化引导错误（三步），不裸 404。
+
+**D-meta-anon-1（2026-11-18 真机实锤，跨端同构）**：产品名录 `_load_meta`
+也必须走这条链。此前它只带 `_eff_key()`（首装为空）且 `except ToolError: pass`
+吞掉 401 → 回退空快照 → 名录恒空 → 产品归因必失败（needsProductAsk），而
+领令牌要提交成功、提交成功要归因成功 → **默认形态下一条声音都提交不了**。
+修法：meta 401 时先领零字段匿名令牌（落 runtime.json），带 key 重试一次，
+`source=meta-anon`；仍失败才回退快照（不阻断采集）。
+**dsh 侧与 Python 侧必须同步**——两端各有一份 meta 加载，漏一侧就是半修。
+
 设计依据见 proposal 三·四节方案比对：进门零摩擦，问责靠档位。E3 修正待落引擎侧文档：查重依赖提交方
 外部去重键或内容 hash——服务端生成 voice_id 使 saveCollectRecord 的
 voice_id 查重不生效（详见 VOD-VOI 文档修正）。
