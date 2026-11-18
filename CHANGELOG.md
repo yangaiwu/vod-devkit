@@ -705,3 +705,23 @@
 
 - 3999e31 feat(dsh): 删除旧单条提交链，囤积端点成为唯一提交路径（S241）
 
+## v0.5.43（2026-11-18）
+
+- d2a26d2 fix(dsh): 提交回执三处缺陷（S242）——引擎 rejected 透出（此前被吞，
+  用户被告知「已收录」而实际未入库）；voiceIds 缺失时 accepted=0 + receiptIncomplete
+  且不写账本（此前按空回执记账，本地账本被空 voiceId 污染）；失败话术不再谎报
+  「已暂存」（dsh 无 pending 队列），回执加 notStored + userFacingHint
+- bd434ed feat(dsh): 采集语义对齐 vod_mcp（S243）——补契约必填 echo 原话回显；
+  补 tags 采集层三分类（problem_type 按产品白名单过滤，取不到=不过滤不误杀，
+  脏值丢弃报 invalidTags）；补缺产品先问一次（-32010 + needsProductAsk + 候选串，
+  计数封顶 3、成功归零；多产品歧义不追问）
+- cbdcb44 fix(dsh): 失败/空批回执补齐契约必填 echo（S243 复查）
+- c05f771 fix(dsh): 契约 required 补齐（S244）——vod_devkit_info 补 commitSha、
+  vod_list_submitted 返回字段 voices→submissions（Python 侧本来就是对的）；
+  新增 contract-conformance 门禁（真跑每个工具 execute 逐字段校验 required）
+- 本轮修复（pytest 3 红转绿）：重录 case_roster（S242/S243 新增用例未入册）；
+  重排 dsh description 1811→1473 字，把缺产品追问提进 500 字截断窗口
+  （原先在 1379 字处，dsh 宿主根本读不到）；归因锁改为「问一次 + 禁造产品名」并存口径
+- 顺带修两处：test_s161 陈旧断言（其「隔离 HOME 外一律忽略」已被 S168 三分支取代，
+  现只锁两落点同源）；host_matrix.py 的 _pin_roots 由 setdefault 改为强制覆盖
+  （外部残留 VOD_DEVKIT_*_ROOT 会让巡检探错树却报 10 PASS 假绿灯）

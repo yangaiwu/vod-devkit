@@ -40,9 +40,19 @@ if str(_SRC) not in sys.path:
 
 
 def _pin_roots() -> None:
-    """进程入口处显式钉两个根（main() 调；import 不调）。"""
-    os.environ.setdefault("VOD_DEVKIT_SRC_ROOT", str(_SRC))
-    os.environ.setdefault("VOD_DEVKIT_DIST_ROOT", str(_DIST))
+    """进程入口处显式钉两个根（main() 调；import 不调）。
+
+    🔴 必须**强制覆盖**而不是 setdefault（2026-11-18 实测假 PASS）：
+    外部 shell/CI 若已导出 `VOD_DEVKIT_*_ROOT`（如上次会话遗留、或用户在别的仓里
+    export 过），setdefault 会保留那个外部值 → 巡检探的是**别的树**，报 10 PASS
+    而实际本仓根本没被检查。现在覆盖并显式告警，让「被谁改了」可见。
+    """
+    for key, val in (("VOD_DEVKIT_SRC_ROOT", _SRC), ("VOD_DEVKIT_DIST_ROOT", _DIST)):
+        prev = os.environ.get(key)
+        if prev and prev != str(val):
+            print(f"[warn] env {key}={prev} 被覆盖为本仓 {val}（否则巡检会探错树）",
+                  file=sys.stderr)
+        os.environ[key] = str(val)
 
 
 from pathlib import Path

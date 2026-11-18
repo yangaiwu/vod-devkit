@@ -81,16 +81,19 @@ def test_dsh_desc_survives_truncation_budget():
 
 
 def test_dsh_desc_no_stale_permissive_attribution():
-    """归因口径漂移锁（D-attrib-B，2026-11-11 更新）：dsh 壳归因已改运行期
-    字面解析——description 必须写「来自用户原话」，禁止回流两种旧口径：
+    """归因口径漂移锁（D-attrib-B → D-product-ask-1，2026-11-18 更新）：dsh 壳归因已改
+    运行期字面解析，且 S243 起缺产品时**先问一次**（不再一味禁问）。本锁防两种回退：
     ①宽容链「explicit arg → config → host identity」（D-dsh-install-1 实锤）
-    ②「绑定在安装期且无运行期解析」（D-attrib-B 前的旧口径）。"""
+    ②「绑定在安装期且无运行期解析」（D-attrib-B 前的旧口径）
+    以及防「禁造产品名」这句被压缩掉——它现在与「问一次」并存，不是互相取消。"""
     desc = _dsh_composed_desc()
     assert "explicit arg" not in desc, "旧宽容归因口径句回流"
     assert "install/deploy time" not in desc and "bound at install" not in desc, \
         "旧「安装期绑定」口径句回流（须为运行期字面解析口径）"
     assert "user's own words" in desc, "缺「来自用户原话」口径句"
-    assert "NEVER ask or invent a product" in desc, "缺禁问/禁造产品名句"
+    # 2026-11-18 口径：问一次（needsProductAsk）在前，禁造产品名在后，两句必须同时在场
+    assert "needsProductAsk" in desc, "缺「缺产品先问一次」口径句（D-product-ask-1）"
+    assert "NEVER invent a product" in desc, "缺禁造产品名句"
 
 
 def test_dsh_desc_precondition_semantics():

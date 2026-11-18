@@ -784,27 +784,25 @@ export function apply(ctx, config) {
     const tools = [
         {
             name: 'vod_submit_voices',
-            description: '[VOD-unique] Submit agent-product user feedback voices to VOD (write). '
-                + 'PRECONDITION (overrides everything below): obtain the user\'s explicit consent to submit THIS feedback before calling; '
-                + 'the user merely stating a complaint is NOT consent; never pass confirmed=true without it. '
-                + 'ON FAILURE: tell the user in plain words only (e.g. 这次没有提交成功，需要的话我再提一次). '
-                + 'NEVER say 已暂存/稍后自动重试 — the plugin has no local queue; that would be a false claim. '
-                + 'NEVER expose HTTP status codes, apiKeyFingerprint, tokenTier, stack traces, '
-                + 'tool names (say 提交反馈, never vod_submit_voices) or mechanism words '
-                + '(调用/被拒/护栏/参数) to the user - they are internal diagnostics. '
-                + 'The agent submits on the user\'s behalf; system behavior is described as 系统/稍后自动. '
-                + 'OUTPUT CONTRACT: when explaining results to the user, only cover 收录状态与后续跟进. '
-                + 'NEVER explain internal mechanics to users: 声音来源/渠道字段、计数规则（入库/净新增）、配额、归因——这些是系统内部概念。 '
-                + 'Anonymous tier has NO credentials by design. ' +
-                'Each voice = one user feedback (content ≤2000 chars). '
-                + 'content MUST be a faithful transcription of the user\'s own words - '
-                + 'NEVER invent sentiment (e.g. 体验不好) or fabricate content the user did not say. '
-                +                'A bare product name or a question is NOT feedback - ask what the user wants to report. ' +
-                + 'Attribution comes from the user\'s own words; config product is only a fallback. NEVER invent a product. '
-                + 'If attribution finds no product, the tool returns needsProductAsk: ask the user once which product this is about (offer the candidates in the error), then resubmit the same feedback verbatim — do not fill in product yourself. ' +
-                'Fixed one-time follow-up at confirmation, verbatim: 「方便的话，补充一下遇到这个问题时的操作步骤或期望的表现吗？不方便回复"没有"，我直接提交。」' +
-                'Answer → reproSteps/expectedBehavior verbatim excerpt, never into content; "没有/跳过"=omit both. ' +
-                'Batch ≤50. Returns voiceIds (reconciliation key) + taskIds.',
+            description: '[VOD-unique] Submit user feedback voices to VOD (write). '
+                // 500 字窗口纪律（dsh 硬截断）：同意闸 + 缺产品追问 + 失败话术 + 禁编造
+                // 必须在最前面，其余机制纪律放窗口外（模型仍可读到全文的宿主不受影响）。
+                + 'PRECONDITION: obtain the user\'s explicit consent to submit THIS feedback before calling; '
+                + 'a complaint alone is NOT consent; never pass confirmed=true without it. '
+                + 'NO PRODUCT FOUND → the tool returns needsProductAsk: ask the user once which product this is about (use the candidates in the error), then resubmit the same feedback verbatim; NEVER invent a product for them. '
+                + 'ON FAILURE: say in plain words only (e.g. 这次没有提交成功，需要的话我再提一次). '
+                + 'NEVER say 已暂存/稍后自动重试 — no local queue exists; that would be a false claim. '
+                + 'content MUST be a faithful transcription of the user\'s own words (≤2000 chars); '
+                + 'NEVER invent sentiment or fabricate content the user did not say. A bare product name or a question is NOT feedback -- ask what they want to report. '
+                + 'Each voice = one user feedback. '
+                + 'NEVER expose HTTP status codes, fingerprints, tokenTier, stack traces, tool names '
+                + '(say 提交反馈, never vod_submit_voices) or mechanism words (调用/被拒/护栏/参数/配额) — internal diagnostics. '
+                + 'Attribution comes from the user\'s own words; config product is only a fallback. '
+                + 'Anonymous tier has NO credentials by design. '
+                + 'OUTPUT: to the user, cover only 收录状态与后续跟进; never explain 声音来源/渠道字段、计数规则、归因. '
+                + 'Fixed one-time follow-up at confirmation, verbatim: 「方便的话，补充一下遇到这个问题时的操作步骤或期望的表现吗？不方便回复"没有"，我直接提交。」'
+                + 'Answer → reproSteps/expectedBehavior verbatim excerpt, never into content; "没有/跳过"=omit both. '
+                + 'Batch ≤50. Returns voiceIds (reconciliation key) + taskIds.',
             parameters: buildParameters({
                 voices: {
                     type: 'array', required: true,

@@ -131,23 +131,29 @@ def test_s159_hermes_spec_reroot_leaves_foreign_paths_alone(monkeypatch, tmp_pat
 
 
 def test_s161_hermes_landing_judged_once(monkeypatch, tmp_path):
-    """S161：CLI 落点与文件落点必须由同一判据决定（隔离 HOME 下只认位于该 HOME 之内的 HERMES_HOME）。
+    """S161：CLI 落点与文件落点必须由同一判据决定。
 
     实机背景：`_cli_env()` 曾用「root 不在真实家目录之下」判"隔离 root"，
-    `_spec()` 用「root 在 HOME 之下」。两条判据对 `HERMES_HOME=/tmp/shared` 给出**相反**结论：
-    CLI 认为自己写 /tmp/shared，文件却写在 `<HOME>/.hermes` —— 正是 0.5.25 修过的分裂形态。
-    收敛后两边都跟随 HOME（并在 stderr 说明忽略），显式钉在隔离 HOME 之内的才认。
+    `_spec()` 用「root 在 HOME 之下」。两条判据对同一个 HERMES_HOME 给出**相反**
+    结论：CLI 认为自己写 A，文件却写在 B —— 正是 0.5.25 修过的分裂形态。
+
+    ⚠️ 2026-11-18 更新：本条原断言「隔离 HOME 下凡是 HOME 之外的 HERMES_HOME 一律忽略」，
+    已被 S168（D-hermes-root-3way-1）收窄为**三分支**——HOME 之外但也不在真实家目录下的
+    值属容器挂载卷形态（`HOME=/app` + `HERMES_HOME=/data/hermes`），必须**认**，否则配置
+    写进镜像层、重建即丢。故此处保留的本条意图只剩「两个落点同源」，不再断言具体落点；
+    三分支的正确性由 test_s168_hermes_landing_three_way 逐支锁死。
     """
     from vod_mcp.host_adapters import hermes
 
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "shared"))   # 隔离 HOME 之外
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "shared"))   # HOME 之外、真实家目录之外
     spec = hermes._spec()
-    assert Path(spec["configPath"]) == home / ".hermes" / "mcp" / "vod-devkit.json"
     env = hermes._cli_env()
-    assert env["HERMES_HOME"] == str(home / ".hermes")
+    # 唯一判据：spec 的 configPath 与 CLI 拿到的 HERMES_HOME 必须指向同一棵树
+    assert Path(env["HERMES_HOME"]) in Path(spec["configPath"]).parents, (
+        f"落点分裂：CLI={env['HERMES_HOME']} file={spec['configPath']}")
 
 
 def test_s161_hermes_landing_accepts_root_inside_isolated_home(monkeypatch, tmp_path):
