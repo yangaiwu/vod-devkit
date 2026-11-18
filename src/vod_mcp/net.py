@@ -129,6 +129,29 @@ def _load_meta(force: bool = False) -> dict:
                     "stale": False, "source": "meta"}
     except ToolError:
         pass
+    # D-meta-anon-1（2026-11-18 真机实锤，与 dsh 侧同构）：未配 key 的默认形态下
+    # meta 请求先于「提交遇 401 才领令牌」发生 → 401 → 上面 except 吞掉 → 名录恒空
+    # → 产品归因必失败（needsProductAsk），且领令牌要提交成功、提交成功要归因成功
+    # → 默认形态下一条声音都提交不了。修法：401 先领匿名令牌，带 key 重试一次。
+    key = _eff_key()
+    if not key:
+        token = _fetch_anon_token()
+        if token:
+            try:
+                rt._runtime_update({"java_key": token, "token_tier": "anonymous"})
+            except Exception:
+                pass
+            try:
+                out = _http("GET", _META_PATH, None, base=_java_base(), key=token, timeout=10)
+                data = out.get("data") or {}
+                if isinstance(data.get("products"), list) and data["products"]:
+                    rt._runtime_update({"meta_cache": {"fetchedAt": int(now), "data": data}})
+                    return {"products": data["products"],
+                            "catalog": data.get("productCatalog") or [],
+                            "dictVersion": data.get("dictVersion"),
+                            "stale": False, "source": "meta-anon"}
+            except ToolError:
+                pass
     # 快照不含分类白名单：collect._allowed_tags 取不到产品分类时 allowed 为空=不校验
     # （宁可放行也不误杀采集）
     return {"products": _META_SNAPSHOT["products"], "catalog": [],
