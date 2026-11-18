@@ -694,6 +694,9 @@
     "S234": {
       "carrier": "docs/design.md"
     },
+    "S236": {
+      "carrier": "docs/design.md"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

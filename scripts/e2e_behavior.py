@@ -461,6 +461,27 @@ def ledger_rows_since(ts: str) -> list:
     return out
 
 
+def scope_engine_rows(engine_rows: list, ledger_rows: list) -> tuple:
+    """把引擎行收窄到**本轮提交的 voiceId**（S236）。
+
+    为什么必须收：`engine_rows_since(t0)` 返回时间窗内**所有**行——并发跑别的宿主、别的
+    会话、或人工发的验证声音都会进来。旧实现把它们当候选做"原话保真"比对，于是外部行
+    会被报成"改写"（实测：C1 命中同窗口的短验证声音、C4 命中 dsh 验证声音，两条假红）。
+    收窄口径：以本机账本本轮回执里的 voiceId 为白名单（账本=本轮确实拿到引擎回执的凭证）。
+    账本没有回执（老路径/囤积档不可见）时保持原样，交给三态判定去报"不可判"。
+
+    返回 (scoped_rows, note)。
+    """
+    ids = {str(r.get("voiceId")) for r in (ledger_rows or []) if r.get("voiceId")}
+    if not ids:
+        return list(engine_rows or []), ""
+    keep = [r for r in (engine_rows or []) if str(r.get("id")) in ids]
+    dropped = len(engine_rows or []) - len(keep)
+    note = (f"已排除 {dropped} 行非本轮提交（时间窗内的并发/外来提交，按 voiceId 白名单收窄）"
+            if dropped else "")
+    return keep, note
+
+
 def _row_verdict(expect_rows: int, engine_rows: list, ledger_rows: list) -> tuple:
     """落库线的三态判定（S214）：有引擎行=可判；无引擎行但账本有回执=**不可判**；
     两者皆空=真违规（提交链路确实没触发）。
@@ -554,15 +575,20 @@ def run_case(host: str, case: dict, cfg: dict, model: str | None = None) -> dict
     # S221：空回复=宿主回合没产出（实测 task_complete.last_agent_message=None），
     # 等满 poll_s(600s) 不会有新证据，只会把套件拖成 30 分钟。
     poll_budget = 30 if not str(reply or "").strip() else 600
-    rows = _await_engine_rows(t0, expect_rows, poll_s=poll_budget)
+    raw_rows = _await_engine_rows(t0, expect_rows, poll_s=poll_budget)
+    ledger = ledger_rows_since(t0)
+    rows, scope_note = scope_engine_rows(raw_rows, ledger)
 
     verdict = judge_case(expect_rows=expect_rows, engine_rows=rows,
-                         ledger_rows=ledger_rows_since(t0), reply=str(reply or ""),
+                         ledger_rows=ledger, reply=str(reply or ""),
                          verbatim_full=verbatim_full)
+    if scope_note:
+        verdict.setdefault("notes", []).append(scope_note)
     for bucket in verdict["violations"]:
         record_violation(host, bucket, cfg["window_days"])
 
     out = {"case": case["id"], "rule": case["rule"], "fails": verdict["fails"],
+           "notes": verdict.get("notes") or [],
            "prompt": prompt,
            "rows": [{"id": r["id"], "content": r["content"]} for r in rows]}
     if verdict["reply_indeterminate"]:

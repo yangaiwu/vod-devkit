@@ -436,6 +436,12 @@ exit 1 附可照抄的手动修复格式。manifest 增 dshProfile 键（golden 
   本对文档；验收/环境探测脚本放 `scripts/`（`host_matrix` / `smoke_hosts` / `probe_tools` /
   `e2e_*`），**不进 `package.json` 的 `files` 白名单**（随包发不出去），也不是交付物清单的一部分；
   用例清单以 proposal.md 第四节为准，禁止把一次性探针塞进交付面
+- 行为级 e2e 的引擎行必须收窄到本轮 voiceId（S236）：`engine_rows_since(t0)` 返回时间窗内
+  **所有**行，并发提交/人工验证声音会混进来；旧实现拿它们做原话保真比对，把外来行报成
+  「改写」（实测 C1/C4 两条假红）。现口径 `scope_engine_rows()`：以本机账本本轮回执的
+  voiceId 为白名单收窄，并在回执 `notes` 里写明排除了几行；账本无回执时保持原样，交三态
+  判定报「不可判」。**e2e 不得与其他提交并发跑**——收窄只能排除异 id 行，同 id 同文的
+  重复提交仍会干扰，跑前确认窗口干净
 - 功能级验证入口单一来源（S234）：`host_matrix.resolve_entry()` 是"宿主 → 它自己配置里的
   launch"的唯一解析点，巡检与 `scripts/probe_tools.py` 共用；环境变量两种键（`env` /
   `environment`）都要读——三个宿主用后者，裸探针只读前者会把 10 工具报成 12（实测）。
