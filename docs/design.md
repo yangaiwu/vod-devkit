@@ -760,10 +760,23 @@ tests/test_remote_transport.py + tests/test_mcp_standard_transport.py（标准/�
 | 部署 | scope.grain | key | 隔离依据 | product 先验 | 降级原因 |
 |---|---|---|---|---|---|
 | 一 agent 一本地 stdio | `process` | `proc:<pid>`（+`|name` 二级后缀，name 不单独成 key） | 进程私有内存 | 可用 | — |
-| 一 agent 一远程（独立进程+目录） | `process` | `proc:@<VOD_DEVKIT_HOME>` | 进程 + home（**已进 key**） | 可用 | — |
+| 一 agent 一远程（独立进程+目录） | `process` | `proc:@<VOD_DEVKIT_HOME>` | 进程 + home（**已进 key**） | **需显式 `VOD_SINGLE_TENANT=1`**，见下 | 未声明单租户时 `no_session_id` |
 | 多 agent 共用远程 | `request` | `sess:<mcp-session-id>` | 会话表；记忆 TTL 随 session | **禁用 + 打点** | `no_session_id` |
 | （增强）显式 agent 头 | `request` | `agent:<agent-id>` | 同上（跨会话共享记忆） | 禁用 | — |
 | （兜底）全拿不到 | — | `None` | **读写皆禁用**；计数仅单轮内 | 走原话 + 问一次 | `no_session_id` / `no_proc_id` |
+
+**模式② 的 product 先验（审查 P1-1 修正，2026-11-19）**：远程面此前被 `if not remote:`
+一刀切禁用先验，模式②因此丢掉安装绑定（与本表"可用"的承诺对立，是**功能回归**）。
+现在放开为**三个条件同时满足**才可用，缺一个即退回禁用：
+
+```
+① VOD_SINGLE_TENANT=1（显式声明，默认关 —— 不明说就不放开）
+② VOD_DEVKIT_HOME 非空（进程/目录私有的唯一可证证据）
+③ 拿不到调用方会话标识 sess:/agent:（能拿到说明可能多 agent 共用 = 模式③）
+```
+
+设计理由：模式② 物理上"一进程一 agent"，先验不会错归；但**代码无法从进程内部证明
+"只有我一个 agent 在用"**，所以要求部署者显式声明。默认关保证既有部署行为不变。
 
 要点：
 - **`sess:` 与 `agent:` 前缀分工**：前者=会话级（标准 stateful 自动获得），

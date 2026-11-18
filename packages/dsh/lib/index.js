@@ -700,7 +700,12 @@ export function planDriftHandling({ userTurns, pulledBack = false, offTopic = fa
     // 像反馈的原话：含抱怨/建议词，或带可感知的量级描述（"两分钟""半小时"这类
     // 用户描述成本的表达——不含任何关键词但确实是反馈，漏掉就是真丢声音）。
     // 刻意保守：宁可多留，不可丢。
-    const SIGNAL = /慢|卡|错|崩|挂|失败|打不开|没反应|不能用|不好用|难用|不方便|体验|希望|建议|能不能|为什么不|太.{0,3}(复杂|繁琐|慢|难)|bug|报错|超时|等了|半天|好久|长时间|[一二三四五六七八九十两几\d]+\s*(秒|分钟|小时|天)/;
+    // 🔴 2026-11-19 补「半」：实测「加载要等半分钟」被漏判（字符类里没有"半"），
+    //    而"等了半小时"能命中 —— 同一量级语义两种说法一收一丢，是留底功能的真缺陷。
+    // 🔴 同日再补「错」的负面前置：单字 `错` 会把"天气不错""挺好的不错"这类**正面**
+    //    表述收进缓冲，污染语料。用 `(?<!不)错` 排除"不错"；"没错"由词表外的语境决定，
+    //    这里只保证最常见误收。宁可漏一点，也不要往语料里塞夸奖。
+    const SIGNAL = /慢|卡|崩|挂|失败|打不开|没反应|不能用|不好用|难用|不方便|体验|希望|建议|能不能|为什么不|(?<!不)错|太.{0,3}(复杂|繁琐|慢|难)|bug|报错|超时|等了|半天|好久|长时间|[一二三四五六七八九十两几半\d]+\s*(秒|分钟|小时|天)/;
     const buffer = turns.filter((t) => SIGNAL.test(t));
     // 一次拉回：只在"当前跑题"且"还没拉过"时拉；拉过就放弃（不重复追问）。
     const shouldPullBack = !!offTopic && !pulledBack;
@@ -865,6 +870,15 @@ export function apply(ctx, config) {
                     type: 'array', required: true,
                     description: 'Array of 1-50 voices: {content (required, ≤2000), userType (optional 企业|个人|未知), tags (optional 采集层分类标注，写 problem_type:<六类之一>，白名单外值由插件丢弃并在回执 invalidTags 报出，不拒收声音), reproSteps/expectedBehavior (optional 用户追问补充, only when the fixed one-time follow-up got an answer; never merge into content)}',
                 },
+                // D-drift-1（审查 P1-2 修正 2026-11-19）：本参数此前**没有声明**，
+                // 而 buildParameters 产出 additionalProperties:false ⇒ 宿主直接把
+                // `offTopic` 过滤掉 ⇒ execute 里 `args.offTopic` 恒 undefined ⇒
+                // 拉回/复位分支永不触发（能力写在文档里、运行时不存在）。
+                // 语义判定归模型（本插件不做语义推断），这里只负责接收。
+                offTopic: {
+                    type: 'boolean',
+                    description: 'Optional. Set true only when the last user turn is off-topic (not about the product/feedback); omit otherwise. Used solely to decide whether to pull the conversation back once and to keep off-topic feedback that was already captured.',
+                },
             }),
             output: { schema: { type: 'object', additionalProperties: true }, render: renderText },
             async execute(args, exec) {
@@ -898,6 +912,23 @@ export function apply(ctx, config) {
                     pulledBack: !!loadRuntime().drift_pulled_back,
                     offTopic: !!args.offTopic,
                 });
+                // D-drift-1（审查 P1-2 修正）：跑题期留底 —— 把「跑题期间说过的、像反馈的
+                // 原话」并入本批提交，用户不必在被拉回后重述一遍。
+                // 🔴 三条纪律：
+                //   ① 只补**没被本批覆盖**的原话（本批已有同一条就不再重复，防重复入库）；
+                //   ② 逐字原话，不拼接、不改写（content 红线不因留底豁免）；
+                //   ③ 只在 resume（已经拉回过、现在回到话题）时补 —— shouldPullBack 那一轮
+                //      buffer 里的原话还没被确认，直接提交等于替用户做了决定。
+                if (drift.resume && drift.buffer.length) {
+                    const existing = new Set(voices.map((v) => String(v?.content ?? '').trim()));
+                    for (const t of drift.buffer) {
+                        const text = String(t).trim();
+                        if (text && !existing.has(text)) {
+                            voices.push({ content: text });
+                            existing.add(text);
+                        }
+                    }
+                }
                 const rgVerdict = new Map(); // index → verified|fuzzy|mismatch|unavailable
                 const accepted = [], taskIds = [], rejected = [];
                 const invalidTags = [];

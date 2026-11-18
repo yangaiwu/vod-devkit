@@ -401,7 +401,23 @@ def _resolve_scope(client_info) -> dict:
                 "product": prod, "product_prior": True,
                 "degraded": False, "degraded_reason": None}
 
-    # ④ 远程面且无任何标识：读写皆禁用；product 先验禁用（多租户下必错归）
+    # ④ 远程面：
+    #    ④-a 单租户（模式②：一 agent 一远程，独立进程 + 独立 VOD_DEVKIT_HOME）
+    #         —— 进程私有、只有一个 agent，安装先验不会错归，可用。
+    #         🔴 三个条件必须同时满足，缺一个就退回 ④-b 的禁用：
+    #            ① 显式开关 VOD_SINGLE_TENANT（默认关：不明说就不放开，避免误判）；
+    #            ② 有 VOD_DEVKIT_HOME —— 它是"进程/目录私有"的唯一可证证据；
+    #            ③ 拿不到调用方会话标识（能拿到 sess:/agent: 说明可能多 agent 共用，
+    #               那正是模式③，绝不能用安装先验）。
+    #         审查 P1-1（2026-11-19）：此前 `if not remote:` 把远程面一刀切禁用，
+    #         模式②因此丢掉安装先验（design.md:763 承诺"可用"），是功能回归。
+    #    ④-b 多租户/未声明：读写皆禁用 + 先验禁用（多租户下必错归）
+    home = str(os.environ.get("VOD_DEVKIT_HOME") or "").strip()
+    single_tenant = str(os.environ.get("VOD_SINGLE_TENANT") or "").strip().lower() in ("1", "true", "yes", "on")
+    if single_tenant and home and not agent:
+        return {"key": f"proc:@{home}", "grain": "process", "id_source": "proc_home",
+                "product": prod, "product_prior": True,
+                "degraded": False, "degraded_reason": None}
     return {"key": None, "grain": None, "id_source": None,
             "product": prod, "product_prior": False,
             "degraded": True, "degraded_reason": "no_session_id"}
