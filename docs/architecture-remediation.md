@@ -2,7 +2,7 @@
 
 > 缺陷台账：[`architecture-defects.md`](architecture-defects.md)（编号一一对应，`ARCH-XX-NN`
 > → `ARCH-RM-XX-NN`）。
-> 基线：`dev` @ `6649fda`。本文只给方案，不在本 Issue 改代码——**每项按 P 级另开工单**，
+> 基线：`dev` @ `ba48d9d`（v0.5.44；随台账修订统一重钉）。本文只给方案，不在本 Issue 改代码——**每项按 P 级另开工单**，
 > 工单号建议见第六节。
 
 ## 零、整改前置纪律（先读，不然会返工）
@@ -35,7 +35,7 @@
 | 批次 | 编号 | 标题 | 人日 |
 |---|---|---|---|
 | **B1 门禁与发布口径**（先做，防后续整改"改了没人守"） | ARCH-BLD-01 | 双 CI 定义漂移 + 只跑 main | 2.0 |
-| | ARCH-BLD-02 | dev 基线与 main 口径冲突 | 2.0 |
+| | ARCH-BLD-02 | dev 基线与 main 口径冲突（release.sh 半步已修） | 1.0 |
 | | ARCH-BLD-05 | pre-push 未接线 + 作者机路径 | 1.0 |
 | | ARCH-CFG-04 | secret_scan 覆盖边界 | 1.0 |
 | | ARCH-BLD-03 | 根 plugin.json 版本漂移 | 1.0 |
@@ -166,7 +166,10 @@ CI 门禁收敛（BLD-01） ──→ 其余所有项（新用例才有地方跑
   回滚后门禁覆盖面退回 GitCode 4 条（即现状），不影响运行时代码。
 - **验收断言**：两份 workflow 的 step 名集合相等；`dev` 分支的 push 会触发。
 
-#### ARCH-RM-BLD-02 更新/发版/夹具改用当前分支口径
+#### ARCH-RM-BLD-02 更新/夹具改用当前分支口径（release.sh 半步已落地）
+
+> 注：dev 头 `95217f1` 已先行落地 release 侧半步（`scripts/release.sh:170-176` 改为推
+> 当前分支 `CUR_BRANCH`），本项收敛为 update 语义与测试夹具两件事。
 
 - **是否触碰决策**：**是**——`tests/test_installer.py:120-125` 的注释把"比较 origin/main"
   当作语义锁。整改前先向 [`decisions.md`](decisions.md) 追加一条
@@ -177,18 +180,16 @@ CI 门禁收敛（BLD-01） ──→ 其余所有项（新用例才有地方跑
      --abbrev-ref --symbolic-full-name @{upstream}`）；无上游时用
      `origin/<current>`；两者都拿不到 → 打印"当前分支没有上游，无法判断更新"并 `return`
      （不 `exit 1`，那是误报）。
-  2. `scripts/release.sh:165-167`：`main` 改为 `$RELEASE_BRANCH`（默认=当前分支），
-     并在脚本开头打印目标分支供确认。
-  3. `tests/test_installer.py:125`：`--branch main` → `--branch <当前分支>`
+  2. `tests/test_installer.py:125`：`--branch main` → `--branch <当前分支>`
      （用 `git rev-parse --abbrev-ref HEAD` 传参）。
-  4. `tests/test_p2_structure.py` 的 update 语义锁同步改口径。
-- **影响文件**：`src/vodkit_cli/update.py`、`scripts/release.sh`、`tests/test_installer.py`、
+  3. `tests/test_p2_structure.py` 的 update 语义锁同步改口径。
+- **影响文件**：`src/vodkit_cli/update.py`、`tests/test_installer.py`、
   `tests/test_p2_structure.py`、`docs/decisions.md`（新增决策）。
 - **回归用例**：
   - `tests/test_p2_structure.py::test_update_compares_current_upstream`
   - `tests/test_installer.py`（在无 `main` 引用的检出上不再 ERROR）
   - `tests/test_installer.py::test_update_refuses_when_tracked_conflict`（保持）
-- **回滚点**：还原 `update.py:29-42`、`release.sh:165-167`、两个用例；`decisions.md`
+- **回滚点**：还原 `update.py:29-42`、两个用例；`decisions.md`
   的那条决策**不要删**，改为标注"已撤回（原因）"——决策台账按追加制。
 - **验收断言**：在 `feat/*`/`dev` 分支上 `vod-devkit update` 不再报"更新失败"；
   `python3 -m pytest tests/test_installer.py -q` 在无 `main` 的检出上是绿。
@@ -536,7 +537,7 @@ CI 门禁收敛（BLD-01） ──→ 其余所有项（新用例才有地方跑
 
 | 编号 | 实施步骤（最小形态） | 影响文件 | 回归用例 | 回滚点 | 人日 |
 |---|---|---|---|---|---|
-| ARCH-RM-DEP-01 | ①`runtime_state._is_remote_face` 改为读模块内注入的标志 `_SERVER_FACE_LOCAL`；②`transport_remote` 在协程体里同时 set `net._SERVER_FACE` 与 `rt.set_server_face(True)`；③删掉 `src/vod_mcp/runtime_state.py:422` 的反向 import | `runtime_state.py`、`transport_remote.py`、`net.py` | `tests/test_import_graph.py::test_no_cycle_in_vod_mcp`、`tests/test_remote_transport.py` 全绿 | 恢复反向懒导入；新用例删除 | 2.0 |
+| ARCH-RM-DEP-01 | ①`runtime_state._is_remote_face` 改为读模块内注入的标志 `_SERVER_FACE_LOCAL`；②`transport_remote` 在协程体里同时 set `net._SERVER_FACE` 与 `rt.set_server_face(True)`；③删掉 `src/vod_mcp/runtime_state.py:438` 的反向 import | `runtime_state.py`、`transport_remote.py`、`net.py` | `tests/test_import_graph.py::test_no_cycle_in_vod_mcp`、`tests/test_remote_transport.py` 全绿 | 恢复反向懒导入；新用例删除 | 2.0 |
 | ARCH-RM-DEP-03 | ①`errors.py`（ERR-03 引入）承载 `ToolError`；②`net.ToolError = ToolError` 保留别名一个版本；③`src/vod_mcp/packs/knowledge.py:2` 改 `from vod_mcp import errors`；④`src/vod_mcp/skills_registry.py:67` 改读 `rt` 的标志（与 DEP-01 同源） | `errors.py`、`net.py`、`packs/*.py`、`skills_registry.py` | `::test_packs_do_not_import_net_for_errors` | 恢复 `net.ToolError` 与两处 import | 1.5 |
 | ARCH-RM-DEP-06 | `provenance.py:6-8` 与 `src/vod_mcp/payload.py:28` 的常量改函数 `build_info_path()`/`manifest_path()`/`dist_root()`；调用点改函数调用 | `provenance.py`、`payload.py`、`common.py` | `tests/test_state_read.py::test_provenance_paths_are_live` | 恢复常量；用例删除 | 1.0 |
 | ARCH-RM-CALL-03 | ①`_SENTINEL` 改 `weakref.WeakKeyDictionary`（键=manager 实例）；②`_sentinel_ttl` 从 `SCOPE_TTL_SEC` 派生改为显式常量 `SENTINEL_FRESH_SEC`；③补"manager 重建"用例 | `transport_remote.py`、`runtime_state.py`、`tests/test_remote_transport.py` | `::test_sentinel_survives_manager_rebuild` | 恢复 dict + `id(manager)` | 3.0 |

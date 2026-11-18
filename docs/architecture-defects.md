@@ -1,6 +1,7 @@
 # 架构设计缺陷台账（五维走查）
 
-> 基线：`dev` 分支 commit `6649fda`（本台账全部证据在同基线工作树上逐条复核）。
+> 基线：`dev` @ `ba48d9d`（v0.5.44；QA 复核指出初稿走查树实为 `f6af880`、与抬头的 `6649fda`
+> 不符，本次修订已把分支合并到 dev 头并将全部证据引用统一重钉到本基线）。
 > 配套文件：整改方案见 [`architecture-remediation.md`](architecture-remediation.md)；
 > 结构"应然"契约见 [`architecture.md`](architecture.md)，设计决策见 [`design.md`](design.md)，
 > 安全模型见 [`safety-model.md`](safety-model.md)，远程面 ④⑤⑥ 专项见
@@ -54,7 +55,7 @@
 
 ## 二、结论摘要
 
-五维共 **32** 条（P0 2 / P1 18 / P2 12），合计约 **56.5 人日**。
+五维共 **32** 条（P0 2 / P1 18 / P2 12），合计约 **55.5 人日**（BLD-02 的 release.sh 半步已由 `95217f1` 修复，工作量相应核减 1.0）。
 
 | 编号 | 标题 | 级别 | 人日 |
 |---|---|---|---|
@@ -84,7 +85,7 @@
 | ARCH-CFG-06 | 机器级 state 目录权限只在迁移路径收紧 0700 | P2 | 0.5 |
 | ARCH-CFG-07 | `guard_scope` 字段剔除靠"新字段记得加" | P2 | 1.0 |
 | ARCH-BLD-01 | 双 CI 定义漂移：GitCode 只覆盖 3/9 门禁，且两者都只在 `main` 触发 | P1 | 2.0 |
-| ARCH-BLD-02 | 开发基线 `dev` 而 release/update/测试夹具全钉 `main` | P1 | 2.0 |
+| ARCH-BLD-02 | 开发基线 `dev` 而 update/测试夹具仍钉 `main`（release.sh 半步已由 `95217f1` 修复） | P1 | 1.0 |
 | ARCH-BLD-03 | 版本六处落点，根 `plugin.json` 永久停在 `0.1.0` | P1 | 1.0 |
 | ARCH-BLD-04 | 根 `build-info.json` 快照落后 HEAD，却被 install 与 provenance 当权威 | P1 | 1.5 |
 | ARCH-BLD-05 | `.githooks/pre-push` 未接线，且含作者机绝对路径 | P1 | 1.0 |
@@ -120,7 +121,7 @@
 ### ARCH-DEP-01 `net` ↔ `runtime_state` 双向依赖，靠函数内懒导入破环
 
 - **证据**：`src/vod_mcp/net.py:14`（顶层 `from vod_mcp import runtime_state as rt`）；
-  `src/vod_mcp/runtime_state.py:422`（`_is_remote_face()` 函数体内 `from vod_mcp import net as _net`）；
+  `src/vod_mcp/runtime_state.py:438`（`_is_remote_face()` 函数体内 `from vod_mcp import net as _net`）；
   `src/vod_mcp/runtime_state.py:5`（模块 docstring 自陈"需要身份时**函数内懒导入**，避免
   `net` ↔ `runtime_state` 的循环"）。
 - **影响面**：两个模块互为依赖，环只被"函数内 import"这一行代码维持。任何一侧把懒导入提到
@@ -449,7 +450,7 @@
 - **日志**：唯一出口 `runtime_state._log`（固定 `/tmp` 路径），无级别、无请求标识；
   远程面 `BaseHTTPRequestHandler.log_message` 被置空。见 ARCH-ERR-05。
 - **归因/溯源可追溯性**：`attribution_memory` 覆盖时留 10 条历史
-  （`src/vod_mcp/runtime_state.py:521`），`provenance` 提供 build-info/install-manifest
+  （`src/vod_mcp/runtime_state.py:537`），`provenance` 提供 build-info/install-manifest
   两个真源；**该子项未发现达到三门槛的缺陷**——历史快照有界但显式声明
   （`_ATTR_HISTORY_CAP = 10`）且有用例锁（`tests/test_attribution.py`），故只列建议，
   不进缺陷表。
@@ -494,7 +495,7 @@
   ② 人工编辑 `policy.json` 时少一个 `severity`/`match` 字段 ⇒ `KeyError` 而非"规则非法"
   的可读报错，且该异常同样在 `src/vod_mcp/server.py:91` 的保护之外（与 ERR-01 叠加为硬崩）；
   ③ 规则集版本（`assets/safety/policy.json:2` 的 `version: 0.1.0`）与契约版本
-  （`assets/contract/tools.schema.json` 的 `version: 0.5.43`）不同步，无人校验。
+  （`assets/contract/tools.schema.json` 的 `version: 0.5.44`）不同步，无人校验。
 - **判定依据**：可捕获（删字段后调 `check` 断言错误可读且 fail-closed）；有触发路径
   （手工编辑规则是文档鼓励的操作）；影响面＝护栏可用性。
 - **整改措施**：`load_policy()` 加进程内缓存（文件 mtime/size 失效）+ 装载期 schema 校验
@@ -802,7 +803,7 @@
 | 副本校验 | `scripts/verify_copies.py`（内容一致 + 零提交） | 依赖 git（`--no-git` 可降级） |
 | 质量门禁 | `.github/workflows/ci.yml`（9 条） / `.gitcode/workflows/ci.yml`（4 条） | 两处漂移（BLD-01） |
 | 本地门禁 | `.githooks/pre-push` | 默认未接线（BLD-05） |
-| 发布后断言 | `scripts/release.sh:169-179`（现场 pack + `publish_verify`） | `files` 白名单逐文件枚举（BLD-06） |
+| 发布后断言 | `scripts/release.sh:189-199`（现场 pack + `publish_verify`） | `files` 白名单逐文件枚举（BLD-06） |
 
 **该维结论**：单点工具（sync/verify/release）设计成熟且有"为什么不能只看 diff"的
 教训沉淀；缺陷在于**门禁的接线与覆盖面**，以及 dev/main 双基线的口径未统一。
@@ -832,27 +833,27 @@
 
 ---
 
-### ARCH-BLD-02 开发基线 `dev` 而 release/update/测试夹具全钉 `main`
+### ARCH-BLD-02 开发基线 `dev` 而 update/测试夹具仍钉 `main`（release.sh 半步已修）
 
-- **证据**：`scripts/release.sh:165`（`git push origin main --tags`）；`:167`
-  （`git push github main --tags`）；`src/vodkit_cli/update.py:32`
+- **证据**：`src/vodkit_cli/update.py:32`
   （`git rev-parse origin/main`）、`:37`（`git pull --ff-only`，**不带分支参数**）；
   `tests/test_installer.py:120-127`（`_git(SRC_REPO, "clone", "--bare", "--branch", "main", …)`，
   注释自陈"开发分支切到 dev/main 之外时…本文件两条 update 用例秒红、pre-push 门禁卡死"）；
-  两份 CI 的 `branches: ["main"]`。
+  两份 CI 的 `branches: ["main"]`。**半步已修**：`scripts/release.sh` 的推送目标已由
+  dev 头 `95217f1` 改为当前分支（`release.sh:170-176`，`CUR_BRANCH=$(git rev-parse
+  --abbrev-ref HEAD)`），本条不再计入该半步。
 - **影响面**：① 在 `dev`（或任何非 `main` 分支）上跑 `vod-devkit update`：`rev-parse
   origin/main` 为空 ⇒ `local != remote` ⇒ 走 `git pull --ff-only` ⇒ 失败 ⇒ `exit 1`
   （用户看到"更新失败（有本地改动阻挡 ff？）"，与真实原因无关）；
   ② 本地跑整套 pytest 在**没有 `main` 引用**的检出上出现大量 ERROR（本次实测 71 条，
-  见附录 10.3）；③ 发版只能从 `main` 出，而开发在 `dev`，两者之间没有合并门禁定义。
+  见附录 10.3）；③ CI 仍只在 `main` 触发，`dev` 上的提交零门禁（与 BLD-01 叠加）。
 - **判定依据**：可捕获（`tests/test_p2_structure.py` 已有 update 语义锁——它锁的是
   "比较 origin/main"这个**错误前提**；改成"当前分支的上游"后该用例需同步）；
   有触发路径（开发者日常）；影响面＝本地与 CI 双红、update 命令失效。
 - **整改措施**：`update` 比较"当前分支上游"（`@{upstream}`，缺失时回落 `origin/<branch>`）；
-  release 的目标分支改为参数/从当前分支派生；测试夹具改成 `--branch <当前分支>`，
-  见 `ARCH-RM-BLD-02`。
+  测试夹具改成 `--branch <当前分支>`，见 `ARCH-RM-BLD-02`。
 - **优先级**：P1
-- **工作量**：2.0 人日
+- **工作量**：1.0 人日
 - **验收断言**：`tests/test_p2_structure.py::test_update_compares_current_upstream`；
   在 `dev` 与本分支上 `python3 -m pytest tests/test_installer.py -q` 无 `main` 依赖 ERROR。
 
@@ -860,10 +861,10 @@
 
 ### ARCH-BLD-03 版本六处落点，根 `plugin.json` 永久停在 `0.1.0`
 
-- **证据**（同一时刻实测）：`package.json:3` = `0.5.43`；`pyproject.toml:3` = `0.5.43`；
-  `src/vod_mcp/__init__.py:8` = `0.5.43`；`plugins/vod-devkit/.codex-plugin/plugin.json:3`
-  = `0.5.43`；`build-info.json:2` = `0.5.43`；`assets/contract/tools.schema.json`
-  的 `version` = `0.5.43`；而**根** `plugin.json:3` = `0.1.0`。
+- **证据**（同一时刻实测）：`package.json:3` = `0.5.44`；`pyproject.toml:3` = `0.5.44`；
+  `src/vod_mcp/__init__.py:8` = `0.5.44`；`plugins/vod-devkit/.codex-plugin/plugin.json:3`
+  = `0.5.44`；`build-info.json:2` = `0.5.44`；`assets/contract/tools.schema.json`
+  的 `version` = `0.5.44`；而**根** `plugin.json:3` = `0.1.0`。
   机制原因：`scripts/release.sh:97-101`（`EXTRA_FILES` 只有 `.codex-plugin/plugin.json`、
   插件副本 `build-info.json`、`packages/dsh/package.json`）与 `:143-146`（`git add` 清单）
   都不含根 `plugin.json` ⇒ 该文件从写入日起再未被更新。
@@ -887,9 +888,10 @@
 
 ### ARCH-BLD-04 根 `build-info.json` 快照落后 HEAD，却被 install 与 provenance 当权威
 
-- **证据**：`build-info.json:2-3`（`"version": "0.5.43"`, `"commitSha":
-  "bebcb67950e6e183b3fd39b2423b3b05022aac57"`）；同工作树 `git log -1 --format=%H` =
-  `f6af880…`（落后一个发布回滚提交）。读点：`src/vodkit_cli/common.py:310`
+- **证据**：`build-info.json:2-3`（`"version": "0.5.44"`, `"commitSha":
+  "54909d030eb3e798eeb5d5c6f27c3f02ab8dcbd1"`）；同工作树 `git log -1 --format=%H` =
+  `ba48d9d…`（快照钉在发版起点提交 `54909d0`，落后 HEAD 三个提交：一次发版 + 两次
+  release 修复）。读点：`src/vodkit_cli/common.py:310`
   （`_write_install_manifest` 用 `build-info.json` 的 `version`/`commitSha` 写安装账本）、
   `src/vod_mcp/provenance.py:11-15`（`read_build_info()` 供 `vod_devkit_info`）、
   `src/vodkit_cli/doctor.py:183-193`（把根 `build-info.json` 与载荷那份并列做漂移判定）。
@@ -935,9 +937,9 @@
 
 ### ARCH-BLD-06 `package.json` 的 `files` 逐文件枚举
 
-- **证据**：`package.json:37-100`（`files` 逐条列出 30+ 个 `src/vod_mcp/*.py`，含
+- **证据**：`package.json:10-57`（`files` 逐条列出 30+ 个 `src/vod_mcp/*.py`，含
   `src/vod_mcp/host_adapters/` 与 `src/vod_mcp/packs/` 两个目录条目，其余全是文件名）；
-  兜底在后：`scripts/release.sh:169-179`（发版现场 `npm pack` 后断言包内代码指纹）；
+  兜底在后：`scripts/release.sh:189-199`（发版现场 `npm pack` 后断言包内代码指纹）；
   历史事故：`CHANGELOG.md` 记 "npm 0.4.1 实锤——包内缺 `pending.py`：`files` 白名单逐文件
   枚举漏新模块".
 - **影响面**：新增模块忘加 `files` ⇒ npm 包缺文件，而仓内测试与 CI 全绿；只能靠发版后的
@@ -1082,8 +1084,8 @@ PY
 |---|---|---|
 | 依赖环 | 10.2 脚本 | 仅 `vod_mcp.net` ↔ `vod_mcp.runtime_state` 一组 |
 | 吞异常 | 10.1 的 `ast` 脚本 | 169 个 `except` / 捕 `Exception` 55 处 / 体仅 `pass` 26 处 |
-| 版本一致性 | 10.1 的 grep | 六处 `0.5.43`，根 `plugin.json` = `0.1.0` |
-| 裸 HEAD 对比 | `git log -1 --format=%H` vs `build-info.json` | `f6af880…` vs `bebcb67…` |
+| 版本一致性 | 10.1 的 grep | 六处 `0.5.44`，根 `plugin.json` = `0.1.0` |
+| 裸 HEAD 对比 | `git log -1 --format=%H` vs `build-info.json` | `ba48d9d…` vs `54909d0…` |
 | 钩子接线 | `git config --get core.hooksPath` | 空（未接线） |
 | 双 CI 门禁数 | 两份 workflow 的 step/name 计数 | 9 + host-matrix vs 4 |
 | 整套 pytest（有 `main` 引用的可写检出） | `python3 -m pytest tests/ -q -p no:randomly` | 31 失败 / 0 错误；失败集中在 dsh 宿主与 state_read（环境性，见下注） |
