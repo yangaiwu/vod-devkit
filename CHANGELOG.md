@@ -725,3 +725,16 @@
 - 顺带修两处：test_s161 陈旧断言（其「隔离 HOME 外一律忽略」已被 S168 三分支取代，
   现只锁两落点同源）；host_matrix.py 的 _pin_roots 由 setdefault 改为强制覆盖
   （外部残留 VOD_DEVKIT_*_ROOT 会让巡检探错树却报 10 PASS 假绿灯）
+
+## v0.5.44（2026-11-19）
+
+- 83afd19 review(456): 草稿归属只认会话 + 哨兵会话兜底 + agent 头格式约束
+- aecb20e review: 修复审查 7 问题（含文档口径二次修正）
+- bebcb67 docs(readme): 同步三种部署模式 + 修正远端工具面过期表述
+- 310841d docs: 补齐 D-meta-anon-1（匿名档 meta 死循环）到需求/设计/决策三份文档
+- b603818 fix(net): 匿名档 meta 401 死循环（Python 侧，与 dsh 同构）
+- fc10bb6 refactor(scope): 作用域拆粒度/身份两维 + 隔离维度进 key + product_prior 开关
+- ceb50be feat(mcp): 远程面回归 MCP 标准 stateful + 作用域隔离 + 双形态能力对齐（S146）
+- ad893df fix(collect): SKILL.md 压回 cap 内 + 补 retrieve 指令 + 修 meta 匿名档 401 死循环
+- 3d0e645 fix(tests): install 夹具显式钉 main——dev 分支上 update 两条用例恒红、pre-push 卡死
+
