@@ -703,6 +703,9 @@
     "S238": {
       "carrier": "docs/design.md"
     },
+    "S239": {
+      "carrier": "tests/test_s239_stale_wording.py"
+    },
     "U1": {
       "carrier": "tests/test_skeleton.py"
     },

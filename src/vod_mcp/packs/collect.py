@@ -374,7 +374,7 @@ def _hoard_voice(v: dict, content: str) -> dict:
 def _raise_explicit_key_rejected(key: str) -> None:
     """显式 key（安装注入/正式档）被引擎 401 拒绝 → fail fast：
     不取匿名令牌、不覆盖配置——静默降级匿名档=配置错误被吞
-    （归因错位比报错更糟，同 AIShell 错归病根）。囤积/legacy 两路径同口径。"""
+    （归因错位比报错更糟，同 AIShell 错归病根）。囤积端点单一路径同口径（S238）。"""
     raise net.ToolError(
         f"注入的 key 被引擎拒绝（指纹 {net._fingerprint(key)}）："
         "请核对 key 是否过期/被吊销，或移除 key 走匿名档。"
