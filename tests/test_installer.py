@@ -117,7 +117,14 @@ def env(tmp_path, engine_stub):
     stub_vd.chmod(0o755)
 
     bare = tmp_path / "origin.git"
-    _git(SRC_REPO, "clone", "--bare", "--quiet", str(SRC_REPO), str(bare))
+    # 显式钉 main（2026-11-18 实测）：cmd_update 语义锁是「比较 origin/main」
+    # （tests/test_p2_structure.py），而 git clone --bare 会把 bare 的 HEAD 设成
+    # 源仓**当前**分支。开发分支切到 dev/main 之外时（如新建 dev 上开发），克隆
+    # 出来的临时仓也在 dev，commit_on_origin 推到 dev，update 仍比 origin/main
+    # → 恒判「已是最新」，本文件两条 update 用例秒红、pre-push 门禁卡死。
+    _git(SRC_REPO, "clone", "--bare", "--quiet", "--branch", "main",
+         str(SRC_REPO), str(bare))
+    _git(bare, "symbolic-ref", "HEAD", "refs/heads/main")
     # bare 的 HEAD 指向克隆时的分支；排除 hooks 干扰
     repo = tmp_path / "repo"
     _git(bare, "clone", "--quiet", str(bare), str(repo))
