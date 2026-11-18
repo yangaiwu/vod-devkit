@@ -1,6 +1,6 @@
 $ vod-devkit doctor
-[doctor] 载荷：在用 0.5.40(hermes)
-[doctor] 载荷已换（<HOME>/.vod-devkit/payloads/0.5.40）——重启宿主会话生效
+[doctor] 载荷：在用 0.5.41(hermes)
+[doctor] 载荷已换（<HOME>/.vod-devkit/payloads/0.5.41）——重启宿主会话生效
 [doctor] 出站代理：未设（出站直连；urllib 会读 env，无需另配）
 [doctor] 引擎可达：HTTP 200 <ENGINE>/rest/developer/manager/hdvodmngservice/v1/external/meta
 doctor: OK
