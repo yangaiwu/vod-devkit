@@ -49,9 +49,13 @@ def _attribute_product(items: list, params: dict, client_info: dict | None = Non
     meta = net._load_meta()
     answer = str(params.get("product") or "").strip()
     mem = rt._memory_get(client_info)
-    # D-scope-1：请求级产品（多 agent 共用进程时各带自己的）优先于安装绑定。
+    # D-scope-1：请求级产品优先于安装绑定；安装先验只在 product_prior=True 时可用。
+    # 共用远程进程（多租户）下必须禁用安装先验——一份 runtime.json 代表不了所有
+    # agent，硬用就是错归（与"错归比不归更糟"同源）。
     scope = rt._resolve_scope(client_info)
-    binding = scope["product"] or str(rt._RT.get("product") or "").strip() or None
+    binding = (scope["product"]
+               or (str(rt._RT.get("product") or "").strip() if scope["product_prior"] else "")
+               or None)
 
     if answer:
         rid = _attrib.resolve_id(answer, meta)
@@ -128,6 +132,8 @@ def _require_product_or_ask(attr: dict, items: list, client_info: dict | None = 
         return
     # 追问轮次上限（2026-11-12 评审采纳）：同一会话最多追问 2 次，之后明确终止——
     # 避免"用户连续给两个都查不到的名字"时模型无限重问。
+    # D-scope-1：跨请求持久化计数依赖作用域 key；降级（key=None）时读写皆禁用，
+    # 计数自然退化为单轮内计数——不产生跨 agent 污染，正当的"同轮别重复追问"仍成立。
     mem = rt._memory_get(client_info)
     fails = int(mem.get("ask_failures") or 0) + 1
     rt._memory_put(client_info, ask_failures=fails)

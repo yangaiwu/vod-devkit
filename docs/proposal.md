@@ -1231,8 +1231,12 @@ voiceId 必须按作用域隔离，否则静默污染（错归进引擎幂等域
 | S146-1 | 标准握手 | `initialize` 响应头下发 `mcp-session-id`；带该头调用工具成功；两次握手得到不同会话且互不干扰 |
 | S146-2 | 厂商兼容 | 官方 SDK 客户端、旧协议（2024-11-05）、不带 `Accept` 头、裸 HTTP 不握手（兜底放行且可连续多次）、无 session 直调 五类均可接入 |
 | S146-3 | 能力对齐 | `enabled_tools(remote=True) == enabled_tools(remote=False)`；`REMOTE_WITHHELD == ()` |
-| S146-4 | 作用域隔离 | 不同 `agent_id`/会话 → 不同 key，A 的记忆不泄漏给 B；无标识 → `key=None` 且不写共享桶（宁可多问，不可错归） |
-| S146-5 | 产品优先级 | 请求级 product（会话头携带）优先于安装绑定；两者皆空走原话归因 + 问用户 |
+| S146-4 | 作用域隔离 | 不同会话/agent → 不同 key（`sess:`/`agent:` 前缀分工），A 的记忆不泄漏给 B；无标识 → `key=None` 且**读写皆禁用**（宁可多问，不可错归） |
+| S146-5 | 产品优先级 | 请求级 product 优先于安装绑定；两者皆空走原话归因 + 问用户；**共用远程进程下 `product_prior=False`**（安装先验禁用，防多租户错归） |
+| S146-6 | 粒度与身份正交 | `scope.grain`(process/request) 与 `scope.id_source`(proc/proc_home/sess/agent) 分别成列，不压成一个字段 |
+| S146-7 | 隔离维度进 key | `VOD_DEVKIT_HOME` 进入 stdio 远程独立进程的 key（`proc:@<home>`）；stdio 主键为进程身份，`name` 仅二级后缀 |
+| S146-8 | TTL 同源 | `session_idle_timeout` 与记忆 TTL 同取 `SCOPE_TTL_SEC`，两者相等由测试锁定 |
+| S146-9 | 无写盘副作用 | `_resolve_scope` 不得调用 `_install_nonce()`（会写盘）；"显式 key 被拒"路径不得污染 runtime.json |
 
 
 ## 凭据单入口与技能读取教法（S124-S125，2026-11-15）

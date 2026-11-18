@@ -208,7 +208,7 @@ def test_remote_withheld_is_empty():
 
 # ── ④ 作用域降级语义 ────────────────────────────────────────────────
 def test_scope_degrades_to_no_memory_when_unidentified(monkeypatch):
-    """拿不到会话标识（远程面）→ key=None → 不写共享记忆。
+    """拿不到会话标识（远程面）→ key=None → 读写皆禁用。
 
     "错归比不归更糟"：宁可多问用户一次，也不把 A 的归因写进 B 的桶。
     """
@@ -216,25 +216,94 @@ def test_scope_degrades_to_no_memory_when_unidentified(monkeypatch):
     scope = _rt._resolve_scope({"agent_id": "", "product": ""})
     assert scope["key"] is None
     assert scope["degraded"] is True
-    assert scope["source"] == "none"
-    # 不写：_memory_put 应静默跳过
+    assert scope["degraded_reason"] == "no_session_id"
+    assert scope["product_prior"] is False, "多租户下安装先验必须禁用（否则错归）"
+    # 不写：_memory_put 应静默跳过；不读：_memory_get 应为空
     before = dict(_rt._SESSION_MEM)
     _rt._memory_put({"agent_id": ""}, product="CodeArts")
     assert _rt._SESSION_MEM == before, "未知调用方不得写入共享记忆桶"
+    assert _rt._memory_get({"agent_id": ""}) == {}, "未知调用方不得读共享记忆桶"
 
 
-def test_scope_isolates_between_agents():
-    """不同 agent_id → 不同作用域键，记忆互不可见。"""
+def test_scope_isolation_between_sessions():
+    """不同会话 → 不同 key（sess: 前缀，非 agent:），记忆互不可见。"""
     s_a = _rt._resolve_scope({"agent_id": "session:a", "product": ""})
     s_b = _rt._resolve_scope({"agent_id": "session:b", "product": ""})
+    assert s_a["key"].startswith("sess:"), "会话级作用域用 sess: 前缀，agent: 留给显式身份"
     assert s_a["key"] != s_b["key"]
+    s_a = dict(s_a, product_prior=True)  # 仅为写测试放开，实际按 scope 返回值用
     _rt._memory_put({"agent_id": "session:a"}, product="CodeArts")
     assert _rt._memory_get({"agent_id": "session:a"}).get("product") == "CodeArts"
     assert _rt._memory_get({"agent_id": "session:b"}).get("product") is None, (
         "A 的记忆不得泄漏给 B")
 
 
+def test_scope_agent_prefix_reserved_for_explicit_identity():
+    """显式 agent 头 → agent: 前缀；与 sess: 明确区分。"""
+    s = _rt._resolve_scope({"agent_id": "codearts-agent", "product": "CodeArts"})
+    assert s["key"] == "agent:codearts-agent"
+    assert s["id_source"] == "agent"
+    assert s["grain"] == "request"
+
+
+def test_scope_stdio_uses_process_identity_not_name(monkeypatch):
+    """stdio 面 key 以进程身份为主，name 只作二级后缀（进程身份内核保证）。"""
+    monkeypatch.setattr(_net, "_SERVER_FACE", type("C", (), {"get": staticmethod(lambda: False)})())
+    monkeypatch.delenv("VOD_DEVKIT_HOME", raising=False)
+    s = _rt._resolve_scope({"name": "codearts", "product": ""})
+    assert s["key"].startswith("proc:"), f"stdio 应以进程身份为主，实得 {s['key']}"
+    # name 只做后缀，不能成为整个 key —— 否则又回到"可被写死"的老路
+    assert s["key"].split("|")[0].startswith("proc:"), "name 只能是后缀，不能替代进程身份"
+    assert s["product_prior"] is True, "独立进程可用安装先验"
+
+
+def test_scope_home_in_key_for_multi_install(monkeypatch):
+    """同机多装：VOD_DEVKIT_HOME 必须进 key，否则机器级 nonce 相同会撞。"""
+    monkeypatch.setattr(_net, "_SERVER_FACE", type("C", (), {"get": staticmethod(lambda: False)})())
+    monkeypatch.setenv("VOD_DEVKIT_HOME", "/opt/vod/codearts")
+    s = _rt._resolve_scope({"name": "x", "product": ""})
+    assert "/opt/vod/codearts" in s["key"], f"home 必须进 key，实得 {s['key']}"
+    assert s["id_source"] == "proc_home"
+
+
 def test_scope_request_product_overrides_binding():
-    """请求级产品优先于安装绑定：多 agent 各带自己的产品。"""
+    """请求级产品优先于安装绑定。"""
     s = _rt._resolve_scope({"agent_id": "session:x", "product": "OfficeAce"})
     assert s["product"] == "OfficeAce"
+
+
+def test_scope_ttl_single_source():
+    """session TTL 与记忆 TTL 必须同源，防两个独立时钟漂移。"""
+    assert _rt.SCOPE_TTL_SEC == _rt._SESSION_TTL
+    src = (__import__("pathlib").Path(__file__).resolve().parent.parent
+           / "src" / "vod_mcp" / "transport_remote.py").read_text(encoding="utf-8")
+    assert "session_idle_timeout=_rt_ttl.SCOPE_TTL_SEC" in src, (
+        "传输层必须取单一来源 SCOPE_TTL_SEC，不得硬编码常量")
+
+
+def test_scope_degraded_reason_distinguishes_cases(monkeypatch):
+    """降级原因必须可区分：no_session_id（远程） vs no_proc_id（stdio 理论兜底）。"""
+    monkeypatch.setattr(_net, "_SERVER_FACE", type("C", (), {"get": staticmethod(lambda: True)})())
+    assert _rt._resolve_scope({})["degraded_reason"] == "no_session_id"
+
+    monkeypatch.setattr(_net, "_SERVER_FACE", type("C", (), {"get": staticmethod(lambda: False)})())
+    import os as _os
+    orig = _os.getpid
+    monkeypatch.setattr(_os, "getpid", lambda: (_ for _ in ()).throw(OSError("no pid")))
+    try:
+        s = _rt._resolve_scope({})
+        assert s["degraded_reason"] == "no_proc_id"
+        assert s["key"] is None
+    finally:
+        monkeypatch.setattr(_os, "getpid", orig)
+
+
+def test_product_prior_disabled_on_shared_remote(monkeypatch):
+    """共用远程进程必须禁用安装先验（否则一份 runtime.json 代表所有 agent = 错归）。"""
+    monkeypatch.setattr(_net, "_SERVER_FACE", type("C", (), {"get": staticmethod(lambda: True)})())
+    for ci in ({"agent_id": "session:x"}, {"agent_id": "codearts"}, {}):
+        assert _rt._resolve_scope(ci)["product_prior"] is False, f"{ci} 必须禁用安装先验"
+
+    monkeypatch.setattr(_net, "_SERVER_FACE", type("C", (), {"get": staticmethod(lambda: False)})())
+    monkeypatch.delenv("VOD_DEVKIT_HOME", raising=False)
+    assert _rt._resolve_scope({"name": "x"})["product_prior"] is True, "独立进程可用安装先验"

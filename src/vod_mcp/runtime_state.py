@@ -323,45 +323,88 @@ def _install_nonce() -> str:
 
 
 _SESSION_TTL = 30 * 60          # 会话内滑动记忆（D-product-ask-1）
+# 作用域 TTL 单一来源：远程传输的 session_idle_timeout 必须取这个值，
+# 两个独立时钟会产生「记忆还在但会话已回收」（悬挂桶泄漏）或「窗口内会话过期
+# 导致同一用户被当新客」。测试锁住两者相等。
+SCOPE_TTL_SEC = _SESSION_TTL
 
 
 _SESSION_MEM: dict = {}         # 进程=一次宿主会话：重启即清，跨会话不继承
 
 
 def _resolve_scope(client_info) -> dict:
-    """统一作用域解析（D-scope-1）：三种部署模式共用一条链。
+    """统一作用域解析（D-scope-1）：单一入口，业务侧只消费 key/product/flags。
 
-    背景：远程面 client_info.name 曾写死 "http-remote"，导致多 agent 共用一个
-    server 时记忆/计数/nonce 全部串味（A 说过的产品被 B 命中、A 追问 2 次后
-    B 直接被"别再问了"挡掉、相同内容 voiceId 撞车）。本函数把"作用域从哪来"
-    收敛成唯一入口，业务侧只消费 key/product，不再各自推断。
+    背景：远程面 client_info.name 曾写死 "http-remote"，_session_key 因此恒等，
+    导致多 agent 共用一个 server 时记忆/计数/nonce 全串味（A 说过的产品被 B 命中、
+    A 追问 2 次后 B 直接被"别再问了"挡掉、相同内容 voiceId 撞车）。
 
-    优先级：
-      ① 请求级 agent_id（多 agent 共用进程时由传输层从请求头/session 注入）
-      ② 非远程面（stdio）：进程即作用域 —— 每个 agent 一个进程，天然隔离
-      ③ 远程面且无标识：降级返回 key=None（调用方不写记忆，宁可多问一次，
-         也不把 A 的归因写进 B 的桶 —— "错归比不归更糟"）
+    返回：
+      key             隔离键；None = 读写皆禁用（降级）
+      grain           'process' | 'request' | None  —— 作用域粒度
+      id_source       'proc' | 'proc_home' | 'sess' | 'agent' | None —— 身份来源
+      product         请求级产品（priority 高于安装绑定）
+      product_prior   安装先验是否可用（共用远程进程时必须禁用，否则错归）
+      degraded        是否降级
+      degraded_reason 'no_session_id' | 'no_proc_id' | None —— 供诊断打点
 
-    product 与 key 分开：product 可为空（走原话归因+问用户），key 为空才影响隔离。
+    两条纪律（都是踩过的坑）：
+      ① 区分维度必须进 key，不能只写在注释里 —— "http-remote" 与机器级 nonce
+         都因为"以为能区分、其实区分不了"出过事。
+      ② 不用自我声明的 name 作 key 首选：name 可重复、可被写死。进程身份由内核
+         保证，不需要任何人配合。
     """
     ci = client_info or {}
     agent = str(ci.get("agent_id") or "").strip()
     prod = str(ci.get("product") or "").strip()
-    # 兼容既有契约：stdio 面/宿主适配器用 client_info.name 标识宿主身份
-    # （如 {"name": "codearts"}）。它天然每进程一份，等价于作用域键。
-    name = str(ci.get("name") or "").strip()
+    remote = _is_remote_face()
 
-    if agent:
-        return {"key": f"agent:{agent}", "product": prod,
-                "source": "request", "degraded": False}
-    if name and name != "http-remote":
-        # stdio 面或显式宿主名：进程即作用域（name 已能区分宿主）
-        return {"key": f"host:{name}", "product": prod,
-                "source": "process", "degraded": False}
-    if not _is_remote_face():
-        return {"key": f"proc:{_install_nonce()}", "product": prod,
-                "source": "process", "degraded": False}
-    return {"key": None, "product": prod, "source": "none", "degraded": True}
+    # ① 请求级身份（多 agent 共用远程进程）：显式 agent 头优先于会话
+    if agent and not agent.startswith("session:"):
+        return {"key": f"agent:{agent}", "grain": "request", "id_source": "agent",
+                "product": prod, "product_prior": False,
+                "degraded": False, "degraded_reason": None}
+    # ② 会话级（标准 stateful：initialize 下发的 mcp-session-id）
+    if agent.startswith("session:"):
+        sid = agent[len("session:"):].strip()
+        if sid:
+            return {"key": f"sess:{sid}", "grain": "request", "id_source": "sess",
+                    "product": prod, "product_prior": False,
+                    "degraded": False, "degraded_reason": None}
+
+    if not remote:
+        # ③ 非远程面（stdio）：以**进程身份**为主，name 仅当同一进程内需要区分
+        #    多个逻辑宿主时作二级后缀（既有契约里有此形态，见 test_s145_draft_*）。
+        #    进程身份由内核保证，不会像 name 那样被写死成常量。
+        #    注意：这里刻意**不调用** _install_nonce()（它有写盘副作用，会在
+        #    "显式 key 被拒"等路径上污染 runtime.json）；直接读进程内已有值。
+        home = str(os.environ.get("VOD_DEVKIT_HOME") or "").strip()
+        name = str(ci.get("name") or "").strip()
+        suffix = f"|{name}" if name and name != "http-remote" else ""
+        try:
+            pid = os.getpid()
+        except Exception:                  # 理论上不会：留作兜底自检
+            return _degraded_scope("no_proc_id", prod)
+        base = (f"proc:@{home}" if home else f"proc:{pid}")
+        return {"key": base + suffix, "grain": "process",
+                "id_source": "proc_home" if home else "proc",
+                "product": prod, "product_prior": True,
+                "degraded": False, "degraded_reason": None}
+
+    # ④ 远程面且无任何标识：读写皆禁用；product 先验禁用（多租户下必错归）
+    return {"key": None, "grain": None, "id_source": None,
+            "product": prod, "product_prior": False,
+            "degraded": True, "degraded_reason": "no_session_id"}
+
+
+def _degraded_scope(reason: str, product: str = "") -> dict:
+    """统一的降级作用域（读写皆禁用）。reason 区分两种情况，供诊断打点：
+      no_session_id —— 远程面拿不到 mcp-session-id（标准客户端应能拿到）
+      no_proc_id    —— stdio 面竟拿不到进程身份（理论上不应发生，留作兜底自检）
+    """
+    return {"key": None, "grain": None, "id_source": None,
+            "product": product, "product_prior": False,
+            "degraded": True, "degraded_reason": reason}
 
 
 def _is_remote_face() -> bool:

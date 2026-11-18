@@ -2644,15 +2644,25 @@ DSH 那段的真实损失不是「没把人拉回来」，而是**那 5 分钟�
    「HTTP 每请求现造 server、无会话，开关下一请求消失、多 agent 互相影响」——
    该前提随 stateful 落地失效，故恢复。传输形态不同 ≠ 能力不同。
 
-3. **作用域单一入口 `_resolve_scope`**，三种部署共用：
-   - 请求级 `agent_id`（会话/显式头）→ `agent:<id>`
-   - 宿主 `client_info.name`（stdio/显式宿主名）→ `host:<name>`
-   - 仅进程 → `proc:<install_nonce>`
-   - **全都拿不到 → `key=None`：不写记忆、不持久计数**
+3. **作用域单一入口 `_resolve_scope`**，三种部署共用。粒度与身份来源是正交两维：
+   - 显式 agent 头 → `agent:<id>`（身份级，跨会话共享记忆）
+   - 标准会话 → `sess:<mcp-session-id>`（会话级；`sess:`/`agent:` 前缀分工，
+     混用会让"这桶是会话还是身份"无法分辨）
+   - stdio → `proc:<pid>`（name 仅二级后缀，不单独成 key —— name 可重复、可被写死）
+   - 远程独立进程+目录 → `proc:@<VOD_DEVKIT_HOME>`（**home 进 key**，否则机器级
+     nonce 相同时 key 会撞，落盘记忆照样串）
+   - **全都拿不到 → `key=None`：读写皆禁用**；计数退化为单轮内（不跨请求，不污染）
      （宁可多问用户一次，也不把 A 的归因写进 B 的桶 —— 同「错归比不归更糟」）
 
-4. **`product` 与 `key` 解耦**：请求级 product 优先于安装绑定；两者皆空走原话归因 +
-   问用户。product 为空完全合法，不影响隔离。
+   **session TTL 与记忆 TTL 同源**（都取 `SCOPE_TTL_SEC`，测试锁相等）：两个独立
+   时钟会造成「记忆还在但会话已回收」（悬挂桶泄漏）或「窗口内会话过期把同一用户
+   当新客」。`_resolve_scope` 不得有写盘副作用（曾因调用 `_install_nonce()` 在
+   "显式 key 被拒"路径上污染 runtime.json）。
+
+4. **`product` 与 `key` 解耦，且 `product_prior` 是独立开关**：请求级 product 优先于
+   安装绑定；两者皆空走原话归因 + 问用户。product 为空完全合法，不影响隔离。
+   **共用远程进程（多租户）下 `product_prior` 必须 False** —— 一份 runtime.json
+   代表不了所有 agent，硬用就是错归（解耦只解一半的情形）。
 
 5. **厂商兼容兜底**：标准 stateful 下，无 session 的非 initialize 请求会被 SDK 回
    400「Missing session ID」。兜底在内部走一次握手取得会话并补上请求头，让裸 HTTP

@@ -87,10 +87,13 @@ class RemoteRuntime:
         #   ① 偏离标准 —— 外部服务对接时按标准实现方能互操作（自造一套无法对接）；
         #   ② 无会话标识 —— 多 agent 共用一个 server 时记忆/计数/nonce 全串味。
         # 标准流程：initialize 下发 mcp-session-id → 客户端后续请求回传 → 按会话隔离。
-        # session_idle_timeout 与记忆窗口一致（30 分钟），过期自动回收。
+        # D-scope-1：session TTL 与记忆窗口同源（都取 rt.SCOPE_TTL_SEC），
+        # 避免两个独立时钟产生「记忆还在但会话已回收」（悬挂桶泄漏）或
+        # 「窗口内会话过期导致同一用户被当新客」。记忆 TTL 由 session TTL 驱动。
+        from vod_mcp import runtime_state as _rt_ttl
         self.manager = StreamableHTTPSessionManager(
             app=build_server(remote=True), json_response=True,
-            stateless=False, session_idle_timeout=30 * 60)
+            stateless=False, session_idle_timeout=_rt_ttl.SCOPE_TTL_SEC)
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._serve_loop, daemon=True)
 

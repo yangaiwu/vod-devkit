@@ -742,17 +742,33 @@ tests/test_remote_transport.py + tests/test_mcp_standard_transport.py（标准/�
 
 ### 作用域（Scope）单一入口
 
-三种部署形态共用一条解析链，业务侧只消费 `key`/`product`：
+三种部署形态共用一条解析链，业务侧只消费 `key` / `product` / `product_prior`。
+**粒度（grain）与身份来源（id_source）是两个正交维度，不压成一个字段**；
+**区分维度必须进 key，不能只写在注释里**（`"http-remote"` 与机器级 nonce 都因为
+"以为能区分、其实区分不了"出过事）。
 
-| 部署 | scope.source | key 来源 | 隔离依据 |
-|---|---|---|---|
-| 一 agent 一本地 MCP（stdio） | `process` | `host:<client_info.name>` 或 `proc:<install_nonce>` | 进程私有 `_SESSION_MEM` |
-| 一 agent 一远程 MCP（各自进程+目录） | `process` | 同上 | 进程 + `VOD_DEVKIT_HOME` 分目录 |
-| 多 agent 共用远程 MCP | `request` | `agent:<mcp-session-id>` | 标准会话 |
+| 部署 | scope.grain | key | 隔离依据 | product 先验 | 降级原因 |
+|---|---|---|---|---|---|
+| 一 agent 一本地 stdio | `process` | `proc:<pid>`（+`|name` 二级后缀，name 不单独成 key） | 进程私有内存 | 可用 | — |
+| 一 agent 一远程（独立进程+目录） | `process` | `proc:@<VOD_DEVKIT_HOME>` | 进程 + home（**已进 key**） | 可用 | — |
+| 多 agent 共用远程 | `request` | `sess:<mcp-session-id>` | 会话表；记忆 TTL 随 session | **禁用 + 打点** | `no_session_id` |
+| （增强）显式 agent 头 | `request` | `agent:<agent-id>` | 同上（跨会话共享记忆） | 禁用 | — |
+| （兜底）全拿不到 | — | `None` | **读写皆禁用**；计数仅单轮内 | 走原话 + 问一次 | `no_session_id` / `no_proc_id` |
 
-全部拿不到时 `key=None` → **不写记忆、不持久计数**（宁可多问用户一次，也不把 A 的归因
-写进 B 的桶 —— 与「错归比不归更糟」同源）。`product` 与 `key` 解耦：product 可为空
-（走原话归因 + 问用户），key 为空才影响隔离。
+要点：
+- **`sess:` 与 `agent:` 前缀分工**：前者=会话级（标准 stateful 自动获得），
+  后者=身份级（客户端显式声明）。混用会让"这个桶是会话还是身份"无法分辨。
+- **session TTL 与记忆 TTL 同源**：都取 `runtime_state.SCOPE_TTL_SEC`，测试锁相等。
+  两个独立时钟会造成「记忆还在但会话已回收」（悬挂桶泄漏）或「窗口内会话过期
+  把同一用户当新客」。
+- **`key=None` 时读写皆禁用**（不只是不写，也不读，防残留桶被读到）；
+  计数退化为单轮内计数 —— 不跨请求，故不产生跨 agent 污染，正当的
+  "同一轮别重复追问"仍成立。
+- **`product` 与 `key` 解耦**：product 可为空（走原话归因 + 问用户）；
+  `product_prior` 是独立开关 —— 共用远程进程下必须 False，否则一份 runtime.json
+  代表所有 agent 就是错归。
+- `_resolve_scope` **不得有写盘副作用**（曾因调用 `_install_nonce()` 在
+  "显式 key 被拒"路径上污染 runtime.json）。
 
 与参照物逐条对账（不留"够用就行"的账）：
 
