@@ -21,6 +21,7 @@
 import argparse
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -592,32 +593,45 @@ def _audit_openclaw(home: Path, expect_version: str) -> tuple:
     json.loads 会整份失败；而且用户可能用 `openclaw --profile` 另存一份状态。
     probe 的输出里带 launch（真实 command+args），直接拿它拉一次 server 自证版本。
     """
+    entry, why = _openclaw_entry(home)
+    if entry is None:
+        return ("NOT_INSTALLED" if why.startswith("无 openclaw") or "没有 vod-devkit" in why
+                else "DRIFT"), why
+    row = next((r for r in (_raw_manifest(home).get("installs") or [])
+                if r.get("target") == "openclaw"), {})
+    ok, msg = _probe(entry, expect_version)
+    if ok and not row:
+        return "DRIFT", ("注册表里有条目但**账本缺 openclaw 行**（装了没入账：uninstall 摘不到、"
+                         "prune 的在用集合靠配置面兜底）——重跑 install --target openclaw")
+    label = "openclaw 注册表" + ("" if row else "，账本未记")
+    return ("PASS" if ok else "DRIFT"), f"{msg}（{label}）"
+
+
+def _openclaw_entry(home: Path | None = None) -> tuple:
+    """OpenClaw 的 launch 只信它自己的注册表（JSON5 配置不可直接解析）。"""
+    home = Path.home() if home is None else home
     cli = shutil.which("openclaw")
     if not cli:
-        return "NOT_INSTALLED", "无 openclaw CLI"
+        return None, "无 openclaw CLI"
     try:
         r = subprocess.run([cli, "mcp", "probe", "vod-devkit", "--json"],
                            capture_output=True, text=True, timeout=90)
-    except Exception as e:      # noqa: BLE001
-        return "DRIFT", f"probe 失败：{e}"
+    except Exception as e:                      # noqa: BLE001
+        return None, f"probe 失败：{e}"
     if r.returncode != 0:
-        return "NOT_INSTALLED", f"注册表里没有 vod-devkit（{(r.stderr or r.stdout).strip()[-140:]}）"
+        return None, "注册表里没有 vod-devkit"
     raw = r.stdout or ""
     try:
         data = json.loads(raw[raw.find("{"):])
-    except Exception:      # noqa: BLE001
-        return "DRIFT", f"probe 输出不是 JSON：{raw[-160:]}"
-    srv = ((data.get("servers") or {}).get("vod-devkit") or {})
-    launch = str(srv.get("launch") or "")
+    except Exception:                           # noqa: BLE001
+        return None, "probe 输出不是 JSON"
+    launch = str(((data.get("servers") or {}).get("vod-devkit") or {}).get("launch") or "")
     if not launch:
-        return "DRIFT", "probe 未给出 launch（注册表条目缺 command/args）"
+        return None, "probe 未给出 launch"
     parts = shlex.split(launch)
     entry = {"command": parts[0], "args": parts[1:]}
-    # env 不在 probe 的 launch 里，而 `openclaw mcp show --json` 会把 env 值**打码**
-    # （实测 __OPENCLAW_REDACTED__，拿它拉 server 必挂）。所以 env 从安装期账本取
-    # ——与其它宿主"读宿主配置里的 env"同一个语义来源。
-    row = next((r for r in (_raw_manifest(home).get("installs") or [])
-                if r.get("target") == "openclaw"), {})
+    row = next((x for x in (_raw_manifest(home).get("installs") or [])
+                if x.get("target") == "openclaw"), {})
     env = {}
     if row.get("packs"):
         env["VOD_PACKS"] = str(row["packs"])
@@ -625,12 +639,77 @@ def _audit_openclaw(home: Path, expect_version: str) -> tuple:
         env["VOD_JAVA_API_BASE"] = str(row["apiBase"])
     if env:
         entry["env"] = env
-    ok, msg = _probe(entry, expect_version)
-    if ok and not row:
-        return "DRIFT", ("注册表里有条目但**账本缺 openclaw 行**（装了没入账：uninstall 摘不到、"
-                         "prune 的在用集合靠配置面兜底）——重跑 install --target openclaw")
-    label = f"openclaw 注册表 {srv.get('tools')} 工具" + ("" if row else "，账本未记")
-    return ("PASS" if ok else "DRIFT"), f"{msg}（{label}）"
+    return entry, "openclaw 注册表"
+
+
+def _dsh_entry(profile: str, home: Path | None = None) -> tuple:
+    """从 profile 的 cordis.patch.yml 里取 vod-devkit-mcp 块的 launch（S234）。
+
+    dsh 没有"一份 JSON 配置"可读：MCP 入口写在托管块里（command/args/env）。
+    """
+    home = Path.home() if home is None else home
+    patch = home / ".dsh" / "profiles" / profile / "cordis.patch.yml"
+    if not patch.exists():
+        return None, f"缺 patch {patch}"
+    text = patch.read_text(encoding="utf-8")
+    if "vod-devkit-mcp" not in text:
+        return None, "patch 里没有 vod-devkit-mcp 块"
+    blk = text.split("- id: vod-devkit-mcp", 1)[1]
+    for cut in ("\n    - id: vod-devkit\n", "\n    - id: vod-devkit "):
+        if cut in blk:
+            blk = blk.split(cut, 1)[0]
+    cmd = re.search(r"^\s+command:\s*(.+)$", blk, re.M)
+    args = re.findall(r"^\s+-\s+(/\S+\.py)\s*$", blk, re.M)
+    env = {}
+    for k, v in re.findall(r"^\s+(VOD_[A-Z_]+):\s*\"?([^\"\n]+)\"?", blk, re.M):
+        env[k] = v.strip()
+    if not cmd:
+        return None, "patch 块缺 command"
+    entry = {"command": cmd.group(1).strip(), "args": args}
+    if env:
+        entry["env"] = env
+    return entry, f"patch:{profile}"
+
+
+def resolve_entry(host: str, home: Path | None = None, profile: str = "web") -> tuple:
+    """宿主 → 它自己配置里的 MCP launch（`--audit` 与 `probe_tools` 共用，S234）。
+
+    巡检与工具面探针必须用**同一个 launch**：两个入口各自解析一份配置，会一边报 PASS
+    一边报 12 工具（实测：`env`/`environment` 键不同 + 解析分叉）。
+    """
+    home = Path.home() if home is None else home
+    if host == "hermes":
+        return _hermes_effective_entry(home)
+    if host == "dsh":
+        return _dsh_entry(profile, home)
+    if host == "codex":
+        mkt, mcp, _guessed = _codex_effective_mcp(home)
+        if not mcp:
+            return None, f"codex 插件缓存里没有 .mcp.json（市场 {mkt or '未声明'}）"
+        entry = (json.loads(Path(mcp).read_text(encoding="utf-8")).get("mcpServers") or {}).get("vod-devkit")
+        return entry, f"市场 {mkt}"
+    if host == "codex-desktop":
+        mcp = home / "plugins" / "vod-devkit" / ".mcp.json"
+        if not mcp.exists():
+            return None, "插件目录缺 .mcp.json"
+        entry = (json.loads(mcp.read_text(encoding="utf-8")).get("mcpServers") or {}).get("vod-devkit")
+        return entry, "插件目录"
+    if host == "openclaw":
+        return _openclaw_entry(home)
+    spec = EXPECT.get(host) or {}
+    if spec.get("skip"):
+        return None, spec["skip"]
+    conf = home / spec["config"] if spec.get("config") else None
+    if conf is None or not conf.exists():
+        return None, f"缺配置 {conf}"
+    try:
+        data = json.loads(conf.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        return None, f"配置不是合法 JSON：{e}"
+    entry = _dig(data, spec.get("entry"))
+    if not entry:
+        return None, "配置里没有 vod-devkit 条目"
+    return entry, str(conf)
 
 
 # S232：安全面差异要机器可查——"哪个宿主有 hook 层"原来只写在文档里，

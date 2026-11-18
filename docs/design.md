@@ -432,8 +432,14 @@ exit 1 附可照抄的手动修复格式。manifest 增 dshProfile 键（golden 
 
 ## 六、质量与验收
 
-- 交付纪律：仓库内只含插件产品代码 + 随 CI 跑的 pytest 用例 + 本对文档；
-  验收脚本/环境探测工具不入库，用例清单以 proposal.md 第四节为准
+- 交付纪律（S234 校正措辞，与现状对齐）：仓库内 = 插件产品代码 + 随 CI 跑的 pytest 用例 +
+  本对文档；验收/环境探测脚本放 `scripts/`（`host_matrix` / `smoke_hosts` / `probe_tools` /
+  `e2e_*`），**不进 `package.json` 的 `files` 白名单**（随包发不出去），也不是交付物清单的一部分；
+  用例清单以 proposal.md 第四节为准，禁止把一次性探针塞进交付面
+- 功能级验证入口单一来源（S234）：`host_matrix.resolve_entry()` 是"宿主 → 它自己配置里的
+  launch"的唯一解析点，巡检与 `scripts/probe_tools.py` 共用；环境变量两种键（`env` /
+  `environment`）都要读——三个宿主用后者，裸探针只读前者会把 10 工具报成 12（实测）。
+  探针只调只读工具，不提交、不落库
 - pytest：工具契约（mock api.py）+ 护栏规则命中 + packs 裁剪 + 安装器
   uninstall 幂等
 - 走完整调用链验证后断言才能落文档（入口路由→api.py→任务表）
