@@ -38,6 +38,45 @@ REMOTE_INSTRUCTIONS = (
 )
 
 
+MCP_SESSION_HEADER = "mcp-session-id"
+
+
+def _req_scope(ctx, remote: bool = True) -> dict:
+    """从当前请求取作用域信息（D-scope-1）。
+
+    MCP 标准 stateful 传输下，服务端在 initialize 响应头下发 mcp-session-id，
+    客户端后续请求自动回传（SDK: streamable_http.py:154）。据此把同一会话的
+    记忆/追问计数/nonce 收拢到一个作用域，不同会话互不影响。
+
+    降级：拿不到 session（极端客户端不回传 / stdio 面）→ agent_id 为空，
+    runtime_state._resolve_scope 会给出 key=None，即"不写记忆、不持久计数"。
+    宁可多问用户一次，也不把 A 的归因写进 B 的桶。
+
+    可选增强：客户端若显式声明 X-Vod-Agent-Id / X-Vod-Product（同一 agent
+    跨会话共享记忆时用），优先采用 —— 但这不是接入前提。
+    """
+    h = {}
+    req = getattr(ctx, "request", None)
+    if req is not None:
+        raw = getattr(req, "headers", None) or {}
+        try:
+            h = {str(k).lower(): str(v) for k, v in dict(raw).items()}
+        except Exception:      # 头部实现对非映射类型应宽松：取不到就降级
+            h = {}
+    sid = h.get(MCP_SESSION_HEADER, "").strip()
+    aid = h.get("x-vod-agent-id", "").strip()
+    prod = h.get("x-vod-product", "").strip()
+    return {
+        "name": "http-remote",
+        "version": "1",
+        "transport": "http" if remote else "stdio",
+        # 作用域键：显式 agent 标识优先，其次会话 id，都没有则为空（降级）
+        "agent_id": aid or (f"session:{sid}" if sid else ""),
+        "product": prod,
+        "session_id": sid,
+    }
+
+
 def _text_result(payload: dict, is_error: bool = False) -> types.CallToolResult:
     return types.CallToolResult(
         content=[types.TextContent(type="text",
@@ -106,7 +145,11 @@ def build_server(remote: bool = True) -> Server:
         verdict, msg, code = guardrails.check(name, args)
         if verdict != "allow":
             return _text_result({"error": msg, "code": code}, is_error=True)
-        client_info = {"name": "http-remote", "version": "1", "transport": "http"}
+        # D-scope-1：从标准会话头取作用域键。
+        # MCP 标准 stateful 传输由服务端在 initialize 下发 mcp-session-id，客户端
+        # 后续请求自动回传（SDK streamable_http.py:154）。拿不到时降级为无作用域
+        # （不写记忆、不持久计数），绝不共用同一个桶 —— "错归比不归更糟"。
+        client_info = _req_scope(ctx, remote=remote)
         try:
             out = await asyncio.to_thread(tools.dispatch, name, args, client_info)
         except tools.ToolError as e:

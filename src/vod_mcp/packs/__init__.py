@@ -76,15 +76,13 @@ def _resolve(raw: str) -> tuple:
     return packs
 
 
-# 服务面（HTTP 传输）摘除的工具。（2026-11-16 D-token-machine-1 修订：远程面收窄为
-# 只剩这一项——远程部署的实际形态是"同一台机器上独立跑一个 MCP server 进程，
-# 多个 agent 通过 HTTP 连它"，和本地同一套身份/账本语义，所以 draft/commit/ledger 都放开。）
-#   packs_configure：会话内开关是**进程内状态**，HTTP 面每请求现造 server、无会话，
-#                 开关会在下一个请求消失（"以为改了其实没改"）；且多 agent 共用进程时会互相影响。
-# draft/commit 放开的前置是**草稿归属隔离**：草稿落 owner（宿主名+身份 hash），commit 校验归属，
-# 避免同机两个 agent 之间"A 的草稿被 B 提交"（collect.draft_voices / commit_voices）。
-# 注意：submit 不摘——它对 VOD 的唯一动作是调用引擎 HTTP API，落库是服务端的事。
-REMOTE_WITHHELD = ("vod_packs_configure",)
+# 服务面（HTTP 传输）摘除的工具。
+# 2026-11-18 D-scope-1 起：**清空**。此前摘 vod_packs_configure 的理由是
+# 「HTTP 面每请求现造 server、无会话，开关会在下一个请求消失、多 agent 共用时互相影响」；
+# 该理由随标准 stateful 传输落地而失效——现在服务端在 initialize 下发
+# mcp-session-id，会话内状态由 SDK session 持有，跨请求存活，且按会话隔离。
+# 因此远程面与 stdio 面工具面完全一致（不阉割能力），差异只在传输形态。
+REMOTE_WITHHELD: tuple = ()
 
 
 def enabled_tools(remote: bool = False) -> list:

@@ -111,9 +111,12 @@ def test_initialize_and_instructions_withhold_host_path(remote):
     assert "skillRoot" in text or "本机路径" in text, "必须明说不给服务器本机路径"
 
 
-def test_tool_face_withholds_only_packs_switch(remote):
-    """D-token-machine-1：远程面=同机独立进程，与本地同面；只摘 packs_configure
-    （进程内状态，HTTP 每请求现造 server、多 agent 共用会互相影响）。"""
+def test_tool_face_matches_local(remote):
+    """远程面与本地工具面**完全一致**（2026-11-18 D-scope-1 起）。
+
+    此前摘 packs_configure 的理由（HTTP 无会话、开关下一请求消失、多 agent 互相
+    影响）已随标准 stateful 传输失效：会话跨请求存活且按会话隔离。
+    """
     _init(remote["url"])
     st, _h, raw = _post(remote["url"], {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     assert st == 200
@@ -121,7 +124,7 @@ def test_tool_face_withholds_only_packs_switch(remote):
     assert "vod_submit_voices" in names
     assert {"vod_draft_voices", "vod_commit_voices", "vod_list_submitted"} <= names, \
         "两段式与本机账本在远程面同样可用（草稿已按宿主隔离）"
-    assert "vod_packs_configure" not in names, "进程内开关不从远程暴露"
+    assert "vod_packs_configure" in names, "会话内开关在 stateful 下同样可用（不阉割能力）"
     assert {"vod_list_skills", "vod_retrieve_skill"} <= names
 
 
@@ -147,15 +150,17 @@ def test_bad_json_400(remote):
     assert json.loads(body)["error"]["code"] == -32700
 
 
-def test_withheld_tool_is_refused_even_if_called(remote):
-    """被摘掉的工具直接调用也必须拒（摘除不是只藏描述）。"""
+def test_packs_configure_callable_on_remote(remote):
+    """远程面同样可调会话内开关（2026-11-18 D-scope-1 起不再摘除）。"""
     _init(remote["url"])
     st, _h, raw = _post(remote["url"], {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                                         "params": {"name": "vod_packs_configure",
                                                    "arguments": {}}})
+    assert st == 200
     result = json.loads(raw)["result"]
-    assert result["isError"] is True
-    assert "[remote]" in result["content"][0]["text"]
+    # 空参数走参数校验错误（-32602），说明工具本身可达而非被 [remote] 拦掉
+    text = result["content"][0]["text"]
+    assert "[remote]" not in text, f"不应再按远程面摘除，实得：{text[:120]}"
 
 
 def test_retrieve_skill_omits_host_path_on_remote(remote):

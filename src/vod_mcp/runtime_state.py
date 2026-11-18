@@ -328,23 +328,63 @@ _SESSION_TTL = 30 * 60          # 会话内滑动记忆（D-product-ask-1）
 _SESSION_MEM: dict = {}         # 进程=一次宿主会话：重启即清，跨会话不继承
 
 
-def _session_key(client_info) -> str:
-    """记忆作用域（Scope）：宿主 + 身份。
+def _resolve_scope(client_info) -> dict:
+    """统一作用域解析（D-scope-1）：三种部署模式共用一条链。
 
-    进程内即一次 stdio 会话；远程面是多租户共享进程，所以身份也必须进 key，
-    否则 A 用户的"不知道→CodeArts"会串到 B 用户。
+    背景：远程面 client_info.name 曾写死 "http-remote"，导致多 agent 共用一个
+    server 时记忆/计数/nonce 全部串味（A 说过的产品被 B 命中、A 追问 2 次后
+    B 直接被"别再问了"挡掉、相同内容 voiceId 撞车）。本函数把"作用域从哪来"
+    收敛成唯一入口，业务侧只消费 key/product，不再各自推断。
+
+    优先级：
+      ① 请求级 agent_id（多 agent 共用进程时由传输层从请求头/session 注入）
+      ② 非远程面（stdio）：进程即作用域 —— 每个 agent 一个进程，天然隔离
+      ③ 远程面且无标识：降级返回 key=None（调用方不写记忆，宁可多问一次，
+         也不把 A 的归因写进 B 的桶 —— "错归比不归更糟"）
+
+    product 与 key 分开：product 可为空（走原话归因+问用户），key 为空才影响隔离。
     """
     ci = client_info or {}
-    import hashlib
-    from vod_mcp import net as _net   # 懒导入：net 依赖本模块，导入期成环
-    ident = _net._eff_key() or ""
-    ident_hash = hashlib.sha256(ident.encode()).hexdigest()[:8] if ident else _install_nonce()
-    return f"{ci.get('name') or 'unknown'}|{ident_hash}"
+    agent = str(ci.get("agent_id") or "").strip()
+    prod = str(ci.get("product") or "").strip()
+    # 兼容既有契约：stdio 面/宿主适配器用 client_info.name 标识宿主身份
+    # （如 {"name": "codearts"}）。它天然每进程一份，等价于作用域键。
+    name = str(ci.get("name") or "").strip()
+
+    if agent:
+        return {"key": f"agent:{agent}", "product": prod,
+                "source": "request", "degraded": False}
+    if name and name != "http-remote":
+        # stdio 面或显式宿主名：进程即作用域（name 已能区分宿主）
+        return {"key": f"host:{name}", "product": prod,
+                "source": "process", "degraded": False}
+    if not _is_remote_face():
+        return {"key": f"proc:{_install_nonce()}", "product": prod,
+                "source": "process", "degraded": False}
+    return {"key": None, "product": prod, "source": "none", "degraded": True}
+
+
+def _is_remote_face() -> bool:
+    """当前是否远程（HTTP）面。contextvar 由传输层设置，默认 False=stdio。"""
+    from vod_mcp import net as _net
+    return bool(_net._SERVER_FACE.get())
+
+
+def _session_key(client_info):
+    """记忆作用域（Scope）：见 _resolve_scope。
+
+    返回 None = 未知调用方（远程面无标识）→ 调用方不读也不写记忆。
+    返回 str  = 隔离键（记忆/追问计数共用）。
+    """
+    return _resolve_scope(client_info)["key"]
 
 
 def _memory_get(client_info) -> dict:
     import time as _t
-    cur = _SESSION_MEM.get(_session_key(client_info)) or {}
+    key = _session_key(client_info)
+    if not key:
+        return {}                       # 未知调用方：不读共享桶（D-scope-1 降级）
+    cur = _SESSION_MEM.get(key) or {}
     if cur and _t.time() - float(cur.get("at") or 0) > _SESSION_TTL:
         return {}
     return dict(cur)
@@ -354,6 +394,8 @@ def _memory_put(client_info, **fields) -> None:
     import time as _t
     with _RT_LOCK:      # get→update→set 持锁：远程面并发请求不互相丢字段
         key = _session_key(client_info)
+        if not key:
+            return                      # 未知调用方：不写，避免污染他人桶（D-scope-1）
         cur = _memory_get(client_info)
         cur.update(fields)
         cur["at"] = int(_t.time())      # 滑动过期

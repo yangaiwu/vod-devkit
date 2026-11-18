@@ -720,21 +720,39 @@ test/remote-mcp-server.test.ts 是参照物），只在我们有身份/写面的
 | 维度 | devkit | 本插件 |
 |---|---|---|
 | 启动 | 同一二进制 `--transport remote --port 9528 --host 127.0.0.1` | `vod-devkit serve --transport remote --port 9528 --host 127.0.0.1`（bin 透传） |
-| 传输 | 官方 SDK Streamable HTTP，stateless + jsonResponse | 官方 Python SDK `StreamableHTTPSessionManager(json_response=True, stateless=True)` |
+| 传输 | 官方 SDK Streamable HTTP，stateless + jsonResponse | **官方 Python SDK 标准 stateful**：`StreamableHTTPSessionManager(json_response=True, stateless=False, session_idle_timeout=30*60)`（2026-11-18 D-scope-1 起；此前 stateless=True 属简化形态） |
 | 方法契约 | POST 进传输；GET 405；OPTIONS 204 + ACAO:*；通知 202；坏 JSON 400 | 同（逐条测试钉死）；`Accept` 必须含 `application/json`——只给 `text/event-stream` 的客户端按 jsonResponse 模式回 406（与 devkit 同） |
-| 工具面门控 | remoteSurface 摘掉 secrets 包 + 本地写工具 | `packs.REMOTE_WITHHELD` 只摘 `vod_packs_configure`（2026-11-16 修订，见 D-token-machine-1）；draft/commit/ledger 与本地一致，草稿按宿主隔离 |
+| 会话 | 无会话（stateless） | **标准会话**：initialize 下发 `mcp-session-id`，客户端后续请求回传；会话跨请求存活、按会话隔离（记忆/计数/nonce 作用域即会话） |
+| 工具面门控 | remoteSurface 摘掉 secrets 包 + 本地写工具 | **与 stdio 完全一致，`REMOTE_WITHHELD = ()`**（2026-11-18 D-scope-1：旧理由是「HTTP 无会话、开关下一请求消失」，随 stateful 落地失效） |
 | instructions | remote 版不给 skillRoot，教 retrieve_skill | 同；`vod_retrieve_skill` 在远程面不返回 path，`vod_list_skills` 不返回 skillsDir |
 | 身份 | 不管（凭据在服务器本机文件） | **请求头 Authorization 逐请求注入优先**；无 Bearer 时与本地同链领/复用机器级匿名令牌（2026-11-16 修订） |
-| 鉴权 | 无，README 警告别公开 | 无内建鉴权（同），默认回环 + 反代承担 TLS/身份 |
+| 鉴权 | 无，README 警告别公开 | 无内建鉴权（同），默认回环 + 反代承担 TLS / 身份 |
+| 厂商兼容 | — | 标准握手为主路径；**无 session 的非 initialize 请求走内部握手兜底**（裸 HTTP 客户端可在不改代码的情况下接入，且仍落到独立会话） |
 
 插件不写库这条在远程面同样成立：HTTP 面唯一的出站动作仍是引擎 HTTP API
 （POST /external/voices 等），落库/配额/审计全在服务端；本仓没有任何 DB 连接
 代码路径，远程面也没有新增。
 
-承载：`vod_mcp/transport_remote.py`（HTTP 外壳 + ASGI 适配层）、
-`vod_mcp/remote_app.py`（SDK Server 与工具面/instructions）、
-`vod_mcp/guardrails.py`（护栏唯一实现，两面共用）、`packs.REMOTE_WITHHELD`、
-`tools._REQ_KEY/_SERVER_FACE`（逐请求身份）、tests/test_remote_transport.py（13 例）。
+承载：`vod_mcp/transport_remote.py`（HTTP 外壳 + ASGI 适配层 + 无会话兜底）、
+`vod_mcp/remote_app.py`（SDK Server 与工具面/instructions/_req_scope）、
+`vod_mcp/guardrails.py`（护栏唯一实现，两面共用）、`packs.REMOTE_WITHHELD`（现为空）、
+`runtime_state._resolve_scope`（统一作用域：请求级 agent_id > 宿主 name > 进程 nonce > 无标识降级）、
+`tools._REQ_KEY/_SERVER_FACE`（逐请求身份）、
+tests/test_remote_transport.py + tests/test_mcp_standard_transport.py（标准/厂商兼容 13 例）。
+
+### 作用域（Scope）单一入口
+
+三种部署形态共用一条解析链，业务侧只消费 `key`/`product`：
+
+| 部署 | scope.source | key 来源 | 隔离依据 |
+|---|---|---|---|
+| 一 agent 一本地 MCP（stdio） | `process` | `host:<client_info.name>` 或 `proc:<install_nonce>` | 进程私有 `_SESSION_MEM` |
+| 一 agent 一远程 MCP（各自进程+目录） | `process` | 同上 | 进程 + `VOD_DEVKIT_HOME` 分目录 |
+| 多 agent 共用远程 MCP | `request` | `agent:<mcp-session-id>` | 标准会话 |
+
+全部拿不到时 `key=None` → **不写记忆、不持久计数**（宁可多问用户一次，也不把 A 的归因
+写进 B 的桶 —— 与「错归比不归更糟」同源）。`product` 与 `key` 解耦：product 可为空
+（走原话归因 + 问用户），key 为空才影响隔离。
 
 与参照物逐条对账（不留"够用就行"的账）：
 

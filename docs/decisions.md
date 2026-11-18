@@ -2618,3 +2618,59 @@ DSH 那段的真实损失不是「没把人拉回来」，而是**那 5 分钟�
 **Falsifier**：若宿主提供常驻会话缓冲区或跨会话反馈草稿（当前无此承载），
 第 3 条「回来不重说」可退化为纯会话内实现；若引擎侧新增过程反馈通道，
 「禁空头承诺」中关于「无该通道」的表述需同步更新。
+
+## D-scope-1 远程传输回归 MCP 标准 + 作用域隔离（2026-11-18，负责人拍板）
+
+**触发**：多 agent 共用一个远程 MCP server 的场景下出现三类静默污染，且远程面此前
+`stateless=True` 偏离 MCP 标准，无法与外部服务互操作。
+
+### 一、症状（均为静默，提交照常"成功"）
+
+| 症状 | 机理 | 后果 |
+|---|---|---|
+| 归因错 | 远程面 `client_info` 写死 `"http-remote"`，`_session_key` 恒等 → A 回答过的产品被 B 命中 | 错归进引擎幂等/判重域，事后难追溯 |
+| 拒绝服务 | 追问计数共用 → A 追问 2 次后 B 首次即判"第 3 次" | B 什么都没做就被"别再问了"挡掉，丢单 |
+| 丢声量 | nonce 相同 → voiceId 相同 → 引擎判重合并 | 相同内容只存一条，不报错 |
+
+### 二、决策
+
+1. **回归 MCP 标准 stateful 传输**（不自造一套）。
+   `stateless=True` 本是简化形态，代价是偏离标准 + 无会话标识。改为
+   `stateless=False, session_idle_timeout=30*60`：initialize 下发 `mcp-session-id`，
+   客户端后续请求回传，会话跨请求存活并按会话隔离。**外部对接按标准实现方能互操作。**
+
+2. **stdio 与 remote 工具面完全一致，不阉割能力**。
+   `REMOTE_WITHHELD = ()`（原为 `("vod_packs_configure",)`）。旧摘除理由是
+   「HTTP 每请求现造 server、无会话，开关下一请求消失、多 agent 互相影响」——
+   该前提随 stateful 落地失效，故恢复。传输形态不同 ≠ 能力不同。
+
+3. **作用域单一入口 `_resolve_scope`**，三种部署共用：
+   - 请求级 `agent_id`（会话/显式头）→ `agent:<id>`
+   - 宿主 `client_info.name`（stdio/显式宿主名）→ `host:<name>`
+   - 仅进程 → `proc:<install_nonce>`
+   - **全都拿不到 → `key=None`：不写记忆、不持久计数**
+     （宁可多问用户一次，也不把 A 的归因写进 B 的桶 —— 同「错归比不归更糟」）
+
+4. **`product` 与 `key` 解耦**：请求级 product 优先于安装绑定；两者皆空走原话归因 +
+   问用户。product 为空完全合法，不影响隔离。
+
+5. **厂商兼容兜底**：标准 stateful 下，无 session 的非 initialize 请求会被 SDK 回
+   400「Missing session ID」。兜底在内部走一次握手取得会话并补上请求头，让裸 HTTP
+   客户端无需改代码即可接入，且仍落到独立会话（不与他人共桶）。握手失败则原样透传，
+   标准错误照常返回（不掩盖真实问题）。
+
+### 三、落地与验证
+
+- 承载：`transport_remote.py`（stateful + 兜底）、`remote_app.py`（`_req_scope`）、
+  `runtime_state._resolve_scope`、`packs/collect.py`（产品解析链）、`packs.REMOTE_WITHHELD`
+- 用例：`tests/test_mcp_standard_transport.py` 13 例（标准握手 3 / 厂商兼容 5 /
+  能力对齐 2 / 作用域降级 3）；`test_remote_transport.py`、`test_packs_configure.py`、
+  `test_token_machine_scope.py` 的旧契约断言同步更新（各处写明旧口径已废 + 依据）
+- 真机：stdio 与 remote 两形态端到端各跑一遍（含真实平台提交）
+
+**Falsifier**：
+- 若部署方确认「永远只有一个 agent 连一个 server」，则会话隔离无收益，可退回
+  stateless（但对外互操作仍需标准实现，故不建议回退）。
+- 若客户端普遍不回传 `mcp-session-id`（实测官方 SDK 会回传），则兜底路径成为主路径，
+  此时每次调用新建会话 → 受 `max_sessions` 约束，需改回 header 方案或提高上限。
+- 若引擎侧能接受「同内容不同来源」不被合并，则 nonce 派生可简化。

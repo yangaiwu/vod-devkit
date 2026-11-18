@@ -49,7 +49,9 @@ def _attribute_product(items: list, params: dict, client_info: dict | None = Non
     meta = net._load_meta()
     answer = str(params.get("product") or "").strip()
     mem = rt._memory_get(client_info)
-    binding = str(rt._RT.get("product") or "").strip() or None
+    # D-scope-1：请求级产品（多 agent 共用进程时各带自己的）优先于安装绑定。
+    scope = rt._resolve_scope(client_info)
+    binding = scope["product"] or str(rt._RT.get("product") or "").strip() or None
 
     if answer:
         rid = _attrib.resolve_id(answer, meta)

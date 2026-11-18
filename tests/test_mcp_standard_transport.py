@@ -1,0 +1,240 @@
+"""D-scope-1：MCP 标准传输 + 厂商兼容性 + 双形态能力对齐。
+
+背景（2026-11-18 真机实锤）：
+  远程面此前用 stateless=True —— 偏离 MCP 标准（标准 Transport 是 stateful，
+  服务端在 initialize 下发 mcp-session-id，客户端后续请求回传），且无会话标识
+  导致多 agent 共用一个 server 时记忆/追问计数/nonce 全串味：
+
+    · A 回答过「CodeArts」→ 写入共享桶 → B 只说「太慢了」被归到 CodeArts（错归）
+    · A 追问 2 次产品 → 共享计数 → B 首次被问即被判「第 3 次」→ 直接拒提交（丢单）
+    · nonce 相同 → 相同内容 voiceId 撞车 → 引擎判重合并（丢声量，不报错）
+
+  落地方向（负责人拍板）：**按标准实现，不自造一套** —— 外部服务对接必须能互操作；
+  stdio 与 remote 只是传输形态不同，**工具能力不得阉割**。
+
+本文件锁四组：
+  ① 标准握手：initialize 下发 session、带 session 可用、两会话互不干扰
+  ② 厂商兼容：标准 SDK / 裸 HTTP / 不回传 session / 旧协议版本 / 无 Accept 头
+  ③ 能力对齐：stdio 与 remote 工具集完全一致（含 vod_packs_configure）
+  ④ 降级语义：拿不到会话作用域时不写共享记忆（宁可多问，不可错归）
+"""
+import json
+import pytest
+
+mcp = pytest.importorskip("mcp", reason="远程面需要可选依赖 mcp（pip install 'vod-devkit[remote]'）")
+
+import threading  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E402
+
+from vod_mcp import net as _net  # noqa: E402
+from vod_mcp import packs as _packs  # noqa: E402
+from vod_mcp import runtime_state as _rt  # noqa: E402
+from vod_mcp import transport_remote as tr  # noqa: E402
+
+SESSION_HEADER = "mcp-session-id"
+
+
+class _Engine(BaseHTTPRequestHandler):
+    """最小引擎桩：只回答 meta / token，够握手与工具列举用。"""
+
+    def log_message(self, *a):
+        pass
+
+    def _json(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if "/external/meta" in self.path:
+            self._json(200, {"code": 200, "data": {
+                "products": ["CodeArts", "OfficeAce"],
+                "productCatalog": [{"id": 1, "name": "CodeArts"},
+                                   {"id": 3, "name": "OfficeAce"}],
+            }})
+            return
+        self._json(404, {"code": 404})
+
+    def do_POST(self):
+        if self.path.endswith("/external/token"):
+            self._json(200, {"code": 200, "data": {"token": "anon-t1"}})
+            return
+        self._json(200, {"code": 200, "voiceIds": ["ext_std_1"]})
+
+
+@pytest.fixture
+def remote(monkeypatch):
+    engine = ThreadingHTTPServer(("127.0.0.1", 0), _Engine)
+    threading.Thread(target=engine.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{engine.server_port}"
+    monkeypatch.setattr(_net, "JAVA_BASE", base)
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
+
+    runtime = tr.RemoteRuntime("127.0.0.1", 0)
+    runtime.start()
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), tr._Handler)
+    httpd.daemon_threads = True
+    httpd.runtime = runtime
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    finally:
+        httpd.shutdown()
+        engine.shutdown()
+
+
+def _post(url, payload, headers=None):
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode(), method="POST",
+        headers={"content-type": "application/json",
+                 "accept": "application/json, text/event-stream",
+                 **(headers or {})})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status, dict(resp.headers), resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), e.read()
+
+
+def _handshake(url, name="client", version="2025-06-18", extra=None, accept=True):
+    """标准握手：initialize → 取 session → initialized 通知。返回 (sid, status)。"""
+    hdrs = dict(extra or {})
+    if not accept:
+        pass  # 由调用方控制：真不带 Accept 的极端情形走 _post_raw
+    st, hd, body = _post(url, {
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": version, "capabilities": {},
+                   "clientInfo": {"name": name, "version": "1"}}}, hdrs)
+    sid = hd.get(SESSION_HEADER) or hd.get("Mcp-Session-Id")
+    if sid:
+        _post(url, {"jsonrpc": "2.0", "method": "notifications/initialized"},
+              {**hdrs, "Mcp-Session-Id": sid})
+    return sid, st, body
+
+
+def _call(url, sid, tool, args=None):
+    st, _h, body = _post(url, {
+        "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+        "params": {"name": tool, "arguments": args or {}}},
+        {"Mcp-Session-Id": sid} if sid else {})
+    return st, body
+
+
+# ── ① 标准握手与会话隔离 ────────────────────────────────────────────
+def test_standard_handshake_issues_session(remote):
+    """标准 Transport：initialize 必须下发 mcp-session-id。"""
+    sid, st, _ = _handshake(remote, "std")
+    assert st == 200
+    assert sid, "标准 stateful 传输必须在 initialize 响应头下发 mcp-session-id"
+
+
+def test_session_scoped_call_succeeds(remote):
+    """带会话头调用工具应成功（标准路径）。"""
+    sid, _st, _ = _handshake(remote, "std")
+    st, body = _call(remote, sid, "vod_devkit_info")
+    assert st == 200, body[:300]
+    payload = json.loads(body)
+    assert "result" in payload
+
+
+def test_two_sessions_isolated(remote):
+    """两个会话互不干扰，且都能独立工作。"""
+    a, _, _ = _handshake(remote, "agent-A")
+    b, _, _ = _handshake(remote, "agent-B")
+    assert a and b and a != b, "不同握手必须得到不同会话"
+    assert _call(remote, a, "vod_devkit_info")[0] == 200
+    assert _call(remote, b, "vod_devkit_info")[0] == 200
+
+
+# ── ② 厂商兼容矩阵 ─────────────────────────────────────────────────
+def test_compat_vendor_standard_sdk(remote):
+    """厂商：官方 SDK 客户端 —— 标准握手 + 回传 session。"""
+    sid, st, _ = _handshake(remote, "mcp-sdk-python", version="2025-06-18")
+    assert st == 200 and sid
+    assert _call(remote, sid, "vod_list_skills")[0] == 200
+
+
+def test_compat_vendor_old_protocol_version(remote):
+    """厂商：旧协议（2024-11-05）客户端 —— 应能协商，不因版本拒绝。"""
+    sid, st, _ = _handshake(remote, "legacy-client", version="2024-11-05")
+    assert st == 200, "旧协议版本必须能协商（实测需支持）"
+    assert sid, "旧协议同样应下发会话"
+
+
+def test_compat_vendor_no_accept_header(remote):
+    """厂商：不带 Accept 头（部分自研客户端） —— 不应因此失败。"""
+    req = urllib.request.Request(
+        remote, data=json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "no-accept", "version": "1"}}}).encode(),
+        method="POST", headers={"content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        assert resp.status == 200
+
+
+def test_compat_vendor_sideless_direct_call(remote):
+    """厂商：裸 HTTP 不握手直接 tools/call —— 兜底应放行（不 400）。"""
+    st, body = _call(remote, None, "vod_devkit_info")
+    assert st == 200, f"极端客户端应被兜底放行，实得 {st}: {body[:200]}"
+
+
+def test_compat_vendor_sideless_multiple_calls(remote):
+    """厂商：连续多次不握手调用 —— 每次独立会话，不应互相影响或耗尽会话。"""
+    for i in range(3):
+        st, body = _call(remote, None, "vod_devkit_info")
+        assert st == 200, f"第{i+1}次无 session 调用失败: {body[:200]}"
+
+
+# ── ③ 双形态能力对齐（不阉割）────────────────────────────────────────
+def test_tool_parity_stdio_vs_remote():
+    """stdio 与 remote 工具集必须完全一致 —— 传输形态不同不代表能力不同。"""
+    stdio = set(_packs.enabled_tools(remote=False))
+    rem = set(_packs.enabled_tools(remote=True))
+    assert stdio == rem, f"远程面阉割了能力：缺 {stdio - rem}"
+    assert "vod_packs_configure" in rem, "会话内开关必须保留（stateful 下已可实现）"
+
+
+def test_remote_withheld_is_empty():
+    """REMOTE_WITHHELD 必须为空：范围收窄只能是为了正确性，不能是阉割。"""
+    assert _packs.REMOTE_WITHHELD == (), (
+        f"远程面不应再摘除工具，实得 {_packs.REMOTE_WITHHELD}")
+
+
+# ── ④ 作用域降级语义 ────────────────────────────────────────────────
+def test_scope_degrades_to_no_memory_when_unidentified(monkeypatch):
+    """拿不到会话标识（远程面）→ key=None → 不写共享记忆。
+
+    "错归比不归更糟"：宁可多问用户一次，也不把 A 的归因写进 B 的桶。
+    """
+    monkeypatch.setattr(_net, "_SERVER_FACE", type("C", (), {"get": staticmethod(lambda: True)})())
+    scope = _rt._resolve_scope({"agent_id": "", "product": ""})
+    assert scope["key"] is None
+    assert scope["degraded"] is True
+    assert scope["source"] == "none"
+    # 不写：_memory_put 应静默跳过
+    before = dict(_rt._SESSION_MEM)
+    _rt._memory_put({"agent_id": ""}, product="CodeArts")
+    assert _rt._SESSION_MEM == before, "未知调用方不得写入共享记忆桶"
+
+
+def test_scope_isolates_between_agents():
+    """不同 agent_id → 不同作用域键，记忆互不可见。"""
+    s_a = _rt._resolve_scope({"agent_id": "session:a", "product": ""})
+    s_b = _rt._resolve_scope({"agent_id": "session:b", "product": ""})
+    assert s_a["key"] != s_b["key"]
+    _rt._memory_put({"agent_id": "session:a"}, product="CodeArts")
+    assert _rt._memory_get({"agent_id": "session:a"}).get("product") == "CodeArts"
+    assert _rt._memory_get({"agent_id": "session:b"}).get("product") is None, (
+        "A 的记忆不得泄漏给 B")
+
+
+def test_scope_request_product_overrides_binding():
+    """请求级产品优先于安装绑定：多 agent 各带自己的产品。"""
+    s = _rt._resolve_scope({"agent_id": "session:x", "product": "OfficeAce"})
+    assert s["product"] == "OfficeAce"

@@ -82,10 +82,15 @@ class RemoteRuntime:
 
         self.host, self.port = host, port
         self._loop = asyncio.new_event_loop()
-        # stateless + json_response：与 devkit 的 WebStandardStreamableHTTPServerTransport
-        # ({sessionIdGenerator: undefined, enableJsonResponse: true}) 等价
+        # D-scope-1（2026-11-18）：回归 MCP 标准 stateful 传输。
+        # 此前 stateless=True 是简化形态，代价有二：
+        #   ① 偏离标准 —— 外部服务对接时按标准实现方能互操作（自造一套无法对接）；
+        #   ② 无会话标识 —— 多 agent 共用一个 server 时记忆/计数/nonce 全串味。
+        # 标准流程：initialize 下发 mcp-session-id → 客户端后续请求回传 → 按会话隔离。
+        # session_idle_timeout 与记忆窗口一致（30 分钟），过期自动回收。
         self.manager = StreamableHTTPSessionManager(
-            app=build_server(remote=True), json_response=True, stateless=True)
+            app=build_server(remote=True), json_response=True,
+            stateless=False, session_idle_timeout=30 * 60)
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._serve_loop, daemon=True)
 
@@ -143,7 +148,14 @@ class RemoteRuntime:
             tok_key = net._REQ_KEY.set(scope.get("x_vod_key") or None)
             tok_face = net._SERVER_FACE.set(True)
             try:
-                await self.manager.handle_request(scope, receive, send)
+                # D-scope-compat-1（2026-11-18）：极端客户端兜底。
+                # 标准 stateful 传输要求先 initialize 拿 mcp-session-id 再调用，
+                # 缺 session 直接 400（SDK 行为，实测「Missing session ID」）。
+                # 自研裸 HTTP 客户端不握手直接 POST tools/call，在此内部握手补上
+                # 会话头，让它落到独立会话（不与他人共桶）。
+                new_scope = await _ensure_session_for_sideless(self.manager, scope)
+                await self.manager.handle_request(
+                    new_scope if new_scope is not None else scope, receive, send)
             finally:
                 net._SERVER_FACE.reset(tok_face)
                 net._REQ_KEY.reset(tok_key)
@@ -198,7 +210,76 @@ def _scope(handler, body: bytes) -> dict:
         "client": (handler.client_address[0], handler.client_address[1]),
         "server": (handler.server.server_address[0], handler.server.server_address[1]),
         "root_path": "",
+        # 私有键：原始请求体。只给兜底逻辑判断"是不是 initialize"用，
+        # 不参与 ASGI 语义（SDK 读 body 走 receive，不读 scope）。
+        "_vod_body": body,
     }
+
+
+async def _ensure_session_for_sideless(manager, scope: dict):
+    """极端客户端兜底：无 session 且非 initialize 的请求，内部握手补上会话头。
+
+    标准行为（SDK）是直接 400「Missing session ID」。但存在自研裸 HTTP 客户端
+    不握手直接 POST tools/call。兜底在内部走一次 initialize 取得会话 id，返回
+    补好头的新 scope —— 后续仍由 manager 按标准路径处理，客户端无感，且这次
+    调用落到独立会话（不与其它会话共桶，故不串味）。
+
+    返回 None = 不需兜底或兜底失败（调用方用原 scope，标准错误照常返回，
+    不掩盖真实问题）。initialize 本身不拦：那是建会话的入口。
+    """
+    import json as _json
+
+    headers = {k.decode() if isinstance(k, bytes) else k:
+               (v.decode() if isinstance(v, bytes) else v)
+               for k, v in (scope.get("headers") or [])}
+    if (headers.get("mcp-session-id") or "").strip():
+        return None                               # 已有会话：标准路径
+
+    body = scope.get("_vod_body")
+    if not body:
+        return None
+    try:
+        payload = _json.loads(body.decode() if isinstance(body, bytes) else body)
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or payload.get("method") == "initialize":
+        return None                               # initialize 原样交给 manager
+
+    init_payload = {"jsonrpc": "2.0", "id": "__compat_init__", "method": "initialize",
+                    "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                               "clientInfo": {"name": "compat-sideless", "version": "1"}}}
+    captured = {}
+
+    async def init_receive():
+        return {"type": "http.request",
+                "body": _json.dumps(init_payload).encode(), "more_body": False}
+
+    async def init_send(message):
+        if message.get("type") == "http.response.start":
+            for k, v in message.get("headers") or []:
+                kk = k.decode() if isinstance(k, bytes) else k
+                vv = v.decode() if isinstance(v, bytes) else v
+                if kk.lower() == "mcp-session-id":
+                    captured["sid"] = vv
+
+    init_scope = dict(scope)
+    init_scope["headers"] = [(k, v) for k, v in (scope.get("headers") or [])
+                             if (k.decode() if isinstance(k, bytes) else k).lower()
+                             != "mcp-session-id"]
+    try:
+        await manager.handle_request(init_scope, init_receive, init_send)
+    except Exception:
+        return None
+    sid = (captured.get("sid") or "").strip()
+    if not sid:
+        return None                               # 握手没给会话 → 退回标准拒绝路径
+
+    new_scope = dict(scope)
+    new_scope["headers"] = [(k, v) for k, v in (scope.get("headers") or [])
+                            if (k.decode() if isinstance(k, bytes) else k).lower()
+                            != "mcp-session-id"] + [(b"mcp-session-id", sid.encode())]
+    sys.stderr.write("[vod-devkit] 兼容模式：无 session 请求已内部握手（compat-sideless）\n")
+    return new_scope
 
 
 class _StreamSink:
