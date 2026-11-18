@@ -137,7 +137,7 @@ S2/S3 的顺序不能反：先让"共享资产有唯一落点"，再动"运行�
 | `src/` → `dist/` | `src/`（真源）→ `payloads/<ver>/`（运行时副本） | 都不入库；都保证"跑的是构建出来的那份" |
 | `skills/`（包内，由 src/packs 生成） | `plugins/vod-devkit/skills/`（由 `assets/skills/` 生成） | 生成器唯一入口 + 零提交 |
 | `validate-package.mjs` + `structure.test.ts` | `scripts/verify_copies.py` + `tests/test_structure_guards.py` | 校验器/结构用例 |
-| `REPORT-*.md` 堆根（他们也有噪声） | 不放根：报告进 `docs/reports/`（阶段 2 起） | 不复制这条噪声 |
+| `REPORT-*.md` 堆根（他们也有噪声） | 不放根：报告进 `docs/reports/`（**计划内，当前未建目录**） | 不复制这条噪声 |
 
 ## 六、这次通读后"补齐的短板"清单
 
@@ -173,7 +173,7 @@ devkit 把源码放进插件包（`plugins/huaweicloud-core/src`），我们不�
 - 插件副本是**发布物**，布局已被多处断言（`tests/test_installer.py::test_plugin_selfcontained_contract`
   断言 `plugins/vod-devkit/vod_mcp/server.py` 存在且与源码 hash 相同）；
 - `.mcp.json` 是 CLI 形态 + 安装器改写（D-mcp-manifest-a3-1），改写产物的 entry 指向**载荷**，
-  不是插件包内部路径；把代码挪进 `plugins/vod-devkit/src/vod_mcp/` 只会让发布物布局与
+  不是插件包内部路径；把代码挪进 `plugins/vod-devkit/src/vod_mcp/`（**反例，勿照做**）只会让发布物布局与
   老装机假设分叉，换不来任何能力。
 结论：插件副本保持 `vod_mcp/ skills/ contract/ safety/` 平铺；`src/` 只属于仓内形态。
 
@@ -204,7 +204,7 @@ S3 落地后，仓内旧位置（`<repo>/vod_mcp/`、`<repo>/skills/`）不再�
 （`paths.HOOKS / "vod_router.py"`）、被测试按路径加载。按"性质决定位置"：
 
 - 源：`integrations/hermes/hooks/vod_router.py`（与 devkit 的 `integrations/<host>/hooks/` 同构）；
-  将来 codex 侧要用，提升为 `integrations/hooks/` 共享，不复制文件；
+  将来 codex 侧要用，提升为 `integrations/hooks/` 共享（**尚未存在的共享位，属计划**），不复制文件；
 - 发布：载荷仍是 `<payload>/hooks/vod_router.py`（装机路径不变），`payload.sources["hooks"]`
   改从 `integrations/hermes/hooks` 取；
 - S2 把 hooks 放进 `src/` 是按"共享资产"归并，性质核对后纠正——记在这里，避免下次又按对称性摆。

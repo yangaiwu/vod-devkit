@@ -1278,7 +1278,7 @@ tmp→`os.replace` + 0600），并发不会丢更新、不会写坏文件。
 **为什么壳不能继续注册工具**：MCP 与壳同时注册 = 两个 `vod_submit_voices`、两套账本/令牌，
 用户可能重复提交。所以 `registerTools=false` 是 B 模式的强制项，降级形态才保留 true。
 
-**实测**（工具在 `vod-devkit-verification` 技能的 `scripts/dsh-mcp-probe.py`）：dsh 0.2.1-rc.5 +
+**实测**（探针在 `vod-devkit-verification` 技能目录下：该技能内的 `scripts/dsh-mcp-probe.py`，不在本仓）：dsh 0.2.1-rc.5 +
 mcp-client 0.2.1-rc.5，stdio 与 streamable-http 两条传输都通；server 日志 argv 指向载荷
 `server.py`，模型回执 0.5.9；工具名 `mcp__vod-devkit__vod_*`。
 
