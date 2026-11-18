@@ -60,7 +60,8 @@ globalThis.fetch = async (url, opts = {}) => {
 };
 
 // ⚠ 必须先装平台桩再 import 模块：模块在 import 期即捕获 globalThis.fetch。
-const { apply, __clearCaches } = await import('/home/multica/vod-devkit/packages/dsh/lib/index.js');
+// 相对路径：任何机器 clone 后都能跑（曾写死作者机绝对路径 → 他机 ERR_MODULE_NOT_FOUND）
+const { apply, __clearCaches } = await import('../lib/index.js');
 
 function boot(cfg = {}) {
     __clearCaches();

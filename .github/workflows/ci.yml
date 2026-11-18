@@ -37,6 +37,14 @@ jobs:
         run: python3 scripts/registry_reconcile.py
       - name: 测试（pytest 全量：单元+护栏+packs+协议级+回环+meta+账本）
         run: python3 -m pytest tests/ -q
+      - name: dsh 壳单测（npm test）
+        # 实锤（2026-11-18）：此前 ci.yml 只跑 pytest/pyflakes/mypy，dsh 的 node --test
+        # 从未进 CI —— 一个写死作者机绝对路径的测试红了整周没人发现，
+        # "dsh N passed" 只在作者机上成立。这里补上，否则 JS 侧永远没有门禁。
+        run: |
+          cd packages/dsh
+          npm install --no-audit --no-fund
+          npm test
       - name: 安装器烟雾
         run: |
           PYTHONPATH=src python3 bin/vod-devkit build-info

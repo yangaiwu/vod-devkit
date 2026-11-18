@@ -98,3 +98,40 @@ def test_meta_falls_back_to_snapshot_when_unreachable(monkeypatch, clean_state):
     meta = _net._load_meta(force=True)
     assert meta["stale"] is True
     assert meta["source"] == "snapshot"
+
+
+def test_meta_non_401_error_does_not_mint_token(monkeypatch, clean_state):
+    """④ 性能回退护栏：非 401（网络不可达/超时）不得去领令牌。
+
+    否则引擎抖动时每次 collect 都要多等一轮 15s 令牌请求（meta 10s + token 15s
+    = 25s/次），把采集拖垮。ToolError.code 已把 401 归一为 -32012。
+    """
+    minted = []
+
+    def _timeout(method, path, body=None, **kw):
+        raise _net.ToolError("请求超时", code=-32000)
+
+    monkeypatch.setattr(_net, "_http", _timeout)
+    monkeypatch.setattr(_net, "_fetch_anon_token", lambda: minted.append(1) or None)
+
+    meta = _net._load_meta(force=True)
+    assert meta["source"] == "snapshot"
+    assert not minted, "非 401 错误不得触发匿名令牌领取（会白等 15s 且不写缓存）"
+
+
+def test_meta_401_error_does_mint_token(monkeypatch, clean_state):
+    """④b 对照：401 必须去领令牌（-32012 是唯一该走领取链的码）。"""
+    minted = []
+
+    def _401(method, path, body=None, **kw):
+        if "external/token" in path:
+            return {"code": 200, "data": {"token": "anon-x"}}
+        raise _net.ToolError("鉴权失败", code=-32012)
+
+    monkeypatch.setattr(_net, "_http", _401)
+    monkeypatch.setattr(_net, "_fetch_anon_token",
+                        lambda: (minted.append(1), "anon-x")[1])
+
+    meta = _net._load_meta(force=True)
+    assert minted, "401 必须触发匿名令牌领取"
+    assert meta["source"] in ("meta-anon", "snapshot")

@@ -15,6 +15,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 const { planDriftHandling } = await import('../lib/index.js');
 
@@ -67,4 +68,15 @@ test('⑤ 正常流程（无跑题）不触发拉回，也不误判 resume', () 
     assert.equal(r.resume, false, '从未跑题不算「回来续用」');
     assert.equal(r.reason, 'normal');
     assert.deepEqual(r.buffer, ['导出太慢了', '点了导出等了两分钟'], '缓冲区照常收录原话');
+});
+
+
+test('⑥ 接线锁：生产代码必须真的调用 planDriftHandling（防"只有测试引用"）', () => {
+    // 实锤（2026-11-18 审查）：纯函数 + 5 个测试都在，但 apply() 里没有任何调用点，
+    // 于是"跑题期留底"写在文档里、测试绿灯、运行时不存在。这里把接线本身锁住。
+    const src = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
+    const calls = [...src.matchAll(/planDriftHandling\s*\(/g)];
+    assert.ok(calls.length >= 2, '至少一处定义 + 一处生产调用，实得 ' + calls.length);
+    assert.ok(/drift\s*=\s*planDriftHandling\s*\(/.test(src), '生产代码必须把结果赋给 drift');
+    assert.ok(/drift\.shouldPullBack/.test(src), '拉回状态必须被消费（否则"只拉一次"不成立）');
 });

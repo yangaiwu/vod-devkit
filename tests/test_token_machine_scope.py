@@ -283,18 +283,11 @@ def test_s145_install_read_side_matches_server_read_side(tmp_path, monkeypatch):
 
 
 def test_s145_remote_tool_surface_matches_local_except_packs_switch():
-    """远程面与本地**工具面完全一致**（2026-11-18 D-scope-1 起）。
-
-    此前远程面摘 vod_packs_configure，理由是「HTTP 面每请求现造 server、无会话，
-    开关下一请求就消失」。该理由随标准 stateful 传输（initialize 下发
-    mcp-session-id，会话内状态跨请求存活并按会话隔离）失效，故恢复该工具：
-    传输形态不同不等于能力阉割。
-    """
+    """远程面与本地同面：只摘 packs_configure（进程级全局，影响所有会话）。"""
     from vod_mcp import packs
     local = set(packs.enabled_tools())
     remote = set(packs.enabled_tools(remote=True))
-    assert remote == local, f"两形态工具集必须一致，差异：{sorted(local ^ remote)}"
-    assert "vod_packs_configure" in remote, "会话内开关在 stateful 下已可实现，必须保留"
+    assert remote == local - {"vod_packs_configure"}, (sorted(local), sorted(remote))
     assert {"vod_draft_voices", "vod_commit_voices",
             "vod_list_submitted"} <= remote
 

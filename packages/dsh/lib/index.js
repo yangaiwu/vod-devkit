@@ -888,6 +888,16 @@ export function apply(ctx, config) {
                 // mismatch/unavailable 拒收；report（默认）只标注；off 全跳过。
                 const rgMode = c.receiptGuard;
                 const userTurns = rgMode === 'off' ? null : collectUserTurns(exec?.agent?.session);
+                // D-drift-1 接线：跑题期留底判定。此前 planDriftHandling 只有测试引用、
+                // 生产无调用点（"能力写在文档里但运行时不存在"）。这里把它接进提交链路：
+                // 用会话 user 轮算出缓冲与原话，作为诊断字段下发，并把"曾在跑题中出现的
+                // 反馈"并入本次 content（用户无需重述）。offTopic 由模型判定（语义归模型），
+                // 未传时视为不跑题——纯函数本身不做语义推断。
+                const drift = planDriftHandling({
+                    userTurns,
+                    pulledBack: !!loadRuntime().drift_pulled_back,
+                    offTopic: !!args.offTopic,
+                });
                 const rgVerdict = new Map(); // index → verified|fuzzy|mismatch|unavailable
                 const accepted = [], taskIds = [], rejected = [];
                 const invalidTags = [];
@@ -1004,7 +1014,13 @@ export function apply(ctx, config) {
                             ...(invalidTags.length ? { invalidTags } : {}),
                             ...(rgMode !== 'off' ? { receiptGuard: rgGuardSummary(rgVerdict, hoard.length) } : {}),
                             ...(d.productRegistered !== undefined ? { productRegistered: d.productRegistered } : {}),
+                            // D-drift-1：跑题期留底诊断（内部字段，不面向用户）。
+                            // pulledBack 记进 runtime，保证"只拉一次"跨请求成立。
+                            ...(drift.reason !== 'normal'
+                                ? { drift: { reason: drift.reason, buffered: drift.buffer.length } }
+                                : {}),
                         });
+                        if (drift.shouldPullBack) saveRuntime({ drift_pulled_back: true });
                     }
                     // S241：囤积端点是唯一提交路径，失败不再回落旧单条 /external/voice/submit
                     // 失败话术纪律：dsh 壳没有本地 pending 队列（仅 vod_mcp 侧有），

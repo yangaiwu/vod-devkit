@@ -1210,14 +1210,17 @@ args 指向载荷；把 PATH 上的 python3 换成 3.9 再启动 → stderr 出�
 - 形态变更才推 `notifications/tools/list_changed`（无变化不发，避免客户端重拉风暴）；
   `initialize` 的 capabilities 声明 `tools.listChanged=true`。
 - ~~远程面（HTTP）摘除该工具：远程面每请求现造 server、无会话，开关会在下一个请求消失。~~
-  **2026-11-18 D-scope-1 推翻**：远程面已回归 MCP 标准 stateful 传输（initialize 下发
-  `mcp-session-id`，会话跨请求存活并按会话隔离），「无会话」前提失效，故恢复该工具，
-  两形态工具面完全一致。
+  **2026-11-18 D-scope-1 推进，同日二次修正收回**：远程面已回归 MCP 标准 stateful 传输
+  （initialize 下发 `mcp-session-id`，记忆/计数按会话隔离），「无会话」前提确已失效；但真机
+  双会话实测表明本 SDK 版本所有会话**共用同一个 `Server` 实例**、`packs._RUNTIME` 是模块级
+  全局——A 会话 disable collect 后 B 的 `tools/list` 从 12 降到 8。即 stateful 只解决了
+  「开关跨请求存活」，没解决「多 agent 共用进程互相影响」。**结论：继续摘除**
+  （`REMOTE_WITHHELD = ("vod_packs_configure",)`）；逐会话工具面当前 SDK 做不到。
 
 | # | 场景 | 断言 |
 |---|---|---|
 | S132 | 会话内开关生效 | disable 后 `tools/list` 立即少掉该包工具、enable 后回来；`reset` 回到 VOD_PACKS；core 强制；未知 id `-32602`；空参数拒绝；熔断期 enable collect `-32015` 且状态不变；调用前后 `os.environ` 逐键不变（不写 env） |
-| S133 | 协议面与远程边界 | capabilities 声明 `listChanged=true`；有变化时同一次调用输出「响应 + 通知」两条（stdio 上各占一行）、无变化只输出响应；通知后 `tools/list` 反映新区面；**`REMOTE_WITHHELD == ()` 且远程 `tool_specs` 含该工具**；契约含三参数 |
+| S133 | 协议面与远程边界 | capabilities 声明 `listChanged=true`；有变化时同一次调用输出「响应 + 通知」两条（stdio 上各占一行）、无变化只输出响应；通知后 `tools/list` 反映新区面；**远程面 `REMOTE_WITHHELD == ("vod_packs_configure",)` 且远程 `tool_specs` 不含该工具**；契约含三参数 |
 
 ## 远程传输标准实现与作用域隔离（S146，2026-11-18）
 
@@ -1230,7 +1233,7 @@ voiceId 必须按作用域隔离，否则静默污染（错归进引擎幂等域
 |---|---|---|
 | S146-1 | 标准握手 | `initialize` 响应头下发 `mcp-session-id`；带该头调用工具成功；两次握手得到不同会话且互不干扰 |
 | S146-2 | 厂商兼容 | 官方 SDK 客户端、旧协议（2024-11-05）、不带 `Accept` 头、裸 HTTP 不握手（兜底放行且可连续多次）、无 session 直调 五类均可接入 |
-| S146-3 | 能力对齐 | `enabled_tools(remote=True) == enabled_tools(remote=False)`；`REMOTE_WITHHELD == ()` |
+| S146-3 | 能力对齐 | 远程面 = 本地 − `{vod_packs_configure}`（`REMOTE_WITHHELD == ("vod_packs_configure",)`）；draft/commit/list_submitted 等在远程面均可用，仅进程内开关摘除 |
 | S146-4 | 作用域隔离 | 不同会话/agent → 不同 key（`sess:`/`agent:` 前缀分工），A 的记忆不泄漏给 B；无标识 → `key=None` 且**读写皆禁用**（宁可多问，不可错归） |
 | S146-5 | 产品优先级 | 请求级 product 优先于安装绑定；两者皆空走原话归因 + 问用户；**共用远程进程下 `product_prior=False`**（安装先验禁用，防多租户错归） |
 | S146-6 | 粒度与身份正交 | `scope.grain`(process/request) 与 `scope.id_source`(proc/proc_home/sess/agent) 分别成列，不压成一个字段 |
@@ -1584,7 +1587,7 @@ hermes config / **机器级 state**）任一漂移 → `[S143] 测试写到了�
 | S145-11 | `.migrated` 防回灌 | 迁移后手工删 state/runtime → 再调迁移不复活旧文件（`migrated=false`，state 仍为空） |
 | S145-12 | runtime 显式 key 不降级 | runtime 里 tier≠anonymous 的 `auth init` key 被拒 → `source=runtime-key`、`verified=false`、领取调用 0 次、key 不被覆盖 |
 | S145-13 | 远程面与本地同效果（身份） | 远程 HTTP 面：带 Bearer → `source=request`、不代领；不带 → 领/复用机器级匿名令牌并完成提交（引擎 401→领令牌→重试 200） |
-| S145-14 | 远程面工具面~~收窄~~**对齐** | ~~`enabled_tools(remote=True)` = 本地 − `{vod_packs_configure}`~~ → **2026-11-18 D-scope-1：两者完全相等**（`REMOTE_WITHHELD = ()`）；draft/commit/list_submitted 均在；`vod_packs_configure` 亦在（stateful 下会话内开关有效） |
+| S145-14 | 远程面工具面收窄 | `enabled_tools(remote=True)` = 本地 − `{vod_packs_configure}`；2026-11-18 D-scope-1 曾短暂清零（以为 stateful 后按会话隔离），同日真机双会话实测推翻：所有会话共用一个 `Server`、`packs._RUNTIME` 模块级全局，A disable 会影响 B（12→8），故**维持摘除**；draft/commit/list_submitted 均在远程面 |
 | S145-15 | 草稿按宿主隔离 | A 的草稿 B 提交 → `-32011`「不属于当前客户端」；A 自己提交成功且 `twoPhase=true`；旧草稿无 owner 兼容放行 |
 | S145-16 | 安装先验需自指证据 | 装着 `--product=CodeArts`，原话「导出太慢了」无自指 → `source=unknown`（转去问用户）；不得凭先验归因 |
 | S145-17 | 自指时先验成立 | 原话「你们这个产品导出太慢了」→ `source=install_binding`、`product=31`、`evidence=[{reason:self-reference, alias, snippet}]` 可回指 |

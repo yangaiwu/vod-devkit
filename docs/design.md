@@ -731,8 +731,8 @@ test/remote-mcp-server.test.ts 是参照物），只在我们有身份/写面的
 | 启动 | 同一二进制 `--transport remote --port 9528 --host 127.0.0.1` | `vod-devkit serve --transport remote --port 9528 --host 127.0.0.1`（bin 透传） |
 | 传输 | 官方 SDK Streamable HTTP，stateless + jsonResponse | **官方 Python SDK 标准 stateful**：`StreamableHTTPSessionManager(json_response=True, stateless=False, session_idle_timeout=30*60)`（2026-11-18 D-scope-1 起；此前 stateless=True 属简化形态） |
 | 方法契约 | POST 进传输；GET 405；OPTIONS 204 + ACAO:*；通知 202；坏 JSON 400 | 同（逐条测试钉死）；`Accept` 必须含 `application/json`——只给 `text/event-stream` 的客户端按 jsonResponse 模式回 406（与 devkit 同） |
-| 会话 | 无会话（stateless） | **标准会话**：initialize 下发 `mcp-session-id`，客户端后续请求回传；会话跨请求存活、按会话隔离（记忆/计数/nonce 作用域即会话） |
-| 工具面门控 | remoteSurface 摘掉 secrets 包 + 本地写工具 | **与 stdio 完全一致，`REMOTE_WITHHELD = ()`**（2026-11-18 D-scope-1：旧理由是「HTTP 无会话、开关下一请求消失」，随 stateful 落地失效） |
+| 会话 | 无会话（stateless） | **标准会话**：initialize 下发 `mcp-session-id`，客户端后续请求回传；会话跨请求存活，**记忆/计数/nonce 按会话隔离**（`_resolve_scope` 的 `sess:` 前缀即会话）。注意：**工具面不随会话隔离**——本 SDK 版本所有会话共用同一个 `Server` 实例，`packs._RUNTIME` 是模块级全局，一个会话 disable 能力包会摘掉同进程内所有 agent 的工具 |
+| 工具面门控 | remoteSurface 摘掉 secrets 包 + 本地写工具 | **与 stdio 只差一个 `vod_packs_configure`**：`REMOTE_WITHHELD = ("vod_packs_configure",)`（2026-11-18 D-scope-1 二次修正）。stateful 解决了「开关跨请求存活」，但没解决「多会话共用一个 Server 互相影响」——一条调用即可摘掉同进程所有 agent 的采集能力，故继续摘除。逐会话工具面当前 SDK 做不到
 | instructions | remote 版不给 skillRoot，教 retrieve_skill | 同；`vod_retrieve_skill` 在远程面不返回 path，`vod_list_skills` 不返回 skillsDir |
 | 身份 | 不管（凭据在服务器本机文件） | **请求头 Authorization 逐请求注入优先**；无 Bearer 时与本地同链领/复用机器级匿名令牌（2026-11-16 修订） |
 | 鉴权 | 无，README 警告别公开 | 无内建鉴权（同），默认回环 + 反代承担 TLS / 身份 |
@@ -744,7 +744,8 @@ test/remote-mcp-server.test.ts 是参照物），只在我们有身份/写面的
 
 承载：`vod_mcp/transport_remote.py`（HTTP 外壳 + ASGI 适配层 + 无会话兜底）、
 `vod_mcp/remote_app.py`（SDK Server 与工具面/instructions/_req_scope）、
-`vod_mcp/guardrails.py`（护栏唯一实现，两面共用）、`packs.REMOTE_WITHHELD`（现为空）、
+`vod_mcp/guardrails.py`（护栏唯一实现，两面共用）、`packs.REMOTE_WITHHELD`（现为
+`("vod_packs_configure",)`，逐会话工具面当前 SDK 做不到）、
 `runtime_state._resolve_scope`（统一作用域：请求级 agent_id > 宿主 name > 进程 nonce > 无标识降级）、
 `tools._REQ_KEY/_SERVER_FACE`（逐请求身份）、
 tests/test_remote_transport.py + tests/test_mcp_standard_transport.py（标准/厂商兼容 13 例）。
@@ -1163,8 +1164,10 @@ cache 内 .mcp.json 被改写成 `python3` 绝对路径 + `payloads/0.5.9/vod_mc
 `handle()` 因此允许返回 list，`main()` 逐条写出——这是全仓唯一会主动向客户端发消息的位置。
 capabilities 必须声明 `tools.listChanged=true`，否则合规客户端不会重拉 `tools/list`。
 
-**远程面摘除**：`REMOTE_WITHHELD` 加该工具。理由不是"安全"而是语义：HTTP 面每请求现造
-server、无会话，开关写完下一个请求就没了（"以为改了其实没改"）。dsh 壳同理不提供。
+**远程面摘除**：`REMOTE_WITHHELD` 加该工具。理由不是"安全"而是语义：即使 stateful 下
+开关能跨请求存活，本 SDK 版本所有会话共用同一个 `Server`、`packs._RUNTIME` 是模块级全局，
+一个会话 disable 会摘掉同进程内所有 agent 的工具（真机两会话实测：A disable collect 后
+B 的 `tools/list` 从 12 降到 8）。留一个"改了就影响别人"的开关比摘掉更危险。dsh 壳同理不提供。
 
 ## doctor 出站面：代理与引擎可达（D-doctor-egress-1，2026-11-16）
 

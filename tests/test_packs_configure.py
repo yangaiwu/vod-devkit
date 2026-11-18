@@ -155,16 +155,18 @@ def test_s133_stdio_writes_notification_as_its_own_line(tmp_path):
     assert "vod_submit_voices" not in names, "通知之后的 tools/list 必须反映新区面"
 
 
-def test_s133_remote_surface_keeps_the_switch():
-    """远程面**保留**会话内开关（2026-11-18 D-scope-1 起）。
+def test_s133_remote_surface_withholds_the_switch():
+    """远程面摘除会话内开关（真机 v2 结论，2026-11-18）。
 
-    旧口径（已废）认为「HTTP 每请求现造 server，开关无意义」；标准 stateful 传输
-    落地后会话跨请求存活，开关有效且按会话隔离，故不再摘除。
+    本轮曾因 "stateful 后按会话隔离" 恢复过它，但探针实锤：所有会话共用同一个
+    Server 实例 + packs._RUNTIME 模块级全局 → 一个会话改开关，全进程工具面跟着变。
+    逐会话工具面在当前 SDK 下做不到，故维持摘除（否则任何人一条调用即可摘掉
+    同进程所有 agent 的采集能力）。
     """
-    assert packs.REMOTE_WITHHELD == (), "远程面不应摘除任何工具（能力对齐 stdio）"
+    assert "vod_packs_configure" in packs.REMOTE_WITHHELD
     spec_names = [t["name"] for t in
                   tools.tool_specs(packs.enabled_tools(remote=True))]
-    assert "vod_packs_configure" in spec_names, "stateful 下会话内开关必须可用"
+    assert "vod_packs_configure" not in spec_names, "进程级开关不得在远程面暴露"
 
 
 def test_s133_contract_has_the_tool():

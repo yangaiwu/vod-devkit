@@ -192,18 +192,25 @@ def test_compat_vendor_sideless_multiple_calls(remote):
 
 
 # ── ③ 双形态能力对齐（不阉割）────────────────────────────────────────
-def test_tool_parity_stdio_vs_remote():
-    """stdio 与 remote 工具集必须完全一致 —— 传输形态不同不代表能力不同。"""
+def test_tool_parity_except_packs_switch():
+    """remote 与 stdio 只差 vod_packs_configure，其余完全一致。
+
+    2026-11-18 真机探针实锤：本 SDK 版本所有会话共用同一个 Server 实例，
+    且 packs._RUNTIME 是模块级全局 → 会话 A 关掉 collect，会话 B 的 tools/list
+    立刻跟着变。即"逐会话工具面"做不到，恢复该工具等于让任何人一条调用摘掉
+    同进程所有 agent 的采集能力。故维持摘除。
+    """
     stdio = set(_packs.enabled_tools(remote=False))
     rem = set(_packs.enabled_tools(remote=True))
-    assert stdio == rem, f"远程面阉割了能力：缺 {stdio - rem}"
-    assert "vod_packs_configure" in rem, "会话内开关必须保留（stateful 下已可实现）"
+    assert rem == stdio - {"vod_packs_configure"}, (
+        f"差异应只有 packs_configure，实得 {sorted(stdio ^ rem)}")
+    assert {"vod_draft_voices", "vod_commit_voices", "vod_list_submitted"} <= rem
 
 
-def test_remote_withheld_is_empty():
-    """REMOTE_WITHHELD 必须为空：范围收窄只能是为了正确性，不能是阉割。"""
-    assert _packs.REMOTE_WITHHELD == (), (
-        f"远程面不应再摘除工具，实得 {_packs.REMOTE_WITHHELD}")
+def test_remote_withheld_is_exactly_packs_switch():
+    """摘除范围只能是"进程级、会影响所有会话"的那一个工具。"""
+    assert _packs.REMOTE_WITHHELD == ("vod_packs_configure",), (
+        f"实得 {_packs.REMOTE_WITHHELD}")
 
 
 # ── ④ 作用域降级语义 ────────────────────────────────────────────────

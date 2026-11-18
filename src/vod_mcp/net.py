@@ -118,6 +118,7 @@ def _load_meta(force: bool = False) -> dict:
                 "catalog": cache["data"].get("productCatalog") or [],
                 "dictVersion": cache["data"].get("dictVersion"),
                 "stale": False, "source": "cache"}
+    auth_failed = False
     try:
         out = _http("GET", _META_PATH, None, base=_java_base(), key=_eff_key(), timeout=10)
         data = out.get("data") or {}
@@ -127,14 +128,17 @@ def _load_meta(force: bool = False) -> dict:
                     "catalog": data.get("productCatalog") or [],
                     "dictVersion": data.get("dictVersion"),
                     "stale": False, "source": "meta"}
-    except ToolError:
-        pass
+    except ToolError as e:
+        # D-meta-anon-1：只有 401（已归一为 -32012）才值得走匿名领取链。
+        # 网络不可达/超时时若也去领令牌，等于再等 15s 且失败不写缓存 →
+        # 每次 collect 调用重复这 25s（引擎抖动时把采集拖垮）。非鉴权错误
+        # 直接落快照，把"引擎不可达"如实暴露，不伪装成"没 key"。
+        auth_failed = (e.code == -32012)
     # D-meta-anon-1（2026-11-18 真机实锤，与 dsh 侧同构）：未配 key 的默认形态下
-    # meta 请求先于「提交遇 401 才领令牌」发生 → 401 → 上面 except 吞掉 → 名录恒空
-    # → 产品归因必失败（needsProductAsk），且领令牌要提交成功、提交成功要归因成功
-    # → 默认形态下一条声音都提交不了。修法：401 先领匿名令牌，带 key 重试一次。
-    key = _eff_key()
-    if not key:
+    # meta 请求先于「提交遇 401 才领令牌」发生 → 401 → 名录恒空 → 归因必失败
+    # → 而领令牌要提交成功、提交成功要归因成功 → 默认形态下一条声音都提交不了。
+    # 修法：401 先领匿名令牌，带 key 重试一次。
+    if auth_failed and not _eff_key():
         token = _fetch_anon_token()
         if token:
             try:

@@ -2637,12 +2637,19 @@ DSH 那段的真实损失不是「没把人拉回来」，而是**那 5 分钟�
 1. **回归 MCP 标准 stateful 传输**（不自造一套）。
    `stateless=True` 本是简化形态，代价是偏离标准 + 无会话标识。改为
    `stateless=False, session_idle_timeout=30*60`：initialize 下发 `mcp-session-id`，
-   客户端后续请求回传，会话跨请求存活并按会话隔离。**外部对接按标准实现方能互操作。**
+   客户端后续请求回传，会话跨请求存活；**记忆/计数/nonce 按会话隔离**（工具面不随之隔离，
+   见决策 2）。**外部对接按标准实现方能互操作。**
 
-2. **stdio 与 remote 工具面完全一致，不阉割能力**。
-   `REMOTE_WITHHELD = ()`（原为 `("vod_packs_configure",)`）。旧摘除理由是
-   「HTTP 每请求现造 server、无会话，开关下一请求消失、多 agent 互相影响」——
-   该前提随 stateful 落地失效，故恢复。传输形态不同 ≠ 能力不同。
+2. **工具面不阉割能力，只留一个进程内开关例外**。
+   `REMOTE_WITHHELD = ("vod_packs_configure",)`。
+   ~~原写法：`REMOTE_WITHHELD = ()`（2026-11-18 D-scope-1 首次判定）~~ → **同日二次修正收回**：
+   真机双会话实测（真 RemoteRuntime + 两个真会话）——session A 调
+   `vod_packs_configure {disable:[collect]}` 得 `removed:[collect]`，随后 session B 的
+   `tools/list` 从 12 降到 8，`vod_submit_voices` 消失。根因：本 SDK 版本所有会话**共用同一个
+   `Server` 实例**（`build_server` 只在启动时调一次），`packs._RUNTIME` 是**模块级全局**。
+   stateful 只解决了「开关跨请求存活」，没解决「多 agent 共用进程互相影响」——恰是当初摘除的
+   后半句理由，且危害升级为「任何能连端口的一方一条调用即可摘掉所有人的采集能力」。
+   **结论：继续摘除；逐会话工具面在当前 SDK 下做不到，不得按 per-session 写文档。**
 
 3. **作用域单一入口 `_resolve_scope`**，三种部署共用。粒度与身份来源是正交两维：
    - 显式 agent 头 → `agent:<id>`（身份级，跨会话共享记忆）

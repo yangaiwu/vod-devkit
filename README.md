@@ -431,8 +431,9 @@ python -m vod_mcp.server --transport remote --port 9528 --host 127.0.0.1
 
 ### 远程面的通用约束（模式 ②③）
 
-- **工具面与 stdio 完全一致**（含 `vod_packs_configure`，数量以运行期 `tools/list` 为准）。会话内
-  开关在 stateful 下有效且按会话隔离；两段式草稿与本机账本同样可用——草稿按
+- **工具面 = stdio 减去 `vod_packs_configure`**（该工具是进程内开关，远端所有会话共用一个
+  `Server`、包状态是模块级全局，一个会话 disable 会摘掉同进程其他 agent 的工具，故不提供；
+  数量以运行期 `tools/list` 为准）。两段式草稿与本机账本同样可用——草稿按
   宿主隔离（`owner`），A 的草稿 B 提交会被拒（`-32011`）。
 - **身份**：请求头 Bearer 优先；没有时与本地同链，用机器级匿名令牌。
 - token 承载：hermes 走 env `MCP_VOD_DEVKIT_API_KEY`（配置里只留 `${...}` 引用）；
@@ -470,7 +471,7 @@ python -m vod_mcp.server --transport remote --port 9528 --host 127.0.0.1
 | vod_auth_status | core | 只读 | key 指纹化自检 + 三步引导（无 key 可跑） |
 | vod_auth_ensure | core | 写（身份） | 判定 + 领取匿名令牌（幂等；唯一有副作用的认证工具） |
 | vod_search_products | core | 只读 | 名录检索（含主键 ID）：问用户"是哪个产品"前给候选 |
-| vod_packs_configure | core | 写（会话内） | 会话内开关能力包；**stdio 与 remote 均提供**（remote 走标准会话，按会话隔离，2026-11-18 D-scope-1 起不再摘除） |
+| vod_packs_configure | core | 写（会话内） | 会话内开关能力包；**仅 stdio 提供，remote 不提供**（远端所有会话共用一个 `Server`、包状态是模块级全局，一个会话 disable 会摘掉同进程其他 agent 的工具，2026-11-18 二次修正起继续摘除） |
 | vod_check_update | core | 只读 | registry latest（24h 缓存 / 失败静默）；只提醒不升级 |
 | vod_list_skills / vod_retrieve_skill | knowledge | 只读 | 领域规则技能披露（pack 裁剪即拒绝并给恢复命令） |
 
