@@ -18,6 +18,21 @@ from vod_mcp.host_adapters.base import server_env, server_entry
 
 HOST = "hermes"
 SUPPORTS_REMOTE = True
+
+
+def _verifier():
+    """供 host_verify 取"本宿主的安装态"（ARCH-DEP-01：打断 hermes ↔ host_verify 环）。
+
+    host_verify 不反向 import 本模块；它从登记点取这个函数，因此依赖方向单向。
+    """
+    return mcp_entry_state(), _spec().get("profileConfig")
+
+
+from vod_mcp.host_adapters import host_verify as _host_verify  # noqa: E402
+
+_host_verify.register_verifier(HOST, _verifier)
+
+
 def _hermes_home() -> Path | None:
     """HERMES_HOME 显式给定时就是宿主根（hermes CLI 只认它，不认 HOME）。"""
     env = (os.environ.get("HERMES_HOME") or "").strip()

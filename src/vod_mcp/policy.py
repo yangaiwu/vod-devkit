@@ -11,10 +11,82 @@ from vod_mcp import paths
 
 _POLICY_PATH = paths.POLICY
 
+# 装载失败/规则非法时的占位策略：rules 为空 + broken 记录原因。
+# 语义是 **fail-closed**（guardrails 见到 broken 一律 deny），不是 fail-open。
+_BROKEN_POLICY = {"rules": [], "broken": None, "brokenRule": None}
+
+_SEVERITIES = ("deny", "confirm")
+
 
 def load_policy() -> dict:
+    """严格装载（规则文件坏了就抛）——给"我要确认 policy 是好的"的调用方用。
+
+    工具调用路径不要用它：那会把一个可修复的配置问题升级成进程级不可用。
+    改用 `try_load_policy()`（fail-closed）。
+    """
     with open(_POLICY_PATH, encoding="utf-8") as f:
-        return json.load(f)
+        pol = json.load(f)
+    bad = _validate(pol)
+    if bad:
+        raise ValueError(f"policy 规则非法（{bad[0]}）：{bad[1]}")
+    return pol
+
+
+def _validate(policy: dict) -> tuple | None:
+    """结构校验：返回 (rule_id, 原因) 或 None。
+
+    键集合必须与消费点一一对应，否则"校验过了代码照样 KeyError"：
+    `:28 rule["match"]` / `:87 m["regex"]` / `:96 r["severity"]` / `:98/99 message`。
+    """
+    rules = policy.get("rules")
+    if not isinstance(rules, list):
+        return ("<policy>", "rules 必须是数组")
+    for i, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            return (f"rules[{i}]", "规则必须是对象")
+        rid = rule.get("id")
+        if not isinstance(rid, str) or not rid:
+            return (f"rules[{i}]", "缺 id（报错与 explain 要靠它定位）")
+        if rule.get("severity") not in _SEVERITIES:
+            return (rid, f"severity 必须是 {'/'.join(_SEVERITIES)}，实际 {rule.get('severity')!r}")
+        if not isinstance(rule.get("message"), str):
+            return (rid, "缺 message（deny 时要展示给用户）")
+        m = rule.get("match")
+        if not isinstance(m, dict):
+            return (rid, "缺 match 对象")
+        if "field" in m:
+            if m["field"] != "text":
+                return (rid, f"未知 field {m['field']!r}（目前只支持 text）")
+            regex = m.get("regex")
+            if not isinstance(regex, str) or not regex:
+                return (rid, "field=text 必须给 regex")
+            try:
+                re.compile(regex)
+            except re.error as e:
+                return (rid, f"regex 编译失败：{e}")
+        elif "tool" in m:
+            if "equals" not in m and "gt" not in m and "notIn" not in m:
+                return (rid, "match.tool 必须给 equals/gt/notIn 之一（否则规则恒真）")
+        else:
+            return (rid, "match 必须含 tool 或 field")
+    return None
+
+
+def try_load_policy() -> dict:
+    """容错装载：**永不抛**，失败时返回带 `broken` 原因的占位策略。
+
+    调用方（guardrails）见到 `broken` 非空必须 deny —— 护栏坏了等于没有护栏，
+    "放行"是最差的处理（会把本该拦的写操作放出去）。
+    """
+    try:
+        with open(_POLICY_PATH, encoding="utf-8") as f:
+            pol = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        return {**_BROKEN_POLICY, "broken": f"{type(e).__name__}: {e}（{_POLICY_PATH}）"}
+    bad = _validate(pol)
+    if bad:
+        return {**_BROKEN_POLICY, "broken": f"规则 {bad[0]} 非法：{bad[1]}", "brokenRule": bad[0]}
+    return pol
 
 
 def _resolve_ref(policy: dict, value):

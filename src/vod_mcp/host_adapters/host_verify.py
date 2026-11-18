@@ -17,9 +17,22 @@ doctor 不查 configPath，于是出现「install rc=0 + doctor OK，工具却�
   - codex 不在此（已由 doctor 的 `.mcp.json` 形态三分类 `plugin_mcp_form()` 判）；
     同一宿主两套判据必然长成「一侧 OK 一侧 DRIFT」，所以这里不重复报。
   - generic：配置路径由 `--mcp-config` 现给，没有稳定 spec，留待单独的「显式路径」判据。
+
+依赖方向（ARCH-DEP-01，2026-11-19 走查）：**本模块不许反向 import 具体适配器**。
+适配器在降级分支里要的是"我自己的核验结论"，走下面的注入点登记取值函数
+（此前 `_hermes_problems` 函数内 import hermes，与 `hermes.py` 函数内 import
+本模块互为依赖，环只被"函数内 import"撑着）。
 """
 import json
 from pathlib import Path
+
+# 宿主 → 取值函数（由各适配器在 import 期调用 register_verifier 登记）
+_VERIFIERS: dict = {}
+
+
+def register_verifier(host: str, fn) -> None:
+    """供适配器登记"怎么取我自己的安装态"。重复登记以最后一次为准（幂等重载）。"""
+    _VERIFIERS[host] = fn
 
 SUPPORTED = ("hermes", "opencode", "atomcode", "workbuddy", "codeartswork", "codeartsdoer")
 
@@ -47,10 +60,23 @@ def problems(host: str, *, degraded: bool = False) -> list:
 
 
 def _hermes_problems(*, degraded: bool) -> list:
-    from vod_mcp.host_adapters import hermes
-
-    st = hermes.mcp_entry_state()
-    cfg = hermes._spec().get("profileConfig")
+    # ARCH-DEP-01：取值函数由 hermes 模块在 import 期登记（本模块不反向 import 它）。
+    # getter 未登记 ≠ 不可用：doctor 冷启动时 hermes 还没被加载过。这里按需 import 一次
+    # （经 `get()` 走惰性注册表，probe 语义与"读本身即为可达性检查"一致），
+    # 真加载不到才如实报"判不了"，不静默返回 OK。
+    getter = _VERIFIERS.get("hermes")
+    if getter is None:
+        try:
+            from vod_mcp.host_adapters import get as _ha_get
+            _ha_get("hermes")                       # 触发 import 期登记
+        except Exception:      # noqa: BLE001  宿主适配器缺失（载荷裁剪）：如实报
+            return [{"code": "unverifiable", "target": "hermes",
+                     "message": "hermes 适配器不可用（无核验入口）——重跑 install --target hermes"}]
+        getter = _VERIFIERS.get("hermes")
+    if getter is None:
+        return [{"code": "unverifiable", "target": "hermes",
+                 "message": "hermes 适配器未登记核验入口——重跑 install --target hermes"}]
+    st, cfg = getter()
     if not st["present"]:
         code = "missing" if degraded else "no-entry"
         tail = ("手工把 <vod-devkit 备片> 并入该配置的 mcp_servers（无 CLI 时安装器只写备片）"
@@ -82,11 +108,11 @@ def _entry_server_path(entry: dict) -> str:
 
 def _json_problems(host: str, *, degraded: bool) -> list:
     from vod_mcp import hosts as host_specs
-    from vod_mcp.host_adapters import REGISTRY
+    from vod_mcp.host_adapters import get as _ha_get
 
     section, _ = _JSON_HOSTS[host]
     try:
-        mod = REGISTRY[host]
+        mod = _ha_get(host)              # ARCH-DEP-02：惰性注册表只存名字，取模块要过 get()
         # 落点必须与 install 同一来源（codeartswork 有新旧目录之分）
         cfg = (mod.config_path() if hasattr(mod, "config_path")
                else Path(host_specs.load(host)["configPath"]))

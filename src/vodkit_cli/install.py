@@ -26,6 +26,19 @@ from vodkit_cli import common, remote
 KNOWN_TARGETS = tuple(sorted(HOST_ADAPTERS)) + ("generic",)
 
 
+def _adapter_for(target: str):
+    """惰性注册表 → 适配器模块（ARCH-DEP-02）。
+
+    `REGISTRY` 现在只存模块名字符串（急切聚合导入会让误引 host_adapters 变成远程面
+    每请求 500），所以取模块要过 `host_adapters.get()`；未知 target 返回 None
+    （由调用方给"不支持目标"提示）。测试仍可 monkeypatch 本模块的 `HOST_ADAPTERS` 为空。
+    """
+    if target not in HOST_ADAPTERS:
+        return None
+    from vod_mcp.host_adapters import get as _ha_get
+    return _ha_get(target)
+
+
 def _is_tty() -> bool:
     """交互判定：stdin 与 stdout 都是终端才问（重定向/CI 一律不猜）。"""
     try:
@@ -178,7 +191,7 @@ def cmd_install(args):
                 print(f"探测到宿主: {', '.join(picked_list)}")
                 _install_many(picked_list, args)
                 return
-    adapter = HOST_ADAPTERS.get(target)
+    adapter = _adapter_for(target)                # ARCH-DEP-02：惰性注册表→模块对象
     if adapter is None:
         g = [(h["id"], h["config"]) for h in generic_host.detect_known()]
         hint = ("\n  探测到通用 MCP 宿主：" + "；".join(f"{i}（{c}）" for i, c in g)
@@ -370,7 +383,7 @@ def _install_skills(target: str, packs: str, args, profile: str | None = None):
     # ~/.config/opencode/skills/ 并经 skill 工具按需加载——此前安装器漏拷，
     # opencode 只有工具描述一条约束通道，话术类约束全部失效）
     extra_dirs = []  # [(host, Path)]
-    adapter = HOST_ADAPTERS.get(target)
+    adapter = _adapter_for(target)                # ARCH-DEP-02：惰性注册表→模块对象
     dst = adapter.skills_dir(args) if adapter and target != "hermes" else None
     if dst is not None:
         dst.mkdir(parents=True, exist_ok=True)

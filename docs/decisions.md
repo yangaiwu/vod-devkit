@@ -2786,3 +2786,49 @@ runtime 后第一发就 404「Session not found」（会话归属 manager 的 `_
 
 **Falsifier**：若 SDK 提供 stateless 旁路（同一 manager 内按请求分流），哨兵可去掉；
 若平台侧改为统一签名身份，⑥ 的格式约束可升级为强校验。
+
+## D-arch-remediation-1 五维走查整改：P0 两条 + 三条被证实放大的放大器（2026-11-19）
+
+台账 `docs/architecture-defects.md`（PR #23，32 条）落地第一批。每项纪律：**先写红用例
+→ 再改实现 → 门禁反向验证（人为弄坏确认真的红）**。
+
+- [x] **ARCH-ERR-01/02 护栏 fail-closed**：`policy.try_load_policy()` 永不抛，装载失败/
+  规则非法返回带 `broken` 的占位策略，`guardrails.check` 见到即 `deny` + **新码 -32017**。
+  `server.py` 主循环加兜底 try（返回 -32603 且落日志），进程不再被坏 policy 打死。
+  **决策**：**新开 -32017**，与 -32010（缺产品）分开——两者处置动作不同（修 policy 后重启
+  vs 去问产品），混用会把排障引向错误方向。
+  **为什么不复用 -32013**（2026-11-19 二次修正）：-32013 是**已废除的归因拦截码**
+  （`decisions.md:87`、`design.md:140`、`safety-model.md:33`、`proposal.md:135/168` 四处记载）。
+  它"零 raise 点"不是空位，而是策略被推翻后的结果；复用等于在同一码位上叠加无关语义，
+  且违反"决策只追加不删"——旧文档描述的 -32013 会与新代码打架。旧码字面零改动。
+  **Falsifier**：若平台侧已在 -32017 段投产其它语义（-32020.. 段已规划上游映射），
+  或引擎侧错误码表占用该值，则换到下一个空位。
+- [x] **ARCH-CFG-01 pending 私有化**：`append_entry` 用 `os.open(..., 0o600)` 新建（不留
+  0644 窗口）+ 写后 stat 回验；历史宽权限文件在下次写入时收紧（**只收紧不放宽**）；
+  WSL/drvfs 忽略 chmod 时只告警不阻断。
+- [x] **ARCH-CFG-03 原子写单源**：`runtime_state._write_cfg_unlocked` 改调
+  `paths.atomic_write_text`（补 fsync + 软链解析 + 只读保护）；`pending.save_entries` 同源。
+  门禁：`tests/test_runtime_atomic_single.py::test_single_atomic_writer`（AST 断言
+  `os.replace(` 只出现在 `paths.py`）。
+- [x] **ARCH-ERR-04 主链三点留痕**：日志出口失败改 stderr 兜底；坏 `runtime.json` 用
+  `_warn` 告警（**延迟绑定**：该函数在 import 期即被调用，那时 `_warn` 尚未定义）；
+  领匿名令牌失败记 code+原因。
+- [x] **ARCH-DEP-01 破两处环**：① `_SERVER_FACE` 真源抽到零依赖的
+  `vod_mcp/server_face.py`，`net` 与 `runtime_state` 都顶层引用；② `host_verify` 新增
+  `register_verifier()` 注入点，`hermes` 在 import 期登记取值函数（台账漏记的
+  `hermes ↔ host_verify` 环）。门禁 `tests/test_import_graph.py`（AST 建图 + Tarjan SCC，
+  **含函数内 import**）。
+  ⚠️ 踩坑写进注释：`_is_remote_face` 若只看 `server_face` 的快照会与
+  `net._SERVER_FACE` 的 monkeypatch 桩不一致（三条远程面作用域用例变红），故读取入口
+  统一走 `server_face.is_remote()`，它每次现取 net 的实时绑定。
+- [x] **ARCH-DEP-02 host_adapters 惰性注册**：`REGISTRY` 只存模块名，`get()` 走
+  `importlib`；`KeyError` 语义不变；门禁 `test_registry_is_lazy`（子进程验证导入后
+  `sys.modules` 无宿主子模块）。
+- [x] **台账自身三处要修**（本轮实测确认，见 `architecture-defects.md` 附录 10.2/10.3）：
+  ① 附录 10.2 的 `ast` 脚本模块名切错（`str(p)[4:-3]` → `od_mcp.x`），**永远匹配不上、
+  跑出"无环"**，以新用例为准；② DEP-01 漏记 `hermes ↔ host_verify`；③ 附录 10.3 的
+  HEAD 对比行在 `ba48d9d` 上已不成立（`build-info.json` 就等于 HEAD）。
+
+**验证**：全量 `pytest` **1030 passed / 0 failed**（`-p no:randomly`，含 golden 未重录）；
+`pyflakes` 0；`mypy` 52 文件 0 issue；`verify_copies` 四目录一致；`secret_scan` OK；
+`sync_case_roster --check` OK。**未发版**：版本仍 0.5.44。

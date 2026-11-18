@@ -6,17 +6,38 @@
 """
 from pathlib import Path
 
-from vod_mcp.host_adapters import REGISTRY
+from vod_mcp.host_adapters import REGISTRY, get as get_adapter
 
 ROOT = Path(__file__).resolve().parent.parent
 BIN = (ROOT / "bin" / "vod-devkit").read_text(encoding="utf-8")
 
 
 def test_every_registered_adapter_implements_protocol():
-    for host, mod in REGISTRY.items():
+    # ARCH-DEP-02：REGISTRY 改成惰性表后值是模块名（字符串），协议检查要走 get()
+    # ——它返回的仍是模块对象，三件事一条不少（这条用例守的东西没变，只是取法变了）。
+    for host in REGISTRY:
+        mod = get_adapter(host)
         assert mod.HOST == host, f"{host}: HOST 与注册键不一致（{mod.HOST}）"
         for attr in ("install", "install_remote", "skills_dir"):
             assert callable(getattr(mod, attr, None)), f"{host} 缺 {attr}"
+
+
+def test_registry_is_lazy():
+    """ARCH-DEP-02：导入 host_adapters 不许连带导入任何宿主子模块。
+
+    急切聚合导入会让"误引 host_adapters"变成远程面每请求 500（载荷副本不含
+    integrations/，2026-11-12 实锤），单改一个适配器也要拖进 12 个模块。
+    """
+    import subprocess
+    import sys
+    code = ("import sys; import vod_mcp.host_adapters as ha;"
+            "print('|'.join(sorted(m for m in sys.modules"
+            " if m.startswith('vod_mcp.host_adapters.'))))")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                       cwd=str(ROOT), env={"PYTHONPATH": str(ROOT / "src"), "PATH": "/usr/bin:/bin"})
+    assert r.returncode == 0, r.stderr[-400:]
+    loaded = [m for m in r.stdout.strip().split("|") if m]
+    assert not loaded, f"REGISTRY 又变回急切导入了：{loaded}"
 
 
 def test_supported_hosts_match_integrations_or_are_generic():

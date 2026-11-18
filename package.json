@@ -48,6 +48,7 @@
     "src/vod_mcp/runtime.example.json",
     "src/vod_mcp/runtime_state.py",
     "src/vod_mcp/server.py",
+    "src/vod_mcp/server_face.py",
     "src/vod_mcp/skills_registry.py",
     "src/vod_mcp/tools.py",
     "src/vod_mcp/transport_remote.py",

@@ -12,12 +12,16 @@ import urllib.request
 
 from vod_mcp import DEFAULT_JAVA_BASE
 from vod_mcp import runtime_state as rt
+from vod_mcp import server_face
 
 
 _REQ_KEY = contextvars.ContextVar("vod_req_key", default=None)
 
 
-_SERVER_FACE = contextvars.ContextVar("vod_server_face", default=False)
+# 传输面标志（ARCH-DEP-01，2026-11-19 走查）：真源已抽到零依赖的 `vod_mcp.server_face`。
+# 这里保留同名别名，是为了不让 `net._SERVER_FACE.set()/reset()` 与既有测试的
+# monkeypatch 失效——别名与真源是**同一个 ContextVar 对象**，不存在两份状态。
+_SERVER_FACE = server_face.SERVER_FACE
 
 # 匿名令牌代领总开关（D-token-machine-1 安全护栏）：进程级布尔，启动期由
 # transport_remote 按绑定地址决定——非回环绑定（可能被反代/公网触达）默认关闭
@@ -316,13 +320,23 @@ def _fetch_anon_token() -> str | None:
     """零字段匿名令牌（T7b 定稿）：渠道由引擎囤积入库侧固定赋值 vod-agent
     （链路即渠道，客户端不自报）——本端保持空 body（方案 C 原样）。
     D-anon-verify（2026-11-05 真机实锤）：引擎返回 ApiResponse 信封，
-    顶层取 token 恒 None → 无 key 首提必 -32012，信封解析为必经路径。"""
+    顶层取 token 恒 None → 无 key 首提必 -32012，信封解析为必经路径。
+
+    ARCH-ERR-04（2026-11-19 走查）：失败必须留痕。此前整段 `except ToolError: return None`
+    让"端点不可用/401/网络断"三种原因一起消失，调用方只看到笼统的"令牌不可用"，
+    排障只能靠猜。
+    """
     try:
         if ANON_MINT_DISABLED:
+            rt._log("anon-token: 跳过（非回环远程面未开 --allow-anon-mint）")
             return None      # 非回环远程面：不代领（调用方须自带 Bearer）
         out = _http("POST", _TOKEN_PATH, {}, base=_java_base(), key="", timeout=15)
-        return _extract_anon_token(out)
-    except ToolError:
+        token = _extract_anon_token(out)
+        if not token:
+            rt._log(f"anon-token: 响应里没有 token（信封形态可能变了）：{str(out)[:200]}")
+        return token
+    except ToolError as e:
+        rt._log(f"anon-token: 领取失败 code={e.code}：{e}")
         return None
 
 

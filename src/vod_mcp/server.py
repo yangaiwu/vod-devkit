@@ -175,7 +175,14 @@ def main():
         except json.JSONDecodeError:
             resp = _error(None, -32700, "解析错误")
         else:
-            resp = handle(message)
+            try:
+                resp = handle(message)
+            except Exception as e:     # noqa: BLE001  ARCH-ERR-01：任何未捕获异常都不许打死进程
+                # 不含 Exception 之外的 KeyboardInterrupt/SystemExit（那两个必须照常退出）
+                runtime_state._log(f"handle uncaught: {type(e).__name__}: {e}")
+                print(f"[vod-devkit] error: {type(e).__name__}: {e}", file=sys.stderr)
+                resp = _error(message.get("id") if isinstance(message, dict) else None,
+                              -32603, "内部错误（已记录日志）")
         out_msgs = resp if isinstance(resp, list) else ([resp] if resp is not None else [])
         for m in out_msgs:
             sys.stdout.write(json.dumps(m, ensure_ascii=False) + "\n")

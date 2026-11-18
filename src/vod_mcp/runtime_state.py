@@ -18,6 +18,7 @@ from pathlib import Path
 
 from vod_mcp import attribution as _attrib
 from vod_mcp import paths
+from vod_mcp import server_face
 
 
 _RT_LOCK = threading.RLock()
@@ -36,7 +37,18 @@ def _runtime_cfg() -> dict:
     if p.exists():
         try:
             return json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:      # noqa: BLE001
+            # ARCH-ERR-04（2026-11-19 走查）：读成空 dict 是既有降级行为，但必须留痕。
+            # 真实事故链：文件被写坏 → 读成空 → 重领匿名令牌 → 设备锚点漂移 →
+            # 服务端判"设备绑定校验失败"，而插件侧此前**一行日志都没有**指向"文件被写坏"。
+            # 用 _warn 而不是 _log：这一行要能被宿主与用户当场看见，与
+            # _quarantine_bad_runtime 同一出口（stderr + 日志）。
+            # ⚠️ 延迟绑定：本函数在 import 期就被 `_RT = _runtime_cfg()` 调用一次，
+            # 那时 `_warn` 还没定义 —— 直接调用会 NameError（本会话踩到过）。
+            globals().get("_warn", lambda m: None)(
+                f"runtime.json 解析失败（已隔离备份，按空配置继续）：{p} "
+                f"（{type(e).__name__}: {e}）——其中是 key/账本/设备锚点，"
+                "如出现『设备绑定校验失败』先检查本文件")
             return {}
     return {}
 
@@ -135,14 +147,14 @@ def _read_cfg_unlocked(p: Path) -> dict:
 
 
 def _write_cfg_unlocked(p: Path, cfg: dict) -> None:
-    """锁内原子写：tmp → chmod 0600 → os.replace。"""
-    tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    try:
-        os.chmod(tmp, 0o600)        # 先给权限再替换，不留 0644 窗口
-    except OSError:
-        pass
-    os.replace(tmp, p)
+    """锁内原子写：统一走 `paths.atomic_write_text`（ARCH-CFG-03 单源，2026-11-19 走查）。
+
+    此前是私有实现 `write_text` + chmod + os.replace：**无 fsync**（掉电可留 0 字节
+    runtime.json，key/账本/设备锚点一起丢），也**无**软链解析与只读保护——
+    同一个仓存在两套原子写语义，用户 chmod 444 的意图在 runtime.json 上不被尊重。
+    "写后回验权限"仍由 `_verify_perms` 负责（它验的是效果）。
+    """
+    paths.atomic_write_text(p, json.dumps(cfg, ensure_ascii=False, indent=2), mode=0o600)
 
 
 def _verify_perms(p: Path) -> None:
@@ -196,7 +208,12 @@ def _save_runtime(update: dict, replace: bool = False) -> None:
 
 def _log(line: str, path: str = "/tmp/vod_mcp_server.log") -> None:
     """统一日志出口，1MB 截断轮转
-    （D-key-guard-3⑤：客户机长期运行防无限增长；截断保留尾部近期日志）。"""
+    （D-key-guard-3⑤：客户机长期运行防无限增长；截断保留尾部近期日志）。
+
+    ARCH-ERR-04/05（2026-11-19 走查）：这是**唯一的排障真源**，所以它自己失败必须有
+    第二出口——写日志失败时往 stderr 兜底一行，不许 `pass` 掉（否则"日志出口坏了"
+    这件事本身没有痕迹，现场只能看到下游症状）。
+    """
     try:
         p = path
         if os.path.exists(p) and os.path.getsize(p) > 1024 * 1024:
@@ -207,8 +224,9 @@ def _log(line: str, path: str = "/tmp/vod_mcp_server.log") -> None:
                 f.write("== truncated ==\n" + tail)
         with open(p, "a", encoding="utf-8") as f:
             f.write(line.rstrip("\n") + "\n")
-    except Exception:
-        pass
+    except Exception as e:      # noqa: BLE001  日志失败不许打断主链，但必须留痕
+        print(f"[vod-devkit] log-fallback({path}): {line!r} ({type(e).__name__}: {e})",
+              file=sys.stderr)
 
 
 def _warn(msg: str) -> None:
@@ -433,10 +451,22 @@ def _degraded_scope(reason: str, product: str = "") -> dict:
             "degraded": True, "degraded_reason": reason}
 
 
+# 传输面标志（ARCH-DEP-01，2026-11-19 走查）：真源在零依赖的 `vod_mcp.server_face`。
+# 本模块与 `net` 都**顶层**引用它 ⇒ net ↔ runtime_state 的环消失，且两处拿到的是
+# 同一个 ContextVar 对象（`net._SERVER_FACE.set()/reset()` 与测试 monkeypatch 都有效）。
+# 此前它是"runtime_state 函数内 import net 去读"，环只被那一行撑着（提层即 ImportError
+# → MCP server 起不来，宿主表现为掉线）。
+_SERVER_FACE = server_face.SERVER_FACE
+
+
 def _is_remote_face() -> bool:
-    """当前是否远程（HTTP）面。contextvar 由传输层设置，默认 False=stdio。"""
-    from vod_mcp import net as _net
-    return bool(_net._SERVER_FACE.get())
+    """当前是否远程（HTTP）面。contextvar 由传输层设置，默认 False=stdio。
+
+    读取入口统一走零依赖的 `server_face.is_remote()`：它每次现取 `net._SERVER_FACE`
+    的当前绑定，所以 `net._SERVER_FACE.set()/reset()` 与测试 monkeypatch 都有效；
+    而本模块**顶层不 import net** ⇒ net ↔ runtime_state 之间没有 import 边（ARCH-DEP-01）。
+    """
+    return server_face.is_remote()
 
 
 def _session_key(client_info):
