@@ -4,10 +4,13 @@ VOD 用户声音采集插件 —— DeepSeek Harness (dsh) 薄壳。
 
 ## 形态
 
-- 纯采集：3 工具（`vod_submit_voices` / `vod_list_submitted` / `vod_devkit_info`）
+- 纯采集：6 工具（`vod_submit_voices` / `vod_list_submitted` / `vod_devkit_info` /
+  `vod_list_skills` / `vod_retrieve_skill` / `vod_check_update`）
+- 契约面 12 工具里其余 6 个（auth*/packs/draft/commit/search_products）是 MCP 形态专属，
+  dsh 壳不实现：宿主自带审批通道、无草稿两段式、产品由原话解析+追问承担
 - 插件=引擎客户端，只走 HTTPS（VOD external API），不 import 任何引擎模块
 - 与 vod-devkit（MCP 形态，同仓 `../vod_mcp`）语义对齐：
-  - voiceId = f(source, content, 调用级 nonce)：同调用幂等、跨调用保声量
+  - voiceId 由引擎确定性计算（S241 起删除本地 voiceId 键），回执 voiceIds 是唯一对账主键
   - 归因=运行期从用户原话解析（引擎产品名录别名，含中文/长别名），唯一命中才采信；
     优先级：字面证据 > 记忆（30 分钟）> 配置 product 先验 > 未知（引擎 UNKNOWN 池）
   - 多产品命中=歧义 → 不带 product 上送（宁可人工归因，不可错归；与 vod_mcp 同口径）

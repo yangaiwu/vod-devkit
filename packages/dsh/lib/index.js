@@ -37,6 +37,18 @@ const TOKEN_PATH = `${API_PREFIX}/external/token`;
 const LEDGER_CAP = 200;
 const PKG_VERSION = JSON.parse(readFileSync(join(PKG_DIR, 'package.json'), 'utf8')).version;
 
+// build-info.json（构建烧录）：与 vod_mcp provenance.read_build_info 同源口径。
+// dsh 是独立 npm 包（packages/dsh/），仓内形态在上一层；发布物形态可能在包内或缺失
+// → 缺失即 null，不阻断（契约 required 只要求字段存在，不要求非空）。
+function readBuildInfo() {
+    for (const p of [join(PKG_DIR, 'build-info.json'), join(PKG_DIR, '..', '..', 'build-info.json')]) {
+        try {
+            if (existsSync(p)) return JSON.parse(readFileSync(p, 'utf8'));
+        } catch (e) { /* 坏文件按缺失处理 */ }
+    }
+    return {};
+}
+
 export const Config = z.object({
     apiBase: z.string().default('https://vod-dev.topxtopx.com').volatile(),
     apiKey: z.string().default('').volatile().role('secret'),
@@ -984,7 +996,7 @@ export function apply(ctx, config) {
                 return textResult({
                     scope: 'local-machine',
                     total: subs.length,
-                    voices: subs.slice(-limit).reverse(),
+                    submissions: subs.slice(-limit).reverse(),   // 契约 required 名
                 });
             },
         },
@@ -1004,6 +1016,7 @@ export function apply(ctx, config) {
                     // 版本必须跟随包（PKG_VERSION）：写死 '0.1.0' 会让壳永远自称旧版，
                     // 真机实测就吃过这个亏（会话里工具回执报 0.1.0，误判成"装的是老壳"）。
                     version: PKG_VERSION,
+                    commitSha: readBuildInfo().commitSha ?? null,   // 契约 required
                     host: 'dsh',
                     apiBase: c.base,
                     apiKeyFingerprint: fp(c.key),
