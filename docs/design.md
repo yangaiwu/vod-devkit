@@ -47,6 +47,16 @@ full 已删。技能拷贝按 packs 过滤；manifest 记录 preset。
 1. vod_mcp 只允许 import workflow/api.py 的 HTTP 客户端，禁止 import 引擎内部模块
 2. 外部 agent 无 DB 直连路径（护栏 deny 兜底）
 3. 任务 ID（引擎任务表主键）是唯一对账主键，工具返回一律携带
+4. **`src/` 内不许有循环依赖，函数内 import 也算边**（ARCH-DEP-01，2026-11-19 走查）。
+   `tests/test_import_graph.py` 用 AST 建图（含函数内 import）+ Tarjan SCC 断言无环。
+   不许用"函数内懒导入"当破环手段：那只是把故障从 import 期推到重构期——任何一次
+   import 整理把它提到顶层就 `ImportError`，表现是 MCP server 起不来、宿主掉线，
+   而错误只有一行 traceback。真破环靠**抽零依赖真源**（如 `server_face.py`）或
+   **注入点**（如 `host_verify.register_verifier()`）。
+5. **`host_adapters.REGISTRY` 只存模块名，取模块必须过 `get()`**（ARCH-DEP-02）。
+   急切聚合导入 12 个适配器会让"误引 host_adapters"变成**远程面每请求 500**
+   （载荷副本不含 `integrations/`，2026-11-12 实锤），单改一个适配器也要拖进 12 个模块。
+   `tests/test_host_adapters.py::test_registry_is_lazy` 锁死"导入后 sys.modules 无宿主子模块"。
 
 ## 二、MCP 工具契约
 
@@ -747,7 +757,8 @@ test/remote-mcp-server.test.ts 是参照物），只在我们有身份/写面的
 `vod_mcp/guardrails.py`（护栏唯一实现，两面共用）、`packs.REMOTE_WITHHELD`（现为
 `("vod_packs_configure",)`，逐会话工具面当前 SDK 做不到）、
 `runtime_state._resolve_scope`（统一作用域：请求级 agent_id > 宿主 name > 进程 nonce > 无标识降级）、
-`tools._REQ_KEY/_SERVER_FACE`（逐请求身份）、
+`vod_mcp/server_face.py`（传输面标志的零依赖真源；`net._SERVER_FACE` 是同一 ContextVar
+的别名，`runtime_state._is_remote_face()` 经 `server_face.is_remote()` 每次现取实时绑定）、
 tests/test_remote_transport.py + tests/test_mcp_standard_transport.py（标准/厂商兼容 13 例）。
 
 ### 作用域（Scope）单一入口
@@ -1252,7 +1263,7 @@ MCP 单独部署，都共用 `<state>/runtime.json` 里的同一个 `install_non
 | 显式 | `VOD_DEVKIT_HOME`（装机由 `server_env()` 写进各宿主配置，测试写 tmp） |
 | 默认 | `~/.vod-devkit/state` |
 | 文件 | `<state>/runtime.json` + `runtime.json.lock`（flock 同目录） |
-| 权限 | 文件 0600、目录 0700（迁移与每次写都收紧） |
+| 权限 | 文件 0600、目录 0700（迁移、每次写、以及 **pending 队列**都收紧；只收紧不放宽；WSL/drvfs 忽略 chmod 时告警不阻断） |
 | 解析优先级 | `VOD_DEVKIT_HOME` > 机器级 state 已存在（存在即用）> 旧 `DIST_ROOT/vod_mcp/runtime.json`（首启兼容） |
 
 **"机器级"的准确含义**：指**该用户（服务账户）下的安装实例级**，不是操作系统级。
@@ -1296,7 +1307,9 @@ fail fast，后者被拒可重领）。
 **并发语义（明确写死，不加跨网络全局锁）**：两个宿主同时 ensure 时可能各领一枚匿名令牌
 （最后写入者生效）。不为此加覆盖"探针 + 领取"的全局锁：那段持锁最长 25s，会把其他宿主的
 账本/草稿写全堵住，代价大于收益。状态写本身是事务的（进程内 RLock + 跨进程 flock +
-tmp→`os.replace` + 0600），并发不会丢更新、不会写坏文件。
+`paths.atomic_write_text`：同目录 tmp → fsync → chmod → `os.replace`，带软链解析与
+只读目标保护；ARCH-CFG-03 起**全仓只有这一处**原子写实现，此前 runtime.json 那条私有
+路径缺 fsync，掉电可留 0 字节文件、key/账本/设备锚点一起丢），并发不会丢更新、不会写坏文件。
 
 **远程面 = 同机独立进程，与本地同效果（2026-11-16 负责人澄清）**：远程部署的实际形态是
 "同一台机器上把 MCP server 跑成一个常驻进程（127.0.0.1:9528），多个 agent 通过 HTTP 连它"，

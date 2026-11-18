@@ -20,6 +20,7 @@
 | `src/vod_mcp/policy.py:check_tool_call` | `src/vod_mcp/server.py` 的 `tools/call` 前置 | 工具参数（confirm / 批上限） |
 | `src/vod_mcp/policy.py:check_text` | 同上，扫 `guard_scope(args)` 序列化串 | 文本类 deny（DB 直连 / 凭据意图） |
 | `src/vod_mcp/policy.py:guard_scope` | 文本规则扫描面裁剪 | 剔除 `voices[].content` 与 `data`——用户原话不进文本规则，防误杀"反馈里引用凭据串" |
+| `src/vod_mcp/policy.py:_validate` + `try_load_policy` | `src/vod_mcp/guardrails.py:check` | 规则结构校验；失败 **fail-closed**（`deny` + `-32017`），不崩进程（ARCH-ERR-01/02） |
 | 两段式 `vod_draft_voices` → `vod_commit_voices` | `src/vod_mcp/tools.py` | 审计链：一次性令牌 + payloadSha256 防调包；绕过可被账本 `stage` 检测 |
 | codex 采集熔断 | `src/vod_mcp/packs/__init__.py`（BREAKER_MARKERS）+ `src/vodkit_cli/install.py` 安装门禁 | 未确认提交 ≥2 次后强制摘除 collect pack |
 | 分发红线（key 不随包） | `src/vodkit_cli/install.py:cmd_install` 的 `--distribution preset` | `VOD_JAVA_API_KEY` 从 env 摘除且不写宿主配置 |
@@ -30,8 +31,20 @@
 
 错误码约定（宿主/模型可据此分流）：`-32010` deny、`-32011` confirm/草稿令牌不符、
 `-32012` 认证（缺 key 且令牌不可得）、`-32014` 传输（非回环 http）、`-32015` 上游拒绝
-（引擎 4xx/契约漂移）。归因不走错误码：`-32013` 已废除，改为运行期引导
+（引擎 4xx/契约漂移）、**`-32017` 护栏规则不可载入（fail-closed，ARCH-ERR-01）**。
+归因不走错误码：`-32013` 已废除，改为运行期引导
 （无证据就先问一次，不猜）。查表用 `vod-devkit explain <码>`——表由用例锁住与代码 raise 点同步。
+
+**`-32017` 为什么是新码**：`-32013` 是**归因拦截**的废除码位（见上句与
+`decisions.md` D-attrib-binding-1），它"代码里零 raise 点"是策略被推翻的结果、不是空位。
+护栏装载失败与缺产品处置动作不同（修 policy 后重启 vs 去问产品），故独立开码，
+不复用旧码位——复用会让同一码位承载两种互不相关的语义。
+
+**护栏装载失败 = 拒绝执行，不是崩溃**（ARCH-ERR-01/02，2026-11-19 走查 P0）：
+`policy.try_load_policy()` 永不抛；文件缺失/JSON 损坏/规则字段非法（缺 `severity`、
+`field=text` 缺 `regex`、`match` 既无 `tool` 也无 `field` 等）一律映射为 `deny` + `-32017`，
+回执点名违规 rule id；stdio 主循环另有兜底 `try`（返回 `-32603` 并落日志），
+**坏 policy 不再打死 server 进程**（宿主表现为"MCP 掉线"且只有一行 traceback）。
 
 ## 写操作路径
 

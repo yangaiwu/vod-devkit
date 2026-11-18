@@ -1744,6 +1744,34 @@ doctor 只自愈最后装的那个、uninstall 只摘一个块、`prune` 的"在
 |---|---|---|
 | S154-1 | 覆盖 | 代码里出现的 `code=-320XX` 全集 ⊆ explain 表，`known=true` 且三要素（层/原因/动作）齐全 |
 | S154-2 | 语义 | `-32011` 的原因必须落在"草稿/审批令牌"，不得再出现"名录" |
+| **S154-3** | **新码不复用废除码位** | 新增 `-32017`（护栏不可载入）。`-32013` 是归因拦截的**废除码位**（`decisions.md` D-attrib-binding-1、`design.md`、`safety-model.md`、本文件四处记载），"代码零 raise 点"≠ 可复用：复用会让同一码位承载两种互不相关的语义。断言：`explain("-32013")["known"] is False`（保持废除态），`explain("-32017")["known"] is True` |
+
+## 护栏装载失败必须 fail-closed，不许打死进程（ARCH-ERR-01/02，2026-11-19 走查 P0）
+
+**背景**：`policy.load_policy()` 裸 `open()+json.load()`，`guardrails.check()` 位于
+`server.handle` 的 `try` **之外**，`server.main` 主循环的 `handle(message)` 也无 try。
+实测：`policy.json` 写坏一半 → 任意 `tools/call` 抛 `JSONDecodeError` → **stdio 进程退出**
+（宿主只见"MCP 掉线"）；规则少写一个 `severity` → 抛 `AttributeError`（不是"规则非法"）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| ERR-01-1 | 坏 JSON | 半截/空文件 → `deny` + `-32017`，**不抛、进程不退出** |
+| ERR-01-2 | 文件缺失 | 同上，消息含可执行动作（修 policy / 重跑 install / 重启宿主） |
+| ERR-02-1 | 规则字段非法 | 缺 `severity`、`field=text` 缺 `regex`、`match` 既无 `tool` 也无 `field` → `deny` + `-32017`，回执**点名 rule id** |
+| ERR-02-2 | 语义不变 | 校验不得改变既有判定：超批量仍 `-32010`，未确认仍 `-32011` |
+| ERR-02-3 | 随包规则可过 | `assets/safety/policy.json` 必须过校验（否则所有提交都被拒） |
+
+## 失败必须留痕（ARCH-ERR-04/05，2026-11-19 走查）
+
+**背景**：26 处 `except` 体只有 `pass`，其中三个让"排障真源"本身失效。已跑出的真实事故链：
+`runtime.json` 被写坏 → 读成空 → 重领匿名令牌 → 设备锚点漂移 → 服务端判"设备绑定不匹配"，
+**而插件侧没有一行日志指向"文件被写坏"**。
+
+| # | 吞点 | 断言 |
+|---|---|---|
+| ERR-04-1 | `runtime_state._log` 自身失败 | 必须 stderr 兜底一行，不许静默（日志出口坏了这件事本身要有痕迹） |
+| ERR-04-2 | `runtime.json` 解析失败 | 读成空是既有行为不变，但必须告警带文件名与原因 |
+| ERR-04-3 | 领匿名令牌失败 | 接口仍返回 `None`（`-32012` 语义不变），但日志记 code + 原因 |
 
 ## 状态完整性：账本/载荷在用/读侧标量（S155，D-state-integrity-1，2026-11-16 评审）
 
