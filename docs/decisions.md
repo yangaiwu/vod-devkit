@@ -70,9 +70,11 @@ GitHub 直连超时期间用 Git Data API 推送产生了内容等价但 SHA 不
       （meta 消费仅 Python 形态有），引擎 VodExternalProducts 变更需手工同步
       PRODUCT_MAP——已在代码注释标注 M2/M3 不适用 dsh。引擎 !152 合入后需把
       AISHELL/nameAliases 补进此表（一次 2 行改动）。
-- [x] **D-dsh-4（中）囤积端点切换计划已标注**：SUBMIT_PATH 定义处 TODO——引擎
-      /external/voices 上线时改一行 + body 字段核对（批量/逐条回执/Duplicate
-      字符串匹配自然消亡）。
+- [x] **D-dsh-4（中）囤积端点切换已完成（S241，2026-11-18）**：V16 起主路径走
+      /external/voices。S241 删除 SUBMIT_PATH 常量、404/非 2xx 回落旧单条的全部代码，
+      以及只为旧链服务的本地 voiceId() 键（对账主键改用引擎回执 voiceIds）；失败改为
+      如实报错（404→-32016「本条未提交」，其他→-32002），与 Python 侧同口径。
+      回归锁：packages/dsh/test/no-legacy-submit.test.mjs（常量/路径/回落判定/POST 目标）。
 - [x] **D-dsh-5..8（低）已知取舍记档不修**：confirmWrites 配置级开关弱于逐调用
       confirm（dsh 宿主审批通道语义，管理员责任边界）；账本读改写无锁（影响=
       对账缺行，不做分布式锁）；timeoutSec 可配无上界（运维自律）；401 重取令牌

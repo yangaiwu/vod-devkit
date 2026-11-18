@@ -5,7 +5,7 @@
  * - 插件=引擎的客户端，只走 HTTPS，不 import 任何引擎模块
  * - 纯采集形态：submit / 本地账本查询 / 自述 / 技能披露×2 / 版本检查，共 6 工具
  * - 写操作默认走 dsh 审批通道（tools/pre-execute → kind:'ask'）
- * - voiceId = f(source, content, 调用级nonce)：同调用幂等、跨调用保声量
+ * - 提交唯一路径 = POST /external/voices（囤积端点，S241 起不再有旧单条回落）
  * - key 缺失/401 → 自动 POST /external/token 零字段令牌 → 落本地 → 重试一次
  * - 本地账本（data/runtime.json，cap 200 环形）只动目标键，读改写
  */
@@ -32,8 +32,7 @@ const RUNTIME = process.env.VOD_DSH_RUNTIME || join(DATA_DIR, 'runtime.json');
 const FALLBACK_RUNTIME = join(homedir(), '.dsh', 'data', 'vod-devkit-runtime.json');
 let runtimePath = RUNTIME;   // 运行期可变：写入失败后切到 fallback
 const API_PREFIX = '/rest/developer/manager/hdvodmngservice/v1';
-const HOARD_PATH = `${API_PREFIX}/external/voices`; // V16 囤积端点（批量/不触发 LLM/结构化回执）
-const SUBMIT_PATH = `${API_PREFIX}/external/voice/submit`; // 旧单条端点：仅 404 回落使用 // V16 已切换：主路径 HOARD_PATH（囤积），本路径仅 404 回落（见 docs/decisions.md D-dsh-4）
+const HOARD_PATH = `${API_PREFIX}/external/voices`; // 囤积端点：唯一提交路径（S241 起旧单条链已删除）
 const TOKEN_PATH = `${API_PREFIX}/external/token`;
 const LEDGER_CAP = 200;
 const PKG_VERSION = JSON.parse(readFileSync(join(PKG_DIR, 'package.json'), 'utf8')).version;
@@ -440,11 +439,6 @@ async function fetchAnonToken(cfg) {
     return null;
 }
 
-function voiceId(source, content, nonce) {
-    const h = createHash('sha1').update(content + nonce).digest('hex').slice(0, 12);
-    return `ext_${source}_${h}`;
-}
-
 // ── D-rguard-1 ReceiptGuard（提交侧原文比对，2026-11-09 验证立项）──
 // 通道实测（dsh-tools 0.2.0 类型源）：exec.agent.session.deriveMessages() 的
 // user 轮消息 = 用户逐字原文（append-only 会话日志投影，不经模型）——模型改写
@@ -720,88 +714,49 @@ export function apply(ctx, config) {
                             });
                         }
                     }
-                    if (out.status !== 404) {
-                        if (out.ok) {
-                            const d = out.data?.data || out.data || {};
-                            const ids = d.voiceIds || [];
-                            const sts = d.statuses || [];
-                            for (let i = 0; i < hoard.length; i++) {
-                                const vid = ids[i] || '';
-                                if (vid && sts[i] !== 'skipped') accepted.push(vid);
-                                else if (vid) { accepted.push(vid); } // skipped=幂等，也回执
-                                taskIds.push(null); // 囤积语义：无即时任务
-                            }
-                            const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-                            rememberAttribution(attr); // 只记有字面证据的唯一命中
-                            ledgerAppend(hoard.map((h, i) => ({
-                                voiceId: ids[i] || '', taskId: null,
-                                title: h.title.slice(0, 40), product,
-                                productSource: attr.source, productEvidence: attr.evidence,
-                                at: now, status: sts[i] === 'skipped' ? 'accepted' : 'accepted',
-                            })));
-                            return textResult({
-                                accepted: accepted.length, voiceIds: accepted,
-                                taskIds, rejected, path: 'hoarding',
-                                productSource: attr.source,
-                                ...(attr.evidence && attr.evidence.length ? { productEvidence: attr.evidence } : {}),
-                                ...(rgMode !== 'off' ? { receiptGuard: rgGuardSummary(rgVerdict, hoard.length) } : {}),
-                                ...(d.productRegistered !== undefined ? { productRegistered: d.productRegistered } : {}),
-                            });
-                        }
-                        // 非 404 非 2xx → 回落旧单条（如 401 已处理；此处为兼容异常响应）
-                    }
-                }
-                for (let i = 0; i < voices.length; i++) {
-                    const v = voices[i] || {};
-                    const content = String(v.content ?? '').trim();
-                    if (!content) { rejected.push({ index: i, reason: 'content 为空' }); continue; }
-                    if (content.length > 2000) { rejected.push({ index: i, reason: `content 超 2000 字（${content.length}）` }); continue; }
-                    const nonce = randomUUID().replace(/-/g, '').slice(0, 8); // 调用级幂等、跨调用保声量
-                    const vid = voiceId(source, content, nonce);
-                    const desc = content.length >= 10 ? content : `${content} [vod-devkit]`;
-                    const body = {
-                        voiceId: vid,
-                        title: content.slice(0, 128), // R3：title=用户原文（分析消费），模板只允许出现在 description
-                        description: desc,
-                        ...(product ? { product } : {}), // 无证据/歧义 → 不带 product（引擎 UNKNOWN 池）
-                        source,
-                        ...(v.userType ? { customer: v.userType } : {}),
-                    };
-                    const call = () => http('POST', SUBMIT_PATH, body, { ...c, key, signal: exec?.signal });
-                    let out = await call();
-                    if (out.status === 401 && i === 0) {
-                        // 零字段匿名令牌：401 → 自动取令牌 → 落本地 → 重试一次
-                        const token = await fetchAnonToken({ ...c, key: '', signal: exec?.signal });
-                        if (token) {
-                            key = token;
-                            saveRuntime({ java_key: token, token_tier: 'anonymous' });
-                            out = await call();
-                        } else {
-                            return textResult({
-                                error: '未配置接入 key 且匿名令牌端点不可用。引导：1) 首次提交时插件自动申请零字段匿名令牌；' +
-                                    '2) 量到上限后联系 VOD 运营升级正式 key；3) 宿主平台整体对接可获宿主 key',
-                                code: -32012,
-                            });
-                        }
-                    }
                     if (out.ok) {
-                        accepted.push(vid);
-                        taskIds.push(out.data?.data?.taskId ?? null);
-                    } else {
-                        const msg = JSON.stringify(out.data || {}).slice(0, 160);
-                        if (msg.includes('Duplicate entry')) { accepted.push(vid); taskIds.push(null); }
-                        else rejected.push({ index: i, reason: msg && msg !== '{}' ? msg : `HTTP ${out.status}` });
+                        const d = out.data?.data || out.data || {};
+                        const ids = d.voiceIds || [];
+                        const sts = d.statuses || [];
+                        for (let i = 0; i < hoard.length; i++) {
+                            const vid = ids[i] || '';
+                            if (vid) accepted.push(vid); // skipped=幂等，也回执
+                            taskIds.push(null); // 囤积语义：无即时任务
+                        }
+                        const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+                        rememberAttribution(attr); // 只记有字面证据的唯一命中
+                        ledgerAppend(hoard.map((h, i) => ({
+                            voiceId: ids[i] || '', taskId: null,
+                            title: h.title.slice(0, 40), product,
+                            productSource: attr.source, productEvidence: attr.evidence,
+                            at: now, status: 'accepted',
+                        })));
+                        return textResult({
+                            accepted: accepted.length, voiceIds: accepted,
+                            taskIds, rejected, path: 'hoarding',
+                            productSource: attr.source,
+                            ...(attr.evidence && attr.evidence.length ? { productEvidence: attr.evidence } : {}),
+                            ...(rgMode !== 'off' ? { receiptGuard: rgGuardSummary(rgVerdict, hoard.length) } : {}),
+                            ...(d.productRegistered !== undefined ? { productRegistered: d.productRegistered } : {}),
+                        });
                     }
+                    // S241：囤积端点是唯一提交路径，失败不再回落旧单条 /external/voice/submit
+                    const detail = JSON.stringify(out.data || {}).slice(0, 160);
+                    const is404 = out.status === 404;
+                    return textResult({
+                        error: is404
+                            ? '囤积端点未上线（POST /external/voices 返回 404）：本条未提交。引擎部署该端点后自动可用；不要改用老链。'
+                            : `囤积端点返回 HTTP ${out.status}，未提交（旧单条端点已移除）`,
+                        code: is404 ? -32016 : -32002,
+                        httpStatus: out.status,
+                        ...(detail && detail !== '{}' ? { detail } : {}),
+                        rejected,
+                        accepted: 0,
+                        path: 'hoarding',
+                    });
                 }
-                const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-                if (accepted.length) rememberAttribution(attr);
-                ledgerAppend(accepted.map((vid, i) => ({
-                    voiceId: vid, taskId: taskIds[i],
-                    title: String((voices[i] || {}).content ?? '').slice(0, 40),
-                    product, productSource: attr.source, productEvidence: attr.evidence,
-                    at: now,
-                })));
-                return textResult({ accepted: accepted.length, voiceIds: accepted, taskIds, rejected,
+                // hoard 为空（所有条目在前置校验被拒）→ 无提交调用，只回执拒收原因
+                return textResult({ accepted: 0, voiceIds: [], taskIds: [], rejected,
                     productSource: attr.source,
                     ...(attr.evidence && attr.evidence.length ? { productEvidence: attr.evidence } : {}),
                     ...(rgMode !== 'off' ? { receiptGuard: rgGuardSummary(rgVerdict, voices.length) } : {}) });

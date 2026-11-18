@@ -1967,6 +1967,7 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S238 | 删除老链回落 | 移除 `_EXISTING_SUBMIT` 与 404 回落分支：囤积端点 `POST /external/voices` 成为唯一提交路径；404 → `ToolError(-32016)`「本条未提交」，不假装成功、不换链；契约 backend 说明与设计单上游出口图同步；门禁 `tests/test_s238_no_legacy_fallback.py`（3 条：无老链调用/404 明确失败/正常路径只打囤积）|
 | S239 | 老链表述残留清理 | 契约 `vod_submit_voices` 描述删掉「引擎未部署 404 自动回落老链」（改为「唯一提交路径，404=本条未提交」）；`collect.py` 注释「囤积/legacy 两路径」改为单一路径；门禁 `tests/test_s239_stale_wording.py`（契约/注释不得再写老链为可用路径，且必须写明囤积端点）|
 | S240 | 计划/反例路径必须显式标注 | 文档里出现的「不存在的路径」分两类处理：真正的计划项（`docs/reports/`、`integrations/hooks/`）标「计划内/尚未存在」，反例（`plugins/vod-devkit/src/vod_mcp/`）标「反例，勿照做」；设计里引用的技能侧探针路径写明「在本仓之外」；门禁 `tests/test_s240_plan_paths_marked.py`（这些 token 只能以标注形态出现，防下一个人照着去找）|
+| S241 | dsh 壳删除旧单条提交链 | 删除 `SUBMIT_PATH`（`/external/voice/submit`）、404/非 2xx 回落代码段与仅供旧链使用的本地 `voiceId()` 键；囤积端点 `POST /external/voices` 成为唯一提交路径，失败如实报错（404→-32016「本条未提交」，其他→-32002），与 Python 侧对齐。回归锁 `packages/dsh/test/no-legacy-submit.test.mjs`（常量/路径/回落判定/POST 目标）|
 | S192 | 退出码与回执不可判 | 0 全绿 / 1 违规 / 2 熔断 / 3 不可判 / 4 鉴权或引擎 4xx（优先级 1>2>3>4）；空回复+有落库 → `reply_indeterminate` 不进 fails、内容判据照跑；横幅打 model+argv、收尾打 `e2e[exit]` |
 | S193 | 路由词表并表 | `TRIGGER_WORDS` ⊇ SKILL 的 S184 现象词（失败/打不开/超时/崩）+ 口语词；裸「卡」加边界；META 移出共用词（接口/配置/字段/日志/版本）、改收工程动作词 |
 | S194 | 不可判只管网线 | 回执不可判不清空 fails（内容线结论保留）；单出口 `decide_exit` 让异常路径带已收违规（有违规 exit 1）；异常报文逐条打 FAIL、未完成数取剩余 |

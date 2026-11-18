@@ -30,7 +30,8 @@ vod-devkit（可分发插件包；仓内布局 vs 载荷布局见 architecture.m
 单上游出口（方案 A 收敛后）：
   java：VOD_JAVA_API_BASE + VOD_JAVA_API_KEY（ExternalApiKeyFilter Bearer）
         → POST …/external/voices（囤积提交，延迟分析）+ …/external/token（令牌）
-        （S238：老链 …/external/voice/submit 已从插件侧删除，404 不再回落）
+        （S238：老链 …/external/voice/submit 已从 Python 插件侧删除，404 不再回落；
+          S241 已由 dsh 薄壳同步执行，囤积端点在两形态都是唯一提交路径）
   统一出口 _http() 一律携带 Authorization（E1 修复；协议级测试以真
   HTTP 服务器锁死头/路径，永久回归门）。
   workflow 后端已随方案 A 删除（E2 的双后端拓扑成为历史，git 可查）
@@ -441,6 +442,7 @@ exit 1 附可照抄的手动修复格式。manifest 增 dshProfile 键（golden 
   语义（囤积=延迟分析 `analysis=deferred`、老链=提交即分析）并存会让同一插件在不同引擎上
   回执/账本/分析时机分叉，且老链自带第二套 voiceId 与 source 命名空间逻辑。现口径：囤积端点
   404 → `ToolError(-32016)`「本条未提交」，不假装成功、不换链；回执恒 `path=hoarding`
+  （dsh 薄壳同步删除旧单条链与本地 voiceId 键，失败码/措辞与 Python 侧对齐，见 S241 用例）
 - 面向用户的用语纪律是**禁词表**，不只是「别科普」（S237）：技能里原有「不向用户解释机制」
   只是职责边界，模型仍会说「已按 X 归因」（真机 C3/C5 实测）。现口径：技能写死禁词表
   （归因/白名单/令牌/配额/幂等/引擎/端点/提交链/囤积/草稿/主键/名单/voiceId/插件/MCP）+
