@@ -1,9 +1,15 @@
 name: vod-devkit CI
+
+# ARCH-BLD-01（2026-11-19 走查）：门禁清单**只住在 scripts/gate_all.py**，
+# 本文件与 .gitcode/workflows/ci.yml 都只调它 ⇒ 两份定义不再漂移
+# （此前 GitHub 10 步 / GitCode 5 步，secret_scan/mypy/花名册/规则溯源/发版对账/
+#  dsh 单测/宿主矩阵在 GitCode 侧全部缺席，而本仓实际托管在 GitCode）。
+# 触发分支补 dev：开发主干是 dev，此前只在 main 触发 ⇒ dev 上的提交零 CI 门禁。
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "dev"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "dev"]
 
 jobs:
   quality-gate:
@@ -11,44 +17,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # 发版状态对账要读 tag（浅克隆看不到 tag → 曾把已发版判成 DRIFT）；
-          # 脚本侧另有浅克隆兜底，这里取全量历史让门禁权威。
+          # 发版状态对账要读 tag（浅克隆看不到 tag → 曾把已发版判成 DRIFT）
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: 安装依赖（含远程面可选 extra，否则远程面用例 SKIP）
-        run: python3 -m pip install pytest pyflakes mypy pyyaml 'mcp>=1.0' 
-      - name: lint（pyflakes，递归——子目录模块漏检=门禁形同虚设）
-        run: python3 -m pyflakes src/vod_mcp src/vodkit_cli integrations/hermes/hooks tests
-      - name: 双副本一致性（生成物同步后必须与源一致；副本零提交）
-        run: |
-          python3 scripts/sync_plugin.py
-          python3 scripts/verify_copies.py
-      - name: 凭据/高危模式扫描（与 pre-push 同一把尺）
-        run: python3 scripts/secret_scan.py
-      - name: 用例花名册对账（docs ↔ tests/case_roster.json）
-        run: python3 scripts/sync_case_roster.py --check
-      - name: 规则技能 ↔ 引擎真源对账（无引擎检出时 SKIP，不判绿）
-        run: python3 scripts/rules_provenance.py
-      - name: 类型门禁（作用域=新增纯逻辑模块，见 pyproject [tool.mypy]）
-        run: python3 -m mypy
-      - name: 发版状态对账（registry↔仓内；仓内领先=开发中，不判红）
-        run: python3 scripts/registry_reconcile.py
-      - name: 测试（pytest 全量：单元+护栏+packs+协议级+回环+meta+账本）
-        run: python3 -m pytest tests/ -q
-      - name: dsh 壳单测（npm test）
-        # 实锤（2026-11-18）：此前 ci.yml 只跑 pytest/pyflakes/mypy，dsh 的 node --test
-        # 从未进 CI —— 一个写死作者机绝对路径的测试红了整周没人发现，
-        # "dsh N passed" 只在作者机上成立。这里补上，否则 JS 侧永远没有门禁。
-        run: |
-          cd packages/dsh
-          npm install --no-audit --no-fund
-          npm test
-      - name: 安装器烟雾
-        run: |
-          PYTHONPATH=src python3 bin/vod-devkit build-info
-          python3 -c "import ast; ast.parse(open('bin/vod-devkit').read()); print('bin 语法 OK')"
+        run: python3 -m pip install pytest pyflakes mypy pyyaml 'mcp>=1.0'
+      - name: 全量门禁（清单见 scripts/gate_all.py）
+        # 不含 hostmatrix：它需要宿主 CLI，单独一个 job 跑（见下），
+        # 在无 CLI 的 runner 上逐项 SKIP 也不该拖慢主门禁。
+        run: python3 scripts/gate_all.py lint copies secret roster rules mypy registry tests dsh packaging
 
   host-matrix:
     # 宿主安装矩阵（E2E）：隔离 HOME 里 装 → 断言配置形态 → 拉起 server 自证 → 卸 → 验干净。
@@ -64,4 +43,4 @@ jobs:
       - name: 构建信息（矩阵用它断言探针版本）
         run: PYTHONPATH=src python3 bin/vod-devkit build-info
       - name: 宿主矩阵
-        run: python3 scripts/host_matrix.py
+        run: python3 scripts/gate_all.py hostmatrix

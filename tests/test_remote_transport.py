@@ -137,7 +137,13 @@ def test_notification_202_get_405_options_cors(remote):
     req = urllib.request.Request(url, method="OPTIONS")
     with urllib.request.urlopen(req, timeout=10) as resp:
         assert resp.status == 204
-        assert resp.headers["access-control-allow-origin"] == "*"
+        # ARCH-CFG-02（2026-11-19）：不再无条件 `*`。带外域 Origin 的预检只回
+        # 允许的方法与头，**不回** Access-Control-Allow-Origin（浏览器自然拦）；
+        # 回环 Origin 才回显。见 tests/test_cors_origin.py 的端到端用例。
+        assert resp.headers.get("access-control-allow-origin") is None or \
+            resp.headers.get("access-control-allow-origin") != "*", \
+            "OPTIONS 仍无条件回 CORS * —— CFG-02 的原缺陷回归"
+        assert "POST" in (resp.headers.get("access-control-allow-methods") or "")
 
 
 def test_bad_json_400(remote):

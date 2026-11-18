@@ -108,12 +108,31 @@ def test_S110_consumers_sync_before_reading_copies():
 
 
 def test_S105_gate_is_single_entry_shared_by_ci_hook_and_release():
-    """S105：一致性门禁只有一个入口，三处都调它（各写一份 diff = 迟早各错各的）。"""
+    """S105：一致性门禁只有一个入口，三处都调它（各写一份 diff = 迟早各错各的）。
+
+    ARCH-BLD-01（2026-11-19）后入口层次变了：CI 不再直接写 `verify_copies.py`，
+    而是调统一的 `gate_all.py copies`（门禁清单单一真源）。S105 的**意图不变**
+    ——"只有一个实现入口、多处引用"——所以这里改为断言：CI 调 gate_all 的 copies
+    门禁，而 `gate_all.py` 内部必须走 `verify_copies.py`（不许自己拼 diff）。
+    """
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    gc = (ROOT / ".gitcode" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    gate = (ROOT / "scripts" / "gate_all.py").read_text(encoding="utf-8")
     hook = (ROOT / ".githooks" / "pre-push").read_text(encoding="utf-8")
     rel = (ROOT / "scripts" / "release.sh").read_text(encoding="utf-8")
-    for name, text in (("ci.yml", ci), ("pre-push", hook), ("release.sh", rel)):
+
+    # 门禁实现本身必须走单入口
+    assert "verify_copies.py" in gate, "gate_all.py 的 copies 门禁没走 verify_copies 单入口"
+    assert "diff -r" not in gate, "gate_all.py 自己拼 diff -r（会与门禁分叉）"
+
+    # CI 两份都要调 copies 门禁
+    for name, text in (("github ci.yml", ci), ("gitcode ci.yml", gc)):
+        assert "gate_all.py" in text and "copies" in text, f"{name} 没调 copies 门禁"
+
+    # pre-push 与 release.sh 仍直调（它们不受 gate_all 管辖）
+    for name, text in (("pre-push", hook), ("release.sh", rel)):
         assert "verify_copies.py" in text, f"{name} 没走 verify_copies 单入口"
+
     assert "diff -r" not in ci, "ci.yml 还在自己拼 diff -r（会与门禁分叉）"
     assert "diff -r" not in hook, "pre-push 还在自己拼 diff -r"
 

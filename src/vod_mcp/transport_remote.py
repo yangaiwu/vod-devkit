@@ -35,6 +35,33 @@ DEFAULT_PORT = 9528
 MAX_BODY = 4 * 1024 * 1024
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 
+# ARCH-CFG-02：默认 Origin 白名单——只要回环 + 任意端口。
+# 浏览器跨域必带 Origin；不在名单里 → 不发 CORS 头且 do_POST 直接 403。
+# 非回环部署要用别的来源，必须显式 `--allow-origin <origin>`（可多次）。
+DEFAULT_ALLOWED_ORIGINS = (
+    "http://127.0.0.1",
+    "http://localhost",
+    "http://[::1]",
+    "https://127.0.0.1",
+    "https://localhost",
+    "https://[::1]",
+)
+
+
+def origin_allowed(origin: str, allowed) -> bool:
+    """Origin 是否在白名单里。
+
+    规则：**精确匹配，或 `<白名单项>:<任意端口>`**。
+    只比到端口分隔符，所以 `http://127.0.0.1.evil.com` 不会被
+    `http://127.0.0.1` 前缀误放行（本仓 S180 同源教训：前缀匹配必须带边界）。
+    """
+    origin = (origin or "").strip().rstrip("/")
+    for a in allowed or ():
+        a = a.rstrip("/")
+        if origin == a or origin.startswith(a + ":"):
+            return True
+    return False
+
 # 载荷自校验缓存：远程面是长驻无鉴权服务，被改过的服务端载荷要当场拒绝服务，
 # 不能等运维跑 doctor 才发现（devkit 的每请求 verifySkillTree 同思路）。
 # TTL 缓存避免每个请求都做一遍 sha256 全集（40+ 文件）。
@@ -436,9 +463,63 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # 静默：日志走 /tmp/vod_mcp_server.log
         pass
 
+    # ── Origin/Host 收紧（ARCH-CFG-02，2026-11-19 走查 P1）──────────────────
+    # 缺陷：此前无条件发 `Access-Control-Allow-Origin: *`、预检一律 204、`do_POST`
+    # 全程不校验 Origin/Host ⇒ **用户机器上已装插件时，任意网页都能跨域驱动本机端点**
+    # （DNS rebinding 还能绕过"仅回环"）。
+    # 修法：默认只答回环 Origin/Host，其余 403；非回环绑定必须显式给白名单。
+    # ⚠️ CORS 头只约束浏览器，挡不住本机进程/DNS rebinding —— 所以**403 必须在
+    # do_POST 里显式判**，不能只靠"不发 CORS 头"（台账原方案只写"不发头"，不够）。
+    _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
+
+    def _origin_allowed(self) -> bool:
+        """Origin 校验：无 Origin（非浏览器客户端）放行；有则必须命中白名单。
+
+        浏览器跨域请求必带 Origin；curl/SDK 不带。所以这条只管浏览器面，
+        不能拿它挡"本机进程"——那由 Host 校验与既有令牌机制负责。
+
+        匹配规则：**精确匹配，或"回环前缀 + 任意端口"**（`http://127.0.0.1:3000`）。
+        端口不固定是常态（本地 dev server 各种端口），但主机必须精确——否则
+        `http://127.0.0.1.evil.com` 这类会被前缀误放行。
+        """
+        origin = (self.headers.get("Origin") or "").strip()
+        if not origin:
+            return True                      # 非浏览器（curl/SDK/stdio 转发）
+        return origin_allowed(origin, self.server.allowed_origins)  # type: ignore[attr-defined]
+
+    def _host_allowed(self) -> bool:
+        """Host 校验：挡住 DNS rebinding（把 evil.example 解析到 127.0.0.1）。
+
+        绑定回环时只认回环 Host；显式绑非回环时，额外接受配置里的 allow_hosts。
+        """
+        host = (self.headers.get("Host") or "").strip()
+        if not host:
+            return True                      # HTTP/1.0 无 Host：交后续鉴权兜底
+        bare = host.rsplit(":", 1)[0] if not host.startswith("[") else host.split("]")[0] + "]"
+        if bare in self._LOOPBACK_HOSTS:
+            return True
+        return host in self.server.allowed_hosts or bare in self.server.allowed_hosts  # type: ignore[attr-defined]
+
+    def _reject_cross_origin(self, why: str) -> None:
+        """拒收：不发任何 CORS 头（浏览器自然拦），并 403 说明原因。"""
+        body = json.dumps({"jsonrpc": "2.0", "id": None,
+                           "error": {"code": -32600,
+                                     "message": f"跨域/跨主机请求被拒：{why}（默认只接受回环）"}},
+                          ensure_ascii=False).encode()
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()                   # 注意：不调 _cors()，不给浏览器放行机会
+        self.wfile.write(body)
+
     def _cors(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        # 只回显**白名单内**的 Origin；不在白名单就不发（浏览器自然拦）。
+        # 不再无条件 `*`——那是 CFG-02 的原缺陷。
+        origin = (self.headers.get("Origin") or "").strip()
+        if origin and origin_allowed(origin, self.server.allowed_origins):  # type: ignore[attr-defined]
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers",
                          "Content-Type, MCP-Protocol-Version, Mcp-Session-Id, Accept, Authorization")
         self.send_header("Access-Control-Expose-Headers",
@@ -469,6 +550,14 @@ class _Handler(BaseHTTPRequestHandler):
         self._empty(405, {"Allow": "POST, OPTIONS"})
 
     def do_POST(self):
+        # ARCH-CFG-02：Origin/Host 必须在**进业务之前**判（CORS 头只约束浏览器，
+        # 挡不住本机进程与 DNS rebinding，所以这里显式 403）。
+        if not self._host_allowed():
+            self._reject_cross_origin(f"Host={self.headers.get('Host')!r}")
+            return
+        if not self._origin_allowed():
+            self._reject_cross_origin(f"Origin={self.headers.get('Origin')!r}")
+            return
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0 or length > MAX_BODY:
             self._json(400, {"jsonrpc": "2.0", "id": None,
@@ -525,20 +614,24 @@ def _apply_anon_mint_policy(host: str, allow: bool) -> bool:
     return enabled
 
 
-def serve(host: str, port: int, allow_anon_mint: bool = False) -> int:
+def serve(host: str, port: int, allow_anon_mint: bool = False,
+          allow_origins: tuple | None = None, allow_hosts: tuple | None = None) -> int:
     anon = _apply_anon_mint_policy(host, allow_anon_mint)
     if host not in LOOPBACK:
         print(f"[vod-devkit] 警告：远程 MCP 绑定非回环地址 {host}——本进程无内建鉴权，"
               "不要把它匿名暴露到公网；TLS 与身份校验应由反代承担。", file=sys.stderr)
         if not anon:
             print("[vod-devkit] 匿名令牌代领已关闭（非回环绑定）：调用方须带 "
-                  "Authorization: Bearer <key>；单机可信网络确需代领时加 --allow-anon-mint",
+                  "Authorization: Bearer <key>；...代领时加 --allow-anon-mint",
                   file=sys.stderr)
     runtime = RemoteRuntime(host, port)
     runtime.start()
     httpd = ThreadingHTTPServer((host, port), _Handler)
     httpd.daemon_threads = True
     httpd.runtime = runtime
+    # ARCH-CFG-02：Origin/Host 白名单（默认只回环；非回环需显式 --allow-origin/--allow-host）
+    httpd.allowed_origins = frozenset(allow_origins or DEFAULT_ALLOWED_ORIGINS)  # type: ignore[attr-defined]
+    httpd.allowed_hosts = frozenset(allow_hosts or ())                            # type: ignore[attr-defined]
     real_port = httpd.server_address[1]
     print(f"vod-devkit MCP server (remote) listening on {host}:{real_port}", file=sys.stderr)
     try:

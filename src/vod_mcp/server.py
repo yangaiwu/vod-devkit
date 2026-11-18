@@ -137,6 +137,15 @@ def main():
     ap.add_argument("--allow-anon-mint", action="store_true",
                     help="非回环绑定时仍允许服务端代领匿名令牌（默认关闭；"
                          "单机可信网络才开，见 D-token-machine-1）")
+    # ARCH-CFG-02：Origin/Host 白名单扩展（默认只回环）。可多次指定。
+    ap.add_argument("--allow-origin", action="append", default=[],
+                    metavar="ORIGIN",
+                    help="额外允许的浏览器 Origin（可多次）。默认只接受回环 "
+                         "http://127.0.0.1[:port] / http://localhost[:port]")
+    ap.add_argument("--allow-host", action="append", default=[],
+                    metavar="HOST",
+                    help="额外允许的 Host 头（可多次）。默认只接受回环 Host；"
+                         "非回环绑定必须显式给，否则所有 POST 被 403")
     args, _unknown = ap.parse_known_args()
 
     # VOD_PACKS 未知 id 启动即报错（D-packs-config-1，对齐 devkit 口径）：
@@ -164,7 +173,9 @@ def main():
                   "  pip install 'vod-devkit[remote]'   # 或 pip install 'mcp>=1.0'\n"
                   f"（stdio 形态不需要任何第三方依赖；导入失败：{e}）", file=sys.stderr)
             sys.exit(2)
-        sys.exit(transport_remote.serve(args.host, args.port, args.allow_anon_mint))
+        sys.exit(transport_remote.serve(args.host, args.port, args.allow_anon_mint,
+                                   allow_origins=tuple(args.allow_origin) or None,
+                                   allow_hosts=tuple(args.allow_host) or None))
 
     for line in sys.stdin:
         line = line.strip()
