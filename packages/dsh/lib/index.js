@@ -716,24 +716,38 @@ export function apply(ctx, config) {
                     }
                     if (out.ok) {
                         const d = out.data?.data || out.data || {};
-                        const ids = d.voiceIds || [];
-                        const sts = d.statuses || [];
-                        for (let i = 0; i < hoard.length; i++) {
-                            const vid = ids[i] || '';
-                            if (vid) accepted.push(vid); // skipped=幂等，也回执
-                            taskIds.push(null); // 囤积语义：无即时任务
+                        const ids = Array.isArray(d.voiceIds) ? d.voiceIds : [];
+                        // 引擎侧 rejected（产品校验拒绝等）透出，不吞（对齐 Python S238 口径）
+                        const engineRejected = Array.isArray(d.rejected) ? d.rejected
+                            : (Array.isArray(out.data?.rejected) ? out.data.rejected : []);
+                        const mergedRejected = rejected.concat(engineRejected);
+                        // 回执缺失 voiceIds（200 但空回执/整批被拒）→ 不得兜底计成功。
+                        // 实锤缺陷：空 voiceId 记成功且宿主模型据此谎报「已提交」。
+                        const receiptOk = ids.length > 0;
+                        if (receiptOk) {
+                            for (let i = 0; i < hoard.length; i++) accepted.push(ids[i] || '');
                         }
+                        for (let i = 0; i < hoard.length; i++) taskIds.push(null); // 囤积语义：无即时任务
                         const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-                        rememberAttribution(attr); // 只记有字面证据的唯一命中
-                        ledgerAppend(hoard.map((h, i) => ({
-                            voiceId: ids[i] || '', taskId: null,
-                            title: h.title.slice(0, 40), product,
-                            productSource: attr.source, productEvidence: attr.evidence,
-                            at: now, status: 'accepted',
-                        })));
+                        if (receiptOk) {
+                            // 只有真拿到回执才记账 + 记归因记忆，否则账本被空 voiceId 污染
+                            rememberAttribution(attr); // 只记有字面证据的唯一命中
+                            ledgerAppend(hoard.map((h, i) => ({
+                                voiceId: ids[i] || '', taskId: null,
+                                title: h.title.slice(0, 40), product,
+                                productSource: attr.source, productEvidence: attr.evidence,
+                                at: now, status: 'accepted',
+                            })));
+                        }
+                        if (!receiptOk && !engineRejected.length) {
+                            mergedRejected.push({ reason: '引擎回执未含 voiceIds（提交结果未知），请勿视为已收录' });
+                        }
                         return textResult({
-                            accepted: accepted.length, voiceIds: accepted,
-                            taskIds, rejected, path: 'hoarding',
+                            accepted: receiptOk ? accepted.length : 0,
+                            voiceIds: receiptOk ? accepted : [],
+                            taskIds, rejected: mergedRejected, path: 'hoarding',
+                            analysis: 'deferred',
+                            ...(receiptOk ? {} : { receiptIncomplete: true }),
                             productSource: attr.source,
                             ...(attr.evidence && attr.evidence.length ? { productEvidence: attr.evidence } : {}),
                             ...(rgMode !== 'off' ? { receiptGuard: rgGuardSummary(rgVerdict, hoard.length) } : {}),
@@ -741,6 +755,9 @@ export function apply(ctx, config) {
                         });
                     }
                     // S241：囤积端点是唯一提交路径，失败不再回落旧单条 /external/voice/submit
+                    // 失败话术纪律：dsh 壳没有本地 pending 队列（仅 vod_mcp 侧有），
+                    // 因此不得让模型说「已暂存/稍后自动重试」——那是谎报。回执里显式给
+                    // userFacingHint 供模型照抄，并标 notStored 供内部判断。
                     const detail = JSON.stringify(out.data || {}).slice(0, 160);
                     const is404 = out.status === 404;
                     return textResult({
@@ -749,6 +766,8 @@ export function apply(ctx, config) {
                             : `囤积端点返回 HTTP ${out.status}，未提交（旧单条端点已移除）`,
                         code: is404 ? -32016 : -32002,
                         httpStatus: out.status,
+                        notStored: true,
+                        userFacingHint: '这条反馈没有提交成功，我这边也没法先存下来——需要的话稍后再让我提交一次。',
                         ...(detail && detail !== '{}' ? { detail } : {}),
                         rejected,
                         accepted: 0,
