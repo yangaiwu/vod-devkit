@@ -162,9 +162,29 @@ fi
 "$PY" scripts/verify_copies.py || {
   echo "FAIL: 发版提交漏带插件副本改动（tarball 会与 tag 不一致）——修正提交清单后重跑" >&2; exit 1; }
 git tag "v$BUMP"
-git push origin main --tags || { echo "FAIL: GitCode 推送失败（pre-push 门禁或网络），发版未完成"; exit 1; }
-echo "已推送 GitCode"
-if git push github main --tags 2>/dev/null; then echo "已推送 GitHub 镜像"; else echo "WARN: GitHub 镜像推送跳过（token 权限待补）"; fi
+# 🔴 推**当前分支**，不硬编码 main（2026-11-19 实锤两次）：
+#   本仓开发主干是 dev（main 仅发版），但脚本写 `git push origin main --tags`
+#   ⇒ tag 推上去了、release commit 却留在本地 ⇒ 远端 tag 悬空（没有任何分支可达），
+#   而同分支已推时 `git push origin main` 在 dev 上是 no-op，脚本还打印"已推送 GitCode"，
+#   看起来成功、实际分支没动。用 rev-parse 取当前分支消除这个隐式假设。
+CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+git push origin "$CUR_BRANCH" --tags || {
+  echo "FAIL: GitCode 推送失败（pre-push 门禁或网络），发版未完成"; exit 1; }
+echo "已推送 GitCode（分支 $CUR_BRANCH + tag v$BUMP）"
+# main 是否快进由发版人显式决定（本仓约定 main 仅发版用）：
+#   git push origin "$CUR_BRANCH":main
+echo "提示：如需同步 main，执行 git push origin $CUR_BRANCH:main"
+# GitHub 镜像：仅当配置了 remote 才尝试（本仓只有 origin，无 github remote
+# ⇒ 原先无条件执行 + 2>/dev/null 让每次发版都打一条恒定的 WARN，属噪声而非信号）。
+if git remote get-url github >/dev/null 2>&1; then
+  if git push github "$CUR_BRANCH" --tags 2>/dev/null; then
+    echo "已推送 GitHub 镜像（分支 $CUR_BRANCH）"
+  else
+    echo "WARN: GitHub 镜像推送跳过（token 权限待补）"
+  fi
+else
+  echo "跳过 GitHub 镜像（未配置 github remote）"
+fi
 
 # npm 包自证（P0 复发根治：npm 0.4.1 实锤——包内缺 pending.py：files 白名单
 # 逐文件枚举漏新模块 + 曾以旧插件副本打出）：现场 pack 并断言包内代码指纹

@@ -390,12 +390,20 @@ pip install 'vod-devkit[remote]'
 VOD_DEVKIT_HOME=/opt/vod/codearts npx -y vod-devkit@latest install --target generic --product CodeArts
 VOD_DEVKIT_HOME=/opt/vod/aishell  npx -y vod-devkit@latest install --target generic --product AIShell
 
-VOD_DEVKIT_HOME=/opt/vod/codearts python -m vod_mcp.server --transport remote --port 9528 --host 127.0.0.1
-VOD_DEVKIT_HOME=/opt/vod/aishell  python -m vod_mcp.server --transport remote --port 9529 --host 127.0.0.1
+VOD_DEVKIT_HOME=/opt/vod/codearts VOD_SINGLE_TENANT=1 \
+  python -m vod_mcp.server --transport remote --port 9528 --host 127.0.0.1
+VOD_DEVKIT_HOME=/opt/vod/aishell VOD_SINGLE_TENANT=1 \
+  python -m vod_mcp.server --transport remote --port 9529 --host 127.0.0.1
 ```
 
 ⚠️ **`VOD_DEVKIT_HOME` 必须各不相同**，否则两个产品会互相覆盖同一份 `runtime.json`
 （product 被后装的覆盖、nonce 相同导致 voiceId 撞车、账本互相盖掉）。
+
+⚠️ **`VOD_SINGLE_TENANT=1` 决定安装期 `--product` 是否生效**（审查 P1-1，2026-11-19）：
+远程面默认禁用安装先验（多 agent 共用时必错归），模式② 需要**显式声明单租户**才放开。
+三个条件缺一不可：`VOD_SINGLE_TENANT=1` + `VOD_DEVKIT_HOME` 非空 + 请求不带 `sess:`/`agent:`
+标识。不设这个变量时行为与多 agent 共用一致——**用户原话里没提产品就会 -32010 问一次**，
+不会用安装绑定兜底。
 
 宿主侧 attach：
 
@@ -526,8 +534,11 @@ hermes hooks test pre_llm_call --payload-file payload.json
 
 - `VOD_PACKS` 三层：环境变量（平台/CI 注入，启动生效）；**会话内开关** `vod_packs_configure`
   工具（stdio 面：`enable`/`disable`/`reset`，立即改工具面并推 `tools/list_changed`，
-  **不落盘、重启即清**；远程面同样可用，按 MCP 会话隔离）；CLI `packs enable/disable/all --apply`
+  **不落盘、重启即清**）；CLI `packs enable/disable/all --apply`
   （持久，直接改写各宿主配置里的 `VOD_PACKS`，缺省 dry-run，`core` 强制包含）
+  ⚠️ **`vod_packs_configure` 在远程面不提供**（工具面 = stdio 减去它）：远端所有会话共用
+  同一个 `Server` 实例、包状态是模块级全局，一个会话 disable 会摘掉同进程其他 agent 的工具，
+  等于一条调用打断所有人的采集。这是**进程级共享、当前 SDK 下做不到按会话隔离**，不是漏实现。
 - 三层分工一句话：要**当前会话立刻变**用工具，要**以后都变**用 CLI，平台注入用 env。
   MCP 工具不写你的配置文件（持久化只走 CLI 这一个入口）
 - 未知包 id：安装口、server 启动口与 `vod_packs_configure` 都报错并列出可用 id——不静默过滤
