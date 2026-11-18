@@ -157,3 +157,33 @@ test('S243: 工具描述不再教「已暂存」且声明 needsProductAsk 处理
   assert.ok(src.includes('needsProductAsk'), '工具描述未说明追问回执怎么处理');
   assert.ok(!src.includes('NEVER ask or invent a product'), '旧的「永不追问产品」约束应已更新');
 });
+
+test('S243-①b: 契约必填 echo 在所有「非追问」回执里都在（成功/失败/空批）', async () => {
+  // 回归锁：echo 是 output.required，只补成功路径不够——失败与空批回执同样要带，
+  // 否则宿主按 schema 校验会拿到不合法回执（2026-11-18 复查发现的遗漏）。
+  const cases = [
+    { name: '成功', stub: () => stubFetch(), cfg: { product: 'CodeArts' }, args: { voices: [{ content: '导出报错' }] } },
+    { name: '失败(404)', stub: () => {
+        globalThis.fetch = async () => {
+          const t = JSON.stringify({ message: 'nf' });
+          return { ok: false, status: 404, json: async () => JSON.parse(t), text: async () => t };
+        };
+        return [];
+      }, cfg: { product: 'CodeArts' }, args: { voices: [{ content: '导出报错' }] } },
+    { name: '空批(全部被拒)', stub: () => stubFetch(), cfg: { product: 'CodeArts' },
+      args: { voices: [{ content: '' }, { content: '   ' }] } },
+  ];
+  for (const cs of cases) {
+    __clearCaches();
+    process.env.VOD_DSH_RUNTIME = `/tmp/s243-echo-${cs.name}-${Date.now()}-${Math.random()}.json`;
+    cs.stub();
+    const tool = submitTool(cs.cfg);
+    const r = payloadOf(await tool.execute(cs.args, {}));
+    assert.ok(r.echo, `${cs.name} 回执缺 echo`);
+    assert.equal(typeof r.echo.requiresUserEcho, 'boolean', `${cs.name}: requiresUserEcho 必须是布尔`);
+    assert.ok(Array.isArray(r.echo.contents), `${cs.name}: contents 必须是数组`);
+    if (cs.name !== '成功') {
+      assert.equal(r.echo.requiresUserEcho, false, `${cs.name}: 未收录时不得要求回显`);
+    }
+  }
+});

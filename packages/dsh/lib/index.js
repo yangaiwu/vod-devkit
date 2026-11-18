@@ -957,10 +957,12 @@ export function apply(ctx, config) {
                         rejected,
                         accepted: 0,
                         path: 'hoarding',
+                        echo: echoPlan(hoard, []),   // 契约必填：未拿到回执=无 voiceId，回显为空
                     });
                 }
                 // hoard 为空（所有条目在前置校验被拒）→ 无提交调用，只回执拒收原因
                 return textResult({ accepted: 0, voiceIds: [], taskIds: [], rejected,
+                    echo: echoPlan([], []),   // 契约必填：无提交也就无回显
                     productSource: attr.source,
                     ...(attr.evidence && attr.evidence.length ? { productEvidence: attr.evidence } : {}),
                     ...(invalidTags.length ? { invalidTags } : {}),
