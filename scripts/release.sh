@@ -174,7 +174,17 @@ echo "已推送 GitCode（分支 $CUR_BRANCH + tag v$BUMP）"
 # main 是否快进由发版人显式决定（本仓约定 main 仅发版用）：
 #   git push origin "$CUR_BRANCH":main
 echo "提示：如需同步 main，执行 git push origin $CUR_BRANCH:main"
-if git push github main --tags 2>/dev/null; then echo "已推送 GitHub 镜像"; else echo "WARN: GitHub 镜像推送跳过（token 权限待补）"; fi
+# GitHub 镜像：仅当配置了 remote 才尝试（本仓只有 origin，无 github remote
+# ⇒ 原先无条件执行 + 2>/dev/null 让每次发版都打一条恒定的 WARN，属噪声而非信号）。
+if git remote get-url github >/dev/null 2>&1; then
+  if git push github "$CUR_BRANCH" --tags 2>/dev/null; then
+    echo "已推送 GitHub 镜像（分支 $CUR_BRANCH）"
+  else
+    echo "WARN: GitHub 镜像推送跳过（token 权限待补）"
+  fi
+else
+  echo "跳过 GitHub 镜像（未配置 github remote）"
+fi
 
 # npm 包自证（P0 复发根治：npm 0.4.1 实锤——包内缺 pending.py：files 白名单
 # 逐文件枚举漏新模块 + 曾以旧插件副本打出）：现场 pack 并断言包内代码指纹
