@@ -21,8 +21,8 @@ metadata:
 | 插件版本/来源核验 | `vod_devkit_info`（version + commitSha） |
 | key/认证状态、引擎连通性 | `vod_auth_status`（只报指纹，不下发明文） |
 | 准备采集前确认身份（尤其 MCP 单独部署/无 key） | `vod_auth_ensure`（有可用令牌就复用，没有则由服务代理领匿名令牌；幂等，一次会话调一次） |
-| 有哪些技能、规则技能是否可用 | `vod_list_skills` |
-| 取规则技能全文（分类/评分口径） | `vod_retrieve_skill`（owner pack 被裁剪时返回恢复指引） |
+| 有哪些技能、规则技能是否可用 | `vod_list_skills`（**仅 knowledge pack**）；`--preset collect` 下无此工具 ⇒ **直接用 initialize 里给的技能树路径列目录**，不要反复试工具 |
+| 取规则技能全文（分类/评分口径） | `vod_retrieve_skill`（**仅 knowledge pack**）；无此工具时**读 `<initialize 给的技能树>/<技能名>/SKILL.md`**（`--preset collect` 下规则技能照样已装进本机技能目录，实测 4 个技能全在）。owner pack 未被裁剪时该工具会返回恢复指引 |
 
 ## 意图 → 领域技能
 
