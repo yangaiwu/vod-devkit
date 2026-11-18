@@ -23,6 +23,13 @@
 - **归因不问用户**：产品由插件从用户原话字面解析（引擎名录别名），唯一命中才采信；
   多产品命中=歧义 → 落 UNKNOWN 由运营判。安装时的 `--product` 只是可选先验，**且只在原话
   出现自指（"这个产品/你们家/本平台"）时才生效**——没有语境支撑就不拿先验硬归，回到"先问一次"。
+- **作用域隔离**：记忆/追问计数/voiceId 按作用域分桶，三种部署形态共用一条解析链
+  （`_resolve_scope`）：stdio 用进程身份、远程用 MCP 标准会话、显式 agent 头用于跨会话共享。
+  **拿不到任何标识时不读也不写**——宁可多问用户一次，也不把 A 的归因写进 B 的桶
+  （错归进引擎幂等域，静默且难追溯）。
+
+> **三种部署形态**（一 agent 一本地 / 一 agent 一远程 / 多 agent 共用远程）的安装命令、
+> 隔离边界与自检方法见「[三种部署模式](#三种部署模式按场景选)」。
 
 > **同机不要同时启用两个反馈采集技能**：若宿主已装 `huawei-cloud-vod-collector`（反馈→GitCode 工单）等同类技能，请二选一，或明确告之模型通道分工（建单 vs 收录进 VOD）。两边触发词重叠（体验差/有 bug/报告问题），同时启用会让同一条抱怨随机进其中一个通道。技能内已写「渠道边界」判据（看用户要的产物，不看词）。
 
@@ -348,21 +355,46 @@ MCP 已由别处注册、只想装技能话术时：
 npx -y vod-devkit@latest install --target <hermes|opencode|codex> --skills-only
 ```
 
-## 远程部署：MCP 单独部署 + 宿主 attach
+## 三种部署模式（按场景选）
 
-一个远程端点服务多个宿主；身份随请求头走，不落服务器：
+| 模式 | 形态 | 隔离 | 适用 |
+|---|---|---|---|
+| **① 一 agent 一本地 MCP** | stdio，每 agent 一个进程 | 进程天然隔离 | 默认推荐，最简单 |
+| **② 一 agent 一远程 MCP** | 每 agent 一个远程进程 + 独立 `VOD_DEVKIT_HOME` | 进程 + 目录 | 想集中部署但保持隔离 |
+| **③ 多 agent 共用远程 MCP** | 一个远程进程服务多个 agent | **MCP 标准会话** | 一台桌面/一台机器多个 agent |
+
+三者的归因、记忆、追问计数都按**作用域**隔离，业务行为一致。
+
+### 模式 ① 一 agent 一本地 MCP（stdio）
+
+在各 agent 自己的机器上装，进程随 agent 拉起：
+
+```bash
+npx -y vod-devkit@latest install --target <宿主> --product <产品名>
+# 例：--target dsh --profile web --product CodeArts
+```
+
+- 零第三方依赖（stdio 形态不需要 MCP SDK）
+- skill 文件随包本地部署，agent 可直接读 `skillRoot`
+- 产品绑定写在本机 state，`--product` 可用
+
+### 模式 ② 一 agent 一远程 MCP（独立进程 + 独立目录）
 
 ```bash
 pip install 'vod-devkit[remote]'
-vod-devkit serve --transport remote --port 9528 --host 127.0.0.1   # 前面需自建 TLS 反代
+
+# 每个产品独立目录 + 独立端口
+VOD_DEVKIT_HOME=/opt/vod/codearts npx -y vod-devkit@latest install --target generic --product CodeArts
+VOD_DEVKIT_HOME=/opt/vod/aishell  npx -y vod-devkit@latest install --target generic --product AIShell
+
+VOD_DEVKIT_HOME=/opt/vod/codearts python -m vod_mcp.server --transport remote --port 9528 --host 127.0.0.1
+VOD_DEVKIT_HOME=/opt/vod/aishell  python -m vod_mcp.server --transport remote --port 9529 --host 127.0.0.1
 ```
 
-```jsonc
-{ "mcp": { "vod-devkit": {
-    "type": "remote", "url": "http://localhost:9528", "enabled": true } } }
-```
+⚠️ **`VOD_DEVKIT_HOME` 必须各不相同**，否则两个产品会互相覆盖同一份 `runtime.json`
+（product 被后装的覆盖、nonce 相同导致 voiceId 撞车、账本互相盖掉）。
 
-宿主 attach（token 可选——给了就用请求头身份，不给就走远程 server 侧的机器级匿名令牌）：
+宿主侧 attach：
 
 ```bash
 npx -y vod-devkit@latest install --target hermes   --mcp-url https://<网关>/mcp --mcp-token <key>
@@ -374,18 +406,41 @@ npx -y vod-devkit@latest install --target codex    --mcp-url https://<网关>/mc
 远程面工具集）+ **key 真伪**（经远程面真调 `vod_auth_status`，引擎三态：
 `rejected` = API Key 无效 → 拒装且**不写任何配置**；`device-mismatch` =
 匿名令牌设备锚点漂移（token 有效、本机非签发设备）→ 放行，首次提交或
-`vod_auth_ensure` 时自动重领；引擎不可达 → 放行，网络问题不是 key 问题）。`doctor` 复查端点与
-工具面。远程面与 stdio 面的一致性（D-token-machine-1，2026-11-16）：
+`vod_auth_ensure` 时自动重领；引擎不可达 → 放行，网络问题不是 key 问题）。
 
-- **工具面**：与本地一致，唯一例外是 `vod_packs_configure`（进程内开关，HTTP 每请求现造
-  server、多 agent 共用会互相影响）。两段式草稿与本机账本在远程同样可用——草稿按宿主
-  隔离（`owner`），A 的草稿 B 提交会被拒（`-32011`）。
+### 模式 ③ 多 agent 共用远程 MCP
+
+一台机器上多个 agent 连同一个远程端点。**服务端不要设 `--product`**（一份
+runtime.json 代表不了所有 agent，硬用就是错归）：
+
+```bash
+npx -y vod-devkit@latest install --target generic        # 不给 --product
+python -m vod_mcp.server --transport remote --port 9528 --host 127.0.0.1
+```
+
+隔离靠 **MCP 标准会话**：`initialize` 下发 `mcp-session-id`，客户端后续请求
+自动回传，记忆/追问计数/voiceId 按会话隔离。**客户端无需任何额外配置**。
+
+厂商兼容（自研裸 HTTP 客户端不握手时）：服务端自动内部握手兜底，客户端无感；
+日志会出现 `[vod-devkit] 兼容模式：无 session 请求已内部握手`。看到这行说明
+客户端未走标准握手 —— 能用，但每次调用独立会话（记忆不延续）。
+
+自检：连上后看 server 日志
+- **没有** `兼容模式` 那行 → 标准客户端，隔离完全生效 ✅
+- **有**那行 → 客户端不标准，走兜底（可用、不串味、但记忆不跨请求）
+
+### 远程面的通用约束（模式 ②③）
+
+- **工具面与 stdio 完全一致**（含 `vod_packs_configure`，数量以运行期 `tools/list` 为准）。会话内
+  开关在 stateful 下有效且按会话隔离；两段式草稿与本机账本同样可用——草稿按
+  宿主隔离（`owner`），A 的草稿 B 提交会被拒（`-32011`）。
 - **身份**：请求头 Bearer 优先；没有时与本地同链，用机器级匿名令牌。
 - token 承载：hermes 走 env `MCP_VOD_DEVKIT_API_KEY`（配置里只留 `${...}` 引用）；
   opencode 写在 `headers`（注意文件权限）；codex 走 `VOD_MCP_TOKEN`；**不给 token 也行**
   （配置里不写认证，提交走服务端匿名令牌）。
+- **远程面不发布本机路径**：不给 `skillRoot` / `path`，规则文本用 `vod_retrieve_skill` 取。
 - **`--product` 的边界**：它写进的是**执行安装那台机器**的 state。远程面与插件同机时
-  server 读同一份 state（有效）；若 server 在另一台机器上，这个先验对 server 的归因不起作用。
+  server 读同一份 state（有效）；模式 ③ 下建议不设（见上）。
 - **无内建鉴权**：本进程不校验身份，默认只绑回环；对外必须反代 TLS + 身份校验。
   **非回环绑定（`--host 0.0.0.0`）默认关闭匿名代领**，调用方必须带 Bearer；
   确需在可信内网共享本机身份，加 `--allow-anon-mint`。
@@ -415,7 +470,7 @@ npx -y vod-devkit@latest install --target codex    --mcp-url https://<网关>/mc
 | vod_auth_status | core | 只读 | key 指纹化自检 + 三步引导（无 key 可跑） |
 | vod_auth_ensure | core | 写（身份） | 判定 + 领取匿名令牌（幂等；唯一有副作用的认证工具） |
 | vod_search_products | core | 只读 | 名录检索（含主键 ID）：问用户"是哪个产品"前给候选 |
-| vod_packs_configure | core | 写（会话内） | 会话内开关能力包；**远程面不提供**（进程内状态，多 agent 会互相影响） |
+| vod_packs_configure | core | 写（会话内） | 会话内开关能力包；**stdio 与 remote 均提供**（remote 走标准会话，按会话隔离，2026-11-18 D-scope-1 起不再摘除） |
 | vod_check_update | core | 只读 | registry latest（24h 缓存 / 失败静默）；只提醒不升级 |
 | vod_list_skills / vod_retrieve_skill | knowledge | 只读 | 领域规则技能披露（pack 裁剪即拒绝并给恢复命令） |
 
@@ -462,7 +517,7 @@ hermes hooks test pre_llm_call --payload-file payload.json
 
 - `VOD_PACKS` 三层：环境变量（平台/CI 注入，启动生效）；**会话内开关** `vod_packs_configure`
   工具（stdio 面：`enable`/`disable`/`reset`，立即改工具面并推 `tools/list_changed`，
-  **不落盘、重启即清**；远程面无会话、不提供）；CLI `packs enable/disable/all --apply`
+  **不落盘、重启即清**；远程面同样可用，按 MCP 会话隔离）；CLI `packs enable/disable/all --apply`
   （持久，直接改写各宿主配置里的 `VOD_PACKS`，缺省 dry-run，`core` 强制包含）
 - 三层分工一句话：要**当前会话立刻变**用工具，要**以后都变**用 CLI，平台注入用 env。
   MCP 工具不写你的配置文件（持久化只走 CLI 这一个入口）
