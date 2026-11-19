@@ -59,8 +59,9 @@ def test_bin_entry_starts_server():
 def test_two_dispatch_paths_report_same_version():
     """双分派必须同源：bin 入口（前置 execve 分支）与 argparse 子命令分支报同一版本。
 
-    台账 DEP-04 指的就是这两条"取根来源不同"：`cli.py:13` 用 `paths.SRC_ROOT`，
-    子命令 `_serve` 用 `common.ROOT`。仓内形态两者同指，so 版本号必须一致。
+    台账 DEP-04:两条"取根来源不同"——前置分支用 `paths.SRC_ROOT`,子命令 `_serve`
+    曾经用 `common.ROOT`(分发根)。仓内形态两者**不同指**(SRC_ROOT=<repo>/src,
+    DIST_ROOT=<repo>),所以 `_serve` 拼出的 `<repo>/vod_mcp/server.py` 根本不存在。
     """
     r1 = _run([str(BIN), "serve"])
     m1 = _msgs(r1.stdout)
@@ -87,3 +88,30 @@ def test_misplaced_inherited_src_root_is_tolerated(bad):
     r = _run([str(BIN), "serve"], {"VOD_DEVKIT_SRC_ROOT": bad.replace("{repo}", str(ROOT))})
     ok = bool(r.stdout.strip()) or bool(r.stderr.strip())
     assert ok, f"VOD_DEVKIT_SRC_ROOT={bad} 下静默零输出（exit={r.returncode}）"
+
+
+# ── DEP-04 真锁：两条分派必须同源，且拼出的 server.py 真实存在 ──────────────
+#
+# 旧用例 `test_two_dispatch_paths_report_same_version` 是**绕开**的：它硬编码
+# `<repo>/src/vod_mcp/server.py` 去直跑，等于用正确答案验证正确答案，从未检查
+# `_serve` 自己拼什么。所以 DEP-04 在"版本一致"的绿灯下活了下来。
+# 这里改成读源码 + 实测路径存在性，任何一条分支改回分发根都会当场红。
+def test_dep04_serve_branches_share_one_root():
+    """两处 serve 分派必须都用 SRC_ROOT 拼 server.py；不许出现 common.ROOT 拼代码路径。"""
+    src = (ROOT / "src" / "vodkit_cli" / "cli.py").read_text("utf-8")
+    # 前置分支（argv[1]=='serve'）与子命令 _serve 各一处
+    hits = [ln for ln in src.splitlines()
+            if "vod_mcp" in ln and "server.py" in ln and "sys.executable" in ln]
+    assert len(hits) == 2, f"serve 分派点数量变了（期望 2，实际 {len(hits)}）：{hits}"
+    for ln in hits:
+        assert "SRC_ROOT" in ln, f"这条 serve 分派没用 SRC_ROOT（DEP-04 回退）：{ln.strip()}"
+        assert "common.ROOT" not in ln, f"这条 serve 分派又用分发根拼代码路径了：{ln.strip()}"
+
+
+def test_dep04_serve_target_exists():
+    """SRC_ROOT 下必须真有 server.py —— 这条在改回 common.ROOT 时会红。"""
+    from vod_mcp import paths
+    target = paths.SRC_ROOT / "vod_mcp" / "server.py"
+    assert target.is_file(), f"serve 将 exec 不存在的路径：{target}"
+    # 反面：分发根下**不该**有它，防止有人用"两处都建一份"糊过去
+    assert paths.SRC_ROOT != paths.DIST_ROOT or target.is_file()

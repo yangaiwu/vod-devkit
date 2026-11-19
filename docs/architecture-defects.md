@@ -65,7 +65,7 @@
 | ARCH-DEP-01 | `net` ↔ `runtime_state` 双向依赖，靠函数内懒导入破环 | P2 | 2.0 | ✅完整（`2b8bc15`，另修了台账漏记的 hermes↔host_verify 环） |
 | ARCH-DEP-02 | `host_adapters` 急切聚合导入 12 个适配器，与载荷边界冲突 | P1 | 3.0 | ✅完整（惰性注册 + `test_registry_is_lazy`） |
 | ARCH-DEP-03 | 知识披露层反向依赖网络出口层（`skills_registry`/`packs.knowledge` → `net`） | P2 | 1.5 | ⬜未动 |
-| ARCH-DEP-04 | 入口设根契约覆盖不全，`serve` 双分派两条路径根来源不同 | P1 | 2.0 | ⬜未动（**真机实测：`vod-devkit serve` 起不来，见下方实测注**） |
+| ARCH-DEP-04 | 入口设根契约覆盖不全，`serve` 双分派两条路径根来源不同 | P1 | 2.0 | ✅完整（`cli.py:131` 子命令 `_serve` 由 `common.ROOT` 改为 `_paths.SRC_ROOT`，与前置分支 `cli.py:18` 同源；env 统一为 SRC/DIST 两个。**实测**：改前拼出 `<repo>/vod_mcp/server.py` 不存在、改后 `<repo>/src/vod_mcp/server.py` 存在。门禁 `test_dep04_serve_branches_share_one_root` / `test_dep04_serve_target_exists`，已反向验证改回即红） |
 | ARCH-DEP-05 | 运行期安装代码依赖构建脚本 `sync_plugin.py` | P1 | 1.0 | ⬜未动 |
 | ARCH-DEP-06 | 路径常量 import 期冻结，违反 `paths.py` 自陈纪律 | P2 | 1.0 | ⬜未动 |
 | ARCH-CALL-01 | stdio 与 remote 两面各写一套 `tools/call` 管线，错误呈现层级不一 | P1 | 3.0 | ⬜未动 |
@@ -83,7 +83,7 @@
 | ARCH-CFG-01 | `pending-feedback.jsonl` 存用户原话却未收紧 0600 | **P0** | 1.0 | ✅完整（实测改前 0644 → 现 0600，含历史文件收紧） |
 | ARCH-CFG-02 | 远程面 `CORS *` + 无 Host 校验 + 无内建鉴权 → 浏览器可跨域驱动本机端点 | P1 | 2.0 | ✅完整（`89b7b3c`：origin 改白名单 `DEFAULT_ALLOWED_ORIGINS` + Host 校验；`test_cors_origin.py` 锁住） |
 | ARCH-CFG-03 | 三套原子写实现并存，fsync/权限/符号链接语义不一致 | P1 | 2.0 | ✅完整（单源 + AST 门禁；遗留：通用路径 `mode=0o600` 会把 0400 放宽） |
-| ARCH-CFG-04 | `secret_scan.py` 覆盖边界：只扫 tracked、无超时、git 失败即崩 | P1 | 1.0 | ⬜未动 |
+| ARCH-CFG-04 | `secret_scan.py` 覆盖边界：只扫 tracked、无超时、git 失败即崩 | P1 | 1.0 | ✅完整（扫描面 = tracked + `plugins/`/`assets/` 全量，**实测 352 文件含 77 个副本、其中 57 个原先扫不到**；`git ls-files` 加 30s timeout，不可用/超时/非 git 目录一律降级告警；扫描面为空时 fail-closed exit 1。模式补 `.env` 形态与 `java_key` 落盘。「通用长令牌串」试过已**回退**——实测把 git SHA/sha256/npm integrity 全抓进来上百条误报。验收 `test_secret_scan.py` 5 条，已反向验证改回静默通过即红） |
 | ARCH-CFG-05 | 凭据三入口（env / runtime / 请求头），优先级判据散落四处 | P2 | 2.0 | ⬜未动 |
 | ARCH-CFG-06 | 机器级 state 目录权限只在迁移路径收紧 0700 | P2 | 0.5 | ⬜未动 |
 | ARCH-CFG-07 | `guard_scope` 字段剔除靠"新字段记得加" | P2 | 1.0 | ⬜未动 |
