@@ -1,8 +1,25 @@
 #!/bin/bash
 # pre-push 质量门：push 前强制 pytest+pyflakes（GitCode Actions 平台不可用期间的本地机器门禁）
-PY=$(ls /root/.hermes/tools/python-3.14.7*/bin/python3 2>/dev/null || command -v python3)
-LIBS=/root/.hermes/cache/scratch/pylibs
-if [ -d "$LIBS" ]; then export PYTHONPATH="$LIBS:$PYTHONPATH"; fi
+# 接线：python3 scripts/install_hooks.py（ARCH-BLD-05；本脚本不会自动生效）
+#
+# ARCH-BLD-05：此处不再出现任何作者机绝对路径（原形态：作者 HOME 下的解释器目录、
+# 其 pylibs 缓存目录、以及硬编码的 /tmp 日志路径三处）。
+# 解释器选择顺序：仓内 venv → ./venv → PATH 上的 python3。找不到就直接失败，
+# 不要静默回落一个版本不符的解释器（那会把环境问题误判成代码问题）。
+PY=""
+ROOT_GUESS=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
+for cand in "$ROOT_GUESS/.venv/bin/python3" "$ROOT_GUESS/venv/bin/python3"; do
+  if [ -x "$cand" ]; then PY="$cand"; break; fi
+done
+if [ -z "$PY" ]; then PY=$(command -v python3); fi
+if [ -z "$PY" ]; then
+  echo "[pre-push] FAIL: 找不到 python3（请先建 venv 或安装 python3）"; exit 1
+fi
+# 可选：显式指定额外库路径（不再硬编码作者机目录）
+if [ -n "$DEVKIT_PREPUSH_LIBS" ] && [ -d "$DEVKIT_PREPUSH_LIBS" ]; then
+  export PYTHONPATH="$DEVKIT_PREPUSH_LIBS:$PYTHONPATH"
+fi
+echo "[pre-push] 解释器：$PY"
 echo "[pre-push] lint..."
 "$PY" -m pyflakes src/vod_mcp src/vodkit_cli integrations/hermes/hooks tests || { echo "[pre-push] FAIL: lint 未过，禁止推送"; exit 1; }
 echo "[pre-push] pytest..."
@@ -11,9 +28,10 @@ echo "[pre-push] 双副本一致性（生成物同步 + 内容一致 + 副本零
 "$PY" scripts/sync_plugin.py --no-build-info >/dev/null || { echo "[pre-push] FAIL: sync_plugin 失败"; exit 1; }
 "$PY" scripts/verify_copies.py || { echo "[pre-push] FAIL: 双副本漂移——重跑 scripts/sync_plugin.py 后重试"; exit 1; }
 echo "[pre-push] dsh 壳测试（归因对账/回执守卫/UI 全局）..."
+LOG="${TMPDIR:-/tmp}/prepush-dsh.log"
 if command -v node >/dev/null 2>&1 && [ -d packages/dsh/node_modules ]; then
-  ( cd packages/dsh && node --test test/*.test.mjs >/tmp/prepush-dsh.log 2>&1 ) \
-    || { echo "[pre-push] FAIL: dsh 测试未过（见 /tmp/prepush-dsh.log）"; exit 1; }
+  ( cd packages/dsh && node --test test/*.test.mjs >"$LOG" 2>&1 ) \
+    || { echo "[pre-push] FAIL: dsh 测试未过（见 $LOG）"; exit 1; }
 else
   echo "[pre-push] SKIP: 缺 node 或 packages/dsh/node_modules（npm install 后覆盖）"
 fi

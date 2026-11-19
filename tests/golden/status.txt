@@ -5,6 +5,9 @@
     "remote": "<ORIGIN>",
     "ref": "<REF>",
     "commitSha": "<SHA>",
+    "snapshot": "<SNAPSHOT>",
+    "worktreeHead": "<HEAD>",
+    "snapshotLagsHead": "<SNAPSHOT_LAGS_HEAD>",
     "reachable": "<REACHABLE>",
     "released": "<RELEASED>"
   },

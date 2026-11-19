@@ -82,7 +82,11 @@ def sync(root: Path = ROOT, quiet: bool = False, write_build_info: bool = True) 
     version = _version_from_init(root / "src" / "vod_mcp" / "__init__.py")
     bi = {"version": version, "commitSha": sha,
           "builtAt": datetime.datetime.now().isoformat(timespec="seconds"),
-          "sourceRemote": remote or None}
+          "sourceRemote": remote or None,
+          # ARCH-BLD-04：本函数按**当前 HEAD** 重烧 ⇒ 这份快照的语义是 worktree。
+          # release.sh 会在发版时把它改写成 v^ 口径（released），两处必须一致地写这个字段，
+          # 否则读的人无法区分"落后 HEAD 是异常"还是"发版快照本来就停在 v^"。
+          "snapshot": "worktree"}
     if os.environ.get("VOD_DEVKIT_NO_BUILD_INFO") or not write_build_info:
         # 打包/隔离跑法/测试期：保留现有 build-info（npm prepack 会跑本函数，若按当前 HEAD
         # 重烧，tarball 的代码指纹就不再等于 tag，与 release.sh 的终态断言冲突——
@@ -97,7 +101,7 @@ def sync(root: Path = ROOT, quiet: bool = False, write_build_info: bool = True) 
         pkg_rel = "plugins/vod-devkit/build-info.json"
         if not (root / pkg_rel).is_file():
             head = _git(["rev-parse", "HEAD"], root) or bi.get("commitSha")
-            fresh = {**bi, "commitSha": head}
+            fresh = {**bi, "commitSha": head, "snapshot": "worktree"}
             dst = root / pkg_rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(json.dumps(fresh, ensure_ascii=False, indent=2) + "\n",

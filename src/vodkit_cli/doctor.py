@@ -446,6 +446,17 @@ def cmd_doctor(args=None):
             print("[doctor] 提示：安装期提交不在任何 tag 里（非发布构建）——版本号相同，"
                   "内容可能与该版本的 npm 包不同（R10-2）；要一字不差请用 "
                   "npx vod-devkit@<ver> install", file=sys.stderr)
+        # ARCH-BLD-04：快照落后 HEAD 时明确提示「装的是哪个代码」。
+        # 这不是 problem（tracked 快照按设计停在 v^，发版后必然与 HEAD 不等，
+        # 判成 problem 会让每个发版后的真机 doctor 都红），而是**可见性提示**：
+        # 运维按 commitSha 对账时要知道它代表发版快照、工作树实际是 worktreeHead。
+        _src = mf.get("source") or {}
+        _head = _src.get("worktreeHead")
+        if _src.get("snapshotLagsHead"):
+            print(f"[doctor] 提示：build-info 快照 {str(_src.get('commitSha'))[:12]} "
+                  f"≠ 安装时工作树 HEAD {str(_head)[:12]}（snapshot={_src.get('snapshot')}）"
+                  "——对账请用 source.worktreeHead 表示实际代码，"
+                  "commitSha 仅是发版快照（ARCH-BLD-04）", file=sys.stderr)
         if mf.get("mcpConfig") and not Path(mf["mcpConfig"]).exists():
             problems.append("MCP 配置文件缺失")
         # D-token-machine-1（R4）：state 与旧位并存 = "静默不迁"要可见。

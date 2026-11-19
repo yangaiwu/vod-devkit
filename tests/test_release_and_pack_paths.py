@@ -75,3 +75,58 @@ def test_npm_pack_contains_no_bytecode():
             "plugins/vod-devkit/vod_mcp/server.py"]
     missing = [m for m in must if m not in files]
     assert not missing, f"tarball 缺关键文件：{missing}"
+
+# ---- ARCH-BLD-05：pre-push 未接线 + 作者机绝对路径 ----
+
+def test_pre_push_has_no_author_paths():
+    """pre-push 里不许出现作者机绝对路径（原 `/root/.hermes/...` 两处 + 硬编码 /tmp 日志）。
+
+    台账 ARCH-BLD-05 实锤：新克隆在别人机器上跑，`PY` 会静默回落 `python3`
+    （版本可能不符契约），失败原因会被误判成环境问题。
+    """
+    src = (ROOT / ".githooks" / "pre-push").read_text(encoding="utf-8")
+    bad = [p for p in ("/root/.hermes", "/home/", "C:\\Users") if p in src]
+    assert not bad, f"pre-push 含作者机绝对路径：{bad}"
+    # 找不到解释器必须显式失败，而不是静默继续（原形态是 `|| command -v python3` 兜底）
+    assert "找不到 python3" in src, "解释器缺失时应显式失败并给出可读原因"
+
+
+def test_hook_install_script_is_idempotent(tmp_path):
+    """`scripts/install_hooks.py` 必须幂等，且只改本仓（不 --global）。
+
+    用临时 git 仓实测两次调用：第一次接线、第二次报「已接线」且不改动配置。
+    """
+    script = ROOT / "scripts" / "install_hooks.py"
+    assert script.exists(), "缺 scripts/install_hooks.py（BLD-05 整改措施）"
+
+    repo = tmp_path / "hookrepo"
+    repo.mkdir()
+    (repo / ".githooks").mkdir()
+    hook = repo / ".githooks" / "pre-push"
+    hook.write_text("#!/bin/bash\nexit 0\n")
+    hook.chmod(0o644)                      # 故意不给执行位，验证安装器会补
+    (repo / "scripts").mkdir()
+    shutil.copy2(script, repo / "scripts" / "install_hooks.py")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+
+    def _run(*extra):
+        # 脚本按 __file__ 定位 ROOT，所以复制一份到临时仓里跑，才是真的「在别人的克隆上安装」
+        return subprocess.run(["python3", "scripts/install_hooks.py", *extra],
+                              cwd=repo, capture_output=True, text=True)
+
+    first = _run()
+    assert first.returncode == 0, first.stderr
+    cfg = subprocess.run(["git", "config", "--get", "core.hooksPath"], cwd=repo,
+                         capture_output=True, text=True).stdout.strip()
+    assert cfg == ".githooks", f"core.hooksPath 未接线：{cfg!r}"
+    assert hook.stat().st_mode & 0o111, "安装器未补执行位（git 会静默跳过该钩子）"
+    # 不许写 --global
+    glb = subprocess.run(["git", "config", "--global", "--get", "core.hooksPath"],
+                         capture_output=True, text=True).stdout.strip()
+    assert glb != ".githooks", "安装器污染了 --global 配置（会影响用户其他仓库）"
+
+    second = _run()
+    assert second.returncode == 0, second.stderr
+    assert "已接线" in second.stdout, f"第二次调用不幂等：{second.stdout!r}"
+    # --check 也必须绿
+    assert _run("--check").returncode == 0

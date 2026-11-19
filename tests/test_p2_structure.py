@@ -134,8 +134,16 @@ def test_no_module_alias_leaked_into_ref_like_strings():
                      + "\n  ".join(bad[:10]))
 
 
-def test_update_uses_origin_main_ref():
-    """语义锁：cmd_update 比较的必须是 origin/main（上一条的具名实例）。"""
+def test_update_uses_current_branch_ref():
+    """语义锁（ARCH-BLD-02 后改写）：cmd_update 比较的远端 ref 必须由**当前分支**
+    派生（`origin/{branch}`），不许硬编码某个分支名，也不许被拆分正则污染。
+
+    原用例断言 `"origin/main" in src`，那是"钉 main"时代的锁；现在钉 main 本身就是
+    缺陷（dev 上 update 会 ff 到 main、静默切主干），所以锁的意图改为：
+    ① 存在 `origin/{branch}` 的派生引用；② 不再出现字面量 origin/main|origin/dev；
+    ③ 仍不许出现被污染成 cli.main 的形态。"""
     src = (ROOT / "src" / "vodkit_cli" / "update.py").read_text(encoding="utf-8")
-    assert '"origin/main"' in src, "cmd_update 的远端 ref 不是 origin/main"
+    assert 'f"origin/{branch}"' in src, "cmd_update 未按当前分支派生远端 ref"
+    assert '"origin/main"' not in src, "cmd_update 仍硬编码 origin/main（dev 上会静默切主干）"
     assert "cli.main" not in src, "origin/main 被拆分正则污染成 cli.main"
+    assert "cli.branch" not in src, "origin/{branch} 被拆分正则污染成 cli.branch"

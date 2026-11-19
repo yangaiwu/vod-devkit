@@ -3,6 +3,7 @@
 # 真实 ~/.hermes、~/.config/opencode、~/.codex——一切副作用圈在 tmp_path。
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -117,15 +118,14 @@ def env(tmp_path, engine_stub):
     stub_vd.chmod(0o755)
 
     bare = tmp_path / "origin.git"
-    # 显式钉 main（2026-11-18 实测）：cmd_update 语义锁是「比较 origin/main」
-    # （tests/test_p2_structure.py），而 git clone --bare 会把 bare 的 HEAD 设成
-    # 源仓**当前**分支。开发分支切到 dev/main 之外时（如新建 dev 上开发），克隆
-    # 出来的临时仓也在 dev，commit_on_origin 推到 dev，update 仍比 origin/main
-    # → 恒判「已是最新」，本文件两条 update 用例秒红、pre-push 门禁卡死。
-    _git(SRC_REPO, "clone", "--bare", "--quiet", "--branch", "main",
-         str(SRC_REPO), str(bare))
-    _git(bare, "symbolic-ref", "HEAD", "refs/heads/main")
-    # bare 的 HEAD 指向克隆时的分支；排除 hooks 干扰
+    # ARCH-BLD-02（2026-11-19）：不再钉 `main`。`cmd_update` 已改为比较
+    # **当前分支**（`origin/<branch>`），所以夹具只要让裸仓 HEAD 与工作树当前
+    # 分支一致即可 —— 用 `git clone --bare` 的默认行为（继承源仓 HEAD），再显式
+    # 把 symbolic-ref 对齐成同一分支，避免\"源仓在 dev、裸仓却在 main\"的漂移。
+    _cur_branch = _git(SRC_REPO, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    _git(SRC_REPO, "clone", "--bare", "--quiet", str(SRC_REPO), str(bare))
+    # bare 的 HEAD 指向克隆时的分支；显式对齐，排除 hooks 干扰
+    _git(bare, "symbolic-ref", "HEAD", f"refs/heads/{_cur_branch}")
     repo = tmp_path / "repo"
     _git(bare, "clone", "--quiet", str(bare), str(repo))
     # 叠加工作区未提交改动：门禁要测的是"当前要推的内容"，不是上一个提交
@@ -191,7 +191,11 @@ def commit_on_origin(env, marker, touch=None):
 
 
 def _head_branch(env):
-    return _git(env["repo"], "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() or "main"
+    # ARCH-BLD-02：分支兜底不再写死 `main`（写死会让\"分支解析失败\"沉默成 main）。
+    # 拿不到分支名就直接抛，让用例红在明处。
+    b = _git(env["repo"], "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    assert b and b != "HEAD", "测试夹具拿不到当前分支名（detached HEAD？）"
+    return b
 
 
 # ---- opencode：schema 形态 + 既有配置无损合并 ----
@@ -490,6 +494,14 @@ def test_golden_status_and_preset_update_refusal(env):
     for k in ("reachable", "released"):
         assert isinstance(d["source"].get(k), bool), d["source"]
         d["source"][k] = f"<{k.upper()}>"
+    # ARCH-BLD-04 新增字段：`worktreeHead` 与 `snapshot`/`snapshotLagsHead` 也是**环境值**
+    # （HEAD 随检出变、snapshot 随"快照是否等于 HEAD"变）。与 reachable/released 同理
+    # 归一，只锁结构存在性——锁死会让"换个检出/换台机器就红"。
+    assert isinstance(d["source"].get("snapshotLagsHead"), bool), d["source"]
+    d["source"]["snapshotLagsHead"] = "<SNAPSHOT_LAGS_HEAD>"
+    d["source"]["worktreeHead"] = "<HEAD>"
+    assert d["source"].get("snapshot") in ("released", "worktree", "unknown"), d["source"]
+    d["source"]["snapshot"] = "<SNAPSHOT>"
     actual = json.dumps(d, ensure_ascii=False, indent=2)
     _assert_golden("status", actual)
     cli(env, "install", "--target", "hermes", "--product", "CodeArts",
@@ -911,12 +923,22 @@ def _norm_golden(env, text, mf=None):
     subs = [(str(env["home"]), "<HOME>"), (str(env["repo"]), "<REPO>"),
             (str(env["bare"]), "<ORIGIN>")]
     if mf:
+        # ⚠️ 顺序敏感：`worktreeHead` 与 `commitSha` 常常**同值**（快照按 HEAD 重烧时），
+        # 必须先替换长串（HEAD）再替换短串（SHA），否则 worktreeHead 会被误标成 `<SHA>`，
+        # golden 里两个语义就混了（ARCH-BLD-04 新增字段的归一化顺序）。
+        _wh = (mf.get("source") or {}).get("worktreeHead")
+        if _wh and _wh != mf["source"]["commitSha"]:
+            subs += [(str(_wh), "<HEAD>"), (str(_wh)[:12], "<HEAD12>")]
         subs += [(str(mf["source"]["commitSha"]), "<SHA>"),
                  (str(mf["source"]["commitSha"][:12]), "<SHA12>"),
                  (str(mf.get("installedAt")), "<INSTALLED_AT>")]
     for volatile, tag in subs:
         text = text.replace(volatile, tag)
-    return text
+    # `snapshot` 的归一放在替换**之后**：它枚举的是字段值本身，不涉及路径/SHA，
+    # 放在前面会被 subs 里的同串替换打乱（本机 worktree / 发版机 released 都要归一，
+    # 否则 golden 只在作者机当前状态下绿——假门禁）。
+    return re.sub(r'"snapshot": "(released|worktree|unknown)"',
+                  '"snapshot": "<SNAPSHOT>"', text)
 
 
 def test_golden_doctor_without_manifest(env):

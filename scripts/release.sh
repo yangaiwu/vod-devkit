@@ -202,6 +202,17 @@ TAG_COMMIT=$(git rev-parse "v$BUMP")
 # 注意：plugins/vod-devkit/ 只有 .codex-plugin/plugin.json 与 .mcp.json 入库，包内
 # build-info 是生成物（git 不认识它）——只从 tag 取根那份，再拷给插件副本。
 git checkout "v$BUMP" -- build-info.json
+# ARCH-BLD-04：tag 里这份快照的语义是**发版快照**（commitSha 按 tag 口径写）。
+# sync_plugin 写的是 worktree，发版时必须改写为 released，否则"落后 HEAD"这个
+# 状态在发版机上永远报不出口径差异（读到 worktree 会误以为它是按 HEAD 重烧的）。
+python3 - "$BUMP" <<'PY' || { echo "FAIL: 无法把 build-info 的 snapshot 标为 released" >&2; exit 1; }
+import json, sys
+p = "build-info.json"
+d = json.load(open(p, encoding="utf-8"))
+d["snapshot"] = "released"
+open(p, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+print(f"build-info snapshot=released @ {d.get('commitSha','')[:8]}")
+PY
 cp -f build-info.json plugins/vod-devkit/build-info.json
 VOD_DEVKIT_NO_BUILD_INFO=1 npm pack --silent >/dev/null
 BI_SHA=$(tar xzOf "$TGZ" package/plugins/vod-devkit/build-info.json | grep -o '"commitSha": "[0-9a-f]*"' | head -1 | grep -o '[0-9a-f]\{7,\}')

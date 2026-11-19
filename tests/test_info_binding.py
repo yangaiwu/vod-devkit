@@ -118,3 +118,56 @@ def test_s209_contract_registers_every_search_products_field():
     assert returned <= set(props), f"回执字段未登记进契约：{sorted(returned - set(props))}"
     for k in ("installBinding", "nextStep"):
         assert k in props, f"契约缺 {k}"
+
+# ---- ARCH-BLD-04：根 build-info 快照落后 HEAD 时，安装账本必须记下真实 HEAD ----
+
+def test_install_manifest_records_worktree_head_when_snapshot_lags(tmp_path, monkeypatch):
+    """台账点名的验收断言：快照 ≠ HEAD 时，manifest 要**两个值都记**，
+    且 `snapshotLagsHead` 为真 —— 否则运维按 commitSha 对账会对到发版快照，
+    而不是"实际装进去的代码"（BLD-04 实锤：0.5.44 快照落后 HEAD 三个提交）。
+
+    不跑真实 git：直接对 `_write_install_manifest` 的字段组装逻辑做单元验证，
+    用桩替换 build-info 文件与 git 调用，避免依赖当前检出的分支状态。
+    """
+    import json as _json
+    from types import SimpleNamespace
+
+    from vodkit_cli import common
+
+    snap_sha, head_sha = "a" * 40, "b" * 40
+    (tmp_path / "build-info.json").write_text(_json.dumps({
+        "version": "0.5.45", "commitSha": snap_sha,
+        "builtAt": "2026-11-19T00:00:00", "sourceRemote": "git@example:x/y.git",
+        "snapshot": "released",
+    }), encoding="utf-8")
+    monkeypatch.setattr(common, "ROOT", tmp_path)
+    monkeypatch.setenv("VOD_DEVKIT_MANIFEST", str(tmp_path / "install-manifest.json"))
+
+    real_run = common.subprocess.run
+
+    class _P:
+        def __init__(self, out=""):
+            self.stdout, self.returncode = out, 0
+
+    def _fake_run(cmd, *a, **kw):
+        # `git rev-parse HEAD` → 工作树真值；`--abbrev-ref HEAD` → 分支名
+        if list(cmd[:3]) == ["git", "rev-parse", "HEAD"]:
+            return _P(head_sha + "\n")
+        if "HEAD" in cmd and "--abbrev-ref" in cmd:
+            return _P("dev\n")
+        if "tag" in cmd or "branch" in cmd:
+            return _P("")
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(common.subprocess, "run", _fake_run)
+
+    args = SimpleNamespace(target="hermes", preset=None)
+    common._write_install_manifest(args, "hermes", ["core"], None, None, [],
+                                   transport="stdio", payload_dir=str(tmp_path / "payload"))
+
+    mf = _json.loads((tmp_path / "install-manifest.json").read_text(encoding="utf-8"))
+    src = mf["source"]
+    assert src["commitSha"] == snap_sha, "commitSha 仍应是 build-info 快照里的提交"
+    assert src["worktreeHead"] == head_sha, "必须记录安装时真实工作树 HEAD"
+    assert src["snapshotLagsHead"] is True, "快照 ≠ HEAD 必须标记为落后"
+    assert src["snapshot"] == "released", "快照来源标记应透传 build-info 的 snapshot"

@@ -81,17 +81,17 @@
 | ARCH-ERR-05 | 可观测性＝固定 `/tmp` 文本日志：无级别、无请求关联、远程面请求日志静默 | P1 | 3.0 | ⬜未动（一行未改） |
 | ARCH-ERR-06 | `explain` 按文案正则归层，错误码与文案双轨 | P2 | 2.0 | ⬜未动 |
 | ARCH-CFG-01 | `pending-feedback.jsonl` 存用户原话却未收紧 0600 | **P0** | 1.0 | ✅完整（实测改前 0644 → 现 0600，含历史文件收紧） |
-| ARCH-CFG-02 | 远程面 `CORS *` + 无 Host 校验 + 无内建鉴权 → 浏览器可跨域驱动本机端点 | P1 | 2.0 | ⬜未动（`transport_remote.py:440` 仍无条件 `*`） |
+| ARCH-CFG-02 | 远程面 `CORS *` + 无 Host 校验 + 无内建鉴权 → 浏览器可跨域驱动本机端点 | P1 | 2.0 | ✅完整（`89b7b3c`：origin 改白名单 `DEFAULT_ALLOWED_ORIGINS` + Host 校验；`test_cors_origin.py` 锁住） |
 | ARCH-CFG-03 | 三套原子写实现并存，fsync/权限/符号链接语义不一致 | P1 | 2.0 | ✅完整（单源 + AST 门禁；遗留：通用路径 `mode=0o600` 会把 0400 放宽） |
 | ARCH-CFG-04 | `secret_scan.py` 覆盖边界：只扫 tracked、无超时、git 失败即崩 | P1 | 1.0 | ⬜未动 |
 | ARCH-CFG-05 | 凭据三入口（env / runtime / 请求头），优先级判据散落四处 | P2 | 2.0 | ⬜未动 |
 | ARCH-CFG-06 | 机器级 state 目录权限只在迁移路径收紧 0700 | P2 | 0.5 | ⬜未动 |
 | ARCH-CFG-07 | `guard_scope` 字段剔除靠"新字段记得加" | P2 | 1.0 | ⬜未动 |
-| ARCH-BLD-01 | 双 CI 定义漂移：GitCode 只覆盖部分门禁，且两者都只在 `main` 触发 | P1 | 2.0 | ⬜未动（实测 GitCode 5 步 / GitHub 10 步，dev 仍零 CI 门禁） |
-| ARCH-BLD-02 | 开发基线 `dev` 而 update/测试夹具仍钉 `main`（release.sh 半步已修） | P1 | 1.0 | ◐半步（release.sh 已于 `95217f1` 修；`update.py` 与测试夹具仍钉 `main`） |
+| ARCH-BLD-01 | 双 CI 定义漂移：GitCode 只覆盖部分门禁，且两者都只在 `main` 触发 | P1 | 2.0 | ✅完整（`89b7b3c`：清单单一真源 `scripts/gate_all.py`，两套 CI 均触发 `main`/`dev`；GitCode 侧缺 dsh/hostmatrix 属平台能力限制，已在 workflow 注释记明） |
+| ARCH-BLD-02 | 开发基线 `dev` 而 update/测试夹具仍钉 `main`（release.sh 半步已修） | P1 | 1.0 | ✅完整（`95217f1` 修 release.sh；本轮 `update.py` 改按当前分支派生 `origin/{branch}` + detached HEAD 拒执行，`tests/test_installer.py` 夹具不再钉 main、`test_p2_structure.py` 语义锁改写为反向约束） |
 | ARCH-BLD-03 | 版本六处落点，根 `plugin.json` 永久停在 `0.1.0` | P1 | 1.0 | ✅完整（`fde04d0`，8 处落点现全等） |
-| ARCH-BLD-04 | 根 `build-info.json` 快照落后 HEAD，却被 install 与 provenance 当权威 | P1 | 1.5 | ⬜未动 |
-| ARCH-BLD-05 | `.githooks/pre-push` 未接线，且含作者机绝对路径 | P1 | 1.0 | ⬜未动（脚本内仍有 `/root/.hermes/...` 与 `/tmp` 日志；新 clone 不生效） |
+| ARCH-BLD-04 | 根 `build-info.json` 快照落后 HEAD，却被 install 与 provenance 当权威 | P1 | 1.5 | ✅完整（`common.build_info` 加 `snapshot: released\|worktree`；manifest 记 `worktreeHead` + `snapshotLagsHead`；doctor 落后时显式提示；`sync_plugin`/`release.sh` 两处写入口径统一；验收 `test_install_manifest_records_worktree_head_when_snapshot_lags` 已反向验证） |
+| ARCH-BLD-05 | `.githooks/pre-push` 未接线，且含作者机绝对路径 | P1 | 1.0 | ✅完整（新增 `scripts/install_hooks.py` 幂等接线 + `--check`；pre-push 去全部作者机路径、解释器缺失显式失败；`CONTRIBUTING.md` 改成先跑安装脚本；两条验收用例 + 作者路径门禁已反向验证） |
 | ARCH-BLD-06 | `package.json` 的 `files` 逐文件枚举，靠发版后断言兜底 | P2 | 2.0 | ⬜未动（本轮新增模块即被它抓红一次，已手工补白名单——正是本条风险） |
 | ARCH-BLD-07 | `sync_plugin.py` 用字符串切分解析 `__version__`，用例已打桩绕过 | P2 | 0.5 | ⬜未动 |
 
@@ -110,6 +110,9 @@
 > `vod_list_skills` / `vod_retrieve_skill` 未注册，而 `vod-core` 技能路由表第一条就教
 > 模型用这两个工具 ⇒ 真模型首跑即失败（只能改去读载荷目录的 SKILL.md）。
 > 这是**装机后第一次真实使用就撞墙**，优先级高于台账里多数 P1，需单独立项。
+> **已处置（2026-11-19，`c34a37d`）**：选 B 方案改路由表（「仅 knowledge pack」+ 给
+> 「读 `<技能树>/<技能名>/SKILL.md`」替代路），不改预设分层（`decisions.md:23` 已拍板）。
+> `tests/test_skill_availability.py`（4 例）锁住三个前提 + 决策锁。
 >
 > ③ 另一条真机发现：`check_update` 报 `current 0.5.45 vs latest 0.5.43` ——
 > npm registry 滞后于仓内 tag（0.5.44/0.5.45 均未 publish），用户侧更新链路是断的。
