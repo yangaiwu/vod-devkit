@@ -766,3 +766,8 @@
 - c34a37d fix(skill): collect 预设下路由表不再指向未注册的 knowledge 工具（B 方案）
 - 0c4b96b docs: 纠正整改口径夸大 + 台账加「整改状态」列 + serve 入口回归锁
 
+
+## v0.5.47（2026-11-19）
+
+- e1a6098 fix(arch): fix-list three defects and py3.14 SQL forward-compat
+
