@@ -754,3 +754,15 @@
 - ba48d9d fix(release): GitHub 镜像推送按 remote 是否存在决定
 - 95217f1 fix(release): 推送当前分支而非硬编码 main
 
+
+## v0.5.46（2026-11-19）
+
+- e351a30 fix(arch): P1 收官 —— instructions 单一真值 + 运行期去构建依赖 + 两面同码锁（CALL-02 / DEP-05 / CALL-01）
+- ba4b4ab fix(arch): 可观测性结构化 + 错误码域收敛 + 引擎可达性单一真源（ERR-05 / ERR-03 / CALL-06）
+- c80d269 fix(arch): DEP-04 serve 双分派同源 + CFG-04 secret_scan 扫描面补齐
+- 90eebc3 fix(arch): S244 门禁补「账本内容合法性」校验 + 清理被测试污染的 install-manifest（BLD-08）
+- f145f63 fix(arch): BLD-02/04/05 分支派生与快照标记 + hook 安装脚本（台账补齐 12 完整）
+- 89b7b3c fix(arch): CI 门禁单一真源 + 远程面 Origin/Host 收紧（BLD-01 / CFG-02）
+- c34a37d fix(skill): collect 预设下路由表不再指向未注册的 knowledge 工具（B 方案）
+- 0c4b96b docs: 纠正整改口径夸大 + 台账加「整改状态」列 + serve 入口回归锁
+
