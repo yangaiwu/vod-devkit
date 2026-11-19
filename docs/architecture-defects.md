@@ -94,6 +94,7 @@
 | ARCH-BLD-05 | `.githooks/pre-push` 未接线，且含作者机绝对路径 | P1 | 1.0 | ✅完整（新增 `scripts/install_hooks.py` 幂等接线 + `--check`；pre-push 去全部作者机路径、解释器缺失显式失败；`CONTRIBUTING.md` 改成先跑安装脚本；两条验收用例 + 作者路径门禁已反向验证） |
 | ARCH-BLD-06 | `package.json` 的 `files` 逐文件枚举，靠发版后断言兜底 | P2 | 2.0 | ⬜未动（本轮新增模块即被它抓红一次，已手工补白名单——正是本条风险） |
 | ARCH-BLD-07 | `sync_plugin.py` 用字符串切分解析 `__version__`，用例已打桩绕过 | P2 | 0.5 | ⬜未动 |
+| ARCH-BLD-08 | S143 门禁只比前后快照，"本来就脏"的 `install-manifest.json` 永远判绿 | P1 | 1.0 | ✅完整（S244：`tests/conftest.py` 新增 `_manifest_pollution()`，会话结束校验账本落点是否指向 pytest/临时目录 → exit 1；不依赖本轮是否写入。实测污染账本 → exit 1 且四个字段点名；删账本 → exit 0。4 条回归锁 `test_s244_*`） |
 
 > **实测注（2026-11-19，本机）——含一次我的误判，如实记录**：
 >
