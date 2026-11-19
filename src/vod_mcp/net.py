@@ -92,6 +92,12 @@ def _eff_key(explicit=None) -> str:
 
 
 _META_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/meta"
+# ARCH-CALL-06：公开别名，doctor / remote 等外部调用点一律引用它，
+# 不许再手抄这段路径（曾有三处硬编码，引擎改路径要改三处）。
+META_PATH = _META_PATH
+# 引擎 API 公共前缀（remote.py 的 token/products 端点共用）
+_API_PREFIX = "/rest/developer/manager/hdvodmngservice/v1"
+API_PREFIX = _API_PREFIX
 
 
 _META_TTL = 24 * 3600
@@ -168,9 +174,36 @@ def _load_meta(force: bool = False) -> dict:
 
 
 class ToolError(Exception):
-    def __init__(self, message: str, code: int = -32000):
+    """工具层错误。`code` 必须是 JSON-RPC 合法错误码（`-32xxx` 段）。
+
+    ARCH-ERR-03：**上游 HTTP 状态码不许进 `code`**——`429`/`500` 落在协议保留段之外，
+    宿主无法按 JSON-RPC 分类；也不该让 `explain 500` 落到"未分类"。
+    上游真实状态码放 `upstream_status`，供内部按码分流（如 collect 判 404）。
+    """
+
+    def __init__(self, message: str, code: int = -32000, *,
+                 upstream_status: int | None = None):
         super().__init__(message)
         self.code = code
+        self.upstream_status = upstream_status
+
+
+def _http_error_code(status: int) -> int:
+    """上游 HTTP 状态码 → JSON-RPC 错误码（ARCH-ERR-03）。
+
+    **不**透传 status 本体：`429`/`500` 落在 JSON-RPC 保留段之外，客户端无法按协议
+    分类，`explain 500` 也会落到"未分类"。
+
+    - 429：引擎限流/取号排队 → `-32018`（处置是"稍后重试"，不是配置错）
+    - 5xx：引擎自身故障 → `-32019`
+    - 其余 4xx：请求被引擎拒绝 → `-32020`
+    401（→ -32012）与 404（→ -32016，由 collect 按 upstream_status 判）在调用点各自归一。
+    """
+    if status == 429:
+        return -32018
+    if 500 <= status < 600:
+        return -32019
+    return -32020
 
 
 def _http(method: str, path: str, body: dict | None = None,
@@ -209,8 +242,9 @@ def _http(method: str, path: str, body: dict | None = None,
             # 会让探针把正常匿名场景误判成 rejected）
             raise ToolError(
                 f"鉴权失败（{base}）：{detail or '检查 VOD_JAVA_API_KEY 配置'}",
-                code=-32012) from e
-        raise ToolError(f"上游返回 {e.code}: {detail}", code=e.code) from e
+                code=-32012, upstream_status=401) from e
+        raise ToolError(f"上游返回 {e.code}: {detail}", code=_http_error_code(e.code),
+                        upstream_status=e.code) from e
     except urllib.error.URLError as e:
         raise ToolError(f"上游不可达（{base}）: {e.reason}", code=-32001) from e
 
@@ -262,6 +296,34 @@ def probe_key(key: str | None = None, timeout: int = 8) -> dict:
                         "note": "匿名令牌已过期：下次提交自动重领，无需操作"}
             return {"ok": False, "reason": "rejected", "fingerprint": fp}
         return {"ok": None, "reason": "unreachable", "fingerprint": fp}
+
+
+def probe_reachable(base: str | None = None, timeout: int = 4) -> dict:
+    """引擎可达性探针（**不带 key**，ARCH-CALL-06）。
+
+    `doctor` 之前自己抄了一份 `_probe_engine`（手写 URL + 自己一套三态），与 `probe_key`
+    的五态机并存：同一份"引擎是否可达"能给出两种结论，且 5xx 在那边被误归 unreachable。
+    这里把**判定**统一到 net，调用方只做展示层映射。
+
+    返回 {ok, reason, status}：
+      - ok=True,  reason="verified"        2xx（不带 key 也能通，说明路径/网络正常）
+      - ok=False, reason="needs-auth"      401/403（可达，但需凭据——不是不可达）
+      - ok=None,  reason="unreachable"     网络/超时
+      - ok=None,  reason="server-error"    5xx（引擎故障，不是网络问题）
+    """
+    b = base if base is not None else _java_base()
+    try:
+        _http("GET", META_PATH, None, base=b, key=None, timeout=timeout)
+        return {"ok": True, "reason": "verified", "status": 200}
+    except ToolError as ex:
+        st = getattr(ex, "upstream_status", None)
+        if ex.code in (-32012, -32020) or st in (401, 403):
+            return {"ok": False, "reason": "needs-auth", "status": st}
+        if ex.code == -32019 or (st is not None and 500 <= st < 600):
+            return {"ok": None, "reason": "server-error", "status": st}
+        if ex.code == -32001:
+            return {"ok": None, "reason": "unreachable", "status": None}
+        return {"ok": None, "reason": "unreachable", "status": st}
 
 
 def _key_state() -> dict:

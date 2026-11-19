@@ -215,7 +215,9 @@ def _validate_product_or_exit(product: str, base: str, refresh: bool = False) ->
     import urllib.request
     import urllib.error
     import uuid
-    api_prefix = "/rest/developer/manager/hdvodmngservice/v1"
+    from vod_mcp import net as _net
+    # ARCH-CALL-06：路径前缀单一真源在 net（此前这里硬编码一份，与 net/doctor 各一份）
+    api_prefix = _net.API_PREFIX
     key = os.environ.get("VOD_JAVA_API_KEY", "")
     ua = "vod-devkit-installer/1"
 

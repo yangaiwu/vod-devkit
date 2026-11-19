@@ -442,8 +442,10 @@ def submit_voices(params: dict, client_info: dict | None = None,
     try:
         out = net._http("POST", _SUBMIT_HOARDING, body, base=net.JAVA_BASE, key=net._eff_key())
     except net.ToolError as ex:
-        if ex.code == 404:
+        if ex.upstream_status == 404 or ex.code == 404:
             # S238：不再回落老链。引擎未部署囤积端点时如实报错，不假装成功、不换语义
+            # ARCH-ERR-03：`_http` 不再把上游状态码塞进 code（改放 upstream_status），
+            # 这里两个都认——兼容历史抛点（老插件可能仍透传 404）。
             raise net.ToolError(
                 "囤积端点未上线（POST /external/voices 返回 404）：本条**未提交**。"
                 "引擎部署该端点后自动可用；不要改用老链 /external/voice/submit。",

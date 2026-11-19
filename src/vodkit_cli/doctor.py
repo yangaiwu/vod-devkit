@@ -345,17 +345,24 @@ def _proxy_summary() -> str:
 
 
 def _probe_engine(base: str, timeout: float = 4.0) -> tuple:
-    """(state, detail)；state ∈ ok / auth / unreachable。零依赖、不重试、不带 key。"""
-    import urllib.error
-    import urllib.request
-    url = base.rstrip("/") + "/rest/developer/manager/hdvodmngservice/v1/external/meta"
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
-            return ("ok", f"HTTP {r.status} {url}")
-    except urllib.error.HTTPError as e:
-        return ("auth", f"HTTP {e.code}（可达；鉴权/路径响应）{url}")
-    except Exception as e:  # noqa: BLE001  网络类异常一律只报告
-        return ("unreachable", f"{type(e).__name__}: {e}（{url}）")
+    """(state, detail)；state ∈ ok / auth / server-error / unreachable。
+
+    ARCH-CALL-06：判定统一走 `net.probe_reachable`——此前这里自己手抄 URL 并造了一套
+    三态机，与 `net.probe_key` 的五态并存，同一份"引擎是否可达"能给出两种结论，
+    且 5xx 被误归 unreachable（把引擎故障说成网络问题，排查方向直接错）。
+    本函数只做**展示层映射**，不再自己发请求。
+    """
+    from vod_mcp import net
+    r = net.probe_reachable(base=base, timeout=int(timeout))
+    reason = r["reason"]
+    url = base.rstrip("/") + net.META_PATH
+    if reason == "verified":
+        return ("ok", f"HTTP {r['status']} {url}")
+    if reason == "needs-auth":
+        return ("auth", f"HTTP {r['status']}（可达；需凭据）{url}")
+    if reason == "server-error":
+        return ("server-error", f"HTTP {r['status']}（引擎故障，非网络问题）{url}")
+    return ("unreachable", f"{url}")
 
 
 def _report_egress(api_base: str) -> None:
@@ -368,6 +375,9 @@ def _report_egress(api_base: str) -> None:
         print(f"[doctor] 引擎可达：{detail}")
     elif state == "auth":
         print(f"[doctor] 引擎可达：{detail}")
+    elif state == "server-error":
+        # 引擎可达但自身故障：旧实现把它当 unreachable，误导用户去查网络
+        print(f"warn: 引擎可达但服务端故障（5xx，本机网络/配置无关）：{detail}")
     else:
         print(f"warn: 引擎不可达（离线环境可忽略；提交会失败）：{detail}")
 

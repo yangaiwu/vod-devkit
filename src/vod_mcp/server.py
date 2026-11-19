@@ -6,6 +6,7 @@
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 # 自举包路径（对任意 MCP 宿主成立：不依赖宿主透传 PYTHONPATH——
@@ -186,14 +187,28 @@ def main():
         except json.JSONDecodeError:
             resp = _error(None, -32700, "解析错误")
         else:
+            # ARCH-ERR-05：stdio 面也记请求级关联（tool/耗时/结果码），
+            # 与远程面同一出口、同一字段集，排障时两面可统一检索。
+            _t0 = time.monotonic()
+            _tool = ((message.get("params") or {}).get("name")
+                     if isinstance(message, dict) and message.get("method") == "tools/call" else None)
+            _rid = message.get("id") if isinstance(message, dict) else None
             try:
                 resp = handle(message)
             except Exception as e:     # noqa: BLE001  ARCH-ERR-01：任何未捕获异常都不许打死进程
                 # 不含 Exception 之外的 KeyboardInterrupt/SystemExit（那两个必须照常退出）
-                runtime_state._log(f"handle uncaught: {type(e).__name__}: {e}")
+                runtime_state._log(f"handle uncaught: {type(e).__name__}: {e}",
+                                   level="error", event="stdio_call", req_id=_rid,
+                                   tool=_tool, code=-32603,
+                                   duration_ms=round((time.monotonic() - _t0) * 1000, 1))
                 print(f"[vod-devkit] error: {type(e).__name__}: {e}", file=sys.stderr)
                 resp = _error(message.get("id") if isinstance(message, dict) else None,
                               -32603, "内部错误（已记录日志）")
+            else:
+                _method = message.get("method") if isinstance(message, dict) else None
+                runtime_state._log("stdio 调用完成", event="stdio_call", req_id=_rid,
+                                   rpc_method=_method if _method else None, tool=_tool,
+                                   duration_ms=round((time.monotonic() - _t0) * 1000, 1))
         out_msgs = resp if isinstance(resp, list) else ([resp] if resp is not None else [])
         for m in out_msgs:
             sys.stdout.write(json.dumps(m, ensure_ascii=False) + "\n")

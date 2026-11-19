@@ -460,8 +460,14 @@ class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "vod-devkit-mcp"
 
-    def log_message(self, fmt, *args):  # 静默：日志走 /tmp/vod_mcp_server.log
-        pass
+    def log_message(self, format, *args):  # noqa: A002  与基类签名一致
+        """ARCH-ERR-05：HTTP 访问日志接进统一结构化出口（旧实现整体 pass ⇒ 访问面全静默）。
+
+        BaseHTTPRequestHandler 自己的格式是自由文本，这里只记状态行；**带上下文的
+        请求级日志**在 do_POST 里记（有 tool/耗时/结果码）。
+        """
+        from vod_mcp import runtime_state as _rt  # 懒导入：与本模块的既有循环依赖口径一致
+        _rt._log(f"http-access {format % args}", level="debug", event="http_access")
 
     # ── Origin/Host 收紧（ARCH-CFG-02，2026-11-19 走查 P1）──────────────────
     # 缺陷：此前无条件发 `Access-Control-Allow-Origin: *`、预检一律 204、`do_POST`
@@ -593,12 +599,30 @@ class _Handler(BaseHTTPRequestHandler):
         scope = _scope(self, body)
         scope["x_vod_key"] = key
         sink = _StreamSink(self)
+        # ARCH-ERR-05：请求级关联日志——把「这次调用是谁、调了什么、多久、什么结果」
+        # 落成一行结构化记录。旧实现只有自由文本 `http METHOD url key=yes/no`，
+        # 没有任何关联标识，一次调用在日志里散成多行且串不起来。
+        import time as _time
+        from vod_mcp import runtime_state as _rt
+        _t0 = _time.monotonic()
+        _method = message.get("method") if isinstance(message, dict) else None
+        _tool = ((message.get("params") or {}).get("name")
+                 if isinstance(message, dict) and message.get("method") == "tools/call" else None)
+        _rid = message.get("id") if isinstance(message, dict) else None
         try:
             self.server.runtime.request(scope, body, sink)
         except Exception as e:  # 传输层异常：能答就答 500，已经流出去就断连
+            _rt._log("远程面传输层异常", level="error", event="remote_call",
+                     req_id=_rid, rpc_method=_method, tool=_tool,
+                     duration_ms=round((_time.monotonic() - _t0) * 1000, 1),
+                     code=-32603, error=type(e).__name__)
             if not sink.started:
                 self._json(500, {"jsonrpc": "2.0", "id": None,
                                  "error": {"code": -32603, "message": str(e)}})
+        else:
+            _rt._log("远程面调用完成", event="remote_call",
+                     req_id=_rid, rpc_method=_method, tool=_tool,
+                     duration_ms=round((_time.monotonic() - _t0) * 1000, 1))
 
 
 def _apply_anon_mint_policy(host: str, allow: bool) -> bool:

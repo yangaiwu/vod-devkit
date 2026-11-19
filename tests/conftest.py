@@ -66,6 +66,9 @@ def _isolate_machine_writes(monkeypatch, tmp_path):
     # 因为 paths.runtime_json_path() 的优先级②是"机器级 state 已存在即用"——
     # pop 之后子进程/同进程会读到真机 ~/.vod-devkit/state 的匿名令牌（凭据泄漏进测试）。
     monkeypatch.setenv("VOD_DEVKIT_HOME", str(tmp_path / "machine-state"))
+    # ARCH-ERR-05：日志落点默认在 machine_state_home()/logs/，同样必须显式指到 tmp。
+    # 否则任何一次 _log() 都会在真机 state 目录下建 logs/ —— S143 会（正确地）判漂移。
+    monkeypatch.setenv("VOD_DEVKIT_LOG", str(tmp_path / "logs" / "server.log"))
     yield
 
 

@@ -206,32 +206,81 @@ def _save_runtime(update: dict, replace: bool = False) -> None:
     _runtime_atomic(_mutate)
 
 
-def _log(line: str, path: str = "/tmp/vod_mcp_server.log") -> None:
-    """统一日志出口，1MB 截断轮转
-    （D-key-guard-3⑤：客户机长期运行防无限增长；截断保留尾部近期日志）。
+def _log_path() -> str:
+    """日志落点（ARCH-ERR-05）：VOD_DEVKIT_LOG > 系统临时目录 > machine_state_home()/logs。
 
-    ARCH-ERR-04/05（2026-11-19 走查）：这是**唯一的排障真源**，所以它自己失败必须有
-    第二出口——写日志失败时往 stderr 兜底一行，不许 `pass` 掉（否则"日志出口坏了"
-    这件事本身没有痕迹，现场只能看到下游症状）。
+    为什么**不**默认机器级 state 目录（第一版这么设计，被 S143 抓红）：
+    日志是"尽力而为"的旁路，一旦默认落在 state 下，**任何一次 _log() 都会建目录**——
+    未隔离的子进程（测试、探针、并行 install）会污染真机机器状态，触发 S143 漂移告警。
+    排障日志不需要跨重启留存，`/tmp` 正是它的传统落点；需要留存时用 VOD_DEVKIT_LOG 显式指定。
     """
+    env = (os.environ.get("VOD_DEVKIT_LOG") or "").strip()
+    if env:
+        return env
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), "vod_mcp_server.log")
+
+
+def _log(line: str, path: str | None = None, *, level: str = "info", **fields) -> None:
+    """统一日志出口（ARCH-ERR-05）：JSONL 结构化 + 可配置落点 + 1MB 轮转。
+
+    - 结构化：每行一个 JSON 对象，含 ts/level/event/msg，调用方可附 **fields
+      （如 tool / duration_ms / code）。排障工具解析，不用正则抠文案。
+    - 落点：`path` 显式优先（测试与迁移用），否则 `VOD_DEVKIT_LOG` > 机器级 state/logs/。
+    - 轮转：超 1MB 保留尾部 200KB，**在 flock 内做**——多进程并发截断会互相覆盖
+      （旧实现无锁）。
+    - 失败必须有第二出口：写日志失败往 stderr 兜底一行，不许 pass。
+
+    `line` 自由文本保持兼容（既有 9 个调用点不传 level/fields 也照常工作）。
+    """
+    import json as _json
+    import time as _time
+
+    target = path or _log_path()
+    record = {"ts": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.localtime()),
+              "level": level, "msg": line.rstrip("\n")}
+    # 既有 `"warn xxx"` 文案习惯 → 提成 level 字段，msg 去掉前缀（排障按 level 过滤才有效）
+    if line.startswith("warn "):
+        record["level"] = "warn"
+        record["msg"] = line[5:].rstrip("\n")
+    if fields:
+        record.update(fields)
+    payload = _json.dumps(record, ensure_ascii=False)
     try:
-        p = path
-        if os.path.exists(p) and os.path.getsize(p) > 1024 * 1024:
-            with open(p, "r", encoding="utf-8", errors="replace") as f:
-                tail = f.read()[-200 * 1024:]
-            os.replace(p, p + ".old")
-            with open(p, "w", encoding="utf-8") as f:
-                f.write("== truncated ==\n" + tail)
-        with open(p, "a", encoding="utf-8") as f:
-            f.write(line.rstrip("\n") + "\n")
+        import fcntl
+    except ImportError:            # pragma: no cover - Windows：无对等机制，退化为无锁
+        fcntl = None               # type: ignore[assignment]
+    try:
+        p = Path(target)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        # 独立锁文件：**不能**复用 _flock 的 runtime.json 锁——日志轮转会把账本读写堵住。
+        with open(p.parent / (p.name + ".lock"), "a", encoding="utf-8") as _lk:
+            if fcntl is not None:
+                fcntl.flock(_lk.fileno(), fcntl.LOCK_EX)
+            try:
+                if p.exists() and p.stat().st_size > 1024 * 1024:
+                    with open(p, "r", encoding="utf-8", errors="replace") as f:
+                        tail = f.read()[-200 * 1024:]
+                    # 从第一个换行后开始：按字节截断会切碎一行 JSON，留下半截就不是 JSONL 了
+                    _nl = tail.find("\n")
+                    if _nl != -1:
+                        tail = tail[_nl + 1:]
+                    os.replace(p, str(p) + ".old")
+                    with open(p, "w", encoding="utf-8") as f:
+                        f.write(tail)
+                with open(p, "a", encoding="utf-8") as f:
+                    f.write(payload + "\n")
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(_lk.fileno(), fcntl.LOCK_UN)
     except Exception as e:      # noqa: BLE001  日志失败不许打断主链，但必须留痕
-        print(f"[vod-devkit] log-fallback({path}): {line!r} ({type(e).__name__}: {e})",
+        print(f"[vod-devkit] log-fallback({target}): {payload} ({type(e).__name__}: {e})",
               file=sys.stderr)
 
 
-def _warn(msg: str) -> None:
-    """告警出口：server 日志（排障真源），失败静默——不阻断业务主链。"""
-    _log(f"warn {msg}")
+def _warn(msg: str, **fields) -> None:
+    """告警出口：与普通流水同一出口但 level=warn（可按级别过滤，不再淹没在 info 里）。"""
+    _log(msg, level="warn", **fields)
 
 
 def _distribution() -> str:
