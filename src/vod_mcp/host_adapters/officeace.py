@@ -134,9 +134,13 @@ def upsert_row(db_path: Path, row: dict) -> str:
         cur = db.execute("SELECT id, owner_user_id FROM mcp_connectors WHERE name = ?",
                          (NAME,)).fetchone()
         if cur:
+            # 位置占位符 `?`，不是编号 `?1..?N`：sqlite3 把编号占位符当「命名参数」，
+            # 配位置元组在 3.12/3.13 只发 DeprecationWarning、**3.14 起直接抛
+            # ProgrammingError**（2026-11-19 修复清单 P1，回归锁
+            # test_officeace_upsert_raises_no_deprecation_under_strict_warnings）。
             db.execute(
-                "UPDATE mcp_connectors SET command=?1, args_json=?2, env_json=?3, "
-                "updated_at=?4, status=?5, enabled=1 WHERE id=?6",
+                "UPDATE mcp_connectors SET command=?, args_json=?, env_json=?, "
+                "updated_at=?, status=?, enabled=1 WHERE id=?",
                 (row["command"], row["args_json"], row["env_json"], row["updated_at"],
                  "disconnected", cur[0]))
             action = "updated"

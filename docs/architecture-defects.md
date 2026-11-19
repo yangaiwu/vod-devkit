@@ -55,9 +55,9 @@
 
 ## 二、结论摘要
 
-五维共 **32** 条（P0 2 / P1 18 / P2 12），合计约 **55.5 人日**（BLD-02 的 release.sh 半步已由 `95217f1` 修复，工作量相应核减 1.0）。
+五维共 **33** 条（P0 2 / P1 18 / P2 13；第 33 条 ARCH-ERR-07 为 2026-11-19 补录的护栏共用码缺陷，台账初稿遗漏），合计约 **56.5 人日**（BLD-02 的 release.sh 半步已由 `95217f1` 修复，工作量相应核减 1.0）。
 
-> **整改状态**（2026-11-19 起维护，`✅完整` / `◐部分` / `⬜未动`）——查"哪条修了"看这一列，
+> **整改状态**（2026-11-19 起维护，`✅完整` / `◐部分` / `⬜未动`；同日按外部 fix-list 再核一轮）——查"哪条修了"看这一列，
 > 不要翻决策记录反推。本轮落地的代码提交：`2b8bc15`（首批）、`fde04d0`（BLD-03）。
 
 | 编号 | 标题 | 级别 | 人日 | 整改状态 |
@@ -72,14 +72,15 @@
 | ARCH-CALL-02 | `initialize` instructions 双份硬编码，用例只锁关键词 | P1 | 1.0 | ✅完整（抽 `vod_mcp/instructions.py::COLLECT_DISCIPLINE` 单一真值，两面只拼形态尾句（`STDIO_TAIL` / `REMOTE_TAIL`）。三条红线（同意口径/echo 逐字转述/product 追问）集中一处。门禁新增 `test_both_faces_share_collect_discipline` / `test_collect_discipline_covers_the_three_redlines` / `test_form_specific_tails_are_separate`；并修 3 条原先"按文件正文读"的旧用例改为校验运行时下发文本。已反向验证 remote 面改回独立文本即 3 条红） |
 | ARCH-CALL-03 | 远程面哨兵会话以 `id(manager)` 登记，与 SDK 内部语义强耦合 | P2 | 3.0 | ⬜未动 |
 | ARCH-CALL-04 | `collect` pack 单模块承载七件事（692 行 vs `knowledge` 17 行） | P2 | 4.0 | ⬜未动 |
-| ARCH-CALL-05 | 协议面裸造 JSON-RPC，`protocolVersion` 与错误码多处硬编码 | P2 | 1.0 | ⬜未动（实测 **4** 处硬编码，台账写 3 处，漏 `remote.py:98`） |
+| ARCH-CALL-05 | 协议面裸造 JSON-RPC，`protocolVersion` 与错误码多处硬编码 | P2 | 1.0 | ◐部分（**协议版本已单一真源**：`server_face.PROTOCOL_VERSION` 为唯一定义，`server.py`/`transport_remote.py`/`remote.py`×2 共 4 处全改引用；门禁 `test_structure_guards.py::test_protocol_version_has_single_definition` + `::test_all_protocol_version_uses_reference_the_constant`，已反向验证碰回字面量即红；**实测**真 server initialize 回包 `protocolVersion="2025-06-18"` 与常量一致。**未做**：协议面仍裸造 JSON-RPC（错误码硬编码未收敛到常量表）） |
 | ARCH-CALL-06 | 引擎可达性判定两套实现（`net.probe_key` vs `doctor._probe_engine`） | P1 | 2.0 | ✅完整（新增 `net.probe_reachable`：verified/needs-auth/server-error/unreachable 四态；`doctor._probe_engine` 改为只做展示层映射、不再自己发请求；路径单一真源 `net.META_PATH`/`API_PREFIX`，消灭三处硬编码（doctor + remote + net 各一份）。**实测**：旧 doctor 把 5xx 报成 unreachable（引擎故障被说成网络问题），现报 server-error。`test_doctor_egress.py` 新增 5 条（原 9 条 S134 全保留共 14 条），已反向验证 doctor 自造判定即红） |
 | ARCH-ERR-01 | 护栏读取位于异常保护之外，`policy.json` 缺失/损坏直接打死 server | **P0** | 1.0 | ✅完整（fail-closed + `-32017` + 主循环兜底） |
 | ARCH-ERR-02 | 每次工具调用重读 policy 且无 schema 校验（坏规则 → `KeyError`） | P1 | 1.5 | ◐部分（schema 校验已做；**缓存未做**，仍每次重读） |
 | ARCH-ERR-03 | 上游 HTTP 状态码进入 JSON-RPC `code` 域，explain 表与门禁均覆盖不到 | P1 | 2.0 | ✅完整（`net._http_error_code()` 把 429→`-32018`、5xx→`-32019`、其余 4xx→`-32020`；`ToolError` 新增 `upstream_status` 字段承接原始码，`collect` 判 404 改读它。explain 表补三条。门禁从正则改 **AST**：只认 `ToolError/PackRefused` 调用的 `code=` 实参，须为字面量/映射函数/具名常量，同类错误转译（SkillError）放行。**实测**：改前 `code=e.code` 致 429 直接进协议域；改后 `code=-32018` 且原文保留。已反向验证改回即红并点名 `net.py:240 'e.code'`） |
 | ARCH-ERR-04 | 26 处 `except` 体只有 `pass`，主链失败痕迹被吞 | P1 | 3.0 | ◐部分（主链 3 点已补；**实测仍剩 25 处**，全量收敛未做） |
 | ARCH-ERR-05 | 可观测性＝固定 `/tmp` 文本日志：无级别、无请求关联、远程面请求日志静默 | P1 | 3.0 | ✅完整（`_log` 改 JSONL 结构化：ts/level/msg + 任意字段；`_log_path()` 支持 `VOD_DEVKIT_LOG`，默认 `tempfile.gettempdir()` 且**零副作用**（首版默认机器 state 目录被 S143 抓红，已改）；轮转在 flock 内做且从换行边界起算（不再切碎半行 JSON）；远程面 `log_message` 由 `pass` 改为落 `http_access`，`do_POST` 记 req_id/tool/duration_ms；stdio 面同字段集。`tests/test_observability.py` 10 条，已反向验证改回自由文本即 6 条红） |
-| ARCH-ERR-06 | `explain` 按文案正则归层，错误码与文案双轨 | P2 | 2.0 | ⬜未动 |
+| ARCH-ERR-06 | `explain` 按文案正则归层，错误码与文案双轨 | P2 | 2.0 | ◐部分（**JSON-RPC 保留段已补齐**：`-32600/-32601/-32602/-32603/-32700` 五条全部进 `_EXPLAIN_EXTRA`，`known=True` 且有 cause/action；`-32603`（主循环兜底码）文案指向日志与 req_id。门禁 `tests/test_explain_reserved.py`（6 条，含反向约束「`-32013` 废除法码须保持 known=False」）；**未做**：`RULES` 文案正则归层仍在，`classify()` 双轨未消除） |
+| ARCH-ERR-07 | 护栏四类 deny 共用 `-32010`（缺产品），排障方向被指错 | P2 | 1.0 | ✅完整（2026-11-19：按命中规则的 `category` 分派——`exfil`→`-32023`、`write`→`-32024`、confirm 保持 `-32011`、policy 坏保持 `-32017`；护栏侧**不再产出** `-32010`（该码语义 owner 在 collect 归因链路）。explain 补两条。门禁 `tests/test_guard_codes.py`（6 条），含「四条路径码互不相同且无一落在 -32010」；既有锁 `test_policy_load.py::test_deny_rule_still_denies_after_validation` 期望码由 -32010 改为 -32024（保留其原意「校验不许把 deny 顶成 -32017」）。**码位**：`-32021/-32022` 已被 remediation 预留给上游 429/5xx，故新开 `-32023/-32024`） |
 | ARCH-CFG-01 | `pending-feedback.jsonl` 存用户原话却未收紧 0600 | **P0** | 1.0 | ✅完整（实测改前 0644 → 现 0600，含历史文件收紧） |
 | ARCH-CFG-02 | 远程面 `CORS *` + 无 Host 校验 + 无内建鉴权 → 浏览器可跨域驱动本机端点 | P1 | 2.0 | ✅完整（`89b7b3c`：origin 改白名单 `DEFAULT_ALLOWED_ORIGINS` + Host 校验；`test_cors_origin.py` 锁住） |
 | ARCH-CFG-03 | 三套原子写实现并存，fsync/权限/符号链接语义不一致 | P1 | 2.0 | ✅完整（单源 + AST 门禁；遗留：通用路径 `mode=0o600` 会把 0400 放宽） |
@@ -641,6 +642,39 @@
 - **工作量**：2.0 人日
 - **验收断言**：`tests/test_explain_codes.py::test_layer_is_stable_per_code`——对每个码，
   改文案（换同义词）后 `explain` 的 `layer` 不变。
+
+---
+
+### ARCH-ERR-07 护栏四类 deny 共用 `-32010`（缺产品），排障方向被指错
+
+> 2026-11-19 补录：本条不在台账初稿 32 条内，来自外部 fix-list 第 3 条，经复现确认成立。
+> 复现证据：`guardrails.check` 对「凭据泄露」与「批量超限」分别返回 `-32010`，
+> 而 `-32010` 的 explain 文案是「缺少产品归属（用户没说、也追问不到），服务端拒绝写引擎」。
+
+- **证据**：`src/vod_mcp/guardrails.py:38`（`check_tool_call` 的 deny 返回 `-32010`）、
+  `:44`（`check_text` 命中同样返回 `-32010`）；语义 owner 在
+  `src/vod_mcp/packs/collect.py:32`（`_UNRESOLVED_CODE = -32010`，归因链路专用）、
+  `src/vod_mcp/diagnose.py:54`（explain 文案）。
+- **影响面**：四种处置动作完全不同的拦截被压成同一个码——凭据泄露（应「删敏感信息后重提」）、
+  越权/超范围（应「收敛范围」）、策略命中、文本规则命中，全都回报「缺产品，请带上产品再提交」。
+  用户照着提示补产品**永远修不好**，且真实原因（凭据/越权）被掩盖。仓库已有细分码能力，
+  这不是资源限制。
+- **判定依据**：可捕获（对四种拦截各断言一个互不相同的码）；有触发路径（任何一次
+  `tools/call` 都过 `guardrails.check`）；影响面＝排障方向错误 + 可能把凭据内容继续外发。
+- **整改措施**：按命中规则的 `category` 分派（规则自带 `category`，`check_tool_call`/
+  `check_text` 返回的就是原始规则字典，无需新增数据结构）：`exfil`→`-32023`、
+  `write`→`-32024`、confirm 保持 `-32011`、policy 坏保持 `-32017`；未登记 category 兜底
+  `-32024`（宁可粗一档，也不谎报原因）。explain 补两条。
+- **码位纪律**：`-32021/-32022` 已被 `docs/architecture-remediation.md:294` 预留给上游
+  429/5xx 映射，且 `docs/decisions.md:2809` 写明「-32020..22 一旦对外发布就不能复用」⇒
+  新码从 **`-32023`** 起，开新码前已用 AST 全量核对空位。
+- **优先级**：P2（不影响功能正确性，但误导排障并可能掩盖凭据外发）
+- **工作量**：1.0 人日
+- **验收断言**：`tests/test_guard_codes.py`（6 条）——四条路径码互不相同、
+  `-32010` 不在护栏产出集内、两个新码 `explain.known=True` 且文案不含「产品归属」。
+- **既有断言改动**：`tests/test_policy_load.py::test_deny_rule_still_denies_after_validation`
+  期望码 `-32010` → `-32024`（保留原意「校验不许把 deny 顶成 -32017」，并加反向断言
+  「不许再产出 -32010」）。
 
 ---
 

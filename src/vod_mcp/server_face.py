@@ -12,11 +12,19 @@
 `monkeypatch.setattr(net, "_SERVER_FACE", 桩)` 都照常生效（本轮实测踩过：直接读本模块
 的快照会与 net 的桩不一致，导致三条远程面作用域用例变红）。
 
-纪律：本模块**只许**放这一件事，且**不许**有顶层 `vod_mcp.*` import（否则环会长回来）。
-`importlib` 是延迟导入，不是顶层依赖。
+纪律：本模块**只许**放这件事与协议版本常量，且**不许**有顶层 `vod_mcp.*` import
+（否则环会长回来）。`importlib` 是延迟导入，不是顶层依赖。
 """
 import contextvars
 import importlib
+
+# MCP 协议版本单一真源（ARCH-CALL-05）。
+# 为什么放这里：`server.py`（stdio 面 initialize 自报）、`transport_remote.py`（内部
+# 兼容握手）与 `vodkit_cli/remote.py`（安装器探活/探测）三处都要用到它，而本模块零依赖，
+# 谁引它都不造环。此前 `server.py` 定义了一个常量却无人引用、三处各写裸字面量 ⇒ 升级
+# 协议时只改一处就会「服务端自报与客户端握手不一致」，报错却看不出是版本没同步。
+# 门禁：tests/test_structure_guards.py::test_protocol_version_has_single_definition。
+PROTOCOL_VERSION = "2025-06-18"
 
 # 真源。`net._SERVER_FACE` 是它的别名（同一个对象）。
 SERVER_FACE = contextvars.ContextVar("vod_server_face", default=False)

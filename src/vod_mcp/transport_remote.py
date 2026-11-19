@@ -26,7 +26,7 @@ import os
 import sys
 import threading
 
-from vod_mcp import net, paths
+from vod_mcp import net, paths, server_face
 from vod_mcp.remote_app import SIDELESS_MARK_HEADER
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -383,7 +383,8 @@ async def _handshake_once(manager, scope: dict) -> str:
     import json as _json
 
     init_payload = {"jsonrpc": "2.0", "id": "__compat_init__", "method": "initialize",
-                    "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                    "params": {"protocolVersion": server_face.PROTOCOL_VERSION,
+                               "capabilities": {},
                                "clientInfo": {"name": "compat-sideless", "version": "1"}}}
     captured = {}
 

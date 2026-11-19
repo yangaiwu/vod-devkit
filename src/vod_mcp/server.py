@@ -28,9 +28,11 @@ if sys.version_info < (3, 10):
         % sys.version_info[:2])
     sys.exit(2)
 
-from vod_mcp import guardrails, instructions, packs, runtime_state, skills_registry, tools  # noqa: E402
+from vod_mcp import (guardrails, instructions, packs, runtime_state, server_face,  # noqa: E402
+                    skills_registry, tools)
 
-_PROTOCOL_VERSION = "2025-06-18"
+# 协议版本从单一真源取（ARCH-CALL-05）：此前这里定义常量却无人引用，另三处各写裸字面量。
+_PROTOCOL_VERSION = server_face.PROTOCOL_VERSION
 _client_info = {}
 
 

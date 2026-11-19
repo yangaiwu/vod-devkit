@@ -311,3 +311,45 @@ def test_form_specific_tails_are_separate():
     assert str(skills_registry.SKILLS_ROOT) not in remote, \
         "remote 面不许泄漏服务器本机路径"
     assert "不提供服务器本机路径" in remote
+
+
+# ── ARCH-CALL-05：协议版本单一真源 ─────────────────────────────────────────
+# 此前 `server.py:33` 定义了 `_PROTOCOL_VERSION` 却**无人引用**，三处（installer 探测
+# 两处 + 内部握手一处）各写裸字面量。升级协议时只改一处 ⇒ 服务端 initialize 自报
+# 与客户端握手版本不一致，表现为「版本协商失败 / 探活不通」，且从报错看不出是版本没同步。
+def test_protocol_version_has_single_definition():
+    """src/ 里 `2025-06-18` 只许出现在常量定义点（引用一律走常量）。"""
+    import re
+    from pathlib import Path
+
+    from vod_mcp import server_face
+    src = Path(server_face.__file__).resolve().parent.parent   # src/
+    hits = []
+    for py in sorted(src.rglob("*.py")):
+        text = py.read_text(encoding="utf-8")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            # 只有常量定义行允许出现字面量
+            if re.search(r"PROTOCOL_VERSION\s*=\s*[\"']\d", line):
+                continue
+            if re.search(r"[\"']\d{4}-\d{2}-\d{2}[\"']", line):
+                hits.append(f"{py.relative_to(src)}:{lineno}: {line.strip()[:70]}")
+    assert not hits, (
+        "协议版本又出现裸字面量（应引用 server_face.PROTOCOL_VERSION）：\n" + "\n".join(hits))
+
+
+def test_all_protocol_version_uses_reference_the_constant():
+    """三处引用点必须真的读常量，而不是复制字符串。"""
+    from pathlib import Path
+
+    from vod_mcp import server_face
+    root = Path(server_face.__file__).resolve().parent.parent.parent   # repo
+    users = {
+        "src/vod_mcp/server.py": "initialize",
+        "src/vod_mcp/transport_remote.py": "initialize",
+        "src/vodkit_cli/remote.py": "initialize",
+    }
+    for rel in users:
+        text = (root / rel).read_text(encoding="utf-8")
+        assert "PROTOCOL_VERSION" in text, f"{rel} 未引用协议版本常量（又写了裸字面量）"
+    # 常量本身有值，且 initialize 回包用的是它
+    assert server_face.PROTOCOL_VERSION == "2025-06-18"

@@ -3,7 +3,7 @@ import json
 import os
 import sys
 
-from vod_mcp import paths
+from vod_mcp import paths, server_face
 
 
 def _expected_remote_tools() -> set:
@@ -49,7 +49,7 @@ def _probe_remote(url: str, token: str, timeout: int = 15,
         return data
 
     _post({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-           "params": {"protocolVersion": "2025-06-18",
+           "params": {"protocolVersion": server_face.PROTOCOL_VERSION,
                       "clientInfo": {"name": "vod-devkit-installer", "version": "1"},
                       "capabilities": {}}})
     _post({"jsonrpc": "2.0", "method": "notifications/initialized"})
@@ -95,7 +95,7 @@ def _probe_remote_token(url: str, token: str, timeout: int) -> None:
         return data
 
     _post({"jsonrpc": "2.0", "id": 10, "method": "initialize",
-           "params": {"protocolVersion": "2025-06-18",
+           "params": {"protocolVersion": server_face.PROTOCOL_VERSION,
                       "clientInfo": {"name": "vod-devkit-installer", "version": "1"},
                       "capabilities": {}}})
     _post({"jsonrpc": "2.0", "method": "notifications/initialized"})

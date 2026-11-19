@@ -2827,9 +2827,12 @@ runtime 后第一发就 404「Session not found」（会话归属 manager 的 `_
   **未做**：台账原条目是"26 处 `except` 体只有 pass"，本次只补主链 3 点。
   **2026-11-19 实测剩余 25 处**（原 26 减 1，但本次新增 1 处 `pending.py:54` 的
   `_warn` 内部兜底 ⇒ 净剩 25）。全量收敛需要 ERR-04 原方案里的"允许吞三白名单 + AST 门禁"。
-- [ ] **ARCH-ERR-05 可观测性：未开始**。结构化日志（JSONL/级别/请求关联）、
-  日志落点可配置、远程面访问日志（`transport_remote.py` 的 `log_message` 仍 `pass`）
-  **一行未动**。台账 ERR-05 条目仍为未完成。
+- [x] **ARCH-ERR-05 可观测性：已完整落地**（**本行 2026-11-19 订正**，此前误记为「未开始」）。
+  `_log` 已改 JSONL 结构化（ts/level/msg + 任意字段）；`_log_path()` 支持 `VOD_DEVKIT_LOG`，
+  默认 `tempfile.gettempdir()` 且零副作用；轮转在 flock 内、从换行边界起算；远程面
+  `log_message` 由 `pass` 改为落 `http_access`，`do_POST` 记 req_id/tool/duration_ms。
+  门禁 `tests/test_observability.py`（10 条），已反向验证改回自由文本即 6 条红。
+  台账 ERR-05 为 ✅完整。
 - [x] **ARCH-DEP-01 破两处环**（**已完整落地**）：① `_SERVER_FACE` 真源抽到零依赖的
   `vod_mcp/server_face.py`，`net` 与 `runtime_state` 都顶层引用；② `host_verify` 新增
   `register_verifier()` 注入点，`hermes` 在 import 期登记取值函数（台账漏记的
@@ -2852,3 +2855,46 @@ runtime 后第一发就 404「Session not found」（会话归属 manager 的 `_
 **验证**：全量 `pytest` **1030 passed / 0 failed**（`-p no:randomly`，含 golden 未重录）；
 `pyflakes` 0；`mypy` 52 文件 0 issue；`verify_copies` 四目录一致；`secret_scan` OK；
 `sync_case_roster --check` OK。**未发版**：版本仍 0.5.44。
+
+---
+
+## 2026-11-19 外部 fix-list 复核后的修复决策
+
+外部同事转来一份三条缺陷 + 四项欠账的清单（基线 `29de11f` / v0.5.46）。逐条复现后：
+两条成立且已修、一条建议有误已改方案、一条「连带要改」经查不成立。以下只记**决策**，
+证据与验收用例见 `architecture-defects.md` 的 ARCH-ERR-07 / ARCH-CALL-05 / ARCH-ERR-06。
+
+- [x] **ARCH-ERR-07 护栏拆码（新开 `-32023` / `-32024`）**：
+  `guardrails.check` 的两处 deny 曾一律返回 `-32010`（缺产品）。拆法按**命中规则的
+  `category`** 分派，而不是按规则 id 硬编码——规则表自带 `category`（`exfil`/`write`），
+  `check_tool_call`/`check_text` 返回的就是原始规则字典，**不需要新增数据结构**。
+  **Falsifier**：若将来出现第三种处置动作（既非「删敏感信息」也非「收敛范围」）的
+  category，则须再开新码，不得塞进 `-32024`；若平台侧已在 `-32023/-32024` 投产其它语义，
+  则换到下一个空位。
+  ⚠️ **外部清单建议的「策略命中/熔断复用 `-32015`」被否决**：`packs/core.py:124` 已在用
+  `-32015`（语义＝能力包被安全门禁拒绝/熔断），再让护栏 deny 复用它就是「一个码两种来源」，
+  正是本条要消灭的问题。**码位有 owner，不能因为「仓库已有这个码」就复用。**
+- [x] **ARCH-CALL-05 协议版本单一真源**：常量落 `vod_mcp/server_face.py`（零依赖，
+  `server.py` / `transport_remote.py` / `vodkit_cli/remote.py` 引它都不造环），4 处全改引用。
+  台账原记「3 处」已订正为 **4 处**（含常量定义点本身，只数裸字面量会少 1）。
+  **Falsifier**：若将来协议版本需要按形态（stdio/remote）取不同值，则常量须改为按面取值，
+  门禁的「只许一处字面量」断言也要同步放宽。
+- [x] **ARCH-ERR-06 JSON-RPC 保留段补齐**：`-32600/-32601/-32602/-32603/-32700` 五条进
+  explain。**不只补 `-32603`**——实测整段都是 `known=False`，只补一条等于没修。
+  归层沿用既有层名（`配置`/`内部`），**不新增层名**（`LAYERS` 是 doctor 的分组顺序，
+  加新值会让报告出现无对应条目的空组）。
+  **反向约束**：`-32013` 必须保持 `known=False`（已废除的归因拦截码，收录它等于复活废义），
+  已写成 `test_abolished_32013_stays_unknown` 锁住。
+- [x] **前向兼容：`officeace.py` 的 `?1..?N` 编号占位符**（清单 P1）：改回位置 `?`。
+  复现手段固定为 `-W error::DeprecationWarning`——**普通跑测试永远绿**，这是
+  「现在绿、将来必崩」的唯一信号，`N passed` 不能当作结论。
+  门禁两条：运行时严格告警下走通两条分支 + 源码 AST 只扫字符串字面量
+  （**不用正则扫全文**：首版正则把注释里「不是编号 ?1..?N」这句话抓红了）。
+- [x] **`scripts/secret_scan.py` 的 `import os` 未使用**：已删（pyflakes 唯一一条，现 0 条）。
+- [ ] **未采纳：清单问题 3 的「连带要改」**（`diagnose.py:49` 正则 `-32010|产品`、
+  dsh 壳 `-32010` 分支、契约码枚举）。经查这三处都是**归因语义**（"缺产品先问"），
+  与护栏拆码无关，dsh 的 `UNRESOLVED_CODE` 与契约的 `-32010` 描述均正确 ⇒ **不需改动**。
+  真正待修的是 `diagnose.py:49` 那条正则的**优先级**问题（ERR-06 正条目，本轮未动）。
+- [ ] **本轮未做（如实列出）**：ERR-04 剩余 21 处 `except: pass`；ERR-02 policy 缓存；
+  ERR-06 的 `RULES` 文案正则归层（双轨仍未消除）；CALL-05 的错误码常量表；
+  `cmd_doctor`（229 行/分支 ~92）与 `cmd_install`（240 行）的函数拆分。

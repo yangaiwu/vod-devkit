@@ -17,7 +17,6 @@ ARCH-CFG-04（2026-11-19）修三处覆盖边界：
 """
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys

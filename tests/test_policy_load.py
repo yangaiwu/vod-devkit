@@ -73,7 +73,12 @@ def test_shipped_policy_still_passes_validation():
 
 
 def test_deny_rule_still_denies_after_validation(broken_policy):
-    """校验不许改变既有语义：超批量仍 deny -32010（不是被 -32017 顶掉）。"""
+    """校验不许改变既有语义：超批量仍 deny（不是被 -32017 顶掉）。
+
+    ⚠️ 期望码从 -32010 改为 -32024（2026-11-19，fix-list 问题 3）：护栏四类 deny 曾共用
+    -32010（"缺产品"），把"越权/超范围"报成"请补产品"；现按命中规则的 category 分派。
+    注意本用例的 policy **没有 category 字段**，走 `_code_for_hits` 的兜底档 -32024。
+    """
     broken_policy.write_text(json.dumps({
         "version": "0.1.0", "maxVoicesPerSubmit": 2,
         "rules": [{"id": "limit", "severity": "deny", "message": "单批超上限",
@@ -83,7 +88,9 @@ def test_deny_rule_still_denies_after_validation(broken_policy):
     verdict, msg, code = guardrails.check("vod_submit_voices",
                                           {"voices": [{"content": "a"}, {"content": "b"},
                                                       {"content": "c"}]})
-    assert (verdict, code) == ("deny", -32010), (verdict, code)
+    assert (verdict, code) == ("deny", -32024), (verdict, code)
+    assert code != -32017, "校验失败态（-32017）不该覆盖正常的 deny 规则"
+    assert code != -32010, "护栏侧不得再产出「缺产品」码"
     assert "单批超上限" in msg, msg
 
 
