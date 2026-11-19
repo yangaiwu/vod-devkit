@@ -1191,3 +1191,84 @@ def test_s158_doctor_flags_payload_provenance_drift(env, tmp_path, monkeypatch):
     mf = {"source": {"commitSha": "2" * 40}, "payloadDir": str(payload)}
     problem = doctor._provenance_problem(mf)
     assert problem and "载荷 build-info" in problem, problem
+
+
+# ── ARCH-DEP-05：运行期安装不许 shell 出构建脚本 ────────────────────────────
+#
+# 旧实现：codex 适配器发现插件副本缺失时，会 fork `scripts/sync_plugin.py` 现场生成。
+# 但那是**构建期**职责，载荷/插件副本形态下 `ROOT/scripts/` 根本不存在，于是旧代码
+# 落到 else 分支 `exit 2`，文案还写成"npm 包损坏？"——把用户引向错误方向。
+def _codex_args():
+    """codex.install 需要的最小 args（本组用例只验证"缺副本"分支，不碰真实配置）。"""
+    from types import SimpleNamespace
+    return SimpleNamespace(product="CodeArts", product_id=None, preset="collect",
+                          packs="core,collect", api_base=None, dry_run=False)
+
+
+def test_codex_install_without_repo_never_shells_out(tmp_path, monkeypatch):
+    """副本缺失时：不许调 subprocess 跑 sync_plugin，且文案指向"重跑 install"。"""
+    from vod_mcp.host_adapters import codex
+
+    called = []
+
+    def fake_run(cmd, *a, **kw):
+        called.append(cmd)
+        raise AssertionError(f"运行期安装不该 shell 出命令：{cmd}")
+
+    # ROOT 指到不含 scripts/ 的目录（模拟载荷/插件副本形态）
+    monkeypatch.setattr(codex, "ROOT", tmp_path)
+    monkeypatch.setattr(codex.subprocess, "run", fake_run)
+
+    with pytest.raises(SystemExit) as ei:
+        codex.install(_codex_args(), "core,collect")
+    assert ei.value.code == 2
+    assert not called, f"仍然 shell 出了构建脚本：{called}"
+
+
+def test_no_runtime_module_shells_out_to_build_scripts():
+    """运行期代码（src/vod_mcp）不许引用构建脚本 sync_plugin.py。
+
+    这条是上一条的**补强**：上一条靠"副本缺失时 ROOT 指向无 scripts/ 的目录"来挡，
+    但旧实现在那个分支走的是 else（压根不调 subprocess），所以挡不住"有 scripts 时会
+    代跑构建"的情形。直接扫源码，任何出现都红——运行期依赖构建期脚本本身就是缺陷。
+    """
+    import ast
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "src" / "vod_mcp"
+    hits = []
+    for f in src.rglob("*.py"):
+        try:
+            tree = ast.parse(f.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            # 只认"真调用"：subprocess 家族的实参里出现 sync_plugin。
+            # 提示文案（print 里教用户怎么补副本）不是调用，不算违规——
+            # 本门禁第一版按字符串匹配，把这种文案也判红了（自己写的提示被自己抓）
+            if not isinstance(node, ast.Call):
+                continue
+            fn = ast.unparse(node.func)
+            if not fn.startswith("subprocess."):
+                continue
+            blob = ast.unparse(node)
+            if "sync_plugin" in blob:
+                hits.append(f"{f.relative_to(src)}:{node.lineno}: {blob[:90]}")
+    assert not hits, f"运行期代码还在 shell 出构建脚本：{hits}"
+
+
+def test_codex_missing_copy_message_is_actionable(tmp_path, monkeypatch, capsys):
+    """缺副本的文案必须说清缺什么、怎么补，不许猜成"npm 包损坏"。"""
+    from vod_mcp.host_adapters import codex
+    monkeypatch.setattr(codex, "ROOT", tmp_path)
+    # 让 "codex CLI 存在" 这一关先过（否则到不了副本检查分支）
+    monkeypatch.setattr(codex.shutil, "which", lambda _n: "/usr/bin/codex")
+    monkeypatch.setattr(codex, "_codex_home", lambda: tmp_path / ".codex")
+    monkeypatch.setattr(codex.subprocess, "run",
+                        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("不该跑命令")))
+    with pytest.raises(SystemExit):
+        codex.install(_codex_args(), "core,collect")
+    err = capsys.readouterr().err
+    assert "副本缺失" in err, err
+    assert "npm 包损坏" not in err, "文案又把原因猜成 npm 包损坏了"
+    assert "install --target codex" in err or "sync_plugin" in err, \
+        f"没有给出可执行的补救动作：{err}"

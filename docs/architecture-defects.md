@@ -66,10 +66,10 @@
 | ARCH-DEP-02 | `host_adapters` 急切聚合导入 12 个适配器，与载荷边界冲突 | P1 | 3.0 | ✅完整（惰性注册 + `test_registry_is_lazy`） |
 | ARCH-DEP-03 | 知识披露层反向依赖网络出口层（`skills_registry`/`packs.knowledge` → `net`） | P2 | 1.5 | ⬜未动 |
 | ARCH-DEP-04 | 入口设根契约覆盖不全，`serve` 双分派两条路径根来源不同 | P1 | 2.0 | ✅完整（`cli.py:131` 子命令 `_serve` 由 `common.ROOT` 改为 `_paths.SRC_ROOT`，与前置分支 `cli.py:18` 同源；env 统一为 SRC/DIST 两个。**实测**：改前拼出 `<repo>/vod_mcp/server.py` 不存在、改后 `<repo>/src/vod_mcp/server.py` 存在。门禁 `test_dep04_serve_branches_share_one_root` / `test_dep04_serve_target_exists`，已反向验证改回即红） |
-| ARCH-DEP-05 | 运行期安装代码依赖构建脚本 `sync_plugin.py` | P1 | 1.0 | ⬜未动 |
+| ARCH-DEP-05 | 运行期安装代码依赖构建脚本 `sync_plugin.py` | P1 | 1.0 | ✅完整（`codex.py` 删掉运行期 `subprocess.run(sync_plugin.py)` 代跑构建；缺副本改为显式前置校验，文案说清缺什么/怎么补，不再猜"npm 包损坏"。门禁 `test_codex_install_without_repo_never_shells_out` + `test_codex_missing_copy_message_is_actionable` + AST 级 `test_no_runtime_module_shells_out_to_build_scripts`（只认 subprocess 调用，不误伤提示文案——首版按字符串匹配曾误抓自己写的提示）。已反向验证塞回 subprocess 调用即红并点名 `codex.py:293`） |
 | ARCH-DEP-06 | 路径常量 import 期冻结，违反 `paths.py` 自陈纪律 | P2 | 1.0 | ⬜未动 |
-| ARCH-CALL-01 | stdio 与 remote 两面各写一套 `tools/call` 管线，错误呈现层级不一 | P1 | 3.0 | ⬜未动 |
-| ARCH-CALL-02 | `initialize` instructions 双份硬编码，用例只锁关键词 | P1 | 1.0 | ⬜未动 |
+| ARCH-CALL-01 | stdio 与 remote 两面各写一套 `tools/call` 管线，错误呈现层级不一 | P1 | 3.0 | ✅完整（**实测重判**：两面错误码**本来就一致**——同一 `guardrails.check` 给出同一码，如 `-32011`；差异只在承载位置，而承载位置是 MCP 协议强制的：stdio 自造 JSON-RPC 可进 `error` 对象，remote 走 SDK `on_call_tool` 返回 `CallToolResult`，**没有**抛 JSON-RPC error 的通道。故本条按验收断言"仅承载位置不同"判定已达标，未做无意义的对称化改造。新增 `test_two_faces_report_same_code_for_same_error` 锁住两面同码，另锁 `REMOTE_WITHHELD` 为设计而非缺陷） |
+| ARCH-CALL-02 | `initialize` instructions 双份硬编码，用例只锁关键词 | P1 | 1.0 | ✅完整（抽 `vod_mcp/instructions.py::COLLECT_DISCIPLINE` 单一真值，两面只拼形态尾句（`STDIO_TAIL` / `REMOTE_TAIL`）。三条红线（同意口径/echo 逐字转述/product 追问）集中一处。门禁新增 `test_both_faces_share_collect_discipline` / `test_collect_discipline_covers_the_three_redlines` / `test_form_specific_tails_are_separate`；并修 3 条原先"按文件正文读"的旧用例改为校验运行时下发文本。已反向验证 remote 面改回独立文本即 3 条红） |
 | ARCH-CALL-03 | 远程面哨兵会话以 `id(manager)` 登记，与 SDK 内部语义强耦合 | P2 | 3.0 | ⬜未动 |
 | ARCH-CALL-04 | `collect` pack 单模块承载七件事（692 行 vs `knowledge` 17 行） | P2 | 4.0 | ⬜未动 |
 | ARCH-CALL-05 | 协议面裸造 JSON-RPC，`protocolVersion` 与错误码多处硬编码 | P2 | 1.0 | ⬜未动（实测 **4** 处硬编码，台账写 3 处，漏 `remote.py:98`） |

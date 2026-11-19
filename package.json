@@ -37,6 +37,7 @@
     "src/vod_mcp/diagnose.py",
     "src/vod_mcp/guardrails.py",
     "src/vod_mcp/hosts.py",
+    "src/vod_mcp/instructions.py",
     "src/vod_mcp/msgs.py",
     "src/vod_mcp/net.py",
     "src/vod_mcp/paths.py",

@@ -23,20 +23,12 @@ import json
 from mcp import types
 from mcp.server.lowlevel import Server
 
-from vod_mcp import guardrails, packs, skills_registry, tools
+from vod_mcp import guardrails, instructions, packs, skills_registry, tools
 from vod_mcp import runtime_state as rt
 
-REMOTE_INSTRUCTIONS = (
-    "vod-devkit 采集资产与纪律（远程面）：技能 vod-feedback-collect 处理用户对"
-    "本产品的不满/建议/期望（触发词：慢/报错/体验差/希望支持/提单等）。"
-    "提交前必须征得用户明确同意（用户抱怨本身不构成同意）；提交回执 "
-    "echo.contents 必须逐条原样转述给用户（「已收录原话：<content>」），"
-    "禁止改写、概括、增删字词。product 归因：原话唯一命中可直接用；"
-    "未命中或多产品歧义时必须问用户一次\"这条是哪个产品的反馈\"，"
-    "回答填 product；用户说不知道就告知他缺产品不能提交，不要猜。不许不填直接提交。"
-    "本面不提供服务器本机路径（skillRoot），规则文本用 vod_retrieve_skill 取；"
-    "工具面与本地一致，只摘进程内开关 vod_packs_configure。"
-)
+# ARCH-CALL-02：采集纪律的唯一真值在 instructions.COLLECT_DISCIPLINE，
+# 本面只拼接远程形态尾句。曾经这里与 server.py 各写一份近乎逐字重复的文本。
+REMOTE_INSTRUCTIONS = instructions.remote_instructions()
 
 
 MCP_SESSION_HEADER = "mcp-session-id"

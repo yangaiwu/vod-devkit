@@ -94,13 +94,17 @@ def test_s125_remote_face_withholds_paths():
 
 
 def test_s125_initialize_instructions_teach_action_first():
-    from pathlib import Path
-    root = Path(__file__).resolve().parent.parent
-    text = (root / "src" / "vod_mcp" / "server.py").read_text(encoding="utf-8")
-    assert "技能树：" in text and "动作优先" in text and "绝不反复请求" in text
+    """技能读取教法（动作优先）必须在**实际下发**的 instructions 里。
+
+    ARCH-CALL-02 起，两面的文本收敛到 `vod_mcp/instructions.py`；本用例原先按文件正文
+    读 server.py，收敛后读不到（也说明"按文件读"这种写法本身就会随重构失效）。
+    改为直接取运行时字符串，验的是模型真正收到什么。
+    """
+    from vod_mcp import instructions, remote_app, skills_registry
+    stdio = instructions.stdio_instructions(skills_registry.SKILLS_ROOT)
+    assert "技能树：" in stdio and "动作优先" in stdio and "绝不反复请求" in stdio
     # 远程面仍按既有纪律：不发布本机路径
-    remote = (root / "src" / "vod_mcp" / "remote_app.py").read_text(encoding="utf-8")
-    assert "不提供服务器本机路径" in remote
+    assert "不提供服务器本机路径" in remote_app.REMOTE_INSTRUCTIONS
 
 
 def test_s125_catalog_lists_reference_files_if_any():
