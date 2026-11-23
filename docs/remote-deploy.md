@@ -189,6 +189,8 @@ npx -y vod-devkit@latest status     # 该宿主 transport=remote、mcpUrl 在位
 | 事项 | 做法 |
 |---|---|
 | 升级 | 服务端 `npm i -g vod-devkit` 后逐实例 `systemctl restart vod-mcp@<name>`；客户端零改动 |
+| 升级后必做 | **重启宿主**。旧进程仍按旧载荷路径运行，配置面看起来已更新、调用却会失败；
+     `doctor` 会点名"有进程仍在加载旧载荷 X（pid …）"。`prune` 现在不会删除活进程持有的载荷 |
 | 日志 | `VOD_DEVKIT_LOG` 指到实例目录；remote 面会打 `http_access`（req_id/tool/duration_ms） |
 | 排障入口 | ① 反代 access log（谁被 401/429）② 实例日志（哪次调用失败、code）③ 客户端 `doctor` |
 | 备份 | 只需备份各实例的 `state/`（令牌/账本/草稿），代码与载荷可重装 |

@@ -1,4 +1,5 @@
 """诊断类子命令：status / doctor / verify / explain / detect。"""
+import pathlib
 import json
 import os
 import re
@@ -413,6 +414,41 @@ def cmd_detect(args):
     print("摘要：" + detect_framework.summary_line(info))
 
 
+def _check_live_payloads(problems: list) -> None:
+    """报告仍在跑旧载荷（或跑着已被删载荷）的宿主子进程。
+
+    0.5.45 事故：旧进程按已删的载荷路径读护栏规则 → 每次调用被 deny，而配置面全绿。
+    doctor 要把这种"配置对、进程错"的状态说出来，否则用户只能看到调用失败。
+    """
+    try:
+        from vod_mcp import __version__ as _ver
+        from vod_mcp import payload as _payload
+    except Exception:
+        return
+    try:
+        live = _payload.live_payload_processes()
+    except Exception as e:
+        print(f"[doctor] 进程载荷扫描不可用（{e.__class__.__name__}）：{e}")
+        return
+    if not live:
+        return
+    try:
+        root = str((_payload.payload_home() / "payloads").resolve())
+        cur = str((_payload.payload_home() / "payloads" / _ver).resolve())
+    except Exception:
+        return
+    # 只看"本机的载荷目录"：别的 home（例如测试隔离环境、另一套 VOD_DEVKIT_HOME）
+    # 上的进程与本机无关，混进来会让输出随环境漂移（golden 基线会红）。
+    stale = {d: pids for d, pids in live.items()
+             if d != cur and (d == root or d.startswith(root + "/"))}
+    for d, pids in stale.items():
+        gone = "" if pathlib.Path(d).is_dir() else "，该目录已被删除"
+        print(f"[doctor] 有进程仍在加载旧载荷 {d}（pid {', '.join(map(str, pids[:3]))}{gone}）"
+              f"——重启宿主后才会切到 {_ver}")
+    if stale:
+        print("[doctor] 判定：只报告不改字节（重启宿主属用户动作）")
+
+
 def cmd_doctor(args=None):
     target = (getattr(args, "target", "") or "") if args else ""
     problems = []
@@ -492,6 +528,13 @@ def cmd_doctor(args=None):
             raw = json.loads(p.read_text(encoding="utf-8"))
             all_rows = common.install_rows(raw)
             used = _payload.in_use_payloads(all_rows)
+            # 只看本机 payloads 目录：in_use_payloads 现在含"活进程持有的载荷"，
+            # 把别的 HOME（并行会话/测试隔离环境）的进程也算进来会让这行随环境漂移。
+            try:
+                _root = str((_payload.payload_home() / "payloads").resolve())
+                used = {u for u in used if u == _root or u.startswith(_root + "/")}
+            except Exception as e:  # noqa: BLE001
+                _trace.suppress("doctor.payload_scope", e)
             labels: dict[str, list[str]] = {}
             for r in all_rows:
                 d = (r.get("payloadDir") or "").strip()
@@ -501,8 +544,13 @@ def cmd_doctor(args=None):
                     labels.setdefault(str(Path(d).resolve()), []).append(str(r.get("target")))
                 except OSError:
                     labels.setdefault(d, []).append(str(r.get("target")))
+            _live = set()
+            try:
+                _live = set(_payload.live_payload_processes())
+            except Exception as e:  # noqa: BLE001
+                _trace.suppress("doctor.live_payloads", e)
             for k in sorted(used - set(labels)):
-                labels.setdefault(k, []).append("dsh 配置面")
+                labels.setdefault(k, []).append("运行中进程" if k in _live else "dsh 配置面")
             if used:
                 orphans = [ver for _d, ver, _sz in _payload.prune_candidates(rows=all_rows)]
                 live = ", ".join(f"{Path(k).name}({'+'.join(sorted(set(v)))})"
@@ -638,6 +686,7 @@ def cmd_doctor(args=None):
             print(f"warn: key 未验证（引擎不可达，指纹 {chk['fingerprint']}）")
         else:
             print(f"key: 有效（指纹 {chk['fingerprint']}）")
+    _check_live_payloads(problems)
     if problems:
         print(_render_problems(problems))
         sys.exit(1)

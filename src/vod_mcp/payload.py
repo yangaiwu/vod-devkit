@@ -252,6 +252,42 @@ def _host_config_referenced_payloads() -> set:
     return used
 
 
+_PROC_ROOT = Path("/proc")
+
+
+def live_payload_processes() -> dict:
+    """仍在运行的宿主子进程加载的载荷目录 → [pid]。
+
+    实锤（2026-11-23）：0.5.45 载荷被 `prune --apply` 删掉，但三天前起的 MCP 子进程
+    仍按旧路径读 `safety/policy.json`，于是每一次工具调用都被护栏 deny
+    （`FileNotFoundError`）→ 整台机的工具面直接不可用，而账本/配置面都已指向新版本。
+    教训：**"配置上没人引用"不等于"没人在跑"**——活进程持有的路径同样算在用。
+    """
+    out: dict = {}
+    proc = _PROC_ROOT
+    if not proc.is_dir():
+        return out
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            raw = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if b"vod_mcp/server.py" not in raw:
+            continue
+        for tok in raw.split(b"\0"):
+            arg = tok.decode("utf-8", "replace")
+            if arg.endswith("/vod_mcp/server.py") and "payloads" in arg:
+                d = Path(arg).parent.parent
+                try:
+                    key = str(d.resolve())
+                except OSError:
+                    key = str(d)
+                out.setdefault(key, []).append(int(entry.name))
+    return out
+
+
 def in_use_payloads(rows=None) -> set:
     """"在用"载荷集合（单一入口，P2 2026-11-16 评审）。
 
@@ -271,6 +307,9 @@ def in_use_payloads(rows=None) -> set:
             used.add(d)
     used |= _patch_referenced_payloads()
     used |= _host_config_referenced_payloads()
+    # 活进程持有的载荷也必须算在用（0.5.45 事故：配置已前进，旧进程仍在跑，
+    # prune 把它的规则文件删了 → 全部调用被护栏 deny）。
+    used |= set(live_payload_processes())
     return used
 
 
