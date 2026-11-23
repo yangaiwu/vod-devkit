@@ -816,3 +816,8 @@
 - 0e29469 release: v0.5.54
 - 7872a6b docs: add the remote / multi-agent deployment handbook
 
+
+## v0.5.56（2026-11-23）
+
+- c240e17 fix(payload): never prune a payload a live process still holds; doctor names it
+
