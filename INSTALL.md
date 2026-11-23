@@ -103,9 +103,20 @@ npx --yes vod-devkit uninstall
 
 ## WorkBuddy / CodeBuddy（GitHub 仓即市场，无审核）
 
+两条路都行，选一条：
+
 ```
+# ① 让 WorkBuddy 自己装（把仓地址给对方）
 /plugin marketplace add yangaiwu/vod-devkit
+
+# ② 在本机用安装器装（写 mcpServers.vod-devkit）
+npx --yes vod-devkit install --target workbuddy --product <产品>
 ```
+
+**装完必须在 WorkBuddy 里把该 MCP 服务器/插件打开「信任」**，否则宿主不拉起 server——
+表现是"提交声音失败 / 提示 MCP 没起来"（2026-11-23 真机实锤）。改完完全退出 WorkBuddy
+（托盘退出）再启动；验证：会话里 `调用 vod_devkit_info 打印 version` 应回 0.5.51，
+`doctor` 应 0 FAIL。
 
 ## DeepSeek Harness (dsh)
 

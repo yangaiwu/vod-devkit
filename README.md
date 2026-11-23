@@ -247,6 +247,11 @@ npx -y vod-devkit@latest uninstall
 ```
 
 - 落点：`~/.workbuddy/mcp.json` 的 `mcpServers.vod-devkit`；技能装到 `~/.workbuddy/skills`
+- **信任开关（真机 2026-11-23 实锤）**：装完必须在 WorkBuddy 里把该 MCP 服务器/插件**打开「信任」**，
+  否则宿主不拉起 server，表现是"提交声音失败 / 提示 MCP 没起来"；改完要**完全退出**WorkBuddy
+  （托盘退出）再启动，配置只在启动时读
+- 两条安装路径：本机装（`install --target workbuddy`，写 mcpServers）或让 WorkBuddy 自己装
+  （`/plugin marketplace add yangaiwu/vod-devkit`，见 [INSTALL.md](INSTALL.md)）
 - 坑：WorkBuddy 只在 Windows/macOS 有客户端；Linux 上装它等于预置配置，宿主那边不读
 
 ### AtomCode（atomcode）

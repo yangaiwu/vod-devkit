@@ -86,9 +86,21 @@ dsh --profile headless --patch /tmp/probe.yml \
   `DEEPSEEK_API_KEY`，否则报 `MISSING_CREDENTIAL`；注入时别把 key 打进日志。
 - patch 里的 `command` 必须是真实绝对路径（别从脱敏回显里抄）。
 
-## workbuddy / codeartswork
+## workbuddy（2026-11-23 真机已验，0.5.51）/ codeartswork（仍仅形态）
 
-桌面端（官网仅 Windows/macOS），Linux 机器无法安装；只能验配置形态（矩阵 + 文档对表）。
+workbuddy 桌面端（官网仅 Windows/macOS），本机 Linux 无安装对象；本轮由用户在真机装成，实测：
+**工具面 10 个、version=0.5.51**，提交声音成功。两个前置条件缺一不可：
+
+1. **装**：把仓地址给对方自行安装（`/plugin marketplace add yangaiwu/vod-devkit`），
+   或在本机跑 `npx -y vod-devkit@latest install --target workbuddy`；
+2. **信任**：装完必须在 WorkBuddy 里把该 MCP 服务器/插件**打开「信任」**——不打开时
+   宿主不拉起 server，现象就是"提交声音失败 / 提示 MCP 没起来"（本轮真实故障形态）。
+
+排查顺序（复现同一故障时按这个走）：完全退出 WorkBuddy（托盘退出，配置只在启动时读）→
+确认 `%USERPROFILE%\.workbuddy\mcp.json` 里 `command`/`args[0]` 都存在且 `command --version`
+≥ 3.10 → 手动起 server 看 initialize 是否回包 → 再看「信任」开关。
+
+codeartswork 仍是配置形态级（矩阵 + 文档对表），未真机验收。
 
 ## openclaw（2026-11-16 新增，本机已闭环）
 

@@ -139,6 +139,23 @@ shell `registerTools: false`, UI only); otherwise it falls back to the shell's o
 reduced tool surface. Remote attach is still unsupported: `--mcp-url` /
 `--skills-only` exit 2.
 
+### WorkBuddy
+
+```bash
+npx -y vod-devkit@latest install --target workbuddy
+# or let WorkBuddy install it from the repo:
+#   /plugin marketplace add yangaiwu/vod-devkit
+```
+
+- Config: `~/.workbuddy/mcp.json` → `mcpServers.vod-devkit`; skills go to `~/.workbuddy/skills`.
+- **Trust switch (verified on a real machine 2026-11-23)**: after installing, enable
+  **trust** for this MCP server/plugin inside WorkBuddy — otherwise the host never launches
+  the server and you see "submitting feedback failed / MCP is not running". Fully quit
+  WorkBuddy (tray exit; the config is only read at startup) and relaunch.
+- Verify: ask the agent to `call vod_devkit_info and print version` → 0.5.51; `doctor` must be 0 FAIL.
+- Other desktop/CLI hosts (`codeartswork`, `atomcode`, `codex-desktop`, `openclaw`,
+  `officeace`) follow the same `install --target <host>` pattern; see `INSTALL.md`.
+
 ## Other MCP hosts (generic layer)
 
 Hosts without a dedicated adapter are no longer "unsupported":
