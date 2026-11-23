@@ -771,3 +771,8 @@
 
 - e1a6098 fix(arch): fix-list three defects and py3.14 SQL forward-compat
 
+
+## v0.5.48（2026-11-23）
+
+- 6f832fc fix(skill): collect answers technical questions first, asks feedback once
+
