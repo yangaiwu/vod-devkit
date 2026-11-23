@@ -6,10 +6,13 @@
 - OfficeAce 是桌面端（Windows-only），本机无安装对象，只能锁 sqlite 行域逻辑
   与"非 Windows 拒绝"，不伪造真机断言。
 """
+import ast
 import json
+import re
 import sqlite3
 import sys
 import types
+import warnings
 from pathlib import Path
 
 import pytest
@@ -180,6 +183,42 @@ def test_officeace_upsert_is_idempotent_and_keeps_owner(tmp_path):
     assert rows[0][1] is None, (
         "owner_user_id 默认必须 NULL（2026-11-16 评审 P4：从库里抄第一个非空值 = 把连接器挂到别人名下）")
     assert json.loads(rows[0][2]) == {"A": "2"}
+
+
+def test_officeace_upsert_raises_no_deprecation_under_strict_warnings(tmp_path):
+    """回归锁（2026-11-19 修复清单 P1）：UPDATE 分支曾用 ?1..?6 编号占位符绑位置元组。
+
+    sqlite3 认为编号占位符是「命名参数」，配位置序列在 3.14 起抛 ProgrammingError；
+    3.12/3.13 只发 DeprecationWarning，于是普通跑测试永远绿 —— 这正是「现在绿、将来必崩」。
+    本用例把两者都升级为异常，两条分支（插入 / 更新）各走一次。
+    """
+    db = _mk_officeace_db(tmp_path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        assert officeace.upsert_row(db, officeace.connector_row(
+            "/usr/bin/python3", ["/x/server.py"], {"A": "1"})) == "created"
+        assert officeace.upsert_row(db, officeace.connector_row(
+            "/usr/bin/python3", ["/x/server.py"], {"A": "2"})) == "updated"
+
+
+def test_officeace_sql_uses_positional_placeholders_only():
+    """源码锁：本仓 host_adapters 不许用 ?1..?N 编号占位符（Python 3.14 前向兼容）。
+
+    用 AST 只取**字符串字面量**，不用正则扫全文：正则会把注释（本仓刚踩过——注释里
+    写「不是编号 ?1..?N」就被自己抓红）和文档字符串误判成违规，噪音掩盖真问题。
+    只锁 host_adapters 目录：本目录全部按位置元组传参，编号占位符（本该配 dict）混用必崩。
+    """
+    root = Path(officeace.__file__).parent
+    offenders = []
+    for py in sorted(root.glob("*.py")):
+        tree = ast.parse(py.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if re.search(r"\?\d", node.value):
+                    offenders.append(f"{py.name}:{node.lineno}: {node.value[:60]!r}")
+    assert not offenders, (
+        "host_adapters 里出现编号 SQL 占位符，与位置元组绑定混用会在 Python 3.14 抛 "
+        "ProgrammingError。改用 ?：\n" + "\n".join(offenders))
 
 
 def test_officeace_owner_only_from_explicit_env(tmp_path, monkeypatch):

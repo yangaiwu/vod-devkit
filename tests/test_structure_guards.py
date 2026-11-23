@@ -184,8 +184,10 @@ def test_server_instructions_match_attribution_design():
     D-product-ask-1 以 -32010 要模型先问一次——只锁 server.py 一个文件的用例漏掉了它们。
     """
     surfaces = (
-        "src/vod_mcp/server.py",
-        "src/vod_mcp/remote_app.py",
+        # ARCH-CALL-02 起，两面的"说给模型听"文本收敛到 instructions.py。
+        # 仍按文件正文读的两个面：instructions（运行时真实下发内容）+ 工具契约。
+        # server.py / remote_app.py 已不再承载正文，读它们只会读到拼接表达式。
+        "src/vod_mcp/instructions.py",
         "assets/contract/tools.schema.json",
     )
     for rel in surfaces:
@@ -203,9 +205,13 @@ def test_remote_instructions_match_withheld_tools():
     实锤（2026-11-16）：远程文案当时写着"写本机状态的工具（草稿/本地账本）不在本面
     提供"，而 tools/list 实测 11 个工具里 draft/commit/list_submitted 全在——模型
     会以为没有账本/草稿能力，用户问"我提交过哪些"时直接回"没有这个功能"。
+
+    ARCH-CALL-02 起改为校验**实际下发的文本**（REMOTE_INSTRUCTIONS）而不是 remote_app.py
+    的文件正文——文本已收敛到 instructions.py，按文件读会漏（也是本用例原本的教训：
+    "只锁一个文件"就会漏）。
     """
-    from vod_mcp import packs
-    text = (ROOT / "src" / "vod_mcp" / "remote_app.py").read_text(encoding="utf-8")
+    from vod_mcp import packs, remote_app
+    text = remote_app.REMOTE_INSTRUCTIONS
     assert "不在本面提供" not in text, (
         "远程面只摘 vod_packs_configure，不得声称其它工具缺失")
     for name in packs.REMOTE_WITHHELD:
@@ -269,3 +275,124 @@ def test_s129_structure_doc_exists_and_matches_rules():
     for needle in ("唯一的\"宿主发布物\"", "源与生成物分离", "共享资产单一落点",
                    "门禁脚本化", "迁移分阶"):
         assert needle in text, f"结构契约缺少：{needle}"
+
+
+# ── ARCH-CALL-02：采集纪律单一真源 ───────────────────────────────────────────
+#
+# 曾是两份近乎逐字重复的文本（server.py 的 instructions 与 remote_app.py 的
+# REMOTE_INSTRUCTIONS），采集纪律是**产品红线**（同意口径 / 逐字转述 / 产品追问），
+# 改一处漏一处 ⇒ 一个形态的模型行为与另一个不一致，而两边门禁各自只锁关键词，全绿放行。
+def test_both_faces_share_collect_discipline():
+    """两面 instructions 都必须以同一个 COLLECT_DISCIPLINE 开头。"""
+    from vod_mcp import instructions, remote_app, skills_registry
+    c = instructions.COLLECT_DISCIPLINE
+    stdio = instructions.stdio_instructions(skills_registry.SKILLS_ROOT)
+    remote = remote_app.REMOTE_INSTRUCTIONS
+    assert stdio.startswith(c), "stdio 面不再以公共纪律开头（纪律被就地改写了）"
+    assert remote.startswith(c), "remote 面不再以公共纪律开头（又维护了第二份）"
+
+
+def test_collect_discipline_covers_the_three_redlines():
+    """三条红线逐条在位：同意口径、echo 逐字转述、product 末命中必须问一次。"""
+    from vod_mcp import instructions
+    c = instructions.COLLECT_DISCIPLINE
+    assert "征得用户明确同意" in c
+    assert "echo.contents 必须逐条原样转述" in c and "禁止改写" in c
+    assert "必须问用户一次" in c and "不要猜" in c
+
+
+def test_form_specific_tails_are_separate():
+    """形态尾句各自独立：stdio 带本机路径，remote 不带。"""
+    from vod_mcp import instructions, remote_app, skills_registry
+    stdio = instructions.stdio_instructions(skills_registry.SKILLS_ROOT)
+    remote = remote_app.REMOTE_INSTRUCTIONS
+    assert str(skills_registry.SKILLS_ROOT) in stdio, "stdio 面丢了技能树路径"
+    assert "本机路径" in stdio or "skillRoot" in stdio
+    assert str(skills_registry.SKILLS_ROOT) not in remote, \
+        "remote 面不许泄漏服务器本机路径"
+    assert "不提供服务器本机路径" in remote
+
+
+# ── ARCH-CALL-05：协议版本单一真源 ─────────────────────────────────────────
+# 此前 `server.py:33` 定义了 `_PROTOCOL_VERSION` 却**无人引用**，三处（installer 探测
+# 两处 + 内部握手一处）各写裸字面量。升级协议时只改一处 ⇒ 服务端 initialize 自报
+# 与客户端握手版本不一致，表现为「版本协商失败 / 探活不通」，且从报错看不出是版本没同步。
+def test_protocol_version_has_single_definition():
+    """src/ 里 `2025-06-18` 只许出现在常量定义点（引用一律走常量）。"""
+    import re
+    from pathlib import Path
+
+    from vod_mcp import server_face
+    src = Path(server_face.__file__).resolve().parent.parent   # src/
+    hits = []
+    for py in sorted(src.rglob("*.py")):
+        text = py.read_text(encoding="utf-8")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            # 只有常量定义行允许出现字面量
+            if re.search(r"PROTOCOL_VERSION\s*=\s*[\"']\d", line):
+                continue
+            if re.search(r"[\"']\d{4}-\d{2}-\d{2}[\"']", line):
+                hits.append(f"{py.relative_to(src)}:{lineno}: {line.strip()[:70]}")
+    assert not hits, (
+        "协议版本又出现裸字面量（应引用 server_face.PROTOCOL_VERSION）：\n" + "\n".join(hits))
+
+
+def test_all_protocol_version_uses_reference_the_constant():
+    """三处引用点必须真的读常量，而不是复制字符串。"""
+    from pathlib import Path
+
+    from vod_mcp import server_face
+    root = Path(server_face.__file__).resolve().parent.parent.parent   # repo
+    users = {
+        "src/vod_mcp/server.py": "initialize",
+        "src/vod_mcp/transport_remote.py": "initialize",
+        "src/vodkit_cli/remote.py": "initialize",
+    }
+    for rel in users:
+        text = (root / rel).read_text(encoding="utf-8")
+        assert "PROTOCOL_VERSION" in text, f"{rel} 未引用协议版本常量（又写了裸字面量）"
+    # 常量本身有值，且 initialize 回包用的是它
+    assert server_face.PROTOCOL_VERSION == "2025-06-18"
+
+
+def test_packs_do_not_import_net_for_errors():
+    """ARCH-DEP-03 验收：pack 不许借 `net.ToolError` 当领域错误基类（只有出口层能 import net）。
+
+    历史形态：`packs/knowledge.py` 为了把 `SkillError` 转成 `net.ToolError` 反向依赖 net，
+    于是"纯知识、零依赖"的 pack 在没有出口层的上下文里 import 不了。
+    判据：① 任何 pack 里不许出现 `net.ToolError`；② knowledge.py 整文件不许 import net
+    （collect/core 真要发请求，import net 是本职，不在本条约束内）。
+    """
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent / "src" / "vod_mcp" / "packs"
+    bad = []
+    for f in sorted(root.rglob("*.py")):
+        text = f.read_text(encoding="utf-8")
+        tree = ast.parse(text)
+        imports_net = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                mod = node.module or ""
+                if mod == "vod_mcp" and any(a.name == "net" for a in node.names):
+                    imports_net = True
+                if mod.startswith("vod_mcp.net"):
+                    imports_net = True
+        uses_net_toolerror = any(
+            isinstance(n, ast.Attribute) and n.attr == "ToolError"
+            and isinstance(n.value, ast.Name) and n.value.id == "net"
+            for n in ast.walk(tree)
+        )
+        if uses_net_toolerror:
+            bad.append(f"{f.name}: 代码里仍调用 net.ToolError")
+        if f.name == "knowledge.py" and imports_net:
+            bad.append(f"{f.name}: 仍 import net（纯知识包必须零依赖出口层）")
+    assert not bad, "packs 错误口径仍依赖出口层：" + "; ".join(bad)
+
+
+def test_tool_error_truth_lives_in_errors_module():
+    """ToolError 真源在 errors，net 只做别名（否则有人会再用 net.ToolError 造反向依赖）。"""
+    from vod_mcp import errors, net
+    assert net.ToolError is errors.ToolError
+    assert net.ToolError.__module__ == "vod_mcp.errors"

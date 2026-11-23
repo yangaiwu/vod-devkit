@@ -119,11 +119,19 @@ def main():
 
         透传参数：`vod-devkit serve --transport remote --port 9528` 即起 HTTP 面
         （与 huaweicloud-devkit 的 `--transport remote` 同形）。
+
+        DEP-04：**必须与 main() 的 serve 前置分支同源**——server.py 是代码，在
+        SRC_ROOT 下；common.ROOT 是分发根（仓根/载荷根），拿它拼 `vod_mcp/server.py`
+        在仓内形态就指到不存在的路径（实测 /home/.../vod-devkit/vod_mcp/server.py）。
+        两条分支的 env 也统一成同一组，避免只有一条路径声明了根。
         """
+        from vod_mcp import paths as _paths
         extra = list(getattr(a, "server_args", []) or [])
         os.execve(sys.executable,
-                 [sys.executable, str(common.ROOT / "vod_mcp" / "server.py"), *extra],
-                  {**os.environ, "VOD_DEVKIT_ROOT": str(common.ROOT)})
+                 [sys.executable, str(_paths.SRC_ROOT / "vod_mcp" / "server.py"), *extra],
+                  {**os.environ,
+                   "VOD_DEVKIT_SRC_ROOT": str(_paths.SRC_ROOT),
+                   "VOD_DEVKIT_DIST_ROOT": str(_paths.DIST_ROOT)})
     sp_serve = sub.add_parser("serve", help="启动 MCP server（默认 stdio；"
                                             "--transport remote 起 Streamable HTTP）")
     sp_serve.add_argument("server_args", nargs=argparse.REMAINDER,

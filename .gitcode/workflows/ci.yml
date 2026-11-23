@@ -1,22 +1,28 @@
 name: vod-devkit CI
+
+# ARCH-BLD-01（2026-11-19 走查）：门禁清单**只住在 scripts/gate_all.py**，
+# 本文件与 .github/workflows/ci.yml 都只调它 ⇒ 两份定义不再漂移。
+# 此前本文件只有 5 步（缺 secret_scan/mypy/花名册/规则溯源/发版对账/dsh 单测/宿主矩阵），
+# 而本仓实际托管在 GitCode ⇒ 真跑的门禁就是那 5 步。
+# 触发分支补 dev：开发主干是 dev，此前只在 main 触发 ⇒ dev 上的提交零 CI 门禁。
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "dev"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "dev"]
 
 stages:
   test:
-    name: pytest 质量门禁
+    name: 质量门禁
     jobs:
       Test:
-        name: pytest
+        name: gate_all
         runs-on: [default]
         steps:
           - name: checkout
             uses: checkout-action@0.0.1
           - name: install deps
-            run: python3 -m pip install pytest pyflakes
+            run: python3 -m pip install pytest pyflakes mypy pyyaml 'mcp>=1.0'
           # 目录定位必须可失败（原 `cd repo_workspace 2>/dev/null || true` 在目录名
           # 不对时静默跑错地方，门禁形同虚设）：找不到仓库根=直接红
           - name: 定位仓库目录（不可静默）
@@ -24,13 +30,9 @@ stages:
               cd repo_workspace 2>/dev/null;
               ls src/vod_mcp/tools.py >/dev/null
               || { echo "FAIL: 未定位到仓库根（repo_workspace 与当前目录均无 vod_mcp/）"; exit 1; }
-          - name: 双副本一致性（单一门禁：sync_plugin + verify_copies）
+          - name: 全量门禁（清单见 scripts/gate_all.py）
+            # GitCode runner 无 node / 无宿主 CLI：dsh 与 hostmatrix 会显式 SKIP 并打印原因，
+            # 不判绿。其余项与 GitHub 侧**同一份清单**。
             run: >-
               cd repo_workspace 2>/dev/null;
-              python3 scripts/sync_plugin.py &&
-              python3 scripts/verify_copies.py
-              || { echo "FAIL: 双副本漂移——先跑 scripts/sync_plugin.py 再提交（实锤：npm 包曾以旧插件副本发出）"; exit 1; }
-          - name: lint (pyflakes，递归)
-            run: cd repo_workspace 2>/dev/null; python3 -m pyflakes src/vod_mcp src/vodkit_cli integrations/hermes/hooks tests
-          - name: run tests
-            run: cd repo_workspace 2>/dev/null; python3 -m pytest tests/ -q
+              python3 scripts/gate_all.py lint copies secret roster rules mypy registry tests packaging

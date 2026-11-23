@@ -530,7 +530,7 @@
       "carrier": "tests/test_mcp_manifest_a3.py"
     },
     "S180": {
-      "carrier": "tests/test_review_r2.py"
+      "carrier": "tests/test_cors_origin.py"
     },
     "S181": {
       "carrier": "tests/test_review_r2.py"

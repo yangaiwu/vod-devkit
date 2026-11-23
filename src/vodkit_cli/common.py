@@ -16,6 +16,7 @@ from vod_mcp import hosts as host_specs
 
 # 分发根（manifest / build-info / 载荷入口相对它）；包根在 src/，由 paths 负责
 from vod_mcp import paths as _paths
+from vod_mcp import trace as _trace
 
 ROOT = _paths.DIST_ROOT
 
@@ -54,11 +55,19 @@ def build_info(strict: bool = False) -> dict:
     from vod_mcp import __version__
     remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=ROOT,
                             capture_output=True, text=True).stdout.strip()
+    sha = git_sha(strict)
+    head = git_sha(False)            # 当前 HEAD；strict 下与 sha 相同
+    # ARCH-BLD-04：`snapshot` 标出这份 commitSha 的语义——是「发版快照」还是
+    # 「工作树重烧」。没有这个标记时，读的人无法区分"落后 HEAD 是异常"还是
+    # "tracked 快照本就停在 v^ 属正常"（台账实锤：0.5.44 快照落后 HEAD 三个提交，
+    # 却被 install / provenance 当权威，运维按它对账会对到错的提交）。
+    snapshot = "worktree" if sha and head and sha == head else "released"
     return {
         "version": __version__,
-        "commitSha": git_sha(strict),
+        "commitSha": sha,
         "builtAt": datetime.datetime.now().isoformat(timespec="seconds"),
         "sourceRemote": _safe_remote(remote) if remote else None,
+        "snapshot": snapshot,
     }
 
 
@@ -118,8 +127,8 @@ def _skill_installs(manifest_path: Path, extra_dirs) -> list:
                 # （fake-home 测试）不吞真实 HOME 的历史落点，卸载残留自动剪枝
                 if d.startswith(home) and Path(d).is_dir():
                     prev[(si["host"], d)] = si
-        except Exception:
-            pass
+        except Exception as e:
+            _trace.suppress("common._skill_installs", e)
     for h, d in [("hermes", HERMES_SKILLS_DIR)] + list(extra_dirs or []):
         if d is not None:
             prev[(h, str(d))] = {"host": h, "dir": str(d)}
@@ -308,12 +317,24 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
     """manifest 段：落安装名册（版本/来源/归因/落点指纹），并给出 key
     配置提示。名册对账口径见各字段注释（原 install.cmd_install 尾段，整段平移）。"""
     bi = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))
+    # ARCH-BLD-04：`source.commitSha` 是 build-info 快照里的提交，未必等于安装时
+    # 实际代码（tracked 快照按设计停在发版提交 v^）。所以另记一个 `worktreeHead`：
+    # 两者不等时，运维能看见"装的是哪个代码"，而不是对着发版快照对账。
+    _snapshot_sha = bi.get("commitSha")
+    _worktree_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
+                                    capture_output=True, text=True).stdout.strip() or None
     manifest = {
         "version": bi["version"],
         "source": {"type": "git", "remote": bi["sourceRemote"],
                    "ref": subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
                                          cwd=ROOT, capture_output=True, text=True).stdout.strip(),
                    "commitSha": bi["commitSha"],
+                   # 快照来源标记（released=发版快照 / worktree=按当前 HEAD 重烧）
+                   "snapshot": bi.get("snapshot", "unknown"),
+                   # 安装时工作树真实 HEAD；与 commitSha 不等即为"快照落后"的现场
+                   "worktreeHead": _worktree_head,
+                   "snapshotLagsHead": bool(_snapshot_sha and _worktree_head
+                                            and _snapshot_sha != _worktree_head),
                    # R10：提交不可达（amend 后的 dangling 对象）要能被审计看见，而不是
                    # 只在 doctor 里表现为"manifest 与 build-info 不一致"。
                    "reachable": _source_reachable(bi["commitSha"]),

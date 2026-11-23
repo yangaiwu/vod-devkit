@@ -24,8 +24,11 @@ import datetime
 from pathlib import Path
 
 from vod_mcp import paths
+from vod_mcp import trace as _trace
 
-ROOT = paths.ROOT
+def _root():
+    """载荷根每次现读（ARCH-DEP-06）；import 期快照会在换根后指向旧目录。"""
+    return paths.ROOT
 
 def payload_home() -> Path:
     """载荷根（用户级，多宿主共享；版本目录隔离）。
@@ -123,15 +126,15 @@ def stage(version: str | None = None, quiet: bool = False) -> Path:
 
     # 顶层单体文件
     for name in ("build-info.json", "package.json"):
-        src = ROOT / name
+        src = _root() / name
         if src.exists():
             shutil.copyfile(src, dest / name)
 
     removed = prune_stale(dest, set(sources) | {"build-info.json", "package.json",
                                                 "payload.json"})
 
-    info = json.loads((ROOT / "build-info.json").read_text(encoding="utf-8")) \
-        if (ROOT / "build-info.json").exists() else {}
+    bi = _root() / "build-info.json"
+    info = json.loads(bi.read_text(encoding="utf-8")) if bi.exists() else {}
     manifest = {
         "version": version,
         "commitSha": info.get("commitSha"),
@@ -153,8 +156,8 @@ def consume_marker() -> None:
     """server 启动时调用：标记只表示"换过载荷，该重启"，被运行中的进程消费掉。"""
     try:
         marker_path().unlink(missing_ok=True)
-    except Exception:
-        pass
+    except Exception as e:
+        _trace.suppress("payload.consume_marker", e)
 
 
 def verify(payload: Path) -> list:

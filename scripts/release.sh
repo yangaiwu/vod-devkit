@@ -98,6 +98,9 @@ EXTRA_FILES = [
     ("plugins/vod-devkit/.codex-plugin/plugin.json", "json"),
     ("plugins/vod-devkit/build-info.json", "json"),
     ("packages/dsh/package.json", "json"),
+    # 根清单 marketplace 准入文件（2026-11-19 补，ARCH-BLD-03）：此前不在表里，
+    # 自 11-03 写入起永久停在 0.1.0 —— 按 manifest 读版本的外部登记会拿到错版本。
+    ("plugin.json", "json"),
 ]
 for f, kind in EXTRA_FILES:
     try:
@@ -141,7 +144,7 @@ RANGE="${PREV_TAG}..HEAD" && [ -z "$PREV_TAG" ] && RANGE="HEAD"
 
 # 显式文件列表提交（纪律：禁 git add -A——曾误收垃圾文件）
 git add package.json pyproject.toml src/vod_mcp/__init__.py assets/contract/tools.schema.json \
-        plugins/vod-devkit/.codex-plugin/plugin.json packages/dsh/package.json CHANGELOG.md \
+        plugins/vod-devkit/.codex-plugin/plugin.json packages/dsh/package.json plugin.json CHANGELOG.md \
         tests/golden \
         assets/skills docs/decisions.md build-info.json
 # 插件副本不再入库（.gitignore，v0.5.9 零提交）——不再出现在 git add 清单里；
@@ -162,9 +165,29 @@ fi
 "$PY" scripts/verify_copies.py || {
   echo "FAIL: 发版提交漏带插件副本改动（tarball 会与 tag 不一致）——修正提交清单后重跑" >&2; exit 1; }
 git tag "v$BUMP"
-git push origin main --tags || { echo "FAIL: GitCode 推送失败（pre-push 门禁或网络），发版未完成"; exit 1; }
-echo "已推送 GitCode"
-if git push github main --tags 2>/dev/null; then echo "已推送 GitHub 镜像"; else echo "WARN: GitHub 镜像推送跳过（token 权限待补）"; fi
+# 🔴 推**当前分支**，不硬编码 main（2026-11-19 实锤两次）：
+#   本仓开发主干是 dev（main 仅发版），但脚本写 `git push origin main --tags`
+#   ⇒ tag 推上去了、release commit 却留在本地 ⇒ 远端 tag 悬空（没有任何分支可达），
+#   而同分支已推时 `git push origin main` 在 dev 上是 no-op，脚本还打印"已推送 GitCode"，
+#   看起来成功、实际分支没动。用 rev-parse 取当前分支消除这个隐式假设。
+CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+git push origin "$CUR_BRANCH" --tags || {
+  echo "FAIL: GitCode 推送失败（pre-push 门禁或网络），发版未完成"; exit 1; }
+echo "已推送 GitCode（分支 $CUR_BRANCH + tag v$BUMP）"
+# main 是否快进由发版人显式决定（本仓约定 main 仅发版用）：
+#   git push origin "$CUR_BRANCH":main
+echo "提示：如需同步 main，执行 git push origin $CUR_BRANCH:main"
+# GitHub 镜像：仅当配置了 remote 才尝试（本仓只有 origin，无 github remote
+# ⇒ 原先无条件执行 + 2>/dev/null 让每次发版都打一条恒定的 WARN，属噪声而非信号）。
+if git remote get-url github >/dev/null 2>&1; then
+  if git push github "$CUR_BRANCH" --tags 2>/dev/null; then
+    echo "已推送 GitHub 镜像（分支 $CUR_BRANCH）"
+  else
+    echo "WARN: GitHub 镜像推送跳过（token 权限待补）"
+  fi
+else
+  echo "跳过 GitHub 镜像（未配置 github remote）"
+fi
 
 # npm 包自证（P0 复发根治：npm 0.4.1 实锤——包内缺 pending.py：files 白名单
 # 逐文件枚举漏新模块 + 曾以旧插件副本打出）：现场 pack 并断言包内代码指纹
@@ -179,6 +202,17 @@ TAG_COMMIT=$(git rev-parse "v$BUMP")
 # 注意：plugins/vod-devkit/ 只有 .codex-plugin/plugin.json 与 .mcp.json 入库，包内
 # build-info 是生成物（git 不认识它）——只从 tag 取根那份，再拷给插件副本。
 git checkout "v$BUMP" -- build-info.json
+# ARCH-BLD-04：tag 里这份快照的语义是**发版快照**（commitSha 按 tag 口径写）。
+# sync_plugin 写的是 worktree，发版时必须改写为 released，否则"落后 HEAD"这个
+# 状态在发版机上永远报不出口径差异（读到 worktree 会误以为它是按 HEAD 重烧的）。
+python3 - "$BUMP" <<'PY' || { echo "FAIL: 无法把 build-info 的 snapshot 标为 released" >&2; exit 1; }
+import json, sys
+p = "build-info.json"
+d = json.load(open(p, encoding="utf-8"))
+d["snapshot"] = "released"
+open(p, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+print(f"build-info snapshot=released @ {d.get('commitSha','')[:8]}")
+PY
 cp -f build-info.json plugins/vod-devkit/build-info.json
 VOD_DEVKIT_NO_BUILD_INFO=1 npm pack --silent >/dev/null
 BI_SHA=$(tar xzOf "$TGZ" package/plugins/vod-devkit/build-info.json | grep -o '"commitSha": "[0-9a-f]*"' | head -1 | grep -o '[0-9a-f]\{7,\}')

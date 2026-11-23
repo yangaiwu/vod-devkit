@@ -47,6 +47,16 @@ full 已删。技能拷贝按 packs 过滤；manifest 记录 preset。
 1. vod_mcp 只允许 import workflow/api.py 的 HTTP 客户端，禁止 import 引擎内部模块
 2. 外部 agent 无 DB 直连路径（护栏 deny 兜底）
 3. 任务 ID（引擎任务表主键）是唯一对账主键，工具返回一律携带
+4. **`src/` 内不许有循环依赖，函数内 import 也算边**（ARCH-DEP-01，2026-11-19 走查）。
+   `tests/test_import_graph.py` 用 AST 建图（含函数内 import）+ Tarjan SCC 断言无环。
+   不许用"函数内懒导入"当破环手段：那只是把故障从 import 期推到重构期——任何一次
+   import 整理把它提到顶层就 `ImportError`，表现是 MCP server 起不来、宿主掉线，
+   而错误只有一行 traceback。真破环靠**抽零依赖真源**（如 `server_face.py`）或
+   **注入点**（如 `host_verify.register_verifier()`）。
+5. **`host_adapters.REGISTRY` 只存模块名，取模块必须过 `get()`**（ARCH-DEP-02）。
+   急切聚合导入 12 个适配器会让"误引 host_adapters"变成**远程面每请求 500**
+   （载荷副本不含 `integrations/`，2026-11-12 实锤），单改一个适配器也要拖进 12 个模块。
+   `tests/test_host_adapters.py::test_registry_is_lazy` 锁死"导入后 sys.modules 无宿主子模块"。
 
 ## 二、MCP 工具契约
 
@@ -159,6 +169,15 @@ key 过滤）随 VOD-VOI；层级③用户自助维持 P2（签名回执）。
 （空 body，引擎侧 IP 限频，VOD-KEY 端点）→ 令牌回填运行时 +
 落 runtime.json（token_tier=anonymous）→ 重试提交 → 成功。
 令牌端点不可用 → 结构化引导错误（三步），不裸 404。
+
+**D-meta-anon-1（2026-11-18 真机实锤，跨端同构）**：产品名录 `_load_meta`
+也必须走这条链。此前它只带 `_eff_key()`（首装为空）且 `except ToolError: pass`
+吞掉 401 → 回退空快照 → 名录恒空 → 产品归因必失败（needsProductAsk），而
+领令牌要提交成功、提交成功要归因成功 → **默认形态下一条声音都提交不了**。
+修法：meta 401 时先领零字段匿名令牌（落 runtime.json），带 key 重试一次，
+`source=meta-anon`；仍失败才回退快照（不阻断采集）。
+**dsh 侧与 Python 侧必须同步**——两端各有一份 meta 加载，漏一侧就是半修。
+
 设计依据见 proposal 三·四节方案比对：进门零摩擦，问责靠档位。E3 修正待落引擎侧文档：查重依赖提交方
 外部去重键或内容 hash——服务端生成 voice_id 使 saveCollectRecord 的
 voice_id 查重不生效（详见 VOD-VOI 文档修正）。
@@ -720,21 +739,70 @@ test/remote-mcp-server.test.ts 是参照物），只在我们有身份/写面的
 | 维度 | devkit | 本插件 |
 |---|---|---|
 | 启动 | 同一二进制 `--transport remote --port 9528 --host 127.0.0.1` | `vod-devkit serve --transport remote --port 9528 --host 127.0.0.1`（bin 透传） |
-| 传输 | 官方 SDK Streamable HTTP，stateless + jsonResponse | 官方 Python SDK `StreamableHTTPSessionManager(json_response=True, stateless=True)` |
+| 传输 | 官方 SDK Streamable HTTP，stateless + jsonResponse | **官方 Python SDK 标准 stateful**：`StreamableHTTPSessionManager(json_response=True, stateless=False, session_idle_timeout=30*60)`（2026-11-18 D-scope-1 起；此前 stateless=True 属简化形态） |
 | 方法契约 | POST 进传输；GET 405；OPTIONS 204 + ACAO:*；通知 202；坏 JSON 400 | 同（逐条测试钉死）；`Accept` 必须含 `application/json`——只给 `text/event-stream` 的客户端按 jsonResponse 模式回 406（与 devkit 同） |
-| 工具面门控 | remoteSurface 摘掉 secrets 包 + 本地写工具 | `packs.REMOTE_WITHHELD` 只摘 `vod_packs_configure`（2026-11-16 修订，见 D-token-machine-1）；draft/commit/ledger 与本地一致，草稿按宿主隔离 |
+| 会话 | 无会话（stateless） | **标准会话**：initialize 下发 `mcp-session-id`，客户端后续请求回传；会话跨请求存活，**记忆/计数/nonce 按会话隔离**（`_resolve_scope` 的 `sess:` 前缀即会话）。注意：**工具面不随会话隔离**——本 SDK 版本所有会话共用同一个 `Server` 实例，`packs._RUNTIME` 是模块级全局，一个会话 disable 能力包会摘掉同进程内所有 agent 的工具 |
+| 工具面门控 | remoteSurface 摘掉 secrets 包 + 本地写工具 | **与 stdio 只差一个 `vod_packs_configure`**：`REMOTE_WITHHELD = ("vod_packs_configure",)`（2026-11-18 D-scope-1 二次修正）。stateful 解决了「开关跨请求存活」，但没解决「多会话共用一个 Server 互相影响」——一条调用即可摘掉同进程所有 agent 的采集能力，故继续摘除。逐会话工具面当前 SDK 做不到
 | instructions | remote 版不给 skillRoot，教 retrieve_skill | 同；`vod_retrieve_skill` 在远程面不返回 path，`vod_list_skills` 不返回 skillsDir |
 | 身份 | 不管（凭据在服务器本机文件） | **请求头 Authorization 逐请求注入优先**；无 Bearer 时与本地同链领/复用机器级匿名令牌（2026-11-16 修订） |
-| 鉴权 | 无，README 警告别公开 | 无内建鉴权（同），默认回环 + 反代承担 TLS/身份 |
+| 鉴权 | 无，README 警告别公开 | 无内建鉴权（同），默认回环 + 反代承担 TLS / 身份 |
+| 厂商兼容 | — | 标准握手为主路径；**无 session 的非 initialize 请求走内部握手兜底**（裸 HTTP 客户端可在不改代码的情况下接入，且仍落到独立会话） |
 
 插件不写库这条在远程面同样成立：HTTP 面唯一的出站动作仍是引擎 HTTP API
 （POST /external/voices 等），落库/配额/审计全在服务端；本仓没有任何 DB 连接
 代码路径，远程面也没有新增。
 
-承载：`vod_mcp/transport_remote.py`（HTTP 外壳 + ASGI 适配层）、
-`vod_mcp/remote_app.py`（SDK Server 与工具面/instructions）、
-`vod_mcp/guardrails.py`（护栏唯一实现，两面共用）、`packs.REMOTE_WITHHELD`、
-`tools._REQ_KEY/_SERVER_FACE`（逐请求身份）、tests/test_remote_transport.py（13 例）。
+承载：`vod_mcp/transport_remote.py`（HTTP 外壳 + ASGI 适配层 + 无会话兜底）、
+`vod_mcp/remote_app.py`（SDK Server 与工具面/instructions/_req_scope）、
+`vod_mcp/guardrails.py`（护栏唯一实现，两面共用）、`packs.REMOTE_WITHHELD`（现为
+`("vod_packs_configure",)`，逐会话工具面当前 SDK 做不到）、
+`runtime_state._resolve_scope`（统一作用域：请求级 agent_id > 宿主 name > 进程 nonce > 无标识降级）、
+`vod_mcp/server_face.py`（传输面标志的零依赖真源；`net._SERVER_FACE` 是同一 ContextVar
+的别名，`runtime_state._is_remote_face()` 经 `server_face.is_remote()` 每次现取实时绑定）、
+tests/test_remote_transport.py + tests/test_mcp_standard_transport.py（标准/厂商兼容 13 例）。
+
+### 作用域（Scope）单一入口
+
+三种部署形态共用一条解析链，业务侧只消费 `key` / `product` / `product_prior`。
+**粒度（grain）与身份来源（id_source）是两个正交维度，不压成一个字段**；
+**区分维度必须进 key，不能只写在注释里**（`"http-remote"` 与机器级 nonce 都因为
+"以为能区分、其实区分不了"出过事）。
+
+| 部署 | scope.grain | key | 隔离依据 | product 先验 | 降级原因 |
+|---|---|---|---|---|---|
+| 一 agent 一本地 stdio | `process` | `proc:<pid>`（+`|name` 二级后缀，name 不单独成 key） | 进程私有内存 | 可用 | — |
+| 一 agent 一远程（独立进程+目录） | `process` | `proc:@<VOD_DEVKIT_HOME>` | 进程 + home（**已进 key**） | **需显式 `VOD_SINGLE_TENANT=1`**，见下 | 未声明单租户时 `no_session_id` |
+| 多 agent 共用远程 | `request` | `sess:<mcp-session-id>` | 会话表；记忆 TTL 随 session | **禁用 + 打点** | `no_session_id` |
+| （增强）显式 agent 头 | `request` | `agent:<agent-id>` | 同上（跨会话共享记忆） | 禁用 | — |
+| （兜底）全拿不到 | — | `None` | **读写皆禁用**；计数仅单轮内 | 走原话 + 问一次 | `no_session_id` / `no_proc_id` |
+
+**模式② 的 product 先验（审查 P1-1 修正，2026-11-19）**：远程面此前被 `if not remote:`
+一刀切禁用先验，模式②因此丢掉安装绑定（与本表"可用"的承诺对立，是**功能回归**）。
+现在放开为**三个条件同时满足**才可用，缺一个即退回禁用：
+
+```
+① VOD_SINGLE_TENANT=1（显式声明，默认关 —— 不明说就不放开）
+② VOD_DEVKIT_HOME 非空（进程/目录私有的唯一可证证据）
+③ 拿不到调用方会话标识 sess:/agent:（能拿到说明可能多 agent 共用 = 模式③）
+```
+
+设计理由：模式② 物理上"一进程一 agent"，先验不会错归；但**代码无法从进程内部证明
+"只有我一个 agent 在用"**，所以要求部署者显式声明。默认关保证既有部署行为不变。
+
+要点：
+- **`sess:` 与 `agent:` 前缀分工**：前者=会话级（标准 stateful 自动获得），
+  后者=身份级（客户端显式声明）。混用会让"这个桶是会话还是身份"无法分辨。
+- **session TTL 与记忆 TTL 同源**：都取 `runtime_state.SCOPE_TTL_SEC`，测试锁相等。
+  两个独立时钟会造成「记忆还在但会话已回收」（悬挂桶泄漏）或「窗口内会话过期
+  把同一用户当新客」。
+- **`key=None` 时读写皆禁用**（不只是不写，也不读，防残留桶被读到）；
+  计数退化为单轮内计数 —— 不跨请求，故不产生跨 agent 污染，正当的
+  "同一轮别重复追问"仍成立。
+- **`product` 与 `key` 解耦**：product 可为空（走原话归因 + 问用户）；
+  `product_prior` 是独立开关 —— 共用远程进程下必须 False，否则一份 runtime.json
+  代表所有 agent 就是错归。
+- `_resolve_scope` **不得有写盘副作用**（曾因调用 `_install_nonce()` 在
+  "显式 key 被拒"路径上污染 runtime.json）。
 
 与参照物逐条对账（不留"够用就行"的账）：
 
@@ -1120,8 +1188,10 @@ cache 内 .mcp.json 被改写成 `python3` 绝对路径 + `payloads/0.5.9/vod_mc
 `handle()` 因此允许返回 list，`main()` 逐条写出——这是全仓唯一会主动向客户端发消息的位置。
 capabilities 必须声明 `tools.listChanged=true`，否则合规客户端不会重拉 `tools/list`。
 
-**远程面摘除**：`REMOTE_WITHHELD` 加该工具。理由不是"安全"而是语义：HTTP 面每请求现造
-server、无会话，开关写完下一个请求就没了（"以为改了其实没改"）。dsh 壳同理不提供。
+**远程面摘除**：`REMOTE_WITHHELD` 加该工具。理由不是"安全"而是语义：即使 stateful 下
+开关能跨请求存活，本 SDK 版本所有会话共用同一个 `Server`、`packs._RUNTIME` 是模块级全局，
+一个会话 disable 会摘掉同进程内所有 agent 的工具（真机两会话实测：A disable collect 后
+B 的 `tools/list` 从 12 降到 8）。留一个"改了就影响别人"的开关比摘掉更危险。dsh 壳同理不提供。
 
 ## doctor 出站面：代理与引擎可达（D-doctor-egress-1，2026-11-16）
 
@@ -1193,7 +1263,7 @@ MCP 单独部署，都共用 `<state>/runtime.json` 里的同一个 `install_non
 | 显式 | `VOD_DEVKIT_HOME`（装机由 `server_env()` 写进各宿主配置，测试写 tmp） |
 | 默认 | `~/.vod-devkit/state` |
 | 文件 | `<state>/runtime.json` + `runtime.json.lock`（flock 同目录） |
-| 权限 | 文件 0600、目录 0700（迁移与每次写都收紧） |
+| 权限 | 文件 0600、目录 0700（迁移、每次写、以及 **pending 队列**都收紧；只收紧不放宽；WSL/drvfs 忽略 chmod 时告警不阻断） |
 | 解析优先级 | `VOD_DEVKIT_HOME` > 机器级 state 已存在（存在即用）> 旧 `DIST_ROOT/vod_mcp/runtime.json`（首启兼容） |
 
 **"机器级"的准确含义**：指**该用户（服务账户）下的安装实例级**，不是操作系统级。
@@ -1237,7 +1307,9 @@ fail fast，后者被拒可重领）。
 **并发语义（明确写死，不加跨网络全局锁）**：两个宿主同时 ensure 时可能各领一枚匿名令牌
 （最后写入者生效）。不为此加覆盖"探针 + 领取"的全局锁：那段持锁最长 25s，会把其他宿主的
 账本/草稿写全堵住，代价大于收益。状态写本身是事务的（进程内 RLock + 跨进程 flock +
-tmp→`os.replace` + 0600），并发不会丢更新、不会写坏文件。
+`paths.atomic_write_text`：同目录 tmp → fsync → chmod → `os.replace`，带软链解析与
+只读目标保护；ARCH-CFG-03 起**全仓只有这一处**原子写实现，此前 runtime.json 那条私有
+路径缺 fsync，掉电可留 0 字节文件、key/账本/设备锚点一起丢），并发不会丢更新、不会写坏文件。
 
 **远程面 = 同机独立进程，与本地同效果（2026-11-16 负责人澄清）**：远程部署的实际形态是
 "同一台机器上把 MCP server 跑成一个常驻进程（127.0.0.1:9528），多个 agent 通过 HTTP 连它"，
@@ -1248,9 +1320,13 @@ tmp→`os.replace` + 0600），并发不会丢更新、不会写坏文件。
 - 工具面：`REMOTE_WITHHELD` 收窄到只剩 `vod_packs_configure`（进程内开关，HTTP 每请求现造
   server、多 agent 共用会互相影响）。`vod_draft_voices` / `vod_commit_voices` /
   `vod_list_submitted` 远程同样可用。
-- 两段式放开的前置是**草稿归属隔离**：草稿落盘时记 `owner = _session_key(client_info)`
-  （宿主名 + 身份 hash），commit 校验归属，不同 clientInfo 提交一律 -32011
-  （"这份草稿不属于当前客户端"）。旧草稿无 owner 字段 → 兼容放行（升级不断回合）。
+- 两段式放开的前置是**草稿归属隔离**：草稿落盘时记 `owner = _draft_owner(client_info)`
+  —— **只认会话/进程边界**（远程面 `sess:<sid>`，stdio 面 `proc:<pid|home>[|name]`），
+  **不认 `X-Vod-Agent-Id`**，commit 校验归属，不同会话提交一律 -32011。
+  （2026-11-19 审查 ④ 修正：旧口径 `owner = _session_key` 会把自我声明的 agent 头
+  当归属依据 —— 带同一个头的另一条连接能提交别人的草稿，实测放行。）
+  话术分档：两侧都是 `sess:` 且无 agent 摘要 → 「草稿绑定了原会话（重连/进程重启），
+  请重新暂存」；其余 → 「这份草稿不属于当前客户端」。旧草稿无 owner 字段 → 兼容放行。
 - **匿名代领护栏**：回环绑定（同机部署默认 `127.0.0.1`）与本地一致、可代领；
   非回环绑定（`--host 0.0.0.0` 或可能被反代触达）**默认关闭代领**，调用方必须带
   Authorization，确需开启用 `--allow-anon-mint`（`net.ANON_MINT_DISABLED` 进程级开关，

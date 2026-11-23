@@ -76,15 +76,19 @@ def _resolve(raw: str) -> tuple:
     return packs
 
 
-# 服务面（HTTP 传输）摘除的工具。（2026-11-16 D-token-machine-1 修订：远程面收窄为
-# 只剩这一项——远程部署的实际形态是"同一台机器上独立跑一个 MCP server 进程，
-# 多个 agent 通过 HTTP 连它"，和本地同一套身份/账本语义，所以 draft/commit/ledger 都放开。）
-#   packs_configure：会话内开关是**进程内状态**，HTTP 面每请求现造 server、无会话，
-#                 开关会在下一个请求消失（"以为改了其实没改"）；且多 agent 共用进程时会互相影响。
-# draft/commit 放开的前置是**草稿归属隔离**：草稿落 owner（宿主名+身份 hash），commit 校验归属，
-# 避免同机两个 agent 之间"A 的草稿被 B 提交"（collect.draft_voices / commit_voices）。
-# 注意：submit 不摘——它对 VOD 的唯一动作是调用引擎 HTTP API，落库是服务端的事。
-REMOTE_WITHHELD = ("vod_packs_configure",)
+# 服务面（HTTP 传输）摘除的工具。
+# 2026-11-18 D-scope-1 二次修正（真机探针实锤，v2）：
+#   曾在本轮把 REMOTE_WITHHELD 清空，理由是「stateful 后会话内开关有效且按会话隔离」。
+#   **该理由只对了一半** —— 实测（真 RemoteRuntime + 两个真会话）：
+#     session A 调 vod_packs_configure {disable:[collect]} → removed:[collect]
+#     之后 session B 的 tools/list：工具从 12 降到 8，vod_submit_voices 消失
+#   根因：本 SDK 版本所有会话**共用同一个 Server 实例**（build_server 只在启动时调一次），
+#   且 `packs._RUNTIME` 是**模块级全局**。会话隔离只解决「开关跨请求存活」，
+#   没有解决「多 agent 共用进程互相影响」—— 恰恰是当初摘它的后半句理由。
+#   危害升级：任何能连端口的一方，一条调用即可把同进程内所有 agent 的采集能力摘掉
+#   （直到有人 reset），与本分支做的记忆隔离方向相反。
+# 结论：**继续摘除**。逐会话工具面在当前 SDK 下做不到，不要按 per-session 写文档。
+REMOTE_WITHHELD: tuple = ("vod_packs_configure",)
 
 
 def enabled_tools(remote: bool = False) -> list:

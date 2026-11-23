@@ -3,7 +3,8 @@ import json
 import os
 import sys
 
-from vod_mcp import paths
+from vod_mcp import paths, server_face
+from vod_mcp import trace as _trace
 
 
 def _expected_remote_tools() -> set:
@@ -49,7 +50,7 @@ def _probe_remote(url: str, token: str, timeout: int = 15,
         return data
 
     _post({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-           "params": {"protocolVersion": "2025-06-18",
+           "params": {"protocolVersion": server_face.PROTOCOL_VERSION,
                       "clientInfo": {"name": "vod-devkit-installer", "version": "1"},
                       "capabilities": {}}})
     _post({"jsonrpc": "2.0", "method": "notifications/initialized"})
@@ -95,7 +96,7 @@ def _probe_remote_token(url: str, token: str, timeout: int) -> None:
         return data
 
     _post({"jsonrpc": "2.0", "id": 10, "method": "initialize",
-           "params": {"protocolVersion": "2025-06-18",
+           "params": {"protocolVersion": server_face.PROTOCOL_VERSION,
                       "clientInfo": {"name": "vod-devkit-installer", "version": "1"},
                       "capabilities": {}}})
     _post({"jsonrpc": "2.0", "method": "notifications/initialized"})
@@ -190,14 +191,14 @@ def _write_catalog_cache(base: str, catalog: list) -> None:
         except OSError as e:  # noqa: BLE001  权限设不上要能看见（缓存里有产品名录，不算密钥）
             print(f"[vod-devkit] 产品名录缓存权限设置失败（{e}），继续使用", file=sys.stderr)
         os.replace(tmp, p)
-    except OSError:
-        pass                  # 缓存写不进不是安装的失败条件
+    except OSError as e:
+        _trace.suppress("remote._write_catalog_cache", e)
     finally:
         if tmp.exists():
             try:
                 tmp.unlink()
-            except OSError:
-                pass
+            except OSError as e:
+                _trace.suppress("remote._write_catalog_cache", e)
 
 
 def _validate_product_or_exit(product: str, base: str, refresh: bool = False) -> bool:
@@ -215,7 +216,9 @@ def _validate_product_or_exit(product: str, base: str, refresh: bool = False) ->
     import urllib.request
     import urllib.error
     import uuid
-    api_prefix = "/rest/developer/manager/hdvodmngservice/v1"
+    from vod_mcp import net as _net
+    # ARCH-CALL-06：路径前缀单一真源在 net（此前这里硬编码一份，与 net/doctor 各一份）
+    api_prefix = _net.API_PREFIX
     key = os.environ.get("VOD_JAVA_API_KEY", "")
     ua = "vod-devkit-installer/1"
 

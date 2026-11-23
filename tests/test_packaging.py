@@ -62,3 +62,30 @@ def test_runtime_json_never_packable():
         assert f not in ("vod_mcp", "src/vod_mcp/"), (
             "files 含 vod_mcp 整目录——会把真实 runtime.json 打进包，"
             "必须逐文件枚举")
+
+
+def _covered(rel: str, files: set) -> bool:
+    return any(rel == f or rel.startswith(f + "/") for f in files)
+
+
+def test_files_whitelist_covers_all_src_modules():
+    """ARCH-BLD-06 验收：两份源码包（vod_mcp / vodkit_cli）与三份资产目录都必须被覆盖。
+
+    判据是"包内实际能取到每个模块"，而不是"白名单里有没有某个字符串"——
+    历史事故正是白名单写着 `src/vod_mcp` 整目录、但顶层为防 runtime.json 改成逐文件后
+    漏了新模块（npm 0.4.1 缺 pending.py）。这里按**文件**枚举求覆盖，两种声明形态都认。
+    """
+    pkg = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+    files = {f.rstrip("/") for f in pkg.get("files", [])}
+
+    missing = []
+    for pkgdir in ("src/vod_mcp", "src/vodkit_cli"):
+        for f in sorted((ROOT / pkgdir).rglob("*.py")):
+            if "__pycache__" in f.parts or f.name == "runtime.py":
+                continue
+            rel = f.relative_to(ROOT).as_posix()
+            if not _covered(rel, files):
+                missing.append(rel)
+    for asset in ("assets/skills", "assets/contract", "assets/safety"):
+        assert asset in files, f"{asset} 未进白名单（技能/契约/策略随包下发的前提）"
+    assert not missing, "这些模块不在 package.json files 里，npm 包会缺它们：\n" + "\n".join(missing)

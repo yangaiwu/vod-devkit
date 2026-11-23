@@ -1209,12 +1209,51 @@ args 指向载荷；把 PATH 上的 python3 换成 3.9 再启动 → stderr 出�
   `-32015`**（安全门禁，显式动作也不能绕过，且不做静默摘除）。
 - 形态变更才推 `notifications/tools/list_changed`（无变化不发，避免客户端重拉风暴）；
   `initialize` 的 capabilities 声明 `tools.listChanged=true`。
-- 远程面（HTTP）摘除该工具：远程面每请求现造 server、无会话，开关会在下一个请求消失。
+- ~~远程面（HTTP）摘除该工具：远程面每请求现造 server、无会话，开关会在下一个请求消失。~~
+  **2026-11-18 D-scope-1 推进，同日二次修正收回**：远程面已回归 MCP 标准 stateful 传输
+  （initialize 下发 `mcp-session-id`，记忆/计数按会话隔离），「无会话」前提确已失效；但真机
+  双会话实测表明本 SDK 版本所有会话**共用同一个 `Server` 实例**、`packs._RUNTIME` 是模块级
+  全局——A 会话 disable collect 后 B 的 `tools/list` 从 12 降到 8。即 stateful 只解决了
+  「开关跨请求存活」，没解决「多 agent 共用进程互相影响」。**结论：继续摘除**
+  （`REMOTE_WITHHELD = ("vod_packs_configure",)`）；逐会话工具面当前 SDK 做不到。
 
 | # | 场景 | 断言 |
 |---|---|---|
 | S132 | 会话内开关生效 | disable 后 `tools/list` 立即少掉该包工具、enable 后回来；`reset` 回到 VOD_PACKS；core 强制；未知 id `-32602`；空参数拒绝；熔断期 enable collect `-32015` 且状态不变；调用前后 `os.environ` 逐键不变（不写 env） |
-| S133 | 协议面与远程边界 | capabilities 声明 `listChanged=true`；有变化时同一次调用输出「响应 + 通知」两条（stdio 上各占一行）、无变化只输出响应；通知后 `tools/list` 反映新区面；`REMOTE_WITHHELD` 含该工具且远程 `tool_specs` 里没有它；契约含三参数 |
+| S133 | 协议面与远程边界 | capabilities 声明 `listChanged=true`；有变化时同一次调用输出「响应 + 通知」两条（stdio 上各占一行）、无变化只输出响应；通知后 `tools/list` 反映新区面；**远程面 `REMOTE_WITHHELD == ("vod_packs_configure",)` 且远程 `tool_specs` 不含该工具**；契约含三参数 |
+
+## 远程传输标准实现与作用域隔离（S146，2026-11-18）
+
+远程面必须按 MCP 标准实现（不自造一套），才能与外部服务互操作；且 stdio 与 remote
+只是传输形态不同，**工具能力不得阉割**。多 agent 共用一个 server 时，记忆/追问计数/
+voiceId 必须按作用域隔离，否则静默污染（错归进引擎幂等域、跨 agent 拒绝服务、voiceId
+撞车丢声量）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S146-1 | 标准握手 | `initialize` 响应头下发 `mcp-session-id`；带该头调用工具成功；两次握手得到不同会话且互不干扰 |
+| S146-2 | 厂商兼容 | 官方 SDK 客户端、旧协议（2024-11-05）、不带 `Accept` 头、裸 HTTP 不握手（兜底放行且可连续多次）、无 session 直调 五类均可接入 |
+| S146-3 | 能力对齐 | 远程面 = 本地 − `{vod_packs_configure}`（`REMOTE_WITHHELD == ("vod_packs_configure",)`）；draft/commit/list_submitted 等在远程面均可用，仅进程内开关摘除 |
+| S146-4 | 作用域隔离 | 不同会话/agent → 不同 key（`sess:`/`agent:` 前缀分工），A 的记忆不泄漏给 B；无标识 → `key=None` 且**读写皆禁用**（宁可多问，不可错归） |
+| S146-5 | 产品优先级 | 请求级 product 优先于安装绑定；两者皆空走原话归因 + 问用户；**共用远程进程下 `product_prior=False`**（安装先验禁用，防多租户错归） |
+| S146-6 | 粒度与身份正交 | `scope.grain`(process/request) 与 `scope.id_source`(proc/proc_home/sess/agent) 分别成列，不压成一个字段 |
+| S146-7 | 隔离维度进 key | `VOD_DEVKIT_HOME` 进入 stdio 远程独立进程的 key（`proc:@<home>`）；stdio 主键为进程身份，`name` 仅二级后缀 |
+| S146-8 | TTL 同源 | `session_idle_timeout` 与记忆 TTL 同取 `SCOPE_TTL_SEC`，两者相等由测试锁定 |
+| S146-9 | 无写盘副作用 | `_resolve_scope` 不得调用 `_install_nonce()`（会写盘）；"显式 key 被拒"路径不得污染 runtime.json |
+
+### D-meta-anon-1 匿名档 meta 死循环（2026-11-18 真机实锤，跨端同构）
+
+未配 key 的默认形态下，产品名录加载先于「提交遇 401 才领令牌」发生 →
+meta 401 → 异常被吞 → 回退空快照 → 名录恒空 → 归因必失败（needsProductAsk）→
+而领令牌要提交成功、提交成功要归因成功 → **一条声音都提交不了**。
+dsh 侧先修，Python 侧同构补上。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| S147-1 | 无 key 时 meta 401 → 领令牌 → 重试 | 首次 meta 无 auth；随后调 `/external/token`；重试那次带 key；`source=meta-anon` 且名录非空（本轮实测 103 项） |
+| S147-2 | 已配 key 不额外领令牌 | `source=meta`；不调用 `/external/token`；首次 meta 即带 auth |
+| S147-3 | 完全不可达 | `source=snapshot`、`stale=true`，不阻断采集 |
+| S147-4 | 跨端同构 | dsh `loadMeta` 与 Python `_load_meta` 都有 401→领令牌→重试；真机 stdio/remote 均可提交（voiceId 非空） |
 
 
 ## 凭据单入口与技能读取教法（S124-S125，2026-11-15）
@@ -1548,7 +1587,7 @@ hermes config / **机器级 state**）任一漂移 → `[S143] 测试写到了�
 | S145-11 | `.migrated` 防回灌 | 迁移后手工删 state/runtime → 再调迁移不复活旧文件（`migrated=false`，state 仍为空） |
 | S145-12 | runtime 显式 key 不降级 | runtime 里 tier≠anonymous 的 `auth init` key 被拒 → `source=runtime-key`、`verified=false`、领取调用 0 次、key 不被覆盖 |
 | S145-13 | 远程面与本地同效果（身份） | 远程 HTTP 面：带 Bearer → `source=request`、不代领；不带 → 领/复用机器级匿名令牌并完成提交（引擎 401→领令牌→重试 200） |
-| S145-14 | 远程面工具面收窄 | `enabled_tools(remote=True)` = 本地 − `{vod_packs_configure}`；draft/commit/list_submitted 均在；被摘工具直接调用仍 `[remote]` 拒绝 |
+| S145-14 | 远程面工具面收窄 | `enabled_tools(remote=True)` = 本地 − `{vod_packs_configure}`；2026-11-18 D-scope-1 曾短暂清零（以为 stateful 后按会话隔离），同日真机双会话实测推翻：所有会话共用一个 `Server`、`packs._RUNTIME` 模块级全局，A disable 会影响 B（12→8），故**维持摘除**；draft/commit/list_submitted 均在远程面 |
 | S145-15 | 草稿按宿主隔离 | A 的草稿 B 提交 → `-32011`「不属于当前客户端」；A 自己提交成功且 `twoPhase=true`；旧草稿无 owner 兼容放行 |
 | S145-16 | 安装先验需自指证据 | 装着 `--product=CodeArts`，原话「导出太慢了」无自指 → `source=unknown`（转去问用户）；不得凭先验归因 |
 | S145-17 | 自指时先验成立 | 原话「你们这个产品导出太慢了」→ `source=install_binding`、`product=31`、`evidence=[{reason:self-reference, alias, snippet}]` 可回指 |
@@ -1705,6 +1744,34 @@ doctor 只自愈最后装的那个、uninstall 只摘一个块、`prune` 的"在
 |---|---|---|
 | S154-1 | 覆盖 | 代码里出现的 `code=-320XX` 全集 ⊆ explain 表，`known=true` 且三要素（层/原因/动作）齐全 |
 | S154-2 | 语义 | `-32011` 的原因必须落在"草稿/审批令牌"，不得再出现"名录" |
+| **S154-3** | **新码不复用废除码位** | 新增 `-32017`（护栏不可载入）。`-32013` 是归因拦截的**废除码位**（`decisions.md` D-attrib-binding-1、`design.md`、`safety-model.md`、本文件四处记载），"代码零 raise 点"≠ 可复用：复用会让同一码位承载两种互不相关的语义。断言：`explain("-32013")["known"] is False`（保持废除态），`explain("-32017")["known"] is True` |
+
+## 护栏装载失败必须 fail-closed，不许打死进程（ARCH-ERR-01/02，2026-11-19 走查 P0）
+
+**背景**：`policy.load_policy()` 裸 `open()+json.load()`，`guardrails.check()` 位于
+`server.handle` 的 `try` **之外**，`server.main` 主循环的 `handle(message)` 也无 try。
+实测：`policy.json` 写坏一半 → 任意 `tools/call` 抛 `JSONDecodeError` → **stdio 进程退出**
+（宿主只见"MCP 掉线"）；规则少写一个 `severity` → 抛 `AttributeError`（不是"规则非法"）。
+
+| # | 场景 | 断言 |
+|---|---|---|
+| ERR-01-1 | 坏 JSON | 半截/空文件 → `deny` + `-32017`，**不抛、进程不退出** |
+| ERR-01-2 | 文件缺失 | 同上，消息含可执行动作（修 policy / 重跑 install / 重启宿主） |
+| ERR-02-1 | 规则字段非法 | 缺 `severity`、`field=text` 缺 `regex`、`match` 既无 `tool` 也无 `field` → `deny` + `-32017`，回执**点名 rule id** |
+| ERR-02-2 | 语义不变 | 校验不得改变既有判定：超批量仍 `-32010`，未确认仍 `-32011` |
+| ERR-02-3 | 随包规则可过 | `assets/safety/policy.json` 必须过校验（否则所有提交都被拒） |
+
+## 失败必须留痕（ARCH-ERR-04/05，2026-11-19 走查）
+
+**背景**：26 处 `except` 体只有 `pass`，其中三个让"排障真源"本身失效。已跑出的真实事故链：
+`runtime.json` 被写坏 → 读成空 → 重领匿名令牌 → 设备锚点漂移 → 服务端判"设备绑定不匹配"，
+**而插件侧没有一行日志指向"文件被写坏"**。
+
+| # | 吞点 | 断言 |
+|---|---|---|
+| ERR-04-1 | `runtime_state._log` 自身失败 | 必须 stderr 兜底一行，不许静默（日志出口坏了这件事本身要有痕迹） |
+| ERR-04-2 | `runtime.json` 解析失败 | 读成空是既有行为不变，但必须告警带文件名与原因 |
+| ERR-04-3 | 领匿名令牌失败 | 接口仍返回 `None`（`-32012` 语义不变），但日志记 code + 原因 |
 
 ## 状态完整性：账本/载荷在用/读侧标量（S155，D-state-integrity-1，2026-11-16 评审）
 
@@ -1992,6 +2059,15 @@ doctor 侧已统一到 `host_verify`；audit 侧因还带"按配置拉起 server
 | S185-2 | 显式「提交反馈：」前缀 + 元语汇 | 仍走强指令（`无需再判断意图`）——排除不得压掉用户指令 |
 | S185-3 | 真实自身遭遇（带页面/按钮/登录/导出/加载等锚点） | 照旧注入采集指令（排除不得扩大成漏判） |
 | S186 | 现象词变体 | 「体验太差 / 白屏 / 没反应」必须命中（实测漏判原话） |
+
+## 审查 ④⑤⑥：草稿归属 / 哨兵会话 / agent 头（S202-1~3，2026-11-19）
+
+| 用例 | 名称 | 验收判据 |
+|---|---|---|
+| S202-1 | 草稿归属不认 agent 头 | A（会话 s1 + 头 alice）暂存，C（会话 s9 + 同一个头 alice）提交 → `-32011`；同一份草稿由 A 自己提交 → 成功；旧草稿无 `owner` → 兼容放行 |
+| S202-2 | 会话漂移话术分档 | 同客户端换会话提交自己的草稿 → `-32011` 且提示「重新调用 vod_draft_voices」；跨 agent 提交 → `-32011` 且「不属于当前客户端」（两者错误码相同，话术必须不同） |
+| S202-3 | sideless 兜底只占 1 个会话 | 连续 N 次无 `mcp-session-id` 的 `tools/call` → 内部只握手 1 次；补的会话带 `x-vod-sideless` 标且 `_resolve_scope` 给 `key=None`（不写记忆、不持久计数）；带 session 的标准请求不被改写 |
+| S202-4 | agent 头格式约束 | `X-Vod-Agent-Id` 为超长/含空白/含换行/非 ASCII → 忽略并降级到会话分桶（不报错）；合法值（`^[A-Za-z0-9._:-]{1,64}$`）仍作请求级身份 |
 
 ## 套件编排的可测化与词表不变量（S198/S199，2026-11-17 代码整理）
 

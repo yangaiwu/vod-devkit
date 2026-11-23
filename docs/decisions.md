@@ -1640,8 +1640,9 @@ MCP server 独立部署"）：远程与本地是同一套效果，不是多租�
    的 -32012 硬守卫与 `auth_ensure` 的远程拒绝一并废除）。
 2. 工具面：`REMOTE_WITHHELD` 收窄为只剩 `vod_packs_configure`；`vod_draft_voices` /
    `vod_commit_voices` / `vod_list_submitted` 远程同样可用。
-3. 两段式放开的前置：草稿落 `owner = _session_key(client_info)`，commit 校验归属，
-   跨 clientInfo 一律 -32011（旧草稿无 owner → 兼容放行）。
+3. 两段式放开的前置：草稿落 `owner = _draft_owner(client_info)`（2026-11-19 审查 ④ 修正，
+   原为 `_session_key`），只认会话/进程边界、不认 `X-Vod-Agent-Id`，commit 校验归属，
+   跨会话一律 -32011（旧草稿无 owner → 兼容放行）。话术分档见 D-draft-owner-1。
 4. `vod_packs_configure` 仍不暴露：它是进程内状态，HTTP 每请求现造 server、多 agent
    共用会互相影响——这不是"隔离"能解决的问题。
 5. **匿名代领护栏**（采纳评审 P0-2 的 A 半）：回环绑定开启代领（同机默认）；
@@ -2560,3 +2561,392 @@ preset 形态不可联 registry）。
 **Falsifier**：若宿主提供 `tools/list_changed` 或会话内重连，可只换工具面而不重启进程，
 第 2 条话术可删；若部署面恒可访问 registry 且无 preset/离线需求，载荷固化与账本可退化为
 包依赖 + lockfile，第 5 条随之失效。
+
+## D-drift-1 跑题期留底 + placeholder 非软分类判定（2026-11-18）
+
+**触发**：对照 DSH 宿主实测对话（用户「产品体验不友好」→ 追问两轮 → 反问「你是什么技能」
+→ agent 介绍 5 分钟能力 → 抱怨永久丢失，全程零提交）。结论：**不加选项卡片**
+（该流程把结构化追问当默认、无退出通道，且结构化输入会挤掉非结构化原话，
+而本产品的主数据恰恰是原话）。三条决策：
+
+### ① 不加 UI 选项卡片（推翻「借鉴定点选式收集」的提议）
+
+**不是「没想到」，是 2026-11-05 实测后主动删过**（client.jsx：撤掉分类下拉，
+改单输入框）。这次补两条更硬的机制理由，取代原先「用户分不清边界」的主观表述：
+
+- **预分类是偏差源，不是多余**：n01 引擎全量重判，UI 分类要么被忽略（纯浪费），
+  要么作为 hint 传入——那就成了先验锚点，把引擎的独立判断往用户选择上带。
+  删除它移除的是一个会污染下游判断的**输入**，不只是减认知负担。
+- **平台哲学同向**：`ctx.approval.request` 仅支持 `allowed-once`，明确不提供
+  allow-always/记住/撤销——DSH 本身的设计前提就是「不要高频打扰人」。
+  不加选项卡片是顺着平台走，不是逆着。
+
+### ② placeholder **不算**软分类（封住后续「我们其实还在引导分类」的质疑）
+
+判据是**是否产生结构化信号**，不是文案形态：
+
+| | 分类下拉（已删） | placeholder 示例（保留） |
+|---|---|---|
+| 产出物 | `tags: problem_type:xxx` | 无 |
+| 是否进提交体 | 是（成为 n01 的先验锚点） | **否**（client.jsx：tags 不传） |
+| 用户必须做 | 必须选一个 | 可无视 |
+| 错选后果 | 引擎收到错误先验 | 无偏差 |
+
+**结论**：举例只影响视觉提示、不进入任何结构化字段，故不算软分类，文案不改。
+若未来 placeholder 开始写入 tags 或 description 模板，此判定立即失效。
+
+### ③ 补「跑题期留底」机制（唯一真正该补的洞）
+
+DSH 那段的真实损失不是「没把人拉回来」，而是**那 5 分钟里的反馈丢了**。缺口有三处，
+原有 S50「追加反馈定性话术」只覆盖第 1 处：
+
+1. 完全跑题（S50 未覆盖）
+2. **跑题期间仍产生了反馈**（未覆盖 —— DSH 的真实损失）
+3. **跑题后又回来了**（未覆盖 —— 只做拉回会让用户重说一遍）
+
+落地形态（沿用既有「至多一次」范式，不发明新机制）：
+
+- **一次拉回**：答完跑题问题后一句「刚才那条反馈还留着——要我提交吗？」，只拉一次，
+  用户再岔开就放弃（与固定追问的「至多一次」同构）
+- **漂移期静默留底**：跑题期间像抱怨/建议的句子照常进 content 候选，不追问不打断
+  （留底 ≠ 提交，仍需用户同意）
+- **回来不重说**：用户回到话题时直接用缓冲区原话继续，禁止要求重述
+- 边界：仅本轮会话有效，不做跨会话暂存（无承载，承诺即空头）
+
+**行为级判据**（非文本断言）：`planDriftHandling()` 纯函数 + `test/drift.test.mjs` 5 例，
+锁「恰好一次拉回 / 漂移期留底 / 回来不重说 / 放弃后缓冲仍在 / 正常流程不误判」。
+
+**Falsifier**：若宿主提供常驻会话缓冲区或跨会话反馈草稿（当前无此承载），
+第 3 条「回来不重说」可退化为纯会话内实现；若引擎侧新增过程反馈通道，
+「禁空头承诺」中关于「无该通道」的表述需同步更新。
+
+## D-scope-1 远程传输回归 MCP 标准 + 作用域隔离（2026-11-18，负责人拍板）
+
+**触发**：多 agent 共用一个远程 MCP server 的场景下出现三类静默污染，且远程面此前
+`stateless=True` 偏离 MCP 标准，无法与外部服务互操作。
+
+### 一、症状（均为静默，提交照常"成功"）
+
+| 症状 | 机理 | 后果 |
+|---|---|---|
+| 归因错 | 远程面 `client_info` 写死 `"http-remote"`，`_session_key` 恒等 → A 回答过的产品被 B 命中 | 错归进引擎幂等/判重域，事后难追溯 |
+| 拒绝服务 | 追问计数共用 → A 追问 2 次后 B 首次即判"第 3 次" | B 什么都没做就被"别再问了"挡掉，丢单 |
+| 丢声量 | nonce 相同 → voiceId 相同 → 引擎判重合并 | 相同内容只存一条，不报错 |
+
+### 二、决策
+
+1. **回归 MCP 标准 stateful 传输**（不自造一套）。
+   `stateless=True` 本是简化形态，代价是偏离标准 + 无会话标识。改为
+   `stateless=False, session_idle_timeout=30*60`：initialize 下发 `mcp-session-id`，
+   客户端后续请求回传，会话跨请求存活；**记忆/计数/nonce 按会话隔离**（工具面不随之隔离，
+   见决策 2）。**外部对接按标准实现方能互操作。**
+
+2. **工具面不阉割能力，只留一个进程内开关例外**。
+   `REMOTE_WITHHELD = ("vod_packs_configure",)`。
+   ~~原写法：`REMOTE_WITHHELD = ()`（2026-11-18 D-scope-1 首次判定）~~ → **同日二次修正收回**：
+   真机双会话实测（真 RemoteRuntime + 两个真会话）——session A 调
+   `vod_packs_configure {disable:[collect]}` 得 `removed:[collect]`，随后 session B 的
+   `tools/list` 从 12 降到 8，`vod_submit_voices` 消失。根因：本 SDK 版本所有会话**共用同一个
+   `Server` 实例**（`build_server` 只在启动时调一次），`packs._RUNTIME` 是**模块级全局**。
+   stateful 只解决了「开关跨请求存活」，没解决「多 agent 共用进程互相影响」——恰是当初摘除的
+   后半句理由，且危害升级为「任何能连端口的一方一条调用即可摘掉所有人的采集能力」。
+   **结论：继续摘除；逐会话工具面在当前 SDK 下做不到，不得按 per-session 写文档。**
+
+3. **作用域单一入口 `_resolve_scope`**，三种部署共用。粒度与身份来源是正交两维：
+   - 显式 agent 头 → `agent:<id>`（身份级，跨会话共享记忆）
+   - 标准会话 → `sess:<mcp-session-id>`（会话级；`sess:`/`agent:` 前缀分工，
+     混用会让"这桶是会话还是身份"无法分辨）
+   - stdio → `proc:<pid>`（name 仅二级后缀，不单独成 key —— name 可重复、可被写死）
+   - 远程独立进程+目录 → `proc:@<VOD_DEVKIT_HOME>`（**home 进 key**，否则机器级
+     nonce 相同时 key 会撞，落盘记忆照样串）
+   - **全都拿不到 → `key=None`：读写皆禁用**；计数退化为单轮内（不跨请求，不污染）
+     （宁可多问用户一次，也不把 A 的归因写进 B 的桶 —— 同「错归比不归更糟」）
+
+   **session TTL 与记忆 TTL 同源**（都取 `SCOPE_TTL_SEC`，测试锁相等）：两个独立
+   时钟会造成「记忆还在但会话已回收」（悬挂桶泄漏）或「窗口内会话过期把同一用户
+   当新客」。`_resolve_scope` 不得有写盘副作用（曾因调用 `_install_nonce()` 在
+   "显式 key 被拒"路径上污染 runtime.json）。
+
+4. **`product` 与 `key` 解耦，且 `product_prior` 是独立开关**：请求级 product 优先于
+   安装绑定；两者皆空走原话归因 + 问用户。product 为空完全合法，不影响隔离。
+   **共用远程进程（多租户）下 `product_prior` 必须 False** —— 一份 runtime.json
+   代表不了所有 agent，硬用就是错归（解耦只解一半的情形）。
+
+5. **厂商兼容兜底**：标准 stateful 下，无 session 的非 initialize 请求会被 SDK 回
+   400「Missing session ID」。兜底在内部走一次握手取得会话并补上请求头，让裸 HTTP
+   客户端无需改代码即可接入，且仍落到独立会话（不与他人共桶）。握手失败则原样透传，
+   标准错误照常返回（不掩盖真实问题）。
+
+### 三、落地与验证
+
+- 承载：`transport_remote.py`（stateful + 兜底）、`remote_app.py`（`_req_scope`）、
+  `runtime_state._resolve_scope`、`packs/collect.py`（产品解析链）、`packs.REMOTE_WITHHELD`
+- 用例：`tests/test_mcp_standard_transport.py` 13 例（标准握手 3 / 厂商兼容 5 /
+  能力对齐 2 / 作用域降级 3）；`test_remote_transport.py`、`test_packs_configure.py`、
+  `test_token_machine_scope.py` 的旧契约断言同步更新（各处写明旧口径已废 + 依据）
+- 真机：stdio 与 remote 两形态端到端各跑一遍（含真实平台提交）
+
+**Falsifier**：
+- 若部署方确认「永远只有一个 agent 连一个 server」，则会话隔离无收益，可退回
+  stateless（但对外互操作仍需标准实现，故不建议回退）。
+- 若客户端普遍不回传 `mcp-session-id`（实测官方 SDK 会回传），则兜底路径成为主路径，
+  此时每次调用新建会话 → 受 `max_sessions` 约束，需改回 header 方案或提高上限。
+- 若引擎侧能接受「同内容不同来源」不被合并，则 nonce 派生可简化。
+
+## D-meta-anon-1 匿名档 meta 死循环（2026-11-18，端到端真机暴露）
+
+**触发**：stdio 真机端到端首跑即挂——提交返回 -32010「缺产品」，但候选里明明有
+CodeArts。追查发现产品名录为空。
+
+**根因（跨端同构，两端各有一份 meta 加载）**：
+
+```
+未配 key 的默认形态下，名录加载先于「提交遇 401 才领令牌」发生
+  → GET /external/meta 无 Authorization → 引擎 401
+  → except ToolError: pass（异常被吞）→ 回退空快照
+  → products=0 → 产品归因必失败 → needsProductAsk
+  → 而领令牌要提交成功、提交成功要归因成功 → 一条声音都提交不了
+```
+
+dsh 侧（`loadMeta`）此前已修过一次；Python 侧（`net._load_meta`）漏了同一处。
+**这是「修一端忘另一端」的第二次实锤**（第一次是 `SKILL_CAP` 两侧常量）。
+
+**决策**：Python 侧按 dsh 同构修——401 时先领零字段匿名令牌并落 runtime.json，
+带 key 重试一次（`source=meta-anon`）；仍失败才回退快照，不阻断采集。
+
+**验证**：
+- 修复前 `source=snapshot, stale=True, products=0`
+- 修复后 `source=meta-anon, stale=False, products=103`
+- 单测 `tests/test_meta_anon_mint.py` 3 例（401→重试 / 已配 key 不白领 / 不可达回退）
+- 真机端到端：stdio 10/10、remote 13/13、会话隔离 3/3，voiceId 真实入库
+
+**Falsifier**：若引擎把 `/external/meta` 改为匿名可读（查询类不需要鉴权），
+本重试逻辑可退化为单次请求；若平台提供公开的产品名录镜像，则可完全去掉该链。
+**纪律（本仓第 2 次踩）**：凡"两端各有一份实现"的逻辑，修一端后必须 grep 另一端。
+
+## D-draft-owner-1 草稿归属只认会话/进程，不认 agent 头（2026-11-19，审查 ④）
+
+**触发**：2026-11-18 审查指出「草稿 owner 跟着作用域漂」。核对代码后确认它比审查描述的
+更严重：不只是"自己的草稿失效"，而是**别人的草稿能被提交**。
+
+**根因**：`owner` 与校验都用 `rt._session_key()`（= `_resolve_scope().key`），而
+`_resolve_scope` 的第 ① 分支把 `X-Vod-Agent-Id` 排在会话**之前** —— 该头无签名、
+无绑定、用户可任意填写。于是：
+
+```
+A（session:s1，头 alice）draft  → owner = "agent:alice"
+C（session:s9，头 alice）commit → _session_key = "agent:alice" → 相等 → 放行
+```
+
+实测（`tests/test_review_456.py::test_draft_owner_ignores_agent_header`，修复前
+`DID NOT RAISE ToolError`）。同一字段承担了两种职责（隔离边界 + 找回凭据），职责混用。
+
+**决策**：
+1. 新增 `runtime_state._draft_owner(client_info)`，**只认会话/进程边界**：
+   远程面 `sess:<sid>`；stdio 面 `proc:<pid|home>`（+ 既有 `|name` 后缀，保持
+   同进程多逻辑宿主的既有契约）。`X-Vod-Agent-Id` 只作为**摘要附加**进指纹
+   （`sess:<sid>|agent:<aid>`），既不让同头跨会话互认，也不让同会话不同头互认。
+2. 话术分档（同错误码 -32011，不泄露存在性）：
+   - 两侧都是 `sess:` 且无 agent 摘要 → 「草稿绑定了原会话（重连/进程重启会换会话），
+     请重新 vod_draft_voices 暂存」——用户是"接着刚才那件事提交"，不是被人截了；
+   - 其余（含 agent 摘要不同、`sess`↔`proc` 跨形态、任一侧为空）→
+     「这份草稿不属于当前客户端」。
+3. 旧草稿无 `owner` 字段仍兼容放行（升级不断回合）。
+
+**代价**：`agent` 头跨会话共享**记忆**的能力不受影响（记忆仍走 `_session_key`）；
+但"跨会话续草稿"不再支持 —— 草稿本就 10 分钟 TTL + 一次性消费，绑会话是正确语义。
+
+**验证**：`tests/test_review_456.py` 3 例（跨 agent 拒绝 / 会话漂移分档 / 同会话正常提交），
+另 `tests/test_token_machine_scope.py::test_s145_draft_is_owned_by_creating_client` 保持绿。
+
+**Falsifier**：若将来引入签名身份（如 `agent:<sha256(token)[:8]>:<aid>`），
+agent 头可作为可信归属维度重新参与 owner；在那之前它只能是提示。
+
+## D-scope-guard-1 agent 头格式约束 + 哨兵会话（2026-11-19，审查 ⑤⑥）
+
+**⑥ agent 头**：`X-Vod-Agent-Id` 直接当分桶 key，无格式约束 → 换行/空格/中文/超长值
+会污染 key（日志伪造、桶名失控）。决策：`^[A-Za-z0-9._:-]{1,64}$`，非法值**忽略并降级**
+到会话分桶，不报错（它只是提示不是凭证，没必要为格式错误中断采集）。
+`remote_app._req_scope` 与 `runtime_state._resolve_scope` 两处同判据（双保险）。
+
+**⑤ 无 session 兜底**：旧实现每次裸请求都内部 `initialize` 一次，SDK 会话不随请求销毁
+（idle TTL 1800s）→ 1 req/s 常驻 1800 个会话，持续 5.6 req/s 打满上限 10000 后
+**所有客户端（含标准客户端）503**。决策：进程内维护**一个共享哨兵会话**
+（`_sentinel_session`，按 manager 实例绑定），补 sid 时同时打 `x-vod-sideless` 标，
+`_resolve_scope` 见到该标强制 `key=None` —— 会话池占用 O(请求数) → O(1)，
+业务行为与旧实现一致（无记忆），不会退化成"所有裸客户端共用一个记忆桶"。
+
+**实测踩坑（写进代码注释了）**：哨兵登记最初只存一份全局 sid，同进程建第二个
+runtime 后第一发就 404「Session not found」（会话归属 manager 的 `_server_instances`）。
+现在按 `id(manager)` 绑定，registry 变更即自动失效。
+
+**验证**：`tests/test_review_456.py`（⑤ 4 例 + ⑥ 6 例）；
+`test_compat_vendor_sideless_direct_call` / `_multiple_calls` 保持绿（真 SDK 链路上
+3 次裸调用只握手 1 次）。
+
+**Falsifier**：若 SDK 提供 stateless 旁路（同一 manager 内按请求分流），哨兵可去掉；
+若平台侧改为统一签名身份，⑥ 的格式约束可升级为强校验。
+
+## D-arch-remediation-1 五维走查整改：P0 两条 + 三条被证实放大的放大器（2026-11-19）
+
+台账 `docs/architecture-defects.md`（PR #23，32 条）落地第一批。每项纪律：**先写红用例
+→ 再改实现 → 门禁反向验证（人为弄坏确认真的红）**。
+
+> ⚠️ **口径修正（2026-11-19 复审）**：本条下 `[x]` 只表示**该条目声明的那部分**已落，
+> 不等于台账原条目已全部完成。原条目里没做的部分在每条末尾用「**未做**」显式列出。
+> 曾把 ERR-02/04/05 一并打勾，造成"已修完"的错觉——这是记录失真，已改正。
+
+- [x] **ARCH-ERR-01 护栏 fail-closed**（P0，**已完整落地**）：`policy.try_load_policy()`
+  永不抛，装载失败/规则非法返回带 `broken` 的占位策略，`guardrails.check` 见到即 `deny`
+  + **新码 -32017**。`server.py` 主循环加兜底 try（返回 -32603 且落日志），坏 policy 不再
+  打死 stdio 进程。
+  **决策**：**新开 -32017**，与 -32010（缺产品）分开——两者处置动作不同（修 policy 后重启
+  vs 去问产品），混用会把排障引向错误方向。
+  **为什么不复用 -32013**（2026-11-19 二次修正）：-32013 是**已废除的归因拦截码**
+  （`decisions.md:87`、`design.md:140`、`safety-model.md:33`、`proposal.md:135/168` 四处记载）。
+  它"零 raise 点"不是空位，而是策略被推翻后的结果；复用等于在同一码位上叠加无关语义，
+  且违反"决策只追加不删"——旧文档描述的 -32013 会与新代码打架。旧码字面零改动。
+  **Falsifier**：若平台侧已在 -32017 段投产其它语义（-32020.. 段已规划上游映射），
+  或引擎侧错误码表占用该值，则换到下一个空位。
+- [ ] **ARCH-ERR-02 护栏装载：部分完成**。已做：装载期 schema 校验（缺 `severity`/
+  `field=text` 缺 `regex`/`match` 无 `tool` 也无 `field` → 指出 rule id）。
+  **未做**：`load_policy` 的进程内缓存（mtime/size 失效）——**每次 `tools/call` 仍重读
+  一次文件**，热路径 IO 与"人工改规则不用重启"的取舍尚未落地。台账 ERR-02 条目仍为未完成。
+- [x] **ARCH-CFG-01 pending 私有化**（**已完整落地**）：`append_entry` 用
+  `os.open(..., 0o600)` 新建（不留 0644 窗口）+ 写后 stat 回验；历史宽权限文件在下次写入时
+  收紧（**只收紧不放宽**）；WSL/drvfs 忽略 chmod 时只告警不阻断。
+- [x] **ARCH-CFG-03 原子写单源**（**已完整落地**）：`runtime_state._write_cfg_unlocked` 改调
+  `paths.atomic_write_text`（补 fsync + 软链解析 + 只读保护）；`pending.save_entries` 同源。
+  门禁：`tests/test_runtime_atomic_single.py::test_single_atomic_writer`（AST 断言
+  `os.replace(` 只出现在 `paths.py`）。
+  ⚠️ 遗留：`atomic_write_text(mode=0o600)` 会把原本 0400 的文件**放宽**到 0600
+  （"只收紧不放宽"目前只由 `pending._ensure_private` 保证，通用路径没有）。
+- [ ] **ARCH-ERR-04 主链三点留痕：部分完成**。已做：日志出口失败改 stderr 兜底；
+  坏 `runtime.json` 用 `_warn` 告警（**延迟绑定**：该函数在 import 期即被调用，那时
+  `_warn` 尚未定义）；领匿名令牌失败记 code+原因。
+  **未做**：台账原条目是"26 处 `except` 体只有 pass"，本次只补主链 3 点。
+  **2026-11-19 实测剩余 25 处**（原 26 减 1，但本次新增 1 处 `pending.py:54` 的
+  `_warn` 内部兜底 ⇒ 净剩 25）。全量收敛需要 ERR-04 原方案里的"允许吞三白名单 + AST 门禁"。
+- [x] **ARCH-ERR-05 可观测性：已完整落地**（**本行 2026-11-19 订正**，此前误记为「未开始」）。
+  `_log` 已改 JSONL 结构化（ts/level/msg + 任意字段）；`_log_path()` 支持 `VOD_DEVKIT_LOG`，
+  默认 `tempfile.gettempdir()` 且零副作用；轮转在 flock 内、从换行边界起算；远程面
+  `log_message` 由 `pass` 改为落 `http_access`，`do_POST` 记 req_id/tool/duration_ms。
+  门禁 `tests/test_observability.py`（10 条），已反向验证改回自由文本即 6 条红。
+  台账 ERR-05 为 ✅完整。
+- [x] **ARCH-DEP-01 破两处环**（**已完整落地**）：① `_SERVER_FACE` 真源抽到零依赖的
+  `vod_mcp/server_face.py`，`net` 与 `runtime_state` 都顶层引用；② `host_verify` 新增
+  `register_verifier()` 注入点，`hermes` 在 import 期登记取值函数（台账漏记的
+  `hermes ↔ host_verify` 环）。门禁 `tests/test_import_graph.py`（AST 建图 + Tarjan SCC，
+  **含函数内 import**）。
+  ⚠️ 踩坑写进注释：`_is_remote_face` 若只看 `server_face` 的快照会与
+  `net._SERVER_FACE` 的 monkeypatch 桩不一致（三条远程面作用域用例变红），故读取入口
+  统一走 `server_face.is_remote()`，它每次现取 net 的实时绑定。
+- [x] **ARCH-DEP-02 host_adapters 惰性注册**（**已完整落地**）：`REGISTRY` 只存模块名，
+  `get()` 走 `importlib`；`KeyError` 语义不变；门禁 `test_registry_is_lazy`（子进程验证
+  导入后 `sys.modules` 无宿主子模块）。
+- [x] **ARCH-BLD-03 版本落点补根 plugin.json**（**已完整落地**，2026-11-19 追加）：
+  `release.sh` 的 `EXTRA_FILES` 与 `git add` 清单都加 `plugin.json`；该文件自 11-03 起
+  固定在 `0.1.0`，现已随 8 处落点同步到 0.5.45。
+- [x] **台账自身三处要修**（本轮实测确认，见 `architecture-defects.md` 附录 10.2/10.3）：
+  ① 附录 10.2 的 `ast` 脚本模块名切错（`str(p)[4:-3]` → `od_mcp.x`），**永远匹配不上、
+  跑出"无环"**，以新用例为准；② DEP-01 漏记 `hermes ↔ host_verify`；③ 附录 10.3 的
+  HEAD 对比行在 `ba48d9d` 上已不成立（`build-info.json` 就等于 HEAD）。
+
+**验证**：全量 `pytest` **1030 passed / 0 failed**（`-p no:randomly`，含 golden 未重录）；
+`pyflakes` 0；`mypy` 52 文件 0 issue；`verify_copies` 四目录一致；`secret_scan` OK；
+`sync_case_roster --check` OK。**未发版**：版本仍 0.5.44。
+
+---
+
+## 2026-11-19 外部 fix-list 复核后的修复决策
+
+外部同事转来一份三条缺陷 + 四项欠账的清单（基线 `29de11f` / v0.5.46）。逐条复现后：
+两条成立且已修、一条建议有误已改方案、一条「连带要改」经查不成立。以下只记**决策**，
+证据与验收用例见 `architecture-defects.md` 的 ARCH-ERR-07 / ARCH-CALL-05 / ARCH-ERR-06。
+
+- [x] **ARCH-ERR-07 护栏拆码（新开 `-32023` / `-32024`）**：
+  `guardrails.check` 的两处 deny 曾一律返回 `-32010`（缺产品）。拆法按**命中规则的
+  `category`** 分派，而不是按规则 id 硬编码——规则表自带 `category`（`exfil`/`write`），
+  `check_tool_call`/`check_text` 返回的就是原始规则字典，**不需要新增数据结构**。
+  **Falsifier**：若将来出现第三种处置动作（既非「删敏感信息」也非「收敛范围」）的
+  category，则须再开新码，不得塞进 `-32024`；若平台侧已在 `-32023/-32024` 投产其它语义，
+  则换到下一个空位。
+  ⚠️ **外部清单建议的「策略命中/熔断复用 `-32015`」被否决**：`packs/core.py:124` 已在用
+  `-32015`（语义＝能力包被安全门禁拒绝/熔断），再让护栏 deny 复用它就是「一个码两种来源」，
+  正是本条要消灭的问题。**码位有 owner，不能因为「仓库已有这个码」就复用。**
+- [x] **ARCH-CALL-05 协议版本单一真源**：常量落 `vod_mcp/server_face.py`（零依赖，
+  `server.py` / `transport_remote.py` / `vodkit_cli/remote.py` 引它都不造环），4 处全改引用。
+  台账原记「3 处」已订正为 **4 处**（含常量定义点本身，只数裸字面量会少 1）。
+  **Falsifier**：若将来协议版本需要按形态（stdio/remote）取不同值，则常量须改为按面取值，
+  门禁的「只许一处字面量」断言也要同步放宽。
+- [x] **ARCH-ERR-06 JSON-RPC 保留段补齐**：`-32600/-32601/-32602/-32603/-32700` 五条进
+  explain。**不只补 `-32603`**——实测整段都是 `known=False`，只补一条等于没修。
+  归层沿用既有层名（`配置`/`内部`），**不新增层名**（`LAYERS` 是 doctor 的分组顺序，
+  加新值会让报告出现无对应条目的空组）。
+  **反向约束**：`-32013` 必须保持 `known=False`（已废除的归因拦截码，收录它等于复活废义），
+  已写成 `test_abolished_32013_stays_unknown` 锁住。
+- [x] **前向兼容：`officeace.py` 的 `?1..?N` 编号占位符**（清单 P1）：改回位置 `?`。
+  复现手段固定为 `-W error::DeprecationWarning`——**普通跑测试永远绿**，这是
+  「现在绿、将来必崩」的唯一信号，`N passed` 不能当作结论。
+  门禁两条：运行时严格告警下走通两条分支 + 源码 AST 只扫字符串字面量
+  （**不用正则扫全文**：首版正则把注释里「不是编号 ?1..?N」这句话抓红了）。
+- [x] **`scripts/secret_scan.py` 的 `import os` 未使用**：已删（pyflakes 唯一一条，现 0 条）。
+- [ ] **未采纳：清单问题 3 的「连带要改」**（`diagnose.py:49` 正则 `-32010|产品`、
+  dsh 壳 `-32010` 分支、契约码枚举）。经查这三处都是**归因语义**（"缺产品先问"），
+  与护栏拆码无关，dsh 的 `UNRESOLVED_CODE` 与契约的 `-32010` 描述均正确 ⇒ **不需改动**。
+  真正待修的是 `diagnose.py:49` 那条正则的**优先级**问题（ERR-06 正条目，本轮未动）。
+- [x] **本轮未做、已由 D-arch-remediation-2 收口**：ERR-04 的 21 处 `except: pass`、
+  ERR-02 policy 缓存、ERR-06 码优先归层、CALL-05 协议码常量表（见下条 ADR）。
+  仍留：`cmd_doctor`（229 行/分支 ~92）与 `cmd_install`（240 行）的函数拆分（未进台账）。
+
+
+---
+
+## D-arch-remediation-2 P2 整改批次：把"已知会咬人"的 13 条一次收口（2026-11-23）
+
+**决定**：台账里剩余的 13 条（P1 两条半成品 + 11 条 P2）一次性落地，每项一个竖切片 +
+自带门禁用例；不拆成多次发版，避免"门禁改了一半"的中间态被当成稳态。
+
+**逐项决定（含为什么这么修）**
+- **ERR-04**：裸 `pass` 一律走 `vod_mcp/trace.py::suppress(where, exc)`（零模块级依赖，
+  懒导入 runtime_state 落 JSONL）。原因：吞点二十余处、遍布各模块，各自拼日志必漏字段；
+  `where=模块.函数` 便于一条 grep 列出全部吞点。同时把"以后又写 pass"变成**结构用例红**
+  （`test_no_bare_except_pass` 扫全 `src/`，不吃白名单文件）。
+- **ERR-02**：policy 装载按 `(路径, mtime_ns, size)` 指纹缓存，**不用 TTL**——TTL 会让
+  "改完规则要等 N 秒"变成新的排障陷阱。正则装载期编译并缓存，消费点复用同一对象。
+- **ERR-06**：`classify()` **码优先**（先抽文案里的 `-32xxx` 查 `_EXPLAIN_EXTRA`），
+  文案正则降为兜底。附带修 `group()` 对 `认证/传输/引擎/内部/上游` 这些层 `KeyError`
+  （码表早就用了这些层名，旧实现用固定字典取桶）。
+- **CALL-05**：新增 `vod_mcp/protocol.py` 常量表（保留段 + `PROTOCOL_VERSION` 引用
+  `server_face`），`server.py` 零裸码字面量，门禁 AST 断言。
+- **DEP-03**：`ToolError` 真源迁 `vod_mcp/errors.py`，`net` 只做别名；pack 只许引 errors，
+  `knowledge` 整文件不许 import net。**代价**：`net.ToolError` 仍是别名，历史调用不改。
+- **DEP-06**：`provenance`/`payload` 的根路径改函数现读（与 `paths.runtime_json_path()`
+  同口径），换根后不重启即生效。
+- **CALL-03**：哨兵登记不再用 `id(manager)` 当键，改"一次性 mkey + 表内强引用 + `is` 复核"，
+  地址复用不可能命中别人的 sid（真实故障形态：首发 404 Session not found）。
+- **CALL-04**：`packs/collect.py`(692 行) 拆为 `collect/{attribution,tags,submit,draft,ledger}.py`，
+  `__init__.py` 35 行只做再导出，**全部既有调用面（含测试用私有符号）不变**。
+- **CFG-05**：凭据六档优先级（explicit/header/env/runtime/mirror/none）只在
+  `net.resolve_key()` 定义一次，`auth_status` 如实报 `keySource`。
+- **CFG-06**：`paths.ensure_state_home()` 建目录即 0700，已存在的宽权限**只收紧不放宽**。
+- **CFG-07**：用户自由文本字段改为**显式白名单** `USER_TEXT_KEYS` + 递归剥离；
+  用例连契约 schema 里的字段名一起对账（新字段漏登记当场红）。
+- **BLD-06**：白名单覆盖判据改为"按文件枚举两包全部模块 + 三个资产目录"，本轮就现场
+  抓出了 `errors.py`/`protocol.py`/`trace.py` 三个新模块未登记。
+- **BLD-07**：`__version__` 用正则解析（支持类型注解/单引号/行尾注释），坏文件显式失败。
+
+**代价/遗留**
+- `net.ToolError` 别名保留（一个版本周期），下游若改回 `net.ToolError` 不会被门禁拦住
+  （门禁只约束 packs）。
+- `packs/collect` 拆包后，`package.json` 依赖 `src/vod_mcp/packs/` 整目录声明；
+  若将来把 packs 改成逐文件白名单，需同步 `test_files_whitelist_covers_all_src_modules`。
+- `cmd_doctor`/`cmd_install` 的函数体量（229/240 行）不在本台账，未拆。
+
+**Falsifier**
+- 若 `trace.suppress` 自身在日志失败时抛异常（把 pass 换成炸），结构用例抓不住——
+  已补 `test_suppress_survives_broken_logger` 行为锁。
+- 若 policy 缓存因文件系统 mtime 粒度（秒级）漏更新，`test_policy_read_is_cached_until_mtime_changes`
+  会红；届时应改 `st_ctime_ns` 或内容哈希，不许退成 TTL。
+- 若 SDK 将来提供"稳定 manager 标识"，`_manager_key` 应改为直接用 SDK 提供值；
+  在那之前 `uuid4 + is` 是本仓能做到的最强判据。

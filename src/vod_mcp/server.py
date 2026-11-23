@@ -6,6 +6,7 @@
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 # 自举包路径（对任意 MCP 宿主成立：不依赖宿主透传 PYTHONPATH——
@@ -27,9 +28,12 @@ if sys.version_info < (3, 10):
         % sys.version_info[:2])
     sys.exit(2)
 
-from vod_mcp import guardrails, packs, runtime_state, skills_registry, tools  # noqa: E402
+from vod_mcp import (guardrails, instructions, packs, protocol, runtime_state,  # noqa: E402
+                    skills_registry, tools)
+from vod_mcp import trace as _trace
 
-_PROTOCOL_VERSION = "2025-06-18"
+# 协议版本从单一真源取（ARCH-CALL-05）：此前这里定义常量却无人引用，另三处各写裸字面量。
+_PROTOCOL_VERSION = protocol.PROTOCOL_VERSION
 _client_info = {}
 
 
@@ -57,22 +61,7 @@ def handle(message: dict, client_info: dict | None = None) -> dict | list | None
             # listChanged：会话内开关（vod_packs_configure）改工具面后由服务端推
             # notifications/tools/list_changed；不声明的话合规客户端不会重拉 tools/list。
             "capabilities": {"tools": {"listChanged": True}},
-            "instructions": (
-                "vod-devkit 采集资产与纪律：技能 vod-feedback-collect 处理用户对"
-                "本产品的不满/建议/期望（触发词：慢/报错/体验差/希望支持/提单等）。"
-                "提交前必须征得用户明确同意（用户抱怨本身不构成同意）；提交回执"
-                "echo.contents 必须逐条原样转述给用户（「已收录原话：<content>」），"
-                "禁止改写、概括、增删字词。product 归因：原话唯一命中可直接用；"
-                "未命中或多产品歧义时必须问用户一次\"这条是哪个产品的反馈\"，"
-                "回答填 product；用户说不知道就告知他缺产品不能提交，不要猜。不许不填直接提交。"
-                # 技能读取教法（对齐 devkit 的"动作优先"）：树路径在 initialize 就给，
-                # 让 agent 不必先调目录工具；先直读、被拒再回落、不反复请求。
-                " 技能树：" + str(skills_registry.SKILLS_ROOT)
-                + "（本机路径）。读法=动作优先：先直接读 "
-                  "skillRoot/<技能名>/SKILL.md（尝试本身即可达性检查，不做预判）；"
-                  "被拒或读取失败才用 vod_retrieve_skill 取全文（无需文件权限），"
-                  "绝不反复请求。"
-            ),
+            "instructions": instructions.stdio_instructions(skills_registry.SKILLS_ROOT),
             "serverInfo": {
                 "name": "vod-devkit",
                 "version": tools.load_contract()["version"],
@@ -107,7 +96,7 @@ def handle(message: dict, client_info: dict | None = None) -> dict | list | None
         except tools.ToolError as e:
             return _error(req_id, e.code, str(e))
     if req_id is not None:
-        return _error(req_id, -32601, f"未知方法: {method}")
+        return _error(req_id, protocol.UNKNOWN_METHOD, f"未知方法: {method}")
     return None
 
 
@@ -116,8 +105,8 @@ def _consume_payload_marker() -> None:
     try:
         from vod_mcp import payload as _payload
         _payload.consume_marker()
-    except Exception:
-        pass
+    except Exception as e:
+        _trace.suppress("server._consume_payload_marker", e)
 
 
 def main():
@@ -137,6 +126,15 @@ def main():
     ap.add_argument("--allow-anon-mint", action="store_true",
                     help="非回环绑定时仍允许服务端代领匿名令牌（默认关闭；"
                          "单机可信网络才开，见 D-token-machine-1）")
+    # ARCH-CFG-02：Origin/Host 白名单扩展（默认只回环）。可多次指定。
+    ap.add_argument("--allow-origin", action="append", default=[],
+                    metavar="ORIGIN",
+                    help="额外允许的浏览器 Origin（可多次）。默认只接受回环 "
+                         "http://127.0.0.1[:port] / http://localhost[:port]")
+    ap.add_argument("--allow-host", action="append", default=[],
+                    metavar="HOST",
+                    help="额外允许的 Host 头（可多次）。默认只接受回环 Host；"
+                         "非回环绑定必须显式给，否则所有 POST 被 403")
     args, _unknown = ap.parse_known_args()
 
     # VOD_PACKS 未知 id 启动即报错（D-packs-config-1，对齐 devkit 口径）：
@@ -150,8 +148,8 @@ def main():
     # 启动自诊（排障：写 /tmp，宿主过滤环境变量时可观察实际 env）
     try:
         runtime_state._ensure_first_boot()  # D-key-guard-3①：首启标记+构建机残留清理（preset 兜底）
-    except Exception:
-        pass
+    except Exception as e:
+        _trace.suppress("server.main", e)
     runtime_state._log(f"started pid={os.getpid()} argv={sys.argv} "
                        f"VOD_PACKS={os.environ.get('VOD_PACKS')!r} "
                        f"distribution={runtime_state._distribution()} "
@@ -164,7 +162,9 @@ def main():
                   "  pip install 'vod-devkit[remote]'   # 或 pip install 'mcp>=1.0'\n"
                   f"（stdio 形态不需要任何第三方依赖；导入失败：{e}）", file=sys.stderr)
             sys.exit(2)
-        sys.exit(transport_remote.serve(args.host, args.port, args.allow_anon_mint))
+        sys.exit(transport_remote.serve(args.host, args.port, args.allow_anon_mint,
+                                   allow_origins=tuple(args.allow_origin) or None,
+                                   allow_hosts=tuple(args.allow_host) or None))
 
     for line in sys.stdin:
         line = line.strip()
@@ -173,9 +173,30 @@ def main():
         try:
             message = json.loads(line)
         except json.JSONDecodeError:
-            resp = _error(None, -32700, "解析错误")
+            resp = _error(None, protocol.PARSE_ERROR, "解析错误")
         else:
-            resp = handle(message)
+            # ARCH-ERR-05：stdio 面也记请求级关联（tool/耗时/结果码），
+            # 与远程面同一出口、同一字段集，排障时两面可统一检索。
+            _t0 = time.monotonic()
+            _tool = ((message.get("params") or {}).get("name")
+                     if isinstance(message, dict) and message.get("method") == "tools/call" else None)
+            _rid = message.get("id") if isinstance(message, dict) else None
+            try:
+                resp = handle(message)
+            except Exception as e:     # noqa: BLE001  ARCH-ERR-01：任何未捕获异常都不许打死进程
+                # 不含 Exception 之外的 KeyboardInterrupt/SystemExit（那两个必须照常退出）
+                runtime_state._log(f"handle uncaught: {type(e).__name__}: {e}",
+                                   level="error", event="stdio_call", req_id=_rid,
+                                   tool=_tool, code=protocol.INTERNAL_ERROR,
+                                   duration_ms=round((time.monotonic() - _t0) * 1000, 1))
+                print(f"[vod-devkit] error: {type(e).__name__}: {e}", file=sys.stderr)
+                resp = _error(message.get("id") if isinstance(message, dict) else None,
+                              protocol.INTERNAL_ERROR, "内部错误（已记录日志）")
+            else:
+                _method = message.get("method") if isinstance(message, dict) else None
+                runtime_state._log("stdio 调用完成", event="stdio_call", req_id=_rid,
+                                   rpc_method=_method if _method else None, tool=_tool,
+                                   duration_ms=round((time.monotonic() - _t0) * 1000, 1))
         out_msgs = resp if isinstance(resp, list) else ([resp] if resp is not None else [])
         for m in out_msgs:
             sys.stdout.write(json.dumps(m, ensure_ascii=False) + "\n")

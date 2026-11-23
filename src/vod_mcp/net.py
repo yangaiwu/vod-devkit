@@ -11,13 +11,19 @@ import urllib.error
 import urllib.request
 
 from vod_mcp import DEFAULT_JAVA_BASE
+from vod_mcp import errors
 from vod_mcp import runtime_state as rt
+from vod_mcp import server_face
+from vod_mcp import trace as _trace
 
 
 _REQ_KEY = contextvars.ContextVar("vod_req_key", default=None)
 
 
-_SERVER_FACE = contextvars.ContextVar("vod_server_face", default=False)
+# 传输面标志（ARCH-DEP-01，2026-11-19 走查）：真源已抽到零依赖的 `vod_mcp.server_face`。
+# 这里保留同名别名，是为了不让 `net._SERVER_FACE.set()/reset()` 与既有测试的
+# monkeypatch 失效——别名与真源是**同一个 ContextVar 对象**，不存在两份状态。
+_SERVER_FACE = server_face.SERVER_FACE
 
 # 匿名令牌代领总开关（D-token-machine-1 安全护栏）：进程级布尔，启动期由
 # transport_remote 按绑定地址决定——非回环绑定（可能被反代/公网触达）默认关闭
@@ -80,14 +86,50 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def _eff_key(explicit=None) -> str:
-    """当前生效的 key：显式参数 > 请求头（HTTP 面）> env/runtime（stdio 面）。"""
+# ARCH-CFG-05：凭据三入口的**优先级只在这里定义一次**（此前判据散在 _eff_key、
+# _java_key、auth_status、doctor 四处，注释里的顺序还各不相同）。
+# 序：显式参数 > 请求头 Bearer > env(VOD_JAVA_API_KEY) > runtime.json > 进程镜像。
+KEY_SOURCES = ("explicit", "header", "env", "runtime", "mirror", "none")
+
+
+def resolve_key(explicit=None) -> tuple:
+    """返回 (key, source)：source ∈ KEY_SOURCES，供 auth_status/doctor 如实报告档位。"""
     if explicit is not None:
-        return explicit
-    return _REQ_KEY.get() or _java_key()
+        return explicit, "explicit"
+    override = globals().get("JAVA_KEY")       # 模块属性补丁面（测试/历史赋值）视为显式
+    if override:
+        return str(override), "explicit"
+    req = _REQ_KEY.get()
+    if req:
+        return req, "header"
+    env = (os.environ.get("VOD_JAVA_API_KEY") or "").strip()
+    if env:
+        return env, "env"
+    try:
+        val = rt._runtime_cfg().get("java_key")
+    except Exception as e:                  # noqa: BLE001  状态文件坏 → 按"未配置"继续
+        _trace.suppress("net.resolve_key", e)
+        val = None
+    if val:
+        return str(val), "runtime"
+    mirror = (rt._RT or {}).get("java_key")
+    if mirror:
+        return str(mirror), "mirror"
+    return "", "none"
+
+
+def _eff_key(explicit=None) -> str:
+    """当前生效的 key（优先级见 resolve_key 单点定义）。"""
+    return resolve_key(explicit)[0]
 
 
 _META_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/meta"
+# ARCH-CALL-06：公开别名，doctor / remote 等外部调用点一律引用它，
+# 不许再手抄这段路径（曾有三处硬编码，引擎改路径要改三处）。
+META_PATH = _META_PATH
+# 引擎 API 公共前缀（remote.py 的 token/products 端点共用）
+_API_PREFIX = "/rest/developer/manager/hdvodmngservice/v1"
+API_PREFIX = _API_PREFIX
 
 
 _META_TTL = 24 * 3600
@@ -118,6 +160,7 @@ def _load_meta(force: bool = False) -> dict:
                 "catalog": cache["data"].get("productCatalog") or [],
                 "dictVersion": cache["data"].get("dictVersion"),
                 "stale": False, "source": "cache"}
+    auth_failed = False
     try:
         out = _http("GET", _META_PATH, None, base=_java_base(), key=_eff_key(), timeout=10)
         data = out.get("data") or {}
@@ -127,8 +170,34 @@ def _load_meta(force: bool = False) -> dict:
                     "catalog": data.get("productCatalog") or [],
                     "dictVersion": data.get("dictVersion"),
                     "stale": False, "source": "meta"}
-    except ToolError:
-        pass
+    except ToolError as e:
+        # D-meta-anon-1：只有 401（已归一为 -32012）才值得走匿名领取链。
+        # 网络不可达/超时时若也去领令牌，等于再等 15s 且失败不写缓存 →
+        # 每次 collect 调用重复这 25s（引擎抖动时把采集拖垮）。非鉴权错误
+        # 直接落快照，把"引擎不可达"如实暴露，不伪装成"没 key"。
+        auth_failed = (e.code == -32012)
+    # D-meta-anon-1（2026-11-18 真机实锤，与 dsh 侧同构）：未配 key 的默认形态下
+    # meta 请求先于「提交遇 401 才领令牌」发生 → 401 → 名录恒空 → 归因必失败
+    # → 而领令牌要提交成功、提交成功要归因成功 → 默认形态下一条声音都提交不了。
+    # 修法：401 先领匿名令牌，带 key 重试一次。
+    if auth_failed and not _eff_key():
+        token = _fetch_anon_token()
+        if token:
+            try:
+                rt._runtime_update({"java_key": token, "token_tier": "anonymous"})
+            except Exception as e:
+                _trace.suppress("net._load_meta", e)
+            try:
+                out = _http("GET", _META_PATH, None, base=_java_base(), key=token, timeout=10)
+                data = out.get("data") or {}
+                if isinstance(data.get("products"), list) and data["products"]:
+                    rt._runtime_update({"meta_cache": {"fetchedAt": int(now), "data": data}})
+                    return {"products": data["products"],
+                            "catalog": data.get("productCatalog") or [],
+                            "dictVersion": data.get("dictVersion"),
+                            "stale": False, "source": "meta-anon"}
+            except ToolError as e:
+                _trace.suppress("net._load_meta", e)
     # 快照不含分类白名单：collect._allowed_tags 取不到产品分类时 allowed 为空=不校验
     # （宁可放行也不误杀采集）
     return {"products": _META_SNAPSHOT["products"], "catalog": [],
@@ -136,10 +205,28 @@ def _load_meta(force: bool = False) -> dict:
             "stale": True, "source": "snapshot"}
 
 
-class ToolError(Exception):
-    def __init__(self, message: str, code: int = -32000):
-        super().__init__(message)
-        self.code = code
+# ToolError 真源在 errors.py（ARCH-DEP-03）：net 只做别名导出，既有 `net.ToolError`
+# 调用点与 `isinstance(e, net.ToolError)` 判定继续有效。知识包等低层模块直接引 errors，
+# 不再为"一个异常类"反向依赖网络出口层。
+ToolError = errors.ToolError
+
+
+def _http_error_code(status: int) -> int:
+    """上游 HTTP 状态码 → JSON-RPC 错误码（ARCH-ERR-03）。
+
+    **不**透传 status 本体：`429`/`500` 落在 JSON-RPC 保留段之外，客户端无法按协议
+    分类，`explain 500` 也会落到"未分类"。
+
+    - 429：引擎限流/取号排队 → `-32018`（处置是"稍后重试"，不是配置错）
+    - 5xx：引擎自身故障 → `-32019`
+    - 其余 4xx：请求被引擎拒绝 → `-32020`
+    401（→ -32012）与 404（→ -32016，由 collect 按 upstream_status 判）在调用点各自归一。
+    """
+    if status == 429:
+        return -32018
+    if 500 <= status < 600:
+        return -32019
+    return -32020
 
 
 def _http(method: str, path: str, body: dict | None = None,
@@ -178,8 +265,9 @@ def _http(method: str, path: str, body: dict | None = None,
             # 会让探针把正常匿名场景误判成 rejected）
             raise ToolError(
                 f"鉴权失败（{base}）：{detail or '检查 VOD_JAVA_API_KEY 配置'}",
-                code=-32012) from e
-        raise ToolError(f"上游返回 {e.code}: {detail}", code=e.code) from e
+                code=-32012, upstream_status=401) from e
+        raise ToolError(f"上游返回 {e.code}: {detail}", code=_http_error_code(e.code),
+                        upstream_status=e.code) from e
     except urllib.error.URLError as e:
         raise ToolError(f"上游不可达（{base}）: {e.reason}", code=-32001) from e
 
@@ -231,6 +319,34 @@ def probe_key(key: str | None = None, timeout: int = 8) -> dict:
                         "note": "匿名令牌已过期：下次提交自动重领，无需操作"}
             return {"ok": False, "reason": "rejected", "fingerprint": fp}
         return {"ok": None, "reason": "unreachable", "fingerprint": fp}
+
+
+def probe_reachable(base: str | None = None, timeout: int = 4) -> dict:
+    """引擎可达性探针（**不带 key**，ARCH-CALL-06）。
+
+    `doctor` 之前自己抄了一份 `_probe_engine`（手写 URL + 自己一套三态），与 `probe_key`
+    的五态机并存：同一份"引擎是否可达"能给出两种结论，且 5xx 在那边被误归 unreachable。
+    这里把**判定**统一到 net，调用方只做展示层映射。
+
+    返回 {ok, reason, status}：
+      - ok=True,  reason="verified"        2xx（不带 key 也能通，说明路径/网络正常）
+      - ok=False, reason="needs-auth"      401/403（可达，但需凭据——不是不可达）
+      - ok=None,  reason="unreachable"     网络/超时
+      - ok=None,  reason="server-error"    5xx（引擎故障，不是网络问题）
+    """
+    b = base if base is not None else _java_base()
+    try:
+        _http("GET", META_PATH, None, base=b, key=None, timeout=timeout)
+        return {"ok": True, "reason": "verified", "status": 200}
+    except ToolError as ex:
+        st = getattr(ex, "upstream_status", None)
+        if ex.code in (-32012, -32020) or st in (401, 403):
+            return {"ok": False, "reason": "needs-auth", "status": st}
+        if ex.code == -32019 or (st is not None and 500 <= st < 600):
+            return {"ok": None, "reason": "server-error", "status": st}
+        if ex.code == -32001:
+            return {"ok": None, "reason": "unreachable", "status": None}
+        return {"ok": None, "reason": "unreachable", "status": st}
 
 
 def _key_state() -> dict:
@@ -289,13 +405,23 @@ def _fetch_anon_token() -> str | None:
     """零字段匿名令牌（T7b 定稿）：渠道由引擎囤积入库侧固定赋值 vod-agent
     （链路即渠道，客户端不自报）——本端保持空 body（方案 C 原样）。
     D-anon-verify（2026-11-05 真机实锤）：引擎返回 ApiResponse 信封，
-    顶层取 token 恒 None → 无 key 首提必 -32012，信封解析为必经路径。"""
+    顶层取 token 恒 None → 无 key 首提必 -32012，信封解析为必经路径。
+
+    ARCH-ERR-04（2026-11-19 走查）：失败必须留痕。此前整段 `except ToolError: return None`
+    让"端点不可用/401/网络断"三种原因一起消失，调用方只看到笼统的"令牌不可用"，
+    排障只能靠猜。
+    """
     try:
         if ANON_MINT_DISABLED:
+            rt._log("anon-token: 跳过（非回环远程面未开 --allow-anon-mint）")
             return None      # 非回环远程面：不代领（调用方须自带 Bearer）
         out = _http("POST", _TOKEN_PATH, {}, base=_java_base(), key="", timeout=15)
-        return _extract_anon_token(out)
-    except ToolError:
+        token = _extract_anon_token(out)
+        if not token:
+            rt._log(f"anon-token: 响应里没有 token（信封形态可能变了）：{str(out)[:200]}")
+        return token
+    except ToolError as e:
+        rt._log(f"anon-token: 领取失败 code={e.code}：{e}")
         return None
 
 

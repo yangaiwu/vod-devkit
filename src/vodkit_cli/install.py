@@ -20,10 +20,24 @@ def _codex_home():
 from vod_mcp.host_adapters import generic as generic_host
 from vod_mcp import paths
 from vodkit_cli import common, remote
+from vod_mcp import trace as _trace
 
 # 可显式指定（含 generic）的目标清单：交互输入按它校验，不随 HOST_ADAPTERS 的
 # 运行期替换而变（测试与"适配器被裁剪"场景都不该让提示变成骗人的选项）
 KNOWN_TARGETS = tuple(sorted(HOST_ADAPTERS)) + ("generic",)
+
+
+def _adapter_for(target: str):
+    """惰性注册表 → 适配器模块（ARCH-DEP-02）。
+
+    `REGISTRY` 现在只存模块名字符串（急切聚合导入会让误引 host_adapters 变成远程面
+    每请求 500），所以取模块要过 `host_adapters.get()`；未知 target 返回 None
+    （由调用方给"不支持目标"提示）。测试仍可 monkeypatch 本模块的 `HOST_ADAPTERS` 为空。
+    """
+    if target not in HOST_ADAPTERS:
+        return None
+    from vod_mcp.host_adapters import get as _ha_get
+    return _ha_get(target)
 
 
 def _is_tty() -> bool:
@@ -178,7 +192,7 @@ def cmd_install(args):
                 print(f"探测到宿主: {', '.join(picked_list)}")
                 _install_many(picked_list, args)
                 return
-    adapter = HOST_ADAPTERS.get(target)
+    adapter = _adapter_for(target)                # ARCH-DEP-02：惰性注册表→模块对象
     if adapter is None:
         g = [(h["id"], h["config"]) for h in generic_host.detect_known()]
         hint = ("\n  探测到通用 MCP 宿主：" + "；".join(f"{i}（{c}）" for i, c in g)
@@ -264,8 +278,8 @@ def cmd_install(args):
     _atomic_write_text(rt, json.dumps(cfg, ensure_ascii=False, indent=2))
     try:                      # 含 key/锚点：立刻收紧（与运行期写盘同口径）
         os.chmod(rt, 0o600)
-    except OSError:
-        pass
+    except OSError as e:
+        _trace.suppress("install.cmd_install", e)
 
     # ── 远程 attach / skills-only（D-attach-1）───────────────────────────
     # 形态：MCP 单独部署一个远程端点，宿主只把 MCP 配置指向它（+ 本地技能）。
@@ -370,7 +384,7 @@ def _install_skills(target: str, packs: str, args, profile: str | None = None):
     # ~/.config/opencode/skills/ 并经 skill 工具按需加载——此前安装器漏拷，
     # opencode 只有工具描述一条约束通道，话术类约束全部失效）
     extra_dirs = []  # [(host, Path)]
-    adapter = HOST_ADAPTERS.get(target)
+    adapter = _adapter_for(target)                # ARCH-DEP-02：惰性注册表→模块对象
     dst = adapter.skills_dir(args) if adapter and target != "hermes" else None
     if dst is not None:
         dst.mkdir(parents=True, exist_ok=True)

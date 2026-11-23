@@ -725,3 +725,82 @@
 - 顺带修两处：test_s161 陈旧断言（其「隔离 HOME 外一律忽略」已被 S168 三分支取代，
   现只锁两落点同源）；host_matrix.py 的 _pin_roots 由 setdefault 改为强制覆盖
   （外部残留 VOD_DEVKIT_*_ROOT 会让巡检探错树却报 10 PASS 假绿灯）
+
+## v0.5.44（2026-11-19）
+
+- 54909d0 fix(p1): 模式②安装先验回归 + drift 接线三处缺陷
+- f6af880 Revert "release: v0.5.44"
+- b7056ec release: v0.5.44
+- 83afd19 review(456): 草稿归属只认会话 + 哨兵会话兜底 + agent 头格式约束
+- aecb20e review: 修复审查 7 问题（含文档口径二次修正）
+- bebcb67 docs(readme): 同步三种部署模式 + 修正远端工具面过期表述
+- 310841d docs: 补齐 D-meta-anon-1（匿名档 meta 死循环）到需求/设计/决策三份文档
+- b603818 fix(net): 匿名档 meta 401 死循环（Python 侧，与 dsh 同构）
+- fc10bb6 refactor(scope): 作用域拆粒度/身份两维 + 隔离维度进 key + product_prior 开关
+- ceb50be feat(mcp): 远程面回归 MCP 标准 stateful + 作用域隔离 + 双形态能力对齐（S146）
+- ad893df fix(collect): SKILL.md 压回 cap 内 + 补 retrieve 指令 + 修 meta 匿名档 401 死循环
+- 3d0e645 fix(tests): install 夹具显式钉 main——dev 分支上 update 两条用例恒红、pre-push 卡死
+
+
+## v0.5.45（2026-11-19）
+
+- fde04d0 fix(release): 根 plugin.json 纳入版本落点表（ARCH-BLD-03）
+- 719f76f docs(arch): 同步需求/设计/安全文档到首批整改后的实现口径
+- 2b8bc15 fix(arch): 五维走查首批整改——P0 两条 + 三条放大器 + 两处环
+- 40acb4b docs(#1): 五维架构缺陷台账 + 整改方案（QA F1-F4 修订复核通过）(#23)
+- 793d96b docs(#1): QA 复核修订——基线重钉 dev@ba48d9d/v0.5.44 + F1-F3 证据重钉 + BLD-02 半步核减
+- cdafc49 merge dev (v0.5.44) into feat/issue-1
+- 044f1b6 docs(#1): 五维架构缺陷台账 + 整改方案
+- ba48d9d fix(release): GitHub 镜像推送按 remote 是否存在决定
+- 95217f1 fix(release): 推送当前分支而非硬编码 main
+
+
+## v0.5.46（2026-11-19）
+
+- e351a30 fix(arch): P1 收官 —— instructions 单一真值 + 运行期去构建依赖 + 两面同码锁（CALL-02 / DEP-05 / CALL-01）
+- ba4b4ab fix(arch): 可观测性结构化 + 错误码域收敛 + 引擎可达性单一真源（ERR-05 / ERR-03 / CALL-06）
+- c80d269 fix(arch): DEP-04 serve 双分派同源 + CFG-04 secret_scan 扫描面补齐
+- 90eebc3 fix(arch): S244 门禁补「账本内容合法性」校验 + 清理被测试污染的 install-manifest（BLD-08）
+- f145f63 fix(arch): BLD-02/04/05 分支派生与快照标记 + hook 安装脚本（台账补齐 12 完整）
+- 89b7b3c fix(arch): CI 门禁单一真源 + 远程面 Origin/Host 收紧（BLD-01 / CFG-02）
+- c34a37d fix(skill): collect 预设下路由表不再指向未注册的 knowledge 工具（B 方案）
+- 0c4b96b docs: 纠正整改口径夸大 + 台账加「整改状态」列 + serve 入口回归锁
+
+
+## v0.5.47（2026-11-19）
+
+- e1a6098 fix(arch): fix-list three defects and py3.14 SQL forward-compat
+
+
+## v0.5.48（2026-11-23）
+
+- 6f832fc fix(skill): collect answers technical questions first, asks feedback once
+
+
+## v0.5.49（2026-11-23）
+
+- 034afb0 docs(arch): mark all 13 remaining defects fixed and record the batch decision
+- 4e7534b refactor(packs): split the collect pack into five modules (CALL-04)
+- de0cfa0 fix(arch): close out the remaining P2 remediation batch
+
+
+## v0.5.50（2026-11-23）
+
+- ffd5d54 docs: safety model error-code table and real-host snapshot note
+- 408d2c3 docs: align README/INSTALL/RELEASING with the shipped implementation
+
+
+## v0.5.51（2026-11-23）
+
+- 48f811c docs(overview): point the gate line at gate_all.py --all (11 gates)
+
+
+## v0.5.52（2026-11-23）
+
+- ccd8ee6 docs(workbuddy): real-machine verified — trust switch is required
+
+
+## v0.5.53（2026-11-23）
+
+- f148070 docs: add a "where the files land" table (MCP entry vs skills vs payload)
+

@@ -139,6 +139,23 @@ shell `registerTools: false`, UI only); otherwise it falls back to the shell's o
 reduced tool surface. Remote attach is still unsupported: `--mcp-url` /
 `--skills-only` exit 2.
 
+### WorkBuddy
+
+```bash
+npx -y vod-devkit@latest install --target workbuddy
+# or let WorkBuddy install it from the repo:
+#   /plugin marketplace add yangaiwu/vod-devkit
+```
+
+- Config: `~/.workbuddy/mcp.json` → `mcpServers.vod-devkit`; skills go to `~/.workbuddy/skills`.
+- **Trust switch (verified on a real machine 2026-11-23)**: after installing, enable
+  **trust** for this MCP server/plugin inside WorkBuddy — otherwise the host never launches
+  the server and you see "submitting feedback failed / MCP is not running". Fully quit
+  WorkBuddy (tray exit; the config is only read at startup) and relaunch.
+- Verify: ask the agent to `call vod_devkit_info and print version` → 0.5.51; `doctor` must be 0 FAIL.
+- Other desktop/CLI hosts (`codeartswork`, `atomcode`, `codex-desktop`, `openclaw`,
+  `officeace`) follow the same `install --target <host>` pattern; see `INSTALL.md`.
+
 ## Other MCP hosts (generic layer)
 
 Hosts without a dedicated adapter are no longer "unsupported":
@@ -227,19 +244,57 @@ misfired (quoting vs reading are different acts).
 
 ## Quality
 
+Gates have **one entry point** (`ARCH-BLD-01`: both CI definitions call it, so the
+list can no longer drift between them):
+
 ```bash
-python3 -m pytest tests/ -q        # full: unit + guardrails + packs + installer matrix + real-HTTP + stdio
-python3 -m pyflakes src/vod_mcp src/vodkit_cli integrations/hermes/hooks tests
-python3 -m mypy                    # scope in pyproject [tool.mypy]
-python3 scripts/secret_scan.py
-python3 scripts/sync_case_roster.py --check
-python3 scripts/rules_provenance.py
+python3 scripts/gate_all.py --list    # 11 gate names
+python3 scripts/gate_all.py --all     # same set CI runs; any failure exits non-zero
 ```
 
-Gates: pre-push hook (pytest + pyflakes + secret_scan) + GitHub Actions on the
-mirror + byte-identical package mirrors + description budget + install-manifest
-roster checks + outward-doc claim checks. Counts are never hand-written into
-docs; measure them.
+The 11 gates: `lint` / `copies` (byte-identical mirrors) / `secret` / `roster` /
+`rules` (skill provenance, SKIP-not-green without an engine) / `mypy` / `registry`
+(repo version vs npm) / `tests` (full pytest) / `dsh` (node --test) / `packaging`
+(npm pack content) / `hostmatrix` (real install + probe per host).
+
+The pre-push hook runs pytest + pyflakes + mirror check + secret scan locally;
+local green never replaces CI green. Counts are never hand-written into docs.
+
+## Where the files land after install
+
+Three separate things — do not look for skills inside the MCP config:
+
+1. **MCP entry** (how the host launches the server): one record in the host's own config
+   (`command` + `args` + `env`). Skills are **not** here.
+2. **Skills** (`SKILL.md`, the wording discipline): copied as plain folders into the host's
+   skill-scan directory; the agent reads them from disk.
+3. **Payload** (server code + assets): machine-wide, shared by every host
+   (`~/.vod-devkit/payloads/<version>/`); the MCP entry points at it with an absolute path.
+
+| Host | MCP entry | Skills copied to |
+|---|---|---|
+| hermes | `~/.hermes/config.yaml` (+ `~/.hermes/mcp/vod-devkit.json`) | `~/.hermes/skills/devops/vod-devkit` |
+| opencode | `~/.config/opencode/opencode.json` | `~/.config/opencode/skills` |
+| codex | `~/.codex/config.toml` + plugin `~/.codex/plugins/{marketplaces,cache}/vod-local` | `~/.codex/skills` |
+| codex-desktop | `~/.agents/plugins/marketplace.json` | `~/plugins/vod-devkit/skills` |
+| atomcode | `~/.atomcode/mcp.json` | `~/.atomcode/skills` |
+| codeartsdoer | `~/.codeartsdoer/codearts_cli.json` | `~/.codeartsdoer/skills` |
+| codeartswork | `~/.codeartswork/mcp/mcp_settings.json` | `~/.codeartswork/skills` |
+| openclaw | `~/.openclaw/openclaw.json` (only via `openclaw mcp` commands) | `~/.agents/skills` |
+| workbuddy | `~/.workbuddy/mcp.json` | `~/.workbuddy/skills` |
+| dsh | `~/.dsh/profiles/<profile>/cordis.patch.yml` | `~/.dsh/skills` |
+| officeace | desktop registry (Windows/macOS only) | `~/.office-claw/skills` |
+| generic | the file you pass to `--mcp-config` | none (MCP entry only) |
+
+On Windows replace `~/` with `%USERPROFILE%\\`. Three differences worth knowing:
+
+- Skill count follows `--packs`: default `core,collect` → 4 skills; `--packs core` skips
+  `vod-feedback-collect`; without `core` there is no `vod-core`; the two rule skills always copy.
+- Marketplace installs (`/plugin marketplace add`, `codex plugin add`) keep skills **inside the
+  plugin package**, not in the table above.
+- Remote mode (`--mcp-url`) writes no payload and runs no local server, but still copies skills
+  to the host (`--skills-only` copies skills only). Agents that only have the URL fetch rule text
+  via `vod_list_skills` / `vod_retrieve_skill` (requires the `knowledge` pack).
 
 ## Docs
 

@@ -1,10 +1,13 @@
 {
-  "version": "0.5.43",
+  "version": "0.5.53",
   "source": {
     "type": "git",
     "remote": "<ORIGIN>",
     "ref": "<REF>",
     "commitSha": "<SHA>",
+    "snapshot": "<SNAPSHOT>",
+    "worktreeHead": "<HEAD>",
+    "snapshotLagsHead": "<SNAPSHOT_LAGS_HEAD>",
     "reachable": "<REACHABLE>",
     "released": "<RELEASED>"
   },
@@ -43,7 +46,7 @@
       "skillsDir": "<HOME>/.hermes/skills/devops/vod-devkit",
       "payloadDir": "<PAYLOAD>",
       "dshPatch": null,
-      "version": "0.5.43",
+      "version": "0.5.53",
       "commitSha": "<SHA>",
       "skillInstalls": [
         {

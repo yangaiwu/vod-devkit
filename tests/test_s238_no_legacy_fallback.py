@@ -22,9 +22,15 @@ from vod_mcp import net as _net          # noqa: E402
 from vod_mcp.packs import collect as _collect  # noqa: E402
 
 
+
+def _collect_src() -> str:
+    """collect 已拆包（ARCH-CALL-04）：把包内全部模块拼成一份源码供文本断言用。"""
+    root = ROOT / "src" / "vod_mcp" / "packs" / "collect"
+    return "\n".join(p.read_text(encoding="utf-8") for p in sorted(root.glob("*.py")))
+
 def test_s238_source_has_no_legacy_endpoint():
     """源码里不许再出现老链常量与回落分支（防止回流）。"""
-    src = (ROOT / "src" / "vod_mcp" / "packs" / "collect.py").read_text(encoding="utf-8")
+    src = _collect_src()
     assert "_EXISTING_SUBMIT" not in src, "老链常量回流"
     assert "legacy-fallback" not in src, "老链回落分支回流"
     # 允许注释/文案里提"老链"，但**不许有实际调用**（HTTP POST 到老链）

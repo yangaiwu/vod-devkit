@@ -87,3 +87,43 @@ def test_http_returns_503_when_payload_tampered(monkeypatch):
             assert "载荷校验未通过" in payload["error"]["message"]
     finally:
         httpd.shutdown()
+
+
+# ── ARCH-CALL-01：两面错误码必须一致（承载位置按协议各自合法） ──────────────
+#
+# 走查曾把"错误呈现层级不一"登记为缺陷。实测（2026-11-19）结论是：
+# **错误码本来就一致**，差异只在承载位置，而承载位置是 MCP 协议强制的——
+#   · stdio 面自己造 JSON-RPC，可以放进 `error` 对象
+#   · remote 面走 SDK 的 `on_call_tool`，返回类型是 `CallToolResult`，
+#     **没有**抛 JSON-RPC error 的通道，SDK 把工具错误建模为 `is_error=True`
+# 所以"位置一致"在协议上做不到；能且必须守住的是"同一个错误给出同一个 code"。
+# 这条锁住的是这一点——谁把两面改成不同码，这里当场红。
+@pytest.mark.parametrize("name,args,expect_code", [
+    ("vod_submit_voices", {}, -32011),     # confirm 未确认（安全语义，不许随形态变）
+])
+def test_two_faces_report_same_code_for_same_error(name, args, expect_code):
+    from vod_mcp import guardrails, server
+
+    # stdio 面：错误进 JSON-RPC error 对象
+    msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+           "params": {"name": name, "arguments": args}}
+    out = server.handle(msg, None)
+    assert "error" in out, f"stdio 面没走错误分支：{out}"
+    stdio_code = out["error"]["code"]
+
+    # remote 面：同一份 guardrails.check，错误进 CallToolResult
+    verdict, _msg, remote_code = guardrails.check(name, args)
+    assert verdict != "allow", "该入参本应被护栏拒绝"
+
+    assert stdio_code == remote_code == expect_code, (
+        f"两面错误码不一致：stdio={stdio_code} remote={remote_code} 期望={expect_code}（{name}）")
+    assert stdio_code == expect_code
+
+
+def test_remote_withheld_is_remote_only_by_design():
+    """`REMOTE_WITHHELD` 只在远程面拒，这是**设计**不是缺陷（stdio 面本就该能用）。
+
+    远程面没有"本机"概念，写本机状态的工具必须摘掉；台账备注明确不主张对称化。
+    """
+    from vod_mcp import packs
+    assert "vod_packs_configure" in packs.REMOTE_WITHHELD

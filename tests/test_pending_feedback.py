@@ -18,6 +18,12 @@ _spec.loader.exec_module(pq)
 
 # ── ① 幂等键 ──
 
+
+def _collect_src() -> str:
+    """collect 已拆包（ARCH-CALL-04）：把包内全部模块拼成一份源码供文本断言用。"""
+    root = ROOT / "src" / "vod_mcp" / "packs" / "collect"
+    return "\n".join(p.read_text(encoding="utf-8") for p in sorted(root.glob("*.py")))
+
 def test_entry_key_is_entry_level():
     """同一条（content+confirmAt+source 相同）键稳定；任一分量变=新条目。
     内容级去重不归本键——两条同 content 不同 confirmAt 是两条 pending。"""
@@ -103,7 +109,7 @@ def test_failed_entries_must_stay_pending():
 # ── ④ flush 接线（源码锁） ──
 
 def test_submit_voices_wires_flush():
-    src = (ROOT / "src" / "vod_mcp" / "packs" / "collect.py").read_text(encoding="utf-8")
+    src = _collect_src()
     assert 'result["pendingFlush"] = _flush_pending(product)' in src, "两条成功路径都要接 flush"
     # S238：老链回落已删，只剩囤积一条成功路径
     assert src.count('result["pendingFlush"] = _flush_pending(product)') == 1, "囤积路径一处"
@@ -129,6 +135,6 @@ def test_canonical_content_without_lines_falls_back():
 
 
 def test_flush_wiring_uses_canonical_content():
-    src = (ROOT / "src" / "vod_mcp" / "packs" / "collect.py").read_text(encoding="utf-8")
+    src = _collect_src()
     assert "canonical_content(e)" in src, "flush 必须走权威拼接"
     assert '"corrected": corrected' in src, "纠正计数进 flush 诊断"

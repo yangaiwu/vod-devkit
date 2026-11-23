@@ -28,7 +28,12 @@
 3. **新增网络函数**必须给存量用例注入桩，防止测试真打网络
 4. **可漂移值**（product 白名单等）走 `GET /external/meta` 动态取，
    快照兜底须带 `[stale]` 标记；不许把引擎枚举硬编码进新代码
-5. 提交前跑 `.githooks/pre-push`（已 `git config core.hooksPath .githooks`）
+5. 提交前装一次钩子：`python3 scripts/install_hooks.py`（幂等；设置本仓
+   `core.hooksPath=.githooks`，**不动 --global**），之后 `git push` 会自动跑
+   pre-push 门禁（pyflakes + pytest + 双副本一致性 + dsh 用例 + secret_scan）。
+   核验是否已接线：`python3 scripts/install_hooks.py --check`。
+   ⚠️ **ARCH-BLD-05 记录**：此前本文写「已 `git config core.hooksPath .githooks`」，
+   但实测为空 ⇒ 新克隆里钩子从不生效。现在改成「必须先跑安装脚本」，别再假设它自动生效。
 6. **提交信息两段式**：写清「改动」+「已验证证据」+「已知残余」三段。
    证据要可复跑（跑了哪些测试、真机验了什么），残余要写"没测到/已知边界"——
    借鉴 huaweicloud-devkit 的 ledger 纪律：没有残余声明的提交，评审无法

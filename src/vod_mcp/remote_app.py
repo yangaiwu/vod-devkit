@@ -23,19 +23,66 @@ import json
 from mcp import types
 from mcp.server.lowlevel import Server
 
-from vod_mcp import guardrails, packs, skills_registry, tools
+from vod_mcp import guardrails, instructions, packs, skills_registry, tools
+from vod_mcp import runtime_state as rt
 
-REMOTE_INSTRUCTIONS = (
-    "vod-devkit 采集资产与纪律（远程面）：技能 vod-feedback-collect 处理用户对"
-    "本产品的不满/建议/期望（触发词：慢/报错/体验差/希望支持/提单等）。"
-    "提交前必须征得用户明确同意（用户抱怨本身不构成同意）；提交回执 "
-    "echo.contents 必须逐条原样转述给用户（「已收录原话：<content>」），"
-    "禁止改写、概括、增删字词。product 归因：原话唯一命中可直接用；"
-    "未命中或多产品歧义时必须问用户一次\"这条是哪个产品的反馈\"，"
-    "回答填 product；用户说不知道就告知他缺产品不能提交，不要猜。不许不填直接提交。"
-    "本面不提供服务器本机路径（skillRoot），规则文本用 vod_retrieve_skill 取；"
-    "工具面与本地一致，只摘进程内开关 vod_packs_configure。"
-)
+# ARCH-CALL-02：采集纪律的唯一真值在 instructions.COLLECT_DISCIPLINE，
+# 本面只拼接远程形态尾句。曾经这里与 server.py 各写一份近乎逐字重复的文本。
+REMOTE_INSTRUCTIONS = instructions.remote_instructions()
+
+
+MCP_SESSION_HEADER = "mcp-session-id"
+# 内部标记头：兜底补的"哨兵会话"专属。客户端不会发它（服务端内部自己加），
+# 作用是让业务侧知道"这个 session 不是你的，别拿它分桶"（审查 ⑤）。
+SIDELESS_MARK_HEADER = "x-vod-sideless"
+
+
+def _req_scope(ctx, remote: bool = True) -> dict:
+    """从当前请求取作用域信息（D-scope-1）。
+
+    MCP 标准 stateful 传输下，服务端在 initialize 响应头下发 mcp-session-id，
+    客户端后续请求自动回传（SDK: streamable_http.py:154）。据此把同一会话的
+    记忆/追问计数/nonce 收拢到一个作用域，不同会话互不影响。
+
+    降级：拿不到 session（极端客户端不回传 / stdio 面）→ agent_id 为空，
+    runtime_state._resolve_scope 会给出 key=None，即"不写记忆、不持久计数"。
+    宁可多问用户一次，也不把 A 的归因写进 B 的桶。
+
+    可选增强：客户端若显式声明 X-Vod-Agent-Id / X-Vod-Product（同一 agent
+    跨会话共享记忆时用），优先采用 —— 但这不是接入前提。
+    """
+    h = {}
+    req = getattr(ctx, "request", None)
+    if req is not None:
+        raw = getattr(req, "headers", None) or {}
+        try:
+            h = {str(k).lower(): str(v) for k, v in dict(raw).items()}
+        except Exception:      # 头部实现对非映射类型应宽松：取不到就降级
+            h = {}
+    sid = h.get(MCP_SESSION_HEADER, "").strip()
+    aid = h.get("x-vod-agent-id", "").strip()
+    prod = h.get("x-vod-product", "").strip()
+    # 审查 ⑥：非法 agent 头忽略并降级（与 runtime_state._resolve_scope 同一判据）。
+    # 头只是分桶提示：换行/空格/超长/中文都会污染 key（日志伪造、桶名失控），
+    # 且它不是认证凭证，没必要为一个格式错误中断整次采集。
+    if aid and not rt.agent_id_accepted(aid):
+        aid = ""
+    # 审查 ⑤：兜底补的哨兵会话是**共享**会话，不是调用方自己的会话。
+    # 若不标记，_resolve_scope 会给出 sess:<哨兵> → 所有裸客户端共用一个记忆桶
+    # （从"一人一桶"退化成"大家一桶"，比现状更坏）。标记后强制 key=None。
+    sideless = bool(h.get(SIDELESS_MARK_HEADER, "").strip())
+    if sideless:
+        sid = ""
+    return {
+        "name": "http-remote",
+        "version": "1",
+        "transport": "http" if remote else "stdio",
+        # 作用域键：显式 agent 标识优先，其次会话 id，都没有则为空（降级）
+        "agent_id": aid or (f"session:{sid}" if sid else ""),
+        "product": prod,
+        "session_id": sid,
+        "sideless": sideless,
+    }
 
 
 def _text_result(payload: dict, is_error: bool = False) -> types.CallToolResult:
@@ -106,7 +153,11 @@ def build_server(remote: bool = True) -> Server:
         verdict, msg, code = guardrails.check(name, args)
         if verdict != "allow":
             return _text_result({"error": msg, "code": code}, is_error=True)
-        client_info = {"name": "http-remote", "version": "1", "transport": "http"}
+        # D-scope-1：从标准会话头取作用域键。
+        # MCP 标准 stateful 传输由服务端在 initialize 下发 mcp-session-id，客户端
+        # 后续请求自动回传（SDK streamable_http.py:154）。拿不到时降级为无作用域
+        # （不写记忆、不持久计数），绝不共用同一个桶 —— "错归比不归更糟"。
+        client_info = _req_scope(ctx, remote=remote)
         try:
             out = await asyncio.to_thread(tools.dispatch, name, args, client_info)
         except tools.ToolError as e:

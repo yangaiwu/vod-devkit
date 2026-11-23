@@ -102,3 +102,63 @@ def test_dsh_desc_precondition_semantics():
     desc = _dsh_composed_desc()
     assert "NOT consent" in desc, "缺「用户陈述不构成同意」句"
     assert "without it" in desc or "confirmed=true" in desc
+
+
+# ── B3：技能全文预算门禁（dsh/Python 双向 retrieve_skill 硬截断）──────────
+#
+# 为什么需要这道门禁（2026-11-18 实测立项）：
+#   dsh 是唯一没有 MCP 的宿主，纪律/话术全靠 vod_retrieve_skill 拉取 SKILL.md；
+#   而两侧 retrieve 实现都会在超限时**静默截断尾部**：
+#     packages/dsh/lib/index.js:749      const SKILL_CAP = 12000;
+#     src/vod_mcp/skills_registry.py:29  _BODY_CAP = 12000
+#   references/ 在 dsh 面不可达（只 readFileSync(SKILL.md)），所以纪律必须全在
+#   SKILL.md 内且必须落在 cap 之内——否则尾部的隐私红线/同意闸会被物理截掉。
+#
+# 目标定为 11950 而非 12000：留 50 字余量，避免任何一次微调即触线。
+SKILL_MD = ROOT / "assets" / "skills" / "vod-feedback-collect" / "SKILL.md"
+RETRIEVE_CAP = 12000       # 两侧 retrieve 实现的上限（dsh SKILL_CAP / py _BODY_CAP）
+SKILL_LEN_TARGET = 11950   # 留 50 字余量
+
+
+def test_skill_md_fits_retrieve_cap():
+    """SKILL.md 必须装得下 retrieve_skill 的 12000 字上限，否则尾部纪律静默丢失。"""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert len(text) <= SKILL_LEN_TARGET, (
+        f"SKILL.md {len(text)} 字超出目标 {SKILL_LEN_TARGET}"
+        f"（retrieve cap {RETRIEVE_CAP}）——超出部分在 dsh/Python 面会被静默截断")
+
+
+def test_skill_md_tail_disciplines_survive_cap():
+    """尾部关键纪律必须落在 cap 内（回归锁：曾因文件增长被截掉全部 6 条）。
+
+    这 6 条是隐私红线/同意闸第二层/防伪造/对账——被截断=安全约束对模型不可见。
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    tail_disciplines = [
+        "逐次确认：每批提交前用户点头一次",   # 同意闸第二层
+        "来源标记由插件自动注入",             # 防伪造
+        "content 是用户原话，agent 不加",     # 原话红线
+        "不提交用户身份信息",                 # 隐私红线
+        "voiceId 是回执主键",                 # 对账
+        "单批上限 50 条",                     # 边界
+    ]
+    for item in tail_disciplines:
+        pos = text.find(item)
+        assert pos != -1, f"技能正文缺关键纪律：{item}"
+        assert pos < RETRIEVE_CAP, (
+            f"「{item}」位于第 {pos} 字，超出 retrieve cap {RETRIEVE_CAP}——"
+            f"dsh 面不可见")
+
+
+def test_retrieve_cap_constants_in_sync():
+    """两侧 retrieve cap 必须相等（一改一漏会造成表面通、端上仍截断）。"""
+    import re as _re
+    dsh = (ROOT / "packages" / "dsh" / "lib" / "index.js").read_text(encoding="utf-8")
+    py = (ROOT / "src" / "vod_mcp" / "skills_registry.py").read_text(encoding="utf-8")
+    m_dsh = _re.search(r"SKILL_CAP\s*=\s*(\d+)", dsh)
+    m_py = _re.search(r"_BODY_CAP\s*=\s*(\d+)", py)
+    assert m_dsh and m_py, "未找到 cap 常量（dsh SKILL_CAP / py _BODY_CAP）"
+    assert m_dsh.group(1) == m_py.group(1), (
+        f"两侧 retrieve cap 不一致：dsh={m_dsh.group(1)} py={m_py.group(1)}")
+    assert int(m_dsh.group(1)) >= SKILL_LEN_TARGET, (
+        f"cap {m_dsh.group(1)} 低于目标 {SKILL_LEN_TARGET}")

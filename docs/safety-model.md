@@ -7,7 +7,8 @@
 ## 默认拦截什么
 
 - 未经用户同意就写库：`vod_submit_voices` 缺 `confirmed=true` → `[guard:confirm] -32011`。
-- 单批超量：`voices` 条数 > `maxVoicesPerSubmit`（50）→ `[guard:deny] -32010`。
+- 单批超量：`voices` 条数 > `maxVoicesPerSubmit`（50）→ `[guard:deny] -32024`（category=write 越界；
+  护栏侧**不再产出** `-32010`，该码语义 owner 在 collect 归因链路）。
 - 数据库直连意图（`mysql` / `jdbc` / `t_vod_` / `select ... from`）→ deny。
 - 凭据读取意图（access_key / secret_key / x-auth-token / password / private_key
   后接 `:` `=` `值` `发` `读` `取`）→ deny。
@@ -20,6 +21,7 @@
 | `src/vod_mcp/policy.py:check_tool_call` | `src/vod_mcp/server.py` 的 `tools/call` 前置 | 工具参数（confirm / 批上限） |
 | `src/vod_mcp/policy.py:check_text` | 同上，扫 `guard_scope(args)` 序列化串 | 文本类 deny（DB 直连 / 凭据意图） |
 | `src/vod_mcp/policy.py:guard_scope` | 文本规则扫描面裁剪 | 剔除 `voices[].content` 与 `data`——用户原话不进文本规则，防误杀"反馈里引用凭据串" |
+| `src/vod_mcp/policy.py:_validate` + `try_load_policy` | `src/vod_mcp/guardrails.py:check` | 规则结构校验；失败 **fail-closed**（`deny` + `-32017`），不崩进程（ARCH-ERR-01/02） |
 | 两段式 `vod_draft_voices` → `vod_commit_voices` | `src/vod_mcp/tools.py` | 审计链：一次性令牌 + payloadSha256 防调包；绕过可被账本 `stage` 检测 |
 | codex 采集熔断 | `src/vod_mcp/packs/__init__.py`（BREAKER_MARKERS）+ `src/vodkit_cli/install.py` 安装门禁 | 未确认提交 ≥2 次后强制摘除 collect pack |
 | 分发红线（key 不随包） | `src/vodkit_cli/install.py:cmd_install` 的 `--distribution preset` | `VOD_JAVA_API_KEY` 从 env 摘除且不写宿主配置 |
@@ -28,10 +30,33 @@
 | 远程面工具面 | `src/vod_mcp/packs/__init__.py`（REMOTE_WITHHELD） | 只摘 `vod_packs_configure`（进程内开关）；draft/commit/ledger 与本地一致，草稿落 `owner` 按宿主隔离（D-token-machine-1，2026-11-16） |
 | 远程面身份 | `src/vod_mcp/tools.py`（请求头优先 + 机器级令牌） | 请求头 Bearer 优先、逐请求生效；无 Bearer 时与本地同链：领/复用机器级匿名令牌（D-token-machine-1；旧"不代签身份"口径已废除） |
 
-错误码约定（宿主/模型可据此分流）：`-32010` deny、`-32011` confirm/草稿令牌不符、
-`-32012` 认证（缺 key 且令牌不可得）、`-32014` 传输（非回环 http）、`-32015` 上游拒绝
-（引擎 4xx/契约漂移）。归因不走错误码：`-32013` 已废除，改为运行期引导
+错误码约定（宿主/模型可据此分流，真源=`diagnose._EXPLAIN_EXTRA`）：
+
+| 码 | 语义 | 处置 |
+|---|---|---|
+| `-32010` | 缺产品归属（collect 归因链路，**护栏侧不产出**） | 先给候选问用户一次 |
+| `-32011` | confirm 闸 / 草稿与令牌不符 | 用户确认后重提；令牌不符就重取草稿 |
+| `-32012` | 认证（缺 key 且匿名令牌不可得） | `auth status` 看档位；必要时 `auth init` |
+| `-32014` | 传输（非回环明文 http） | 换 https 或回环地址 |
+| `-32015` | 能力包被熔断/安全门禁拒绝 | 显式 `--ack-suspension` 恢复，别改拼写 |
+| `-32016` | 囤积端点未上线（404） | 等引擎部署；**不要回落老链** |
+| `-32017` | 护栏规则不可载入（fail-closed） | 修 policy.json 后重启宿主 |
+| `-32018` / `-32019` / `-32020` | 上游 429 / 5xx / 其余 4xx（原始状态码在 `upstream_status`） | 稍后重试 / 引擎故障 / 修请求 |
+| `-32023` / `-32024` | 护栏 deny：凭据读取意图（exfil）/ 越权超范围（write） | 删敏感信息 / 收敛范围后重提 |
+| `-32600…-32700` | JSON-RPC 协议保留段（结构/方法/参数/内部/解析） | 客户端侧问题，按回执修请求 |
+归因不走错误码：`-32013` 已废除，改为运行期引导
 （无证据就先问一次，不猜）。查表用 `vod-devkit explain <码>`——表由用例锁住与代码 raise 点同步。
+
+**`-32017` 为什么是新码**：`-32013` 是**归因拦截**的废除码位（见上句与
+`decisions.md` D-attrib-binding-1），它"代码里零 raise 点"是策略被推翻的结果、不是空位。
+护栏装载失败与缺产品处置动作不同（修 policy 后重启 vs 去问产品），故独立开码，
+不复用旧码位——复用会让同一码位承载两种互不相关的语义。
+
+**护栏装载失败 = 拒绝执行，不是崩溃**（ARCH-ERR-01/02，2026-11-19 走查 P0）：
+`policy.try_load_policy()` 永不抛；文件缺失/JSON 损坏/规则字段非法（缺 `severity`、
+`field=text` 缺 `regex`、`match` 既无 `tool` 也无 `field` 等）一律映射为 `deny` + `-32017`，
+回执点名违规 rule id；stdio 主循环另有兜底 `try`（返回 `-32603` 并落日志），
+**坏 policy 不再打死 server 进程**（宿主表现为"MCP 掉线"且只有一行 traceback）。
 
 ## 写操作路径
 

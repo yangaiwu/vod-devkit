@@ -12,6 +12,7 @@ from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp import paths as paths_mod
 from vodkit_cli import common, remote
+from vod_mcp import trace as _trace
 
 
 def cmd_status(args=None):
@@ -345,17 +346,24 @@ def _proxy_summary() -> str:
 
 
 def _probe_engine(base: str, timeout: float = 4.0) -> tuple:
-    """(state, detail)；state ∈ ok / auth / unreachable。零依赖、不重试、不带 key。"""
-    import urllib.error
-    import urllib.request
-    url = base.rstrip("/") + "/rest/developer/manager/hdvodmngservice/v1/external/meta"
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
-            return ("ok", f"HTTP {r.status} {url}")
-    except urllib.error.HTTPError as e:
-        return ("auth", f"HTTP {e.code}（可达；鉴权/路径响应）{url}")
-    except Exception as e:  # noqa: BLE001  网络类异常一律只报告
-        return ("unreachable", f"{type(e).__name__}: {e}（{url}）")
+    """(state, detail)；state ∈ ok / auth / server-error / unreachable。
+
+    ARCH-CALL-06：判定统一走 `net.probe_reachable`——此前这里自己手抄 URL 并造了一套
+    三态机，与 `net.probe_key` 的五态并存，同一份"引擎是否可达"能给出两种结论，
+    且 5xx 被误归 unreachable（把引擎故障说成网络问题，排查方向直接错）。
+    本函数只做**展示层映射**，不再自己发请求。
+    """
+    from vod_mcp import net
+    r = net.probe_reachable(base=base, timeout=int(timeout))
+    reason = r["reason"]
+    url = base.rstrip("/") + net.META_PATH
+    if reason == "verified":
+        return ("ok", f"HTTP {r['status']} {url}")
+    if reason == "needs-auth":
+        return ("auth", f"HTTP {r['status']}（可达；需凭据）{url}")
+    if reason == "server-error":
+        return ("server-error", f"HTTP {r['status']}（引擎故障，非网络问题）{url}")
+    return ("unreachable", f"{url}")
 
 
 def _report_egress(api_base: str) -> None:
@@ -368,6 +376,9 @@ def _report_egress(api_base: str) -> None:
         print(f"[doctor] 引擎可达：{detail}")
     elif state == "auth":
         print(f"[doctor] 引擎可达：{detail}")
+    elif state == "server-error":
+        # 引擎可达但自身故障：旧实现把它当 unreachable，误导用户去查网络
+        print(f"warn: 引擎可达但服务端故障（5xx，本机网络/配置无关）：{detail}")
     else:
         print(f"warn: 引擎不可达（离线环境可忽略；提交会失败）：{detail}")
 
@@ -446,6 +457,17 @@ def cmd_doctor(args=None):
             print("[doctor] 提示：安装期提交不在任何 tag 里（非发布构建）——版本号相同，"
                   "内容可能与该版本的 npm 包不同（R10-2）；要一字不差请用 "
                   "npx vod-devkit@<ver> install", file=sys.stderr)
+        # ARCH-BLD-04：快照落后 HEAD 时明确提示「装的是哪个代码」。
+        # 这不是 problem（tracked 快照按设计停在 v^，发版后必然与 HEAD 不等，
+        # 判成 problem 会让每个发版后的真机 doctor 都红），而是**可见性提示**：
+        # 运维按 commitSha 对账时要知道它代表发版快照、工作树实际是 worktreeHead。
+        _src = mf.get("source") or {}
+        _head = _src.get("worktreeHead")
+        if _src.get("snapshotLagsHead"):
+            print(f"[doctor] 提示：build-info 快照 {str(_src.get('commitSha'))[:12]} "
+                  f"≠ 安装时工作树 HEAD {str(_head)[:12]}（snapshot={_src.get('snapshot')}）"
+                  "——对账请用 source.worktreeHead 表示实际代码，"
+                  "commitSha 仅是发版快照（ARCH-BLD-04）", file=sys.stderr)
         if mf.get("mcpConfig") and not Path(mf["mcpConfig"]).exists():
             problems.append("MCP 配置文件缺失")
         # D-token-machine-1（R4）：state 与旧位并存 = "静默不迁"要可见。
@@ -457,8 +479,8 @@ def cmd_doctor(args=None):
             if st.exists() and lg.exists():
                 print(f"[doctor] 注意：机器级 state 与旧位并存（旧位 {lg} 已不再写入、"
                       "未并入 state；确认无用后可手工清理）")
-        except Exception:  # noqa: BLE001  诊断不应因该项失败而中断
-            pass
+        except Exception as e:  # noqa: BLE001  诊断不应因该项失败而中断
+            _trace.suppress("doctor.cmd_doctor", e)
         # 载荷并存可见（0.5.12）：install 不删旧载荷——删错的后果是某个宿主配置里
         # 的 server.py 路径消失（白屏/工具全失），所以只报「谁在用哪份、哪份没人引用」，
         # 清理由人决定。真机实锤：机器上同时躺着 0.5.9/0.5.10/0.5.11 三份。
@@ -489,8 +511,8 @@ def cmd_doctor(args=None):
                       + (f"；可清理（安装行与 dsh 配置都未引用）{orphans}"
                          "（不自动删——doctor 与 prune 是同一判定，删前仍建议看一眼）"
                          if orphans else ""))
-        except Exception:  # noqa: BLE001  诊断项失败不阻断整体
-            pass
+        except Exception as e:  # noqa: BLE001  诊断项失败不阻断整体
+            _trace.suppress("doctor.cmd_doctor", e)
         if mf.get("transport") == "remote" and mf.get("mcpUrl"):
             url = mf["mcpUrl"]
             token = (os.environ.get("VOD_MCP_TOKEN")

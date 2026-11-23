@@ -47,7 +47,9 @@ vod-devkit 插件（Python 单进程薄壳，零第三方依赖；另有远程�
 ## 质量
 
 - 用例：单元+护栏+packs+协议级真 HTTP（锁认证头/路径）+stdio 回环+meta（数量以实测为准，文档不手写计数）
-- 门禁：pre-push 钩子（同步副本→校验→lint/pytest/mypy 红了禁推）+ GitHub Actions（ci.yml / release.yml）
+- 门禁：单一入口 `scripts/gate_all.py --all`（11 道：lint / copies / secret / roster / rules / mypy /
+  registry / tests / dsh / packaging / hostmatrix），两份 CI 都只调它；本地 pre-push 钩子同跑
+  pytest + pyflakes + 副本一致性 + secret_scan（红了禁推）
 - 端到端已实测：多宿主真机会话→引擎落库行对账（行为回归套件 `scripts/e2e_behavior.py`，见 design.md）
 
 ## 对外交付形态

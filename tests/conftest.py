@@ -66,6 +66,9 @@ def _isolate_machine_writes(monkeypatch, tmp_path):
     # 因为 paths.runtime_json_path() 的优先级②是"机器级 state 已存在即用"——
     # pop 之后子进程/同进程会读到真机 ~/.vod-devkit/state 的匿名令牌（凭据泄漏进测试）。
     monkeypatch.setenv("VOD_DEVKIT_HOME", str(tmp_path / "machine-state"))
+    # ARCH-ERR-05：日志落点默认在 machine_state_home()/logs/，同样必须显式指到 tmp。
+    # 否则任何一次 _log() 都会在真机 state 目录下建 logs/ —— S143 会（正确地）判漂移。
+    monkeypatch.setenv("VOD_DEVKIT_LOG", str(tmp_path / "logs" / "server.log"))
     yield
 
 
@@ -122,6 +125,52 @@ def _machine_state() -> dict:
 _MUTATOR_MARKERS = ("install --target", "host_matrix.py", "e2e_behavior.py", "vod-devkit install")
 
 
+# S244：前后快照**只能**发现「测试这一轮改了它」，发现不了「它早就脏了」。
+#
+# 实锤（2026-11-19）：仓根 install-manifest.json 的时间戳停在 04:53，内容是某轮 pytest 写下的
+# `mcpConfig=/tmp/pytest-of-root/pytest-218/test_install_copies_all_skills0/...`。此后每次跑
+# 全量测试，前后快照都一致（全程没人再写它）→ S143 判绿 exit 0；但 doctor 读这份账本会报一堆
+# 假 FAIL（载荷目录缺失 / MCP 配置缺失 / hook 未注册 / 技能副本缺失），把人引向"重装"这种
+# 错误动作。门禁的判据从"有没有变"扩到"内容本身合不合法"。
+_TMP_POLLUTION_MARKERS = ("/tmp/pytest-of-", "/pytest-of-", "/tmp/tmp")
+
+
+def _manifest_pollution() -> list:
+    """仓根账本里任何落点字段指向 pytest/临时目录 = 被测试污染。返回人读的证据行。"""
+    import json as _json
+    import os as _os
+
+    repo = Path(__file__).resolve().parent.parent
+    pth = repo / "install-manifest.json"
+    try:
+        raw = pth.read_text("utf-8")
+    except OSError:
+        return []  # 没有账本 = 未安装，本来就合法
+    try:
+        doc = _json.loads(raw)
+    except ValueError:
+        return []  # 坏文件由 doctor/install 自己的口径报，不在这里重复判
+
+    def _bad(v):
+        return isinstance(v, str) and any(m in v for m in _TMP_POLLUTION_MARKERS)
+
+    hits = []
+    for field in ("mcpConfig", "skillsDir", "payloadDir", "dshPatch"):
+        if _bad(doc.get(field)):
+            hits.append(f"{field}={doc.get(field)}")
+    for row in doc.get("skillInstalls") or []:
+        if isinstance(row, dict) and _bad(row.get("dir")):
+            hits.append(f"skillInstalls[].dir={row.get('dir')}")
+    for row in doc.get("installs") or []:
+        if not isinstance(row, dict):
+            continue
+        for field in ("mcpConfig", "skillsDir", "payloadDir"):
+            if _bad(row.get(field)):
+                hits.append(f"installs[].{field}={row.get(field)}")
+    home = _os.path.expanduser("~")
+    return [h.replace(repo.as_posix(), "<repo>").replace(home, "<home>") for h in hits]
+
+
 def _concurrent_mutators(proc_root=None) -> list:
     """扫描 /proc，返回正在运行的真机写入者命令行（截断 120 字）。"""
     root = Path(proc_root) if proc_root else Path("/proc")
@@ -148,6 +197,17 @@ def pytest_sessionstart(session):
 
 
 def pytest_sessionfinish(session, exitstatus):
+    # S244：先判「账本内容本身合不合法」——它比前后快照更早、也更准地暴露污染。
+    # 这一条不看本轮的写入行为：哪怕全程没人碰它，只要内容指向临时目录就必须红。
+    polluted = _manifest_pollution()
+    if polluted:
+        print("\n[S244] 仓根 install-manifest.json 被测试污染（落点指向临时目录）：\n    "
+              + "\n    ".join(polluted)
+              + "\n  这份账本会让 doctor 报一堆假 FAIL（载荷/MCP/hook/技能副本缺失）。"
+                "\n  处置：确认没有真实安装后删掉它（rm install-manifest.json）即可回到「未安装」；"
+                "\n  若这是真实安装，说明某轮 pytest 覆盖了它，需要重跑 install 重建。", file=sys.stderr)
+        session.exitstatus = 1
+
     before = getattr(session.config, "_machine_before", None)
     if before is None:
         return

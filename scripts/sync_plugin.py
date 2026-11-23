@@ -48,8 +48,21 @@ IGNORE_PATTERNS = ("__pycache__", "runtime.json", "*.pyc", "*.log")
 BUILD_INFO = ("plugins/vod-devkit/build-info.json", "build-info.json")
 
 
+_VERSION_RE = re.compile(
+    r"""^__version__\s*(?::\s*[\w\[\]\., ]+)?\s*=\s*['"]([^'"]+)['"]""", re.M)
+
+
 def _version_from_init(path: Path) -> str:
-    return path.read_text(encoding="utf-8").split('__version__ = "')[1].split('"')[0]
+    """解析 `__version__`（ARCH-BLD-07）。
+
+    历史形态是字符串切分 `split('__version__ = "')[1]`：只要有人写成
+    `__version__: str = "0.5.48"`（类型注解）或换成单引号，切分就抛 IndexError 或
+    取到空串——而用例当时用桩绕过了这条路径，发版时才炸。
+    """
+    m = _VERSION_RE.search(path.read_text(encoding="utf-8"))
+    if not m:
+        raise SystemExit(f"FAIL: {path} 里找不到可解析的 __version__（需形如 __version__ = \"x.y.z\"）")
+    return m.group(1)
 
 
 def _git(args: list[str], root: Path) -> str:
@@ -82,7 +95,11 @@ def sync(root: Path = ROOT, quiet: bool = False, write_build_info: bool = True) 
     version = _version_from_init(root / "src" / "vod_mcp" / "__init__.py")
     bi = {"version": version, "commitSha": sha,
           "builtAt": datetime.datetime.now().isoformat(timespec="seconds"),
-          "sourceRemote": remote or None}
+          "sourceRemote": remote or None,
+          # ARCH-BLD-04：本函数按**当前 HEAD** 重烧 ⇒ 这份快照的语义是 worktree。
+          # release.sh 会在发版时把它改写成 v^ 口径（released），两处必须一致地写这个字段，
+          # 否则读的人无法区分"落后 HEAD 是异常"还是"发版快照本来就停在 v^"。
+          "snapshot": "worktree"}
     if os.environ.get("VOD_DEVKIT_NO_BUILD_INFO") or not write_build_info:
         # 打包/隔离跑法/测试期：保留现有 build-info（npm prepack 会跑本函数，若按当前 HEAD
         # 重烧，tarball 的代码指纹就不再等于 tag，与 release.sh 的终态断言冲突——
@@ -97,7 +114,7 @@ def sync(root: Path = ROOT, quiet: bool = False, write_build_info: bool = True) 
         pkg_rel = "plugins/vod-devkit/build-info.json"
         if not (root / pkg_rel).is_file():
             head = _git(["rev-parse", "HEAD"], root) or bi.get("commitSha")
-            fresh = {**bi, "commitSha": head}
+            fresh = {**bi, "commitSha": head, "snapshot": "worktree"}
             dst = root / pkg_rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(json.dumps(fresh, ensure_ascii=False, indent=2) + "\n",

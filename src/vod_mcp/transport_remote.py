@@ -26,13 +26,42 @@ import os
 import sys
 import threading
 
-from vod_mcp import net, paths
+from vod_mcp import net, paths, server_face
+from vod_mcp.remote_app import SIDELESS_MARK_HEADER
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from vod_mcp import trace as _trace
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9528
 MAX_BODY = 4 * 1024 * 1024
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
+
+# ARCH-CFG-02：默认 Origin 白名单——只要回环 + 任意端口。
+# 浏览器跨域必带 Origin；不在名单里 → 不发 CORS 头且 do_POST 直接 403。
+# 非回环部署要用别的来源，必须显式 `--allow-origin <origin>`（可多次）。
+DEFAULT_ALLOWED_ORIGINS = (
+    "http://127.0.0.1",
+    "http://localhost",
+    "http://[::1]",
+    "https://127.0.0.1",
+    "https://localhost",
+    "https://[::1]",
+)
+
+
+def origin_allowed(origin: str, allowed) -> bool:
+    """Origin 是否在白名单里。
+
+    规则：**精确匹配，或 `<白名单项>:<任意端口>`**。
+    只比到端口分隔符，所以 `http://127.0.0.1.evil.com` 不会被
+    `http://127.0.0.1` 前缀误放行（本仓 S180 同源教训：前缀匹配必须带边界）。
+    """
+    origin = (origin or "").strip().rstrip("/")
+    for a in allowed or ():
+        a = a.rstrip("/")
+        if origin == a or origin.startswith(a + ":"):
+            return True
+    return False
 
 # 载荷自校验缓存：远程面是长驻无鉴权服务，被改过的服务端载荷要当场拒绝服务，
 # 不能等运维跑 doctor 才发现（devkit 的每请求 verifySkillTree 同思路）。
@@ -82,10 +111,18 @@ class RemoteRuntime:
 
         self.host, self.port = host, port
         self._loop = asyncio.new_event_loop()
-        # stateless + json_response：与 devkit 的 WebStandardStreamableHTTPServerTransport
-        # ({sessionIdGenerator: undefined, enableJsonResponse: true}) 等价
+        # D-scope-1（2026-11-18）：回归 MCP 标准 stateful 传输。
+        # 此前 stateless=True 是简化形态，代价有二：
+        #   ① 偏离标准 —— 外部服务对接时按标准实现方能互操作（自造一套无法对接）；
+        #   ② 无会话标识 —— 多 agent 共用一个 server 时记忆/计数/nonce 全串味。
+        # 标准流程：initialize 下发 mcp-session-id → 客户端后续请求回传 → 按会话隔离。
+        # D-scope-1：session TTL 与记忆窗口同源（都取 rt.SCOPE_TTL_SEC），
+        # 避免两个独立时钟产生「记忆还在但会话已回收」（悬挂桶泄漏）或
+        # 「窗口内会话过期导致同一用户被当新客」。记忆 TTL 由 session TTL 驱动。
+        from vod_mcp import runtime_state as _rt_ttl
         self.manager = StreamableHTTPSessionManager(
-            app=build_server(remote=True), json_response=True, stateless=True)
+            app=build_server(remote=True), json_response=True,
+            stateless=False, session_idle_timeout=_rt_ttl.SCOPE_TTL_SEC)
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._serve_loop, daemon=True)
 
@@ -143,7 +180,14 @@ class RemoteRuntime:
             tok_key = net._REQ_KEY.set(scope.get("x_vod_key") or None)
             tok_face = net._SERVER_FACE.set(True)
             try:
-                await self.manager.handle_request(scope, receive, send)
+                # D-scope-compat-1（2026-11-18）：极端客户端兜底。
+                # 标准 stateful 传输要求先 initialize 拿 mcp-session-id 再调用，
+                # 缺 session 直接 400（SDK 行为，实测「Missing session ID」）。
+                # 自研裸 HTTP 客户端不握手直接 POST tools/call，在此内部握手补上
+                # 会话头，让它落到独立会话（不与他人共桶）。
+                new_scope = await _ensure_session_for_sideless(self.manager, scope)
+                await self.manager.handle_request(
+                    new_scope if new_scope is not None else scope, receive, send)
             finally:
                 net._SERVER_FACE.reset(tok_face)
                 net._REQ_KEY.reset(tok_key)
@@ -198,7 +242,203 @@ def _scope(handler, body: bytes) -> dict:
         "client": (handler.client_address[0], handler.client_address[1]),
         "server": (handler.server.server_address[0], handler.server.server_address[1]),
         "root_path": "",
+        # 私有键：原始请求体。只给兜底逻辑判断"是不是 initialize"用，
+        # 不参与 ASGI 语义（SDK 读 body 走 receive，不读 scope）。
+        "_vod_body": body,
     }
+
+
+async def _ensure_session_for_sideless(manager, scope: dict):
+    """极端客户端兜底：无 session 且非 initialize 的请求，内部握手补上会话头。
+
+    标准行为（SDK）是直接 400「Missing session ID」。但存在自研裸 HTTP 客户端
+    不握手直接 POST tools/call。兜底在内部走一次 initialize 取得会话 id，返回
+    补好头的新 scope —— 后续仍由 manager 按标准路径处理，客户端无感。
+
+    🔴 审查 ⑤（2026-11-19）：**必须复用同一个"哨兵会话"，不能每次新建。**
+    旧实现每次调用都内部 initialize 一次，SDK 的会话不随请求结束销毁（靠
+    session_idle_timeout 1800s 回收）→ 裸客户端 1 req/s 就常驻 1800 个会话，
+    持续 5.6 req/s 打满默认上限 10000，之后**所有**客户端（含标准客户端）
+    拿 503「Too many open sessions」——一个不守规矩的客户端能打挂守规矩的。
+    现在会话池占用从 O(请求数) 降到 O(1)。
+
+    ⚠️ 复用带来一个必须同时处理的副作用：哨兵会话是**共享**的，若让它照常
+    进分桶，所有裸客户端会共用一个记忆桶（"一人一桶"退化成"大家一桶"，
+    比新建成独立会话更坏）。所以补 sid 时**同时**打 `x-vod-sideless` 标记，
+    remote_app._req_scope 见到它就把会话清空 → key=None（读写皆禁），
+    业务行为与旧实现完全一致：无 session 请求就是无记忆。
+
+    返回 None = 不需兜底或兜底失败（调用方用原 scope，标准错误照常返回，
+    不掩盖真实问题）。initialize 本身不拦：那是建会话的入口。
+    """
+    import json as _json
+
+    headers = {k.decode() if isinstance(k, bytes) else k:
+               (v.decode() if isinstance(v, bytes) else v)
+               for k, v in (scope.get("headers") or [])}
+    if (headers.get("mcp-session-id") or "").strip():
+        return None                               # 已有会话：标准路径
+
+    body = scope.get("_vod_body")
+    if not body:
+        return None
+    try:
+        payload = _json.loads(body.decode() if isinstance(body, bytes) else body)
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or payload.get("method") == "initialize":
+        return None                               # initialize 原样交给 manager
+
+    sid = await _sentinel_session(manager, scope)
+    if not sid:
+        return None                               # 握手没给会话 → 退回标准拒绝路径
+
+    new_scope = dict(scope)
+    new_scope["headers"] = [(k, v) for k, v in (scope.get("headers") or [])
+                            if (k.decode() if isinstance(k, bytes) else k).lower()
+                            not in ("mcp-session-id", SIDELESS_MARK_HEADER)] \
+        + [(b"mcp-session-id", sid.encode()),
+           (SIDELESS_MARK_HEADER.encode(), b"1")]
+    return new_scope
+
+
+# 哨兵会话登记（进程级）：按 **manager 实例的稳定标识** 绑定 {mkey: {"sid","at","manager"}}
+# ARCH-CALL-03：此前用 `id(manager)` 当键——id 只是对象地址，对象被回收后地址可被复用，
+# 新 manager 可能"继承"上一条已失效的 sid（表现为首发 404「Session not found」），
+# 而且这条耦合只存在于 CPython 的实现细节里。现在改为：① 每个 manager 在登记表里
+# 分配一次性 mkey；② 表里同时**强引用** manager，用 `is` 校验同一性——地址复用不可能
+# 命中别人的记录，对象也不可能在登记期间被回收。
+# 🔴 必须按 manager 绑定，不能只存一份全局 sid：会话归属 manager 实例
+#    （它的 _server_instances），进程内新建一个 manager（重启/重建 runtime、
+#    多实例测试）后旧 sid 一律 404。本会话实测：只存全局 → 同进程第二个
+#    runtime 起来后第一发就吃「Session not found」。
+_SENTINEL: dict = {}
+_SENTINEL_LOCK: threading.Lock = threading.Lock()
+_MANAGER_KEYS: dict = {}      # id(manager) -> mkey（仅用于找键，命中后仍用 is 复核）
+_MANAGERS: dict = {}          # mkey -> manager（强引用，防 id 复用与提前回收）
+
+
+def _manager_key(manager) -> str:
+    """取（必要时分配）manager 的稳定标识。地址复用不会串记录（is 复核）。"""
+    import uuid
+    with _SENTINEL_LOCK:
+        k = _MANAGER_KEYS.get(id(manager))
+        if k is None or _MANAGERS.get(k) is not manager:
+            k = uuid.uuid4().hex
+            _MANAGER_KEYS[id(manager)] = k
+            _MANAGERS[k] = manager
+        return k
+# 与 SDK 的 session_idle_timeout 同源（SCOPE_TTL_SEC）。留一半余量：
+# 哨兵在"半个 TTL 内没被用过"就先自己重建，避免拿着一条已被回收的 sid
+# 让客户端吃 404「Session not found」。
+_SENTINEL_FRESH_SEC = None       # None = 用运行时算出的默认值（见 _sentinel_ttl）
+
+
+def _sentinel_ttl() -> float:
+    if _SENTINEL_FRESH_SEC:
+        return float(_SENTINEL_FRESH_SEC)
+    try:
+        from vod_mcp import runtime_state as _rts
+        return max(30.0, float(_rts.SCOPE_TTL_SEC) / 2)
+    except Exception:                             # pragma: no cover
+        return 900.0
+
+
+def _reset_sideless_state(keep_sid: str | None = None, manager=None) -> None:
+    """清空哨兵登记。
+
+    - 测试隔离用；生产路径不需要调用（失效由时间戳 + manager 绑定自己处理）。
+    - keep_sid：模拟"登记的 sid 已在 manager 侧被 TTL 回收"（时间戳置远古）。
+    - manager 省略时对**所有** manager 生效。
+    """
+    with _SENTINEL_LOCK:
+        if manager is None:
+            _SENTINEL.clear()
+            if keep_sid:
+                _SENTINEL["__global__"] = {"sid": keep_sid, "at": -1e12}
+        else:
+            k = _MANAGER_KEYS.get(id(manager))
+            if k is None or _MANAGERS.get(k) is not manager:
+                return
+            _SENTINEL.pop(k, None)
+            if keep_sid:
+                _SENTINEL[k] = {"sid": keep_sid, "at": -1e12, "manager": manager}
+
+
+def _sentinel_peek(manager=None) -> dict:
+    """读当前哨兵登记（诊断/测试用）。"""
+    with _SENTINEL_LOCK:
+        if manager is None:
+            return dict(_SENTINEL.get("__global__") or {})
+        k = _MANAGER_KEYS.get(id(manager))
+        if k is None or _MANAGERS.get(k) is not manager:
+            return {}
+        rec = dict(_SENTINEL.get(k) or {})
+        rec.pop("manager", None)
+        return rec
+
+
+async def _sentinel_session(manager, scope: dict) -> str:
+    """取（必要时创建一次）哨兵会话 id。失败返回空串。
+
+    并发保护：ThreadingHTTPServer + 单事件循环，协程 await 之间可能交错。
+    "先查后建"可能多建一两个，但不会退化成每请求一个——多建一个只是多占
+    一个会话位，代价可忽略；而每请求一个就是本审查要消灭的 503 根因。
+    """
+    import time as _time
+
+    ttl = _sentinel_ttl()
+    key = _manager_key(manager)
+    with _SENTINEL_LOCK:
+        rec = _SENTINEL.get(key) or {}
+        if rec.get("manager") is not manager:      # 同一 mkey 只属于同一个实例
+            rec = {}
+        sid = str(rec.get("sid") or "")
+        at = float(rec.get("at") or 0)
+        if sid and (_time.monotonic() - at) < ttl:
+            _SENTINEL[key] = {"sid": sid, "at": _time.monotonic(), "manager": manager}
+            return sid
+
+    sid = await _handshake_once(manager, scope)
+    if not sid:
+        return ""
+    with _SENTINEL_LOCK:
+        _SENTINEL[key] = {"sid": sid, "at": _time.monotonic(), "manager": manager}
+    sys.stderr.write("[vod-devkit] 兼容模式：已建立/复用兜底会话（compat-sideless）\n")
+    return sid
+
+
+async def _handshake_once(manager, scope: dict) -> str:
+    """内部握手一次，拿会话 id（不建则返回空串）。"""
+    import json as _json
+
+    init_payload = {"jsonrpc": "2.0", "id": "__compat_init__", "method": "initialize",
+                    "params": {"protocolVersion": server_face.PROTOCOL_VERSION,
+                               "capabilities": {},
+                               "clientInfo": {"name": "compat-sideless", "version": "1"}}}
+    captured = {}
+
+    async def init_receive():
+        return {"type": "http.request",
+                "body": _json.dumps(init_payload).encode(), "more_body": False}
+
+    async def init_send(message):
+        if message.get("type") == "http.response.start":
+            for k, v in message.get("headers") or []:
+                kk = k.decode() if isinstance(k, bytes) else k
+                vv = v.decode() if isinstance(v, bytes) else v
+                if kk.lower() == "mcp-session-id":
+                    captured["sid"] = vv
+
+    init_scope = dict(scope)
+    init_scope["headers"] = [(k, v) for k, v in (scope.get("headers") or [])
+                             if (k.decode() if isinstance(k, bytes) else k).lower()
+                             not in ("mcp-session-id", SIDELESS_MARK_HEADER)]
+    try:
+        await manager.handle_request(init_scope, init_receive, init_send)
+    except Exception:
+        return ""
+    return (captured.get("sid") or "").strip()
 
 
 class _StreamSink:
@@ -251,12 +491,72 @@ class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "vod-devkit-mcp"
 
-    def log_message(self, fmt, *args):  # 静默：日志走 /tmp/vod_mcp_server.log
-        pass
+    def log_message(self, format, *args):  # noqa: A002  与基类签名一致
+        """ARCH-ERR-05：HTTP 访问日志接进统一结构化出口（旧实现整体 pass ⇒ 访问面全静默）。
+
+        BaseHTTPRequestHandler 自己的格式是自由文本，这里只记状态行；**带上下文的
+        请求级日志**在 do_POST 里记（有 tool/耗时/结果码）。
+        """
+        from vod_mcp import runtime_state as _rt  # 懒导入：与本模块的既有循环依赖口径一致
+        _rt._log(f"http-access {format % args}", level="debug", event="http_access")
+
+    # ── Origin/Host 收紧（ARCH-CFG-02，2026-11-19 走查 P1）──────────────────
+    # 缺陷：此前无条件发 `Access-Control-Allow-Origin: *`、预检一律 204、`do_POST`
+    # 全程不校验 Origin/Host ⇒ **用户机器上已装插件时，任意网页都能跨域驱动本机端点**
+    # （DNS rebinding 还能绕过"仅回环"）。
+    # 修法：默认只答回环 Origin/Host，其余 403；非回环绑定必须显式给白名单。
+    # ⚠️ CORS 头只约束浏览器，挡不住本机进程/DNS rebinding —— 所以**403 必须在
+    # do_POST 里显式判**，不能只靠"不发 CORS 头"（台账原方案只写"不发头"，不够）。
+    _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
+
+    def _origin_allowed(self) -> bool:
+        """Origin 校验：无 Origin（非浏览器客户端）放行；有则必须命中白名单。
+
+        浏览器跨域请求必带 Origin；curl/SDK 不带。所以这条只管浏览器面，
+        不能拿它挡"本机进程"——那由 Host 校验与既有令牌机制负责。
+
+        匹配规则：**精确匹配，或"回环前缀 + 任意端口"**（`http://127.0.0.1:3000`）。
+        端口不固定是常态（本地 dev server 各种端口），但主机必须精确——否则
+        `http://127.0.0.1.evil.com` 这类会被前缀误放行。
+        """
+        origin = (self.headers.get("Origin") or "").strip()
+        if not origin:
+            return True                      # 非浏览器（curl/SDK/stdio 转发）
+        return origin_allowed(origin, self.server.allowed_origins)  # type: ignore[attr-defined]
+
+    def _host_allowed(self) -> bool:
+        """Host 校验：挡住 DNS rebinding（把 evil.example 解析到 127.0.0.1）。
+
+        绑定回环时只认回环 Host；显式绑非回环时，额外接受配置里的 allow_hosts。
+        """
+        host = (self.headers.get("Host") or "").strip()
+        if not host:
+            return True                      # HTTP/1.0 无 Host：交后续鉴权兜底
+        bare = host.rsplit(":", 1)[0] if not host.startswith("[") else host.split("]")[0] + "]"
+        if bare in self._LOOPBACK_HOSTS:
+            return True
+        return host in self.server.allowed_hosts or bare in self.server.allowed_hosts  # type: ignore[attr-defined]
+
+    def _reject_cross_origin(self, why: str) -> None:
+        """拒收：不发任何 CORS 头（浏览器自然拦），并 403 说明原因。"""
+        body = json.dumps({"jsonrpc": "2.0", "id": None,
+                           "error": {"code": -32600,
+                                     "message": f"跨域/跨主机请求被拒：{why}（默认只接受回环）"}},
+                          ensure_ascii=False).encode()
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()                   # 注意：不调 _cors()，不给浏览器放行机会
+        self.wfile.write(body)
 
     def _cors(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        # 只回显**白名单内**的 Origin；不在白名单就不发（浏览器自然拦）。
+        # 不再无条件 `*`——那是 CFG-02 的原缺陷。
+        origin = (self.headers.get("Origin") or "").strip()
+        if origin and origin_allowed(origin, self.server.allowed_origins):  # type: ignore[attr-defined]
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers",
                          "Content-Type, MCP-Protocol-Version, Mcp-Session-Id, Accept, Authorization")
         self.send_header("Access-Control-Expose-Headers",
@@ -287,6 +587,14 @@ class _Handler(BaseHTTPRequestHandler):
         self._empty(405, {"Allow": "POST, OPTIONS"})
 
     def do_POST(self):
+        # ARCH-CFG-02：Origin/Host 必须在**进业务之前**判（CORS 头只约束浏览器，
+        # 挡不住本机进程与 DNS rebinding，所以这里显式 403）。
+        if not self._host_allowed():
+            self._reject_cross_origin(f"Host={self.headers.get('Host')!r}")
+            return
+        if not self._origin_allowed():
+            self._reject_cross_origin(f"Origin={self.headers.get('Origin')!r}")
+            return
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0 or length > MAX_BODY:
             self._json(400, {"jsonrpc": "2.0", "id": None,
@@ -322,12 +630,30 @@ class _Handler(BaseHTTPRequestHandler):
         scope = _scope(self, body)
         scope["x_vod_key"] = key
         sink = _StreamSink(self)
+        # ARCH-ERR-05：请求级关联日志——把「这次调用是谁、调了什么、多久、什么结果」
+        # 落成一行结构化记录。旧实现只有自由文本 `http METHOD url key=yes/no`，
+        # 没有任何关联标识，一次调用在日志里散成多行且串不起来。
+        import time as _time
+        from vod_mcp import runtime_state as _rt
+        _t0 = _time.monotonic()
+        _method = message.get("method") if isinstance(message, dict) else None
+        _tool = ((message.get("params") or {}).get("name")
+                 if isinstance(message, dict) and message.get("method") == "tools/call" else None)
+        _rid = message.get("id") if isinstance(message, dict) else None
         try:
             self.server.runtime.request(scope, body, sink)
         except Exception as e:  # 传输层异常：能答就答 500，已经流出去就断连
+            _rt._log("远程面传输层异常", level="error", event="remote_call",
+                     req_id=_rid, rpc_method=_method, tool=_tool,
+                     duration_ms=round((_time.monotonic() - _t0) * 1000, 1),
+                     code=-32603, error=type(e).__name__)
             if not sink.started:
                 self._json(500, {"jsonrpc": "2.0", "id": None,
                                  "error": {"code": -32603, "message": str(e)}})
+        else:
+            _rt._log("远程面调用完成", event="remote_call",
+                     req_id=_rid, rpc_method=_method, tool=_tool,
+                     duration_ms=round((_time.monotonic() - _t0) * 1000, 1))
 
 
 def _apply_anon_mint_policy(host: str, allow: bool) -> bool:
@@ -343,26 +669,30 @@ def _apply_anon_mint_policy(host: str, allow: bool) -> bool:
     return enabled
 
 
-def serve(host: str, port: int, allow_anon_mint: bool = False) -> int:
+def serve(host: str, port: int, allow_anon_mint: bool = False,
+          allow_origins: tuple | None = None, allow_hosts: tuple | None = None) -> int:
     anon = _apply_anon_mint_policy(host, allow_anon_mint)
     if host not in LOOPBACK:
         print(f"[vod-devkit] 警告：远程 MCP 绑定非回环地址 {host}——本进程无内建鉴权，"
               "不要把它匿名暴露到公网；TLS 与身份校验应由反代承担。", file=sys.stderr)
         if not anon:
             print("[vod-devkit] 匿名令牌代领已关闭（非回环绑定）：调用方须带 "
-                  "Authorization: Bearer <key>；单机可信网络确需代领时加 --allow-anon-mint",
+                  "Authorization: Bearer <key>；...代领时加 --allow-anon-mint",
                   file=sys.stderr)
     runtime = RemoteRuntime(host, port)
     runtime.start()
     httpd = ThreadingHTTPServer((host, port), _Handler)
     httpd.daemon_threads = True
     httpd.runtime = runtime
+    # ARCH-CFG-02：Origin/Host 白名单（默认只回环；非回环需显式 --allow-origin/--allow-host）
+    httpd.allowed_origins = frozenset(allow_origins or DEFAULT_ALLOWED_ORIGINS)  # type: ignore[attr-defined]
+    httpd.allowed_hosts = frozenset(allow_hosts or ())                            # type: ignore[attr-defined]
     real_port = httpd.server_address[1]
     print(f"vod-devkit MCP server (remote) listening on {host}:{real_port}", file=sys.stderr)
     try:
         httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
+    except KeyboardInterrupt as e:
+        _trace.suppress("transport_remote.serve", e)
     finally:
         httpd.server_close()
     return 0

@@ -2,22 +2,29 @@
 import json
 
 from vod_mcp import paths
+from vod_mcp import trace as _trace
 
-_ROOT = paths.ROOT
-_BUILD_INFO = _ROOT / "build-info.json"
-_MANIFEST = _ROOT / "install-manifest.json"
+def _build_info_path():
+    """路径每次现读（ARCH-DEP-06）：import 期冻结会在"重装换根"后继续指向旧根。"""
+    return paths.ROOT / "build-info.json"
+
+
+def _manifest_path():
+    return paths.ROOT / "install-manifest.json"
 
 
 def read_build_info() -> dict:
-    if _BUILD_INFO.exists():
-        with open(_BUILD_INFO, encoding="utf-8") as f:
+    p = _build_info_path()
+    if p.exists():
+        with open(p, encoding="utf-8") as f:
             return json.load(f)
     return {"version": "dev", "commitSha": None, "builtAt": None, "sourceRemote": None}
 
 
 def read_manifest() -> dict:
-    if _MANIFEST.exists():
-        with open(_MANIFEST, encoding="utf-8") as f:
+    p = _manifest_path()
+    if p.exists():
+        with open(p, encoding="utf-8") as f:
             return json.load(f)
     return {}
 
@@ -39,8 +46,8 @@ def install_binding() -> str | None:
         val = str(_rt._RT.get("product") or "").strip()
         if val:
             return val
-    except Exception:           # noqa: BLE001 — 读不到不阻断，回落 manifest
-        pass
+    except Exception as e:           # noqa: BLE001 — 读不到不阻断，回落 manifest
+        _trace.suppress("provenance.install_binding", e)
     prods = {str(r.get("product")).strip() for r in (read_manifest().get("installs") or [])
              if r.get("product")}
     return next(iter(prods)) if len(prods) == 1 else None

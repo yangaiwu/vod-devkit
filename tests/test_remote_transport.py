@@ -111,9 +111,8 @@ def test_initialize_and_instructions_withhold_host_path(remote):
     assert "skillRoot" in text or "本机路径" in text, "必须明说不给服务器本机路径"
 
 
-def test_tool_face_withholds_only_packs_switch(remote):
-    """D-token-machine-1：远程面=同机独立进程，与本地同面；只摘 packs_configure
-    （进程内状态，HTTP 每请求现造 server、多 agent 共用会互相影响）。"""
+def test_tool_face_withholds_packs_switch(remote):
+    """远程面与本地同面，只摘 vod_packs_configure（进程级全局，会影响所有会话）。"""
     _init(remote["url"])
     st, _h, raw = _post(remote["url"], {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     assert st == 200
@@ -121,7 +120,7 @@ def test_tool_face_withholds_only_packs_switch(remote):
     assert "vod_submit_voices" in names
     assert {"vod_draft_voices", "vod_commit_voices", "vod_list_submitted"} <= names, \
         "两段式与本机账本在远程面同样可用（草稿已按宿主隔离）"
-    assert "vod_packs_configure" not in names, "进程内开关不从远程暴露"
+    assert "vod_packs_configure" not in names, "进程级开关不从远程暴露"
     assert {"vod_list_skills", "vod_retrieve_skill"} <= names
 
 
@@ -138,7 +137,13 @@ def test_notification_202_get_405_options_cors(remote):
     req = urllib.request.Request(url, method="OPTIONS")
     with urllib.request.urlopen(req, timeout=10) as resp:
         assert resp.status == 204
-        assert resp.headers["access-control-allow-origin"] == "*"
+        # ARCH-CFG-02（2026-11-19）：不再无条件 `*`。带外域 Origin 的预检只回
+        # 允许的方法与头，**不回** Access-Control-Allow-Origin（浏览器自然拦）；
+        # 回环 Origin 才回显。见 tests/test_cors_origin.py 的端到端用例。
+        assert resp.headers.get("access-control-allow-origin") is None or \
+            resp.headers.get("access-control-allow-origin") != "*", \
+            "OPTIONS 仍无条件回 CORS * —— CFG-02 的原缺陷回归"
+        assert "POST" in (resp.headers.get("access-control-allow-methods") or "")
 
 
 def test_bad_json_400(remote):
@@ -297,3 +302,26 @@ def test_tools_call_without_arguments_is_accepted(remote):
     data = json.loads(body)
     assert "error" not in data, data
     assert data["result"].get("isError") is not True, data
+
+
+def test_sentinel_key_ignores_reused_object_addresses():
+    """ARCH-CALL-03 验收：哨兵登记不许靠 `id(manager)` 的地址语义。
+
+    真实故障形态：manager 被回收 → CPython 复用地址 → 新 manager 查表命中旧 sid →
+    首发 404「Session not found」。修法=一次性 mkey + 表内强引用 + is 复核。
+    """
+    from vod_mcp import transport_remote as tr
+
+    class M:
+        pass
+
+    a, b = M(), M()
+    ka = tr._manager_key(a)
+    # 模拟"地址复用"：直接把 b 的地址指到 a 的旧键上（等价于回收后 id 撞车）
+    with tr._SENTINEL_LOCK:
+        tr._MANAGER_KEYS[id(b)] = ka
+    kb = tr._manager_key(b)
+    assert kb != ka, "地址复用必须分配新键，不得继承旧 manager 的哨兵会话"
+    assert tr._MANAGER_KEYS[id(b)] == kb
+    assert tr._MANAGERS[kb] is b and tr._MANAGERS[ka] is a
+    assert tr._sentinel_peek(b) == {}, "新实例不得看到别人的哨兵登记"

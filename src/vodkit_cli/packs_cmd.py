@@ -19,6 +19,7 @@ from vod_mcp import packs as packs_mod
 from vod_mcp import paths
 from vodkit_cli import common
 from vod_mcp.host_adapters import codex as _codex
+from vod_mcp import trace as _trace
 
 _ENV_KEYS = ("env", "environment")
 
@@ -74,8 +75,8 @@ def _dsh_rows() -> list:
         try:
             inst = json.loads((pj.parent / "node_modules" / "dsh-vod-devkit"
                                / "package.json").read_text(encoding="utf-8")).get("version")
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as e:
+            _trace.suppress("packs_cmd._dsh_rows", e)
         out.append({"profile": pj.parent.name, "declared": dep or "(bundles 引用)",
                     "installed": inst, "config": str(pj)})
     return out

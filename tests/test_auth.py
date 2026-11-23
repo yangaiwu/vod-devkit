@@ -705,9 +705,48 @@ def test_legacy_key_hint_contains_version_and_reinstall_command():
     assert "npx vod-devkit@latest install" in hint
     assert "当前 v" in hint  # 版本号在位
     src = ""
-    for _rel in (("vod_mcp", "net.py"), ("vod_mcp", "packs", "collect.py"),
-                 ("vod_mcp", "packs", "core.py")):
-        src += (Path(_net.__file__).resolve().parent.parent.joinpath(*_rel)).read_text(encoding="utf-8")
+    base = Path(_net.__file__).resolve().parent            # src/vod_mcp
+    for _rel in (("net.py",), ("packs", "collect"), ("packs", "core.py")):
+        target = base.joinpath(*_rel)
+        if target.is_dir():                                 # collect 拆包（ARCH-CALL-04）
+            src += "".join(p.read_text(encoding="utf-8") for p in sorted(target.glob("*.py")))
+        else:
+            src += target.read_text(encoding="utf-8")
     # S238 起只剩囤积一条提交路径：定义 + 一处调用 = 2（legacy 回落已删）
     assert src.count("_raise_explicit_key_rejected(") >= 2  # 定义 + 囤积失败路径
     assert src.count("_legacy_key_hint()") >= 2  # 助手内 + auth_status 检测位
+
+
+def test_key_resolution_priority_is_single_source(monkeypatch, tmp_path):
+    """ARCH-CFG-05 验收：三入口优先级只由 net.resolve_key 定义，且 source 可如实报告。
+
+    历史形态：判据散在 `_eff_key`/`_java_key`/`auth_status`/doctor 四处，注释顺序各异，
+    "请求头 vs env 谁优先"要靠通读四个文件才能确认。
+    """
+    from vod_mcp import net
+    from vod_mcp import runtime_state as rt
+
+    monkeypatch.setattr(rt, "_RT", {})
+    monkeypatch.setattr(net, "_REQ_KEY", net._REQ_KEY)      # 保持真实 ContextVar
+    monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
+    monkeypatch.setenv("VOD_DEVKIT_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(rt, "_runtime_cfg", lambda: {})
+
+    assert net.resolve_key()[1] == "none"
+
+    monkeypatch.setattr(rt, "_RT", {"java_key": "mirror-key"})
+    assert net.resolve_key() == ("mirror-key", "mirror")
+
+    monkeypatch.setattr(rt, "_runtime_cfg", lambda: {"java_key": "runtime-key"})
+    assert net.resolve_key() == ("runtime-key", "runtime")
+
+    monkeypatch.setenv("VOD_JAVA_API_KEY", "env-key")
+    assert net.resolve_key() == ("env-key", "env")
+
+    tok = net._REQ_KEY.set("header-key")
+    try:
+        assert net.resolve_key() == ("header-key", "header")
+        assert net.resolve_key("explicit-key") == ("explicit-key", "explicit")
+        assert net._eff_key() == "header-key"               # 单点定义的直接后果
+    finally:
+        net._REQ_KEY.reset(tok)

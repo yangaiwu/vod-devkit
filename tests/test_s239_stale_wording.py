@@ -15,6 +15,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+
+def _collect_src() -> str:
+    """collect 已拆包（ARCH-CALL-04）：把包内全部模块拼成一份源码供文本断言用。"""
+    root = ROOT / "src" / "vod_mcp" / "packs" / "collect"
+    return "\n".join(p.read_text(encoding="utf-8") for p in sorted(root.glob("*.py")))
+
 def _contract_desc() -> str:
     data = json.loads((ROOT / "assets" / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
     return str((data["tools"]["vod_submit_voices"] or {}).get("description") or "")
@@ -28,13 +34,13 @@ def test_s239_contract_no_longer_promises_legacy_fallback():
 
 
 def test_s239_collect_comment_single_path():
-    src = (ROOT / "src" / "vod_mcp" / "packs" / "collect.py").read_text(encoding="utf-8")
+    src = _collect_src()
     assert "legacy 两路径" not in src, "注释仍写两路径"
     assert "囤积端点单一路径" in src
 
 
 def test_s239_error_text_still_warns_against_legacy():
     """允许且要求：404 错误文案要提醒"不要改用老链"（处置指引）。"""
-    src = (ROOT / "src" / "vod_mcp" / "packs" / "collect.py").read_text(encoding="utf-8")
+    src = _collect_src()
     assert "不要改用老链" in src
     assert "-32016" in src
