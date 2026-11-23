@@ -2895,6 +2895,58 @@ runtime 后第一发就 404「Session not found」（会话归属 manager 的 `_
   dsh 壳 `-32010` 分支、契约码枚举）。经查这三处都是**归因语义**（"缺产品先问"），
   与护栏拆码无关，dsh 的 `UNRESOLVED_CODE` 与契约的 `-32010` 描述均正确 ⇒ **不需改动**。
   真正待修的是 `diagnose.py:49` 那条正则的**优先级**问题（ERR-06 正条目，本轮未动）。
-- [ ] **本轮未做（如实列出）**：ERR-04 剩余 21 处 `except: pass`；ERR-02 policy 缓存；
-  ERR-06 的 `RULES` 文案正则归层（双轨仍未消除）；CALL-05 的错误码常量表；
-  `cmd_doctor`（229 行/分支 ~92）与 `cmd_install`（240 行）的函数拆分。
+- [x] **本轮未做、已由 D-arch-remediation-2 收口**：ERR-04 的 21 处 `except: pass`、
+  ERR-02 policy 缓存、ERR-06 码优先归层、CALL-05 协议码常量表（见下条 ADR）。
+  仍留：`cmd_doctor`（229 行/分支 ~92）与 `cmd_install`（240 行）的函数拆分（未进台账）。
+
+
+---
+
+## D-arch-remediation-2 P2 整改批次：把"已知会咬人"的 13 条一次收口（2026-11-23）
+
+**决定**：台账里剩余的 13 条（P1 两条半成品 + 11 条 P2）一次性落地，每项一个竖切片 +
+自带门禁用例；不拆成多次发版，避免"门禁改了一半"的中间态被当成稳态。
+
+**逐项决定（含为什么这么修）**
+- **ERR-04**：裸 `pass` 一律走 `vod_mcp/trace.py::suppress(where, exc)`（零模块级依赖，
+  懒导入 runtime_state 落 JSONL）。原因：吞点二十余处、遍布各模块，各自拼日志必漏字段；
+  `where=模块.函数` 便于一条 grep 列出全部吞点。同时把"以后又写 pass"变成**结构用例红**
+  （`test_no_bare_except_pass` 扫全 `src/`，不吃白名单文件）。
+- **ERR-02**：policy 装载按 `(路径, mtime_ns, size)` 指纹缓存，**不用 TTL**——TTL 会让
+  "改完规则要等 N 秒"变成新的排障陷阱。正则装载期编译并缓存，消费点复用同一对象。
+- **ERR-06**：`classify()` **码优先**（先抽文案里的 `-32xxx` 查 `_EXPLAIN_EXTRA`），
+  文案正则降为兜底。附带修 `group()` 对 `认证/传输/引擎/内部/上游` 这些层 `KeyError`
+  （码表早就用了这些层名，旧实现用固定字典取桶）。
+- **CALL-05**：新增 `vod_mcp/protocol.py` 常量表（保留段 + `PROTOCOL_VERSION` 引用
+  `server_face`），`server.py` 零裸码字面量，门禁 AST 断言。
+- **DEP-03**：`ToolError` 真源迁 `vod_mcp/errors.py`，`net` 只做别名；pack 只许引 errors，
+  `knowledge` 整文件不许 import net。**代价**：`net.ToolError` 仍是别名，历史调用不改。
+- **DEP-06**：`provenance`/`payload` 的根路径改函数现读（与 `paths.runtime_json_path()`
+  同口径），换根后不重启即生效。
+- **CALL-03**：哨兵登记不再用 `id(manager)` 当键，改"一次性 mkey + 表内强引用 + `is` 复核"，
+  地址复用不可能命中别人的 sid（真实故障形态：首发 404 Session not found）。
+- **CALL-04**：`packs/collect.py`(692 行) 拆为 `collect/{attribution,tags,submit,draft,ledger}.py`，
+  `__init__.py` 35 行只做再导出，**全部既有调用面（含测试用私有符号）不变**。
+- **CFG-05**：凭据六档优先级（explicit/header/env/runtime/mirror/none）只在
+  `net.resolve_key()` 定义一次，`auth_status` 如实报 `keySource`。
+- **CFG-06**：`paths.ensure_state_home()` 建目录即 0700，已存在的宽权限**只收紧不放宽**。
+- **CFG-07**：用户自由文本字段改为**显式白名单** `USER_TEXT_KEYS` + 递归剥离；
+  用例连契约 schema 里的字段名一起对账（新字段漏登记当场红）。
+- **BLD-06**：白名单覆盖判据改为"按文件枚举两包全部模块 + 三个资产目录"，本轮就现场
+  抓出了 `errors.py`/`protocol.py`/`trace.py` 三个新模块未登记。
+- **BLD-07**：`__version__` 用正则解析（支持类型注解/单引号/行尾注释），坏文件显式失败。
+
+**代价/遗留**
+- `net.ToolError` 别名保留（一个版本周期），下游若改回 `net.ToolError` 不会被门禁拦住
+  （门禁只约束 packs）。
+- `packs/collect` 拆包后，`package.json` 依赖 `src/vod_mcp/packs/` 整目录声明；
+  若将来把 packs 改成逐文件白名单，需同步 `test_files_whitelist_covers_all_src_modules`。
+- `cmd_doctor`/`cmd_install` 的函数体量（229/240 行）不在本台账，未拆。
+
+**Falsifier**
+- 若 `trace.suppress` 自身在日志失败时抛异常（把 pass 换成炸），结构用例抓不住——
+  已补 `test_suppress_survives_broken_logger` 行为锁。
+- 若 policy 缓存因文件系统 mtime 粒度（秒级）漏更新，`test_policy_read_is_cached_until_mtime_changes`
+  会红；届时应改 `st_ctime_ns` 或内容哈希，不许退成 TTL。
+- 若 SDK 将来提供"稳定 manager 标识"，`_manager_key` 应改为直接用 SDK 提供值；
+  在那之前 `uuid4 + is` 是本仓能做到的最强判据。

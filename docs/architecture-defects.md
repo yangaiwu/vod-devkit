@@ -64,37 +64,37 @@
 |---|---|---|---|---|
 | ARCH-DEP-01 | `net` ↔ `runtime_state` 双向依赖，靠函数内懒导入破环 | P2 | 2.0 | ✅完整（`2b8bc15`，另修了台账漏记的 hermes↔host_verify 环） |
 | ARCH-DEP-02 | `host_adapters` 急切聚合导入 12 个适配器，与载荷边界冲突 | P1 | 3.0 | ✅完整（惰性注册 + `test_registry_is_lazy`） |
-| ARCH-DEP-03 | 知识披露层反向依赖网络出口层（`skills_registry`/`packs.knowledge` → `net`） | P2 | 1.5 | ⬜未动 |
+| ARCH-DEP-03 | 知识披露层反向依赖网络出口层（`skills_registry`/`packs.knowledge` → `net`） | P2 | 1.5 | ✅完整（`errors.py` 承接 ToolError，包内只引 errors；knowledge 不再 import net；结构门禁 `test_packs_do_not_import_net_for_errors`） |
 | ARCH-DEP-04 | 入口设根契约覆盖不全，`serve` 双分派两条路径根来源不同 | P1 | 2.0 | ✅完整（`cli.py:131` 子命令 `_serve` 由 `common.ROOT` 改为 `_paths.SRC_ROOT`，与前置分支 `cli.py:18` 同源；env 统一为 SRC/DIST 两个。**实测**：改前拼出 `<repo>/vod_mcp/server.py` 不存在、改后 `<repo>/src/vod_mcp/server.py` 存在。门禁 `test_dep04_serve_branches_share_one_root` / `test_dep04_serve_target_exists`，已反向验证改回即红） |
 | ARCH-DEP-05 | 运行期安装代码依赖构建脚本 `sync_plugin.py` | P1 | 1.0 | ✅完整（`codex.py` 删掉运行期 `subprocess.run(sync_plugin.py)` 代跑构建；缺副本改为显式前置校验，文案说清缺什么/怎么补，不再猜"npm 包损坏"。门禁 `test_codex_install_without_repo_never_shells_out` + `test_codex_missing_copy_message_is_actionable` + AST 级 `test_no_runtime_module_shells_out_to_build_scripts`（只认 subprocess 调用，不误伤提示文案——首版按字符串匹配曾误抓自己写的提示）。已反向验证塞回 subprocess 调用即红并点名 `codex.py:293`） |
-| ARCH-DEP-06 | 路径常量 import 期冻结，违反 `paths.py` 自陈纪律 | P2 | 1.0 | ⬜未动 |
+| ARCH-DEP-06 | 路径常量 import 期冻结，违反 `paths.py` 自陈纪律 | P2 | 1.0 | ✅完整（provenance/payload 路径改函数现读；`test_provenance_paths_are_live` 换根即见新文件） |
 | ARCH-CALL-01 | stdio 与 remote 两面各写一套 `tools/call` 管线，错误呈现层级不一 | P1 | 3.0 | ✅完整（**实测重判**：两面错误码**本来就一致**——同一 `guardrails.check` 给出同一码，如 `-32011`；差异只在承载位置，而承载位置是 MCP 协议强制的：stdio 自造 JSON-RPC 可进 `error` 对象，remote 走 SDK `on_call_tool` 返回 `CallToolResult`，**没有**抛 JSON-RPC error 的通道。故本条按验收断言"仅承载位置不同"判定已达标，未做无意义的对称化改造。新增 `test_two_faces_report_same_code_for_same_error` 锁住两面同码，另锁 `REMOTE_WITHHELD` 为设计而非缺陷） |
 | ARCH-CALL-02 | `initialize` instructions 双份硬编码，用例只锁关键词 | P1 | 1.0 | ✅完整（抽 `vod_mcp/instructions.py::COLLECT_DISCIPLINE` 单一真值，两面只拼形态尾句（`STDIO_TAIL` / `REMOTE_TAIL`）。三条红线（同意口径/echo 逐字转述/product 追问）集中一处。门禁新增 `test_both_faces_share_collect_discipline` / `test_collect_discipline_covers_the_three_redlines` / `test_form_specific_tails_are_separate`；并修 3 条原先"按文件正文读"的旧用例改为校验运行时下发文本。已反向验证 remote 面改回独立文本即 3 条红） |
-| ARCH-CALL-03 | 远程面哨兵会话以 `id(manager)` 登记，与 SDK 内部语义强耦合 | P2 | 3.0 | ⬜未动 |
-| ARCH-CALL-04 | `collect` pack 单模块承载七件事（692 行 vs `knowledge` 17 行） | P2 | 4.0 | ⬜未动 |
-| ARCH-CALL-05 | 协议面裸造 JSON-RPC，`protocolVersion` 与错误码多处硬编码 | P2 | 1.0 | ◐部分（**协议版本已单一真源**：`server_face.PROTOCOL_VERSION` 为唯一定义，`server.py`/`transport_remote.py`/`remote.py`×2 共 4 处全改引用；门禁 `test_structure_guards.py::test_protocol_version_has_single_definition` + `::test_all_protocol_version_uses_reference_the_constant`，已反向验证碰回字面量即红；**实测**真 server initialize 回包 `protocolVersion="2025-06-18"` 与常量一致。**未做**：协议面仍裸造 JSON-RPC（错误码硬编码未收敛到常量表）） |
+| ARCH-CALL-03 | 远程面哨兵会话以 `id(manager)` 登记，与 SDK 内部语义强耦合 | P2 | 3.0 | ✅完整（哨兵登记改一次性 mkey + 表内强引用 + `is` 复核；`test_sentinel_key_ignores_reused_object_addresses`） |
+| ARCH-CALL-04 | `collect` pack 单模块承载七件事（692 行 vs `knowledge` 17 行） | P2 | 4.0 | ✅完整（collect 拆为 attribution/tags/submit/draft/ledger 五模块，`packs/collect/__init__.py` 35 行只做再导出；1108+ 用例零改动全绿） |
+| ARCH-CALL-05 | 协议面裸造 JSON-RPC，`protocolVersion` 与错误码多处硬编码 | P2 | 1.0 | ✅完整（新增 `protocol.py` 常量表，server.py 零裸码字面量；`test_server_uses_protocol_constants_only`） |
 | ARCH-CALL-06 | 引擎可达性判定两套实现（`net.probe_key` vs `doctor._probe_engine`） | P1 | 2.0 | ✅完整（新增 `net.probe_reachable`：verified/needs-auth/server-error/unreachable 四态；`doctor._probe_engine` 改为只做展示层映射、不再自己发请求；路径单一真源 `net.META_PATH`/`API_PREFIX`，消灭三处硬编码（doctor + remote + net 各一份）。**实测**：旧 doctor 把 5xx 报成 unreachable（引擎故障被说成网络问题），现报 server-error。`test_doctor_egress.py` 新增 5 条（原 9 条 S134 全保留共 14 条），已反向验证 doctor 自造判定即红） |
 | ARCH-ERR-01 | 护栏读取位于异常保护之外，`policy.json` 缺失/损坏直接打死 server | **P0** | 1.0 | ✅完整（fail-closed + `-32017` + 主循环兜底） |
-| ARCH-ERR-02 | 每次工具调用重读 policy 且无 schema 校验（坏规则 → `KeyError`） | P1 | 1.5 | ◐部分（schema 校验已做；**缓存未做**，仍每次重读） |
+| ARCH-ERR-02 | 每次工具调用重读 policy 且无 schema 校验（坏规则 → `KeyError`） | P1 | 1.5 | ✅完整（policy 指纹缓存 `_CACHE` + 装载期编译正则；`test_policy_read_is_cached_until_mtime_changes`／`test_regex_is_compiled_at_load`） |
 | ARCH-ERR-03 | 上游 HTTP 状态码进入 JSON-RPC `code` 域，explain 表与门禁均覆盖不到 | P1 | 2.0 | ✅完整（`net._http_error_code()` 把 429→`-32018`、5xx→`-32019`、其余 4xx→`-32020`；`ToolError` 新增 `upstream_status` 字段承接原始码，`collect` 判 404 改读它。explain 表补三条。门禁从正则改 **AST**：只认 `ToolError/PackRefused` 调用的 `code=` 实参，须为字面量/映射函数/具名常量，同类错误转译（SkillError）放行。**实测**：改前 `code=e.code` 致 429 直接进协议域；改后 `code=-32018` 且原文保留。已反向验证改回即红并点名 `net.py:240 'e.code'`） |
-| ARCH-ERR-04 | 26 处 `except` 体只有 `pass`，主链失败痕迹被吞 | P1 | 3.0 | ◐部分（主链 3 点已补；**实测仍剩 25 处**，全量收敛未做） |
+| ARCH-ERR-04 | 26 处 `except` 体只有 `pass`，主链失败痕迹被吞 | P1 | 3.0 | ✅完整（实测 25 处裸 `pass` 全部收敛到 `trace.suppress`；`test_no_bare_except_pass` 扫全 src 防回退） |
 | ARCH-ERR-05 | 可观测性＝固定 `/tmp` 文本日志：无级别、无请求关联、远程面请求日志静默 | P1 | 3.0 | ✅完整（`_log` 改 JSONL 结构化：ts/level/msg + 任意字段；`_log_path()` 支持 `VOD_DEVKIT_LOG`，默认 `tempfile.gettempdir()` 且**零副作用**（首版默认机器 state 目录被 S143 抓红，已改）；轮转在 flock 内做且从换行边界起算（不再切碎半行 JSON）；远程面 `log_message` 由 `pass` 改为落 `http_access`，`do_POST` 记 req_id/tool/duration_ms；stdio 面同字段集。`tests/test_observability.py` 10 条，已反向验证改回自由文本即 6 条红） |
-| ARCH-ERR-06 | `explain` 按文案正则归层，错误码与文案双轨 | P2 | 2.0 | ◐部分（**JSON-RPC 保留段已补齐**：`-32600/-32601/-32602/-32603/-32700` 五条全部进 `_EXPLAIN_EXTRA`，`known=True` 且有 cause/action；`-32603`（主循环兜底码）文案指向日志与 req_id。门禁 `tests/test_explain_reserved.py`（6 条，含反向约束「`-32013` 废除法码须保持 known=False」）；**未做**：`RULES` 文案正则归层仍在，`classify()` 双轨未消除） |
+| ARCH-ERR-06 | `explain` 按文案正则归层，错误码与文案双轨 | P2 | 2.0 | ✅完整（`classify` 码优先，文案正则降为兜底；`test_layer_is_stable_per_code` 逐码验层稳定；顺带修 `group()` 未知层 KeyError） |
 | ARCH-ERR-07 | 护栏四类 deny 共用 `-32010`（缺产品），排障方向被指错 | P2 | 1.0 | ✅完整（2026-11-19：按命中规则的 `category` 分派——`exfil`→`-32023`、`write`→`-32024`、confirm 保持 `-32011`、policy 坏保持 `-32017`；护栏侧**不再产出** `-32010`（该码语义 owner 在 collect 归因链路）。explain 补两条。门禁 `tests/test_guard_codes.py`（6 条），含「四条路径码互不相同且无一落在 -32010」；既有锁 `test_policy_load.py::test_deny_rule_still_denies_after_validation` 期望码由 -32010 改为 -32024（保留其原意「校验不许把 deny 顶成 -32017」）。**码位**：`-32021/-32022` 已被 remediation 预留给上游 429/5xx，故新开 `-32023/-32024`） |
 | ARCH-CFG-01 | `pending-feedback.jsonl` 存用户原话却未收紧 0600 | **P0** | 1.0 | ✅完整（实测改前 0644 → 现 0600，含历史文件收紧） |
 | ARCH-CFG-02 | 远程面 `CORS *` + 无 Host 校验 + 无内建鉴权 → 浏览器可跨域驱动本机端点 | P1 | 2.0 | ✅完整（`89b7b3c`：origin 改白名单 `DEFAULT_ALLOWED_ORIGINS` + Host 校验；`test_cors_origin.py` 锁住） |
 | ARCH-CFG-03 | 三套原子写实现并存，fsync/权限/符号链接语义不一致 | P1 | 2.0 | ✅完整（单源 + AST 门禁；遗留：通用路径 `mode=0o600` 会把 0400 放宽） |
 | ARCH-CFG-04 | `secret_scan.py` 覆盖边界：只扫 tracked、无超时、git 失败即崩 | P1 | 1.0 | ✅完整（扫描面 = tracked + `plugins/`/`assets/` 全量，**实测 352 文件含 77 个副本、其中 57 个原先扫不到**；`git ls-files` 加 30s timeout，不可用/超时/非 git 目录一律降级告警；扫描面为空时 fail-closed exit 1。模式补 `.env` 形态与 `java_key` 落盘。「通用长令牌串」试过已**回退**——实测把 git SHA/sha256/npm integrity 全抓进来上百条误报。验收 `test_secret_scan.py` 5 条，已反向验证改回静默通过即红） |
-| ARCH-CFG-05 | 凭据三入口（env / runtime / 请求头），优先级判据散落四处 | P2 | 2.0 | ⬜未动 |
-| ARCH-CFG-06 | 机器级 state 目录权限只在迁移路径收紧 0700 | P2 | 0.5 | ⬜未动 |
-| ARCH-CFG-07 | `guard_scope` 字段剔除靠"新字段记得加" | P2 | 1.0 | ⬜未动 |
+| ARCH-CFG-05 | 凭据三入口（env / runtime / 请求头），优先级判据散落四处 | P2 | 2.0 | ✅完整（`net.resolve_key()` 单点定义六档优先级，auth_status 报 `keySource`；`test_key_resolution_priority_is_single_source`） |
+| ARCH-CFG-06 | 机器级 state 目录权限只在迁移路径收紧 0700 | P2 | 0.5 | ✅完整（`paths.ensure_state_home()` 建目录 0700、宽权限只收紧；`test_state_dir_is_private_on_fresh_install`） |
+| ARCH-CFG-07 | `guard_scope` 字段剔除靠"新字段记得加" | P2 | 1.0 | ✅完整（`USER_TEXT_KEYS` 显式白名单 + 递归剥离；`test_free_text_fields_are_explicit` 连契约字段一起对账） |
 | ARCH-BLD-01 | 双 CI 定义漂移：GitCode 只覆盖部分门禁，且两者都只在 `main` 触发 | P1 | 2.0 | ✅完整（`89b7b3c`：清单单一真源 `scripts/gate_all.py`，两套 CI 均触发 `main`/`dev`；GitCode 侧缺 dsh/hostmatrix 属平台能力限制，已在 workflow 注释记明） |
 | ARCH-BLD-02 | 开发基线 `dev` 而 update/测试夹具仍钉 `main`（release.sh 半步已修） | P1 | 1.0 | ✅完整（`95217f1` 修 release.sh；本轮 `update.py` 改按当前分支派生 `origin/{branch}` + detached HEAD 拒执行，`tests/test_installer.py` 夹具不再钉 main、`test_p2_structure.py` 语义锁改写为反向约束） |
 | ARCH-BLD-03 | 版本六处落点，根 `plugin.json` 永久停在 `0.1.0` | P1 | 1.0 | ✅完整（`fde04d0`，8 处落点现全等） |
 | ARCH-BLD-04 | 根 `build-info.json` 快照落后 HEAD，却被 install 与 provenance 当权威 | P1 | 1.5 | ✅完整（`common.build_info` 加 `snapshot: released\|worktree`；manifest 记 `worktreeHead` + `snapshotLagsHead`；doctor 落后时显式提示；`sync_plugin`/`release.sh` 两处写入口径统一；验收 `test_install_manifest_records_worktree_head_when_snapshot_lags` 已反向验证） |
 | ARCH-BLD-05 | `.githooks/pre-push` 未接线，且含作者机绝对路径 | P1 | 1.0 | ✅完整（新增 `scripts/install_hooks.py` 幂等接线 + `--check`；pre-push 去全部作者机路径、解释器缺失显式失败；`CONTRIBUTING.md` 改成先跑安装脚本；两条验收用例 + 作者路径门禁已反向验证） |
-| ARCH-BLD-06 | `package.json` 的 `files` 逐文件枚举，靠发版后断言兜底 | P2 | 2.0 | ⬜未动（本轮新增模块即被它抓红一次，已手工补白名单——正是本条风险） |
-| ARCH-BLD-07 | `sync_plugin.py` 用字符串切分解析 `__version__`，用例已打桩绕过 | P2 | 0.5 | ⬜未动 |
+| ARCH-BLD-06 | `package.json` 的 `files` 逐文件枚举，靠发版后断言兜底 | P2 | 2.0 | ✅完整（白名单按文件枚举/目录声明求覆盖，vod_mcp+vodkit_cli+资产三目录；`test_files_whitelist_covers_all_src_modules` 现场抓出新增三模块） |
+| ARCH-BLD-07 | `sync_plugin.py` 用字符串切分解析 `__version__`，用例已打桩绕过 | P2 | 0.5 | ✅完整（正则解析 `__version__`，支持注解/单引号/行尾注释，坏文件显式失败；`test_version_parser_handles_annotated_form`） |
 | ARCH-BLD-08 | S143 门禁只比前后快照，"本来就脏"的 `install-manifest.json` 永远判绿 | P1 | 1.0 | ✅完整（S244：`tests/conftest.py` 新增 `_manifest_pollution()`，会话结束校验账本落点是否指向 pytest/临时目录 → exit 1；不依赖本轮是否写入。实测污染账本 → exit 1 且四个字段点名；删账本 → exit 0。4 条回归锁 `test_s244_*`） |
 
 > **实测注（2026-11-19，本机）——含一次我的误判，如实记录**：
