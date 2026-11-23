@@ -8,12 +8,11 @@
 - 配置文件不是合法 JSON → 报错退出、字节不动（宁可不装不可装错）。
 - 本机未装该宿主：配置形态按对表实现，doctor 会标「未真机验证」。
 """
-import sys
 from pathlib import Path
 
 from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
-from vod_mcp.host_adapters.base import server_env, server_entry
+from vod_mcp.host_adapters.base import server_env, server_entry, command_args
 from vod_mcp.host_adapters import base
 from vod_mcp.host_adapters.generic import merge_mcp_servers
 
@@ -43,8 +42,8 @@ def config_path() -> Path:
 
 def install(args, packs):
     conf = Path(_spec()["configPath"])
-    entry = {"command": sys.executable, "args": [server_entry()],
-             "env": server_env(args, packs)}
+    _cmd, _args = command_args(args, server_entry())
+    entry = {"command": _cmd, "args": _args, "env": server_env(args, packs)}
     action = merge_mcp_servers(conf, entry)
     print(f"已{_VERB[action]} WorkBuddy 配置：{conf}（{msgs.effective('WorkBuddy')}）")
     from vod_mcp.host_adapters import host_verify

@@ -1,10 +1,9 @@
 """OpenCode 宿主适配：opencode.json 的 mcp 段无损合并 + 随装生成物。"""
-import sys
 from pathlib import Path
 
 from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
-from vod_mcp.host_adapters.base import merge_json_mcp, server_env, server_entry
+from vod_mcp.host_adapters.base import merge_json_mcp, server_env, server_entry, command_list
 from vod_mcp.host_adapters import base
 
 HOST = "opencode"
@@ -36,7 +35,7 @@ def install(args, packs: str) -> Path:
     conf = Path(spec["configPath"])
     entry = {
         "type": "local",
-        "command": [sys.executable, server_entry()],
+        "command": command_list(args, server_entry()),
         "enabled": True,
         "environment": server_env(args, packs),
     }

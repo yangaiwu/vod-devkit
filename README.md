@@ -661,6 +661,20 @@ Windows 上把 `~/` 换成 `%USERPROFILE%\`（例如 `%USERPROFILE%\.workbuddy\m
 
 MIT（见 LICENSE.txt）。第三方素材见 NOTICE。
 
+## MCP 启动形态（`--mcp-launcher`）
+
+`install` 默认把宿主配置写成 **npx 形态**：
+
+```json
+{ "command": "npx", "args": ["-y", "-p", "vod-devkit@<ver>", "vod-devkit-mcp"] }
+```
+
+启动时由 `vod-devkit-mcp` 解析解释器（PATH 上 python ≥3.10，或 `VOD_PYTHON`）与载荷目录，
+配置里不含任何机器专属路径——缓存被清、venv 被删都不会让宿主永久起不来。
+
+要回到"绝对解释器 + 载荷脚本"的旧形态：`install --target <宿主> --mcp-launcher python`
+（dsh / officeace / codex 插件形态本轮仍走旧形态）。
+
 ## 升级后必须重启宿主（否则调用会失败）
 
 `install`/`npm i -g` 只换磁盘上的载荷与配置，**不会重启已经跑起来的宿主进程**。旧进程可能仍按

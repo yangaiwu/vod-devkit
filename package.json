@@ -5,11 +5,13 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "vod-devkit": "./npm/cli.js"
+    "vod-devkit": "./npm/cli.js",
+    "vod-devkit-mcp": "./npm/mcp-launcher.js"
   },
   "files": [
     "bin/vod-devkit",
     "npm/cli.js",
+    "npm/mcp-launcher.js",
     "src/vodkit_cli",
     "assets/skills",
     "assets/contract",

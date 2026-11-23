@@ -14,13 +14,12 @@
 """
 import json
 import shutil
-import sys
 from pathlib import Path
 
 from vod_mcp import msgs
 from vod_mcp import paths as _paths
 from vod_mcp import hosts as host_specs
-from vod_mcp.host_adapters.base import server_env, server_entry
+from vod_mcp.host_adapters.base import server_env, server_entry, command_args
 from vod_mcp.host_adapters import base
 
 HOST = "codex-desktop"
@@ -120,8 +119,8 @@ def _register_plugin(pdir: Path) -> None:
 
 def install(args, packs):
     pdir = plugin_dir()
-    _write_mcp_entry({"command": sys.executable, "args": [server_entry()],
-                      "env": server_env(args, packs)})
+    _cmd, _args = command_args(args, server_entry())
+    _write_mcp_entry({"command": _cmd, "args": _args, "env": server_env(args, packs)})
     _register_plugin(pdir)
     return marketplace_path()
 

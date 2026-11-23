@@ -22,7 +22,7 @@ from pathlib import Path
 
 from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
-from vod_mcp.host_adapters.base import server_env, server_entry
+from vod_mcp.host_adapters.base import server_env, server_entry, command_args
 from vod_mcp.host_adapters import base
 from vod_mcp import trace as _trace
 
@@ -62,8 +62,8 @@ def _run(argv, what: str):
 
 
 def _definition(args, packs) -> dict:
-    return {"command": sys.executable, "args": [server_entry()],
-            "env": server_env(args, packs)}
+    _cmd, _args = command_args(args, server_entry())
+    return {"command": _cmd, "args": _args, "env": server_env(args, packs)}
 
 
 def _show(cli: str) -> dict | None:
