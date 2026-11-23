@@ -55,6 +55,9 @@ def _cli() -> str:
     return exe
 
 
+_NEUTRAL_CWD: str | None = None
+
+
 def _neutral_cwd() -> str:
     """探活的子进程 cwd 必须是中性目录（不在仓根）。
 
@@ -62,10 +65,12 @@ def _neutral_cwd() -> str:
     在仓根跑时 npm 先命中的是仓内 package.json（`/root/vod-devkit/.npmrc` 也被读），
     拿到的不是 npm 上的 vod-devkit → 载荷找不到 → 子进程立刻退出，
     add 报 `MCP error -32000: Connection closed`。巡检探针早已按同一口径改中性 cwd。
+    用 mkdtemp 而不是固定子目录：/tmp 只读或 TMPDIR 受限时固定目录会直接抛异常。
     """
-    d = Path(tempfile.gettempdir()) / "vod-devkit-openclaw-probe"
-    d.mkdir(parents=True, exist_ok=True)
-    return str(d)
+    global _NEUTRAL_CWD
+    if _NEUTRAL_CWD is None:
+        _NEUTRAL_CWD = tempfile.mkdtemp(prefix="vod-devkit-openclaw-probe-")
+    return _NEUTRAL_CWD
 
 
 def _run(argv, what: str):
@@ -85,7 +90,8 @@ def _definition(args, packs) -> dict:
 
 def _show(cli: str) -> dict | None:
     r = subprocess.run([cli, "mcp", "show", NAME, "--json"],
-                       capture_output=True, text=True, timeout=TIMEOUT)
+                       capture_output=True, text=True, timeout=TIMEOUT,
+                       cwd=_neutral_cwd())
     if r.returncode != 0:
         return None
     try:
@@ -129,10 +135,15 @@ def install(args, packs):
     # env 只比键不比值：value 里可能有 VOD_JAVA_API_KEY（真凭据），不能进日志/比对证据。
     got = _show(cli)
     if got is None:
-        # 读回拿不到 ≠ 没落盘，但也不能静默放过：明说"未自证"，让现场能分辨两种局面。
-        print(f"[vod-devkit] openclaw 读回未自证（`mcp show {NAME} --json` 无输出/不可解析）："
-              f"已{verb or '写入'}但未比对注册表内容，请手工 `openclaw mcp list` 确认",
-              file=sys.stderr)
+        # 读回拿不到 ≠ 没落盘，但"没自证也算成功"就等于这道自证白加（装机脚本里 stderr
+        # 警告会被吞）。默认 fail-closed；确要放过用 VOD_DEVKIT_ALLOW_UNVERIFIED=1。
+        msg = (f"[vod-devkit] openclaw 读回未自证（`mcp show {NAME} --json` 无输出/不可解析）："
+               f"已{verb or '写入'}但无法比对注册表内容，请手工 `openclaw mcp list` 确认")
+        if os.environ.get("VOD_DEVKIT_ALLOW_UNVERIFIED"):
+            print(msg + "（VOD_DEVKIT_ALLOW_UNVERIFIED=1，按成功继续）", file=sys.stderr)
+        else:
+            print(msg + "；如确要放过，设置 VOD_DEVKIT_ALLOW_UNVERIFIED=1", file=sys.stderr)
+            sys.exit(2)
     else:
         text = json.dumps(got, ensure_ascii=False)
         missing = [x for x in [payload["command"], *payload["args"]] if x not in text]
