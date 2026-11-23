@@ -7,12 +7,11 @@
   是 `environment`（与 opencode 的 `environment` 同名、与 mcpServers 的 `env` 不同）。
 - 技能落 `~/.codeartswork/skills`。
 """
-import sys
 from pathlib import Path
 
 from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
-from vod_mcp.host_adapters.base import merge_json_mcp, server_env, server_entry
+from vod_mcp.host_adapters.base import merge_json_mcp, server_env, server_entry, command_list
 from vod_mcp.host_adapters import base
 
 HOST = "codeartswork"
@@ -48,7 +47,7 @@ def config_path() -> Path:
 
 def install(args, packs):
     conf = _config_path()
-    entry = {"command": [sys.executable, server_entry()],
+    entry = {"command": command_list(args, server_entry()),
              "environment": server_env(args, packs)}
     action = merge_json_mcp(conf, entry, section="mcp")
     print(f"已{_VERB[action]} CodeArts Work 配置：{conf}（{msgs.effective('CodeArts Work')}）")

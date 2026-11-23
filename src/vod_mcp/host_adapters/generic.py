@@ -18,7 +18,7 @@ from pathlib import Path
 
 from vod_mcp import msgs
 from vod_mcp import paths as _paths
-from vod_mcp.host_adapters.base import server_env, server_entry
+from vod_mcp.host_adapters.base import server_env, server_entry, command_args
 from vod_mcp.host_adapters import base
 
 HOST = "generic"
@@ -55,8 +55,8 @@ def detect_known() -> list:
 def snippet(packs: str = "core,collect", api_base: str = "") -> dict:
     """可粘贴的 stdio 片段（安装器 no-path 时打印）。"""
     args = type("A", (), {"java_api_base": api_base})()
-    entry = {"command": sys.executable, "args": [server_entry()],
-             "env": server_env(args, packs)}
+    _cmd, _args = command_args(args, server_entry())
+    entry = {"command": _cmd, "args": _args, "env": server_env(args, packs)}
     return {"mcpServers": {ENTRY_NAME: entry}}
 
 
@@ -107,8 +107,8 @@ def install(args, packs):
         print("  （技能目录未知，未安装技能；如需话术层请用 --target hermes|opencode|codex）")
         return None
     path = _expand(cfg_path)
-    entry = {"command": sys.executable, "args": [server_entry()],
-             "env": server_env(args, packs)}
+    _cmd, _args = command_args(args, server_entry())
+    entry = {"command": _cmd, "args": _args, "env": server_env(args, packs)}
     action = merge_mcp_servers(path, entry)
     verb = {"created": "写入", "updated": "更新", "unchanged": "跳过（已一致）"}[action]
     print(f"已{verb} {path.name} 的 mcpServers.vod-devkit：{path}（{msgs.effective()}）")

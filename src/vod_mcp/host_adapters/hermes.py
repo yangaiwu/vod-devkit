@@ -14,7 +14,7 @@ from vod_mcp import msgs
 from vod_mcp import paths as _paths
 from vod_mcp import hosts as host_specs
 from vod_mcp import paths
-from vod_mcp.host_adapters.base import server_env, server_entry
+from vod_mcp.host_adapters.base import server_env, server_entry, command_args
 
 HOST = "hermes"
 SUPPORTS_REMOTE = True
@@ -382,9 +382,10 @@ def install(args, packs: str) -> Path:
     """Hermes：官方途径 hermes mcp add（config.yaml mcp_servers）。"""
     conf = Path(_spec()["configPath"]).parent / "vod-devkit.json"
     conf.parent.mkdir(parents=True, exist_ok=True)
+    cmd, cmd_args = command_args(args, server_entry())
     _paths.atomic_write_text(conf, json.dumps({
-        "name": "vod-devkit", "command": sys.executable,
-        "args": [server_entry()], "env": server_env(args, packs),
+        "name": "vod-devkit", "command": cmd,
+        "args": list(cmd_args), "env": server_env(args, packs),
     }, ensure_ascii=False, indent=2))
     env_args = []
     for k, v in server_env(args, packs).items():
@@ -394,8 +395,8 @@ def install(args, packs: str) -> Path:
     if shutil.which("hermes"):
         try:
             r = subprocess.run(
-                ["hermes", "mcp", "add", "vod-devkit", "--command", sys.executable,
-                 *["--env"] + env_args, "--args", server_entry()],
+                ["hermes", "mcp", "add", "vod-devkit", "--command", cmd,
+                 *["--env"] + env_args, "--args", *cmd_args],
                 input="y\ny\n", capture_output=True, text=True, env=_cli_env(),
                 timeout=_CLI_TIMEOUT)
         except subprocess.TimeoutExpired:

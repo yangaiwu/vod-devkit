@@ -204,16 +204,25 @@ def test_install_opencode_schema_and_merge(env):
     oc = env["home"] / ".config" / "opencode" / "opencode.json"
     oc.parent.mkdir(parents=True)
     oc.write_text(json.dumps({"provider": "keep-me", "theme": "dark"}))
+    env["env"]["VOD_DEVKIT_SKIP_REGISTRY_CHECK"] = "1"   # 形态断言与 registry 状态解耦
     r = cli(env, "install", "--target", "opencode", "--preset", "collect", "--product", "CodeArts")
     assert r.returncode == 0, r.stderr
     cfg = json.loads(oc.read_text())
     # 既有内容无损（读改写只动 mcp.vod-devkit 键）
     assert cfg["provider"] == "keep-me" and cfg["theme"] == "dark"
     entry = cfg["mcp"]["vod-devkit"]
-    assert entry["command"][0] == sys.executable          # command=数组
-    assert entry["command"][1].endswith("vod_mcp/server.py")
+    assert entry["command"][0] == "npx"                   # D-interpreter-1：默认 npx 形态
+    assert "vod-devkit-mcp" in entry["command"]
     assert entry["enabled"] is True                       # enabled 必填
     assert entry["environment"]["VOD_PACKS"] == "core,collect"  # 键名 environment
+
+    # 回退形态（command 数组里是绝对解释器）
+    r = cli(env, "install", "--target", "opencode", "--preset", "collect",
+            "--product", "CodeArts", "--mcp-launcher", "python")
+    assert r.returncode == 0, r.stderr
+    entry = json.loads(oc.read_text())["mcp"]["vod-devkit"]
+    assert entry["command"][0] == sys.executable
+    assert entry["command"][1].endswith("vod_mcp/server.py")
 
 
 def test_install_opencode_idempotent(env):
@@ -306,14 +315,26 @@ def test_serve_runtime_breaker_downgrades_collect(monkeypatch, tmp_path):
 # ---- hermes：官方 mcp add 通道 + 配置片段落盘 ----
 
 def test_install_hermes_official_cli_and_conf(env):
+    env["env"]["VOD_DEVKIT_SKIP_REGISTRY_CHECK"] = "1"   # 形态断言与 registry 状态解耦
     r = cli(env, "install", "--target", "hermes", "--preset", "collect", "--product", "CodeArts")
     assert r.returncode == 0, r.stderr
     calls = env["hermes_calls"].read_text().strip().splitlines()
     assert calls and calls[0].startswith("mcp add vod-devkit --command")
     conf = json.loads((env["home"] / ".hermes/mcp/vod-devkit.json").read_text())
+    # D-interpreter-1：默认 npx 形态（配置里没有机器专属解释器路径）
+    assert conf["command"] == "npx"
+    assert conf["args"][:2] == ["-y", "-p"]
+    assert conf["args"][2].startswith("vod-devkit@") and conf["args"][3] == "vod-devkit-mcp"
+    assert "path" not in json.dumps(conf["args"]).lower()
+    assert conf["env"]["VOD_PACKS"] == "core,collect"
+
+    # 回退形态仍可用
+    r = cli(env, "install", "--target", "hermes", "--preset", "collect",
+            "--product", "CodeArts", "--mcp-launcher", "python")
+    assert r.returncode == 0, r.stderr
+    conf = json.loads((env["home"] / ".hermes/mcp/vod-devkit.json").read_text())
     assert conf["command"] == sys.executable
     assert conf["args"][0].endswith("vod_mcp/server.py")
-    assert conf["env"]["VOD_PACKS"] == "core,collect"
 
 
 # ---- 归因绑定：安装必配（T7d 统一，与 dsh UI 加载必配同口径） ----

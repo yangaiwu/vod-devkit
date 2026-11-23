@@ -395,6 +395,12 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
               f"{str(manifest['source'].get('commitSha'))[:12]}——版本号相同但内容可能与该版本的"
               "npm 包不同（真机实锤：0.5.17 装机是 46faccb，registry 是 a5bbea1）。"
               "要一字不差请用 npx vod-devkit@<ver> install，或等发版后再装。", file=sys.stderr)
+    _exe = str(sys.executable or "")
+    if volatile_interpreter(_exe):
+        print(f"[vod-devkit] 警告：解释器在会被清理的位置 {_exe}——宿主配置会把它写成启动命令，"
+              "缓存/临时目录被清后所有宿主一起起不来。建议先建稳定环境再装："
+              "`python3 -m venv /root/.vod-devkit/venv`（或 /opt/<name>/venv）后用它的 python 跑 install。",
+              file=sys.stderr)
     missing = [k for k in ("VOD_JAVA_API_KEY",) if
                not os.environ.get(k) and not _runtime_cfg_read().get("java_key")]
     if missing and transport == "stdio":
@@ -409,6 +415,22 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
                   "（同一实例上的 agent 共用一份身份与额度；要按 agent 隔离请带 --mcp-token，"
                   "或按产品/团队分实例）")
 
+
+
+_VOLATILE_MARKERS = ("/cache/", "/scratch/", "/tmp/", "/temp/")
+
+
+def volatile_interpreter(path: str) -> bool:
+    """解释器路径是否落在会被清理的位置（缓存/临时目录）。
+
+    实锤（2026-11-23）：11 个宿主配置都被写成
+    `/root/.hermes/cache/scratch/.../bin/python`——那套 venv 一次 prune 就没了，
+    配置看着对、宿主全起不来。装机器用哪个解释器就会把它写进配置，所以装的时候必须
+    把"这个解释器会不会被清掉"告诉用户，而不是等他某天所有宿主一起失效。
+    注：`/root/.vod-devkit/venv`、`/opt/...`、系统 `/usr/bin/python3` 都算稳定。
+    """
+    p = str(path or "")
+    return any(m in p for m in _VOLATILE_MARKERS)
 
 def _runtime_cfg_read() -> dict:
     """运行期状态现读（D-token-machine-1：单源在 paths.runtime_json_path()）。

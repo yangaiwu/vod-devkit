@@ -91,6 +91,16 @@ def _hermes_problems(*, degraded: bool) -> list:
     return []
 
 
+def _is_npx_form(entry: dict) -> bool:
+    """配置是否 npx 启动形态：command 为 npx，或 argv 里出现 vod-devkit-mcp。"""
+    cmd = entry.get("command")
+    first = cmd[0] if isinstance(cmd, list) and cmd else cmd
+    argv = list(cmd[1:]) if isinstance(cmd, list) else list(entry.get("args") or [])
+    if str(first or "").strip() in ("npx", "npx.cmd"):
+        return True
+    return any(str(a).strip() == "vod-devkit-mcp" for a in argv)
+
+
 def _entry_server_path(entry: dict) -> str:
     """从条目里取出 server.py 的路径（两种形态：command 数组 / command+args）。"""
     cand: list = []
@@ -143,6 +153,16 @@ def _json_problems(host: str, *, degraded: bool) -> list:
         return [{"code": "mismatch", "target": host,
                  "message": f"{host} 的 {section}.vod-devkit 是远程形态但 url 为空（{cfg}）"
                             "——重跑 install"}]
+    if _is_npx_form(entry):
+        # npx 形态（D-interpreter-1）：没有 server.py 参数，判据是启动器可用
+        import shutil as _sh
+
+        missing = [b for b in ("npx", "node") if not _sh.which(b)]
+        if missing:
+            return [{"code": "mismatch", "target": host,
+                     "message": f"{host} 是 npx 启动形态，但 PATH 上找不到 {'/'.join(missing)}"
+                                "——装 node/npm，或重跑 install --mcp-launcher python"}]
+        return []
     server = _entry_server_path(entry)
     if not server or not Path(server).exists():
         return [{"code": "mismatch", "target": host,

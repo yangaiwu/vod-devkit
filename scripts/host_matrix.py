@@ -39,6 +39,18 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 
+
+def _neutral_cwd() -> str:
+    """验证子进程用中性 cwd。
+
+    npx 形态下若 cwd 里有 vod-devkit 的 package.json（比如就在本仓跑巡检），npx 会把
+    它当"本地包"解析：找不到 node_modules/.bin 就退回 shell 执行 → 命令找不到（假红）。
+    真实宿主极少在插件源码目录里跑，但验证工具经常在。
+    """
+    import tempfile
+
+    return tempfile.mkdtemp(prefix="vod-matrix-")
+
 def _pin_roots() -> None:
     """进程入口处显式钉两个根（main() 调；import 不调）。
 
@@ -281,7 +293,7 @@ def _probe(entry: dict, expect_version: str) -> tuple:
     try:
         proc = subprocess.Popen(argv, stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                env=env, text=True)
+                                env=env, text=True, cwd=_neutral_cwd())
     except OSError as e:
         return False, f"起不来（{e.__class__.__name__}: {e}）{tail}"
     assert proc.stdin is not None and proc.stdout is not None

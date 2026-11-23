@@ -14,12 +14,11 @@ OPENCODE_CONFIG=~/.codeartsdoer/codearts_cli.json、KERNEL_CONFIG_DIR=~/.codeart
   `~/.config/opencode/mcp/mcp_settings.json` —— 写 ~/.codeartsdoer/mcp/ 无效。
 - 技能目录 ~/.codeartsdoer/skills（二进制字符串 "codeartsdoer/skills/"）。
 """
-import sys
 from pathlib import Path
 
 from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
-from vod_mcp.host_adapters.base import merge_json_mcp, server_env, server_entry
+from vod_mcp.host_adapters.base import merge_json_mcp, server_env, server_entry, command_list
 from vod_mcp.host_adapters import base
 
 HOST = "codeartsdoer"
@@ -50,7 +49,7 @@ def install(args, packs):
     conf = Path(_spec()["configPath"])
     entry = {
         "type": "local",
-        "command": [sys.executable, server_entry()],
+        "command": command_list(args, server_entry()),
         "enabled": True,
         "environment": server_env(args, packs),
     }

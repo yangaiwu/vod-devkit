@@ -32,6 +32,10 @@ def main():
     sp.add_argument("--java-api-base", default=None,
                     help="VOD 平台地址（缺省=https://vod-dev.topxtopx.com，勿用回环默认）")
     sp.add_argument("--packs", default="", help="显式覆盖 preset（逗号分隔）")
+    sp.add_argument("--mcp-launcher", default="npx", choices=["npx", "python", "auto"],
+                    help="MCP 启动形态：npx=配置写 `npx -y -p vod-devkit@<ver> vod-devkit-mcp`"
+                         "（启动时解析解释器/载荷，默认）；python=绝对解释器+载荷脚本（旧形态）；"
+                         "auto=有 node 用 npx，否则 python。dsh/officeace/codex 本轮仍用 python")
     sp.add_argument("--ack-suspension", action="store_true",
                      help="确认解除 codex 采集熔断（恢复门禁逃生口，D-codex-circuit-breaker-1）")
     sp.add_argument("--product", default="",

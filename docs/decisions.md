@@ -2950,3 +2950,38 @@ runtime 后第一发就 404「Session not found」（会话归属 manager 的 `_
   会红；届时应改 `st_ctime_ns` 或内容哈希，不许退成 TTL。
 - 若 SDK 将来提供"稳定 manager 标识"，`_manager_key` 应改为直接用 SDK 提供值；
   在那之前 `uuid4 + is` 是本仓能做到的最强判据。
+
+## D-interpreter-1 配置不再写死解释器：npx 启动器（2026-11-23）
+
+事故：宿主配置写 `sys.executable + payloads/<ver>/vod_mcp/server.py`。当"跑 install 的那个
+解释器"落在会被清理的位置（本次是 `/root/.hermes/cache/scratch/.../venv`，prune 后被删），
+11 个宿主同时起不来；而 `doctor` 全绿（配置面读回都正常，问题在运行期才暴露）。
+与 D-payload-1 同源：载荷固化只解决了"代码路径会飞"，解释器那一半没固化。
+
+对标：huaweicloud-devkit v2 的宿主配置一律 `npx -y -p <pkg> <bin>`（Node server，无解释器路径）。
+
+落地：
+- `npm/mcp-launcher.js`（bin `vod-devkit-mcp`）：启动时按 PATH 解析 python≥3.10
+  （VOD_PYTHON → python3 → 3.13/3.12/3.11/3.10 → python），再解析载荷
+  （VOD_DEVKIT_PAYLOAD → payloads/<包版本> → payloads/ 最新版本）。
+- `install --mcp-launcher {npx,python,auto}`（默认 npx）：
+  npx 形态 = `{command: npx, args: [-y, -p, vod-devkit@<ver>, vod-devkit-mcp]}`；
+  python 形态保留为回退。库级调用（测试/老脚本）缺省仍是 python，只有 CLI 默认 npx。
+- 降级判据只信 registry：`npm view vod-devkit@<ver>` 返 E404 才回 python
+  （**不能**用 build-info 的 snapshot=worktree——release.sh 在 worktree 打包，发布物同样写 worktree）。
+- 本轮仍走 python 的三处（后续再切）：`dsh`（patch yml 里 argv 形态另算）、
+  `officeace`（sqlite 连接器行）、`codex`（插件缓存 .mcp.json 的静态形态）。
+
+### D-interpreter-1 实施补记（0.5.58 → 0.5.59，真机灰度暴露的三件事）
+
+1. **npx 冷/热缓存与 cwd**：若 cwd 里存在 `vod-devkit` 的 package.json（例如就在本仓跑巡检），
+   npx 按"本地包"解析，找不到 `node_modules/.bin` 就退回 shell 执行 → `command not found`。
+   处置：`probe_tools.py` / `host_matrix.py` 的子进程一律跑在中性临时 cwd；同时缓存被这种
+   解析污染后需要 `rm -rf ~/.npm/_npx` 再预热。
+2. **宿主给子进程的 PATH 可能很窄**：openclaw 实测只带 node 的 bin，`python3` 落到系统 3.9
+   （低于 ≥3.10 门槛）→ 启动器报"找不到 Python"、宿主侧表现是 `Connection closed`。
+   处置：启动器候选顺序改为 显式覆盖 → **稳定落点**（`~/.vod-devkit/venv`、`/opt/vod-python`）
+   → PATH 命令名 → 其他绝对落点；绝对落点只在"存在"时才用，不把配置绑死。
+   （顺带发现 `/usr/bin/python3.12` 在本机也是软链到 hermes tools，因此"稳定落点"必须排在 PATH 前。）
+3. **矩阵/探针的假红要归因**：同一份配置在仓内 cwd 红、在 /tmp 绿 → 属于验证环境，不是产品缺陷；
+   先把工具挪到中性 cwd，再谈真实失败。

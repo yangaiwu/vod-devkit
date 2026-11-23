@@ -35,6 +35,18 @@ HOSTS = ["hermes", "opencode", "codeartsdoer", "codeartswork", "workbuddy",
 DEFAULT_CALLS = [("vod_devkit_info", {}), ("vod_auth_status", {})]
 
 
+
+def _neutral_cwd() -> str:
+    """验证子进程用中性 cwd。
+
+    npx 形态下若 cwd 里有 vod-devkit 的 package.json（比如就在本仓跑巡检），npx 会把
+    它当"本地包"解析：找不到 node_modules/.bin 就退回 shell 执行 → 命令找不到（假红）。
+    真实宿主极少在插件源码目录里跑，但验证工具经常在。
+    """
+    import tempfile
+
+    return tempfile.mkdtemp(prefix="vod-probe-")
+
 def entry_env(entry: dict) -> dict:
     """宿主的启动环境：`env` ∪ `environment`（两种键都合法，见 S234 的踩坑记录）。"""
     out = {}
@@ -68,7 +80,8 @@ def probe_entry(entry: dict, calls=None, timeout: float = 90.0) -> dict:
     if gone:
         raise RuntimeError(f"入口文件不存在：{gone[0]}")
     proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, env=_spawn_env(entry), text=True)
+                            stderr=subprocess.PIPE, env=_spawn_env(entry), text=True,
+                            cwd=_neutral_cwd())   # npx 形态：避开仓内 package.json
     n = [0]
 
     def rpc(method, params=None):

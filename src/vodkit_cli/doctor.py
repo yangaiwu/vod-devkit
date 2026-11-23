@@ -449,6 +449,37 @@ def _check_live_payloads(problems: list) -> None:
         print("[doctor] 判定：只报告不改字节（重启宿主属用户动作）")
 
 
+def _check_volatile_interpreter() -> None:
+    """宿主配置里的启动解释器是否在会被清理的目录（缓存/临时）。
+
+    doctor 全绿但 `command` 指向 /root/.hermes/cache/... 时，一次缓存清理就能让所有宿主
+    同时起不来（2026-11-23 实锤：11 个面全指向 scratch venv）。
+    """
+    import re
+    from vodkit_cli import common as _c
+    pat = re.compile(r"([/~][^\"'\s,]*/bin/python[0-9.]*)")
+    hits: dict[str, set] = {}
+    try:
+        p = _c.manifest_path()
+        raw = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        cfgs = {str(r.get("mcpConfig") or "") for r in _c.install_rows(raw)}
+    except Exception:
+        cfgs = set()
+    for f in sorted(c for c in cfgs if c):
+        try:
+            text = open(f, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        for m in pat.finditer(text):
+            if _c.volatile_interpreter(m.group(1)):
+                hits.setdefault(m.group(1), set()).add(f)
+    for exe, files in hits.items():
+        print(f"[doctor] 启动解释器在会被清理的目录：{exe}（{len(files)} 份宿主配置）"
+              "——缓存被清后这些宿主会起不来；重建稳定环境后用它的 python 重跑 install")
+    if hits:
+        print("[doctor] 判定：只报告不改配置（换解释器要重装，属用户动作）")
+
+
 def cmd_doctor(args=None):
     target = (getattr(args, "target", "") or "") if args else ""
     problems = []
@@ -687,6 +718,7 @@ def cmd_doctor(args=None):
         else:
             print(f"key: 有效（指纹 {chk['fingerprint']}）")
     _check_live_payloads(problems)
+    _check_volatile_interpreter()
     if problems:
         print(_render_problems(problems))
         sys.exit(1)

@@ -201,3 +201,58 @@ def test_s161_hermes_landing_respects_root_on_real_home(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "rh"))
     assert Path(hermes._spec()["configPath"]) == tmp_path / "rh" / "mcp" / "vod-devkit.json"
     assert hermes._cli_env()["HERMES_HOME"] == str(tmp_path / "rh")
+
+
+def test_command_args_npx_form(monkeypatch):
+    """D-interpreter-1：npx 形态把解释器/载荷解析推迟到启动时。"""
+    from vod_mcp import __version__ as ver
+    from vod_mcp.host_adapters import base
+
+    monkeypatch.setattr(base, "_version_published", lambda v: True)
+    monkeypatch.setattr(base.shutil, "which", lambda name: "/usr/bin/node")
+    args = type("A", (), {"mcp_launcher": "npx"})()
+    cmd, argv = base.command_args(args, "/tmp/p/vod_mcp/server.py")
+    assert cmd == "npx"
+    assert argv == ["-y", "-p", f"vod-devkit@{ver}", "vod-devkit-mcp"]
+
+
+def test_command_args_python_form(monkeypatch):
+    from vod_mcp.host_adapters import base
+    import sys
+
+    args = type("A", (), {"mcp_launcher": "python"})()
+    cmd, argv = base.command_args(args, "/tmp/p/vod_mcp/server.py")
+    assert cmd == sys.executable and argv == ["/tmp/p/vod_mcp/server.py"]
+
+
+def test_command_args_falls_back_when_version_unpublished(monkeypatch):
+    """该版本在 registry 上不存在（E404）：npx 钉版本会 404 → 必须回 python。"""
+    from vod_mcp.host_adapters import base
+    import sys
+
+    monkeypatch.setattr(base.shutil, "which", lambda name: "/usr/bin/node")
+    monkeypatch.setattr(base, "_version_published", lambda v: False)
+    args = type("A", (), {"mcp_launcher": "npx"})()
+    cmd, argv = base.command_args(args, "/tmp/p/vod_mcp/server.py")
+    assert cmd == sys.executable and argv == ["/tmp/p/vod_mcp/server.py"]
+
+
+def test_command_args_auto_without_node(monkeypatch):
+    from vod_mcp.host_adapters import base
+    import sys
+
+    monkeypatch.setattr(base.shutil, "which", lambda name: None)
+    args = type("A", (), {"mcp_launcher": "auto"})()
+    cmd, _ = base.command_args(args, "/tmp/p/vod_mcp/server.py")
+    assert cmd == sys.executable
+
+
+def test_launcher_bin_is_declared_and_shipped():
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    pkg = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    assert pkg["bin"]["vod-devkit-mcp"] == "./npm/mcp-launcher.js"
+    assert "npm/mcp-launcher.js" in pkg["files"]
+    assert (root / "npm" / "mcp-launcher.js").is_file()
