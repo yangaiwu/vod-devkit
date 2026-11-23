@@ -29,6 +29,7 @@ def _verifier():
 
 
 from vod_mcp.host_adapters import host_verify as _host_verify  # noqa: E402
+from vod_mcp import trace as _trace
 
 _host_verify.register_verifier(HOST, _verifier)
 
@@ -84,14 +85,14 @@ def _effective_hermes_home() -> Path | None:
     try:
         root.resolve().relative_to(home)
         return root                                  # 1) 隔离根内
-    except (OSError, ValueError):
-        pass
+    except (OSError, ValueError) as e:
+        _trace.suppress("hermes._effective_hermes_home", e)
     if real is not None:
         try:
             root.resolve().relative_to(real)
             return None                              # 2) 真实家目录派生（泄漏面）
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as e:
+            _trace.suppress("hermes._effective_hermes_home", e)
     return root                                      # 3) 显式运维配置（容器挂载卷等）
 
 

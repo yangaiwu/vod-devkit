@@ -116,8 +116,22 @@ _EXPLAIN_EXTRA = {
 }
 
 
+_CODE_RE = re.compile(r"-32\d{3}")
+
+
 def classify(message: str) -> tuple:
-    """把一条失败/警告文案归到 (层, 原因, 动作)。未收录 → ("未分类", "", "")。"""
+    """把一条失败/警告文案归到 (层, 原因, 动作)。未收录 → ("未分类", "", "")。
+
+    ARCH-ERR-06：**码优先于文案**。同一条错误在不同 raise 点文案不同，按文案归层
+    会出现"同一类错误两种层、取决于措辞"（历史上 `远程面…401` 排在 `-32010|产品`
+    之前，于是"产品未命中且探活失败"被判成网络）。现在先抽文案里的 `-32xxx` 码，
+    命中 _EXPLAIN_EXTRA 就用码表口径；文案正则只做兜底。
+    """
+    m = _CODE_RE.search(message or "")
+    if m:
+        hit = _EXPLAIN_EXTRA.get(m.group(0))
+        if hit:
+            return hit
     for pat, layer, cause, action in RULES:
         if re.search(pat, message):
             return layer, cause, action
@@ -135,13 +149,23 @@ def explain(text: str) -> dict:
 
 
 def group(problems: list) -> dict:
-    """按层分组（保持 LAYERS 顺序，未分类排最后）。"""
+    """按层分组（保持 LAYERS 顺序，未分类排最后，未知层按出现顺序追加）。
+
+    ARCH-ERR-06 附带修：码表里存在 LAYERS 之外的层（`认证`/`传输`/`引擎`/`内部`/`上游`），
+    旧实现用固定字典取桶 → 这些码一进报告就 `KeyError`。现在未知层动态建桶。
+    """
     buckets = {l: [] for l in LAYERS}
     buckets["未分类"] = []
+    extra = {}
     for msg in problems:
         layer, cause, action = classify(msg)
-        buckets[layer].append((msg, cause, action))
-    return {k: v for k, v in buckets.items() if v}
+        if layer in buckets:
+            buckets[layer].append((msg, cause, action))
+        else:
+            extra.setdefault(layer, []).append((msg, cause, action))
+    out = {k: v for k, v in buckets.items() if v}
+    out.update(extra)
+    return out
 
 
 def render_problems(problems: list) -> str:

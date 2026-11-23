@@ -11,8 +11,10 @@ import urllib.error
 import urllib.request
 
 from vod_mcp import DEFAULT_JAVA_BASE
+from vod_mcp import errors
 from vod_mcp import runtime_state as rt
 from vod_mcp import server_face
+from vod_mcp import trace as _trace
 
 
 _REQ_KEY = contextvars.ContextVar("vod_req_key", default=None)
@@ -84,11 +86,41 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def _eff_key(explicit=None) -> str:
-    """当前生效的 key：显式参数 > 请求头（HTTP 面）> env/runtime（stdio 面）。"""
+# ARCH-CFG-05：凭据三入口的**优先级只在这里定义一次**（此前判据散在 _eff_key、
+# _java_key、auth_status、doctor 四处，注释里的顺序还各不相同）。
+# 序：显式参数 > 请求头 Bearer > env(VOD_JAVA_API_KEY) > runtime.json > 进程镜像。
+KEY_SOURCES = ("explicit", "header", "env", "runtime", "mirror", "none")
+
+
+def resolve_key(explicit=None) -> tuple:
+    """返回 (key, source)：source ∈ KEY_SOURCES，供 auth_status/doctor 如实报告档位。"""
     if explicit is not None:
-        return explicit
-    return _REQ_KEY.get() or _java_key()
+        return explicit, "explicit"
+    override = globals().get("JAVA_KEY")       # 模块属性补丁面（测试/历史赋值）视为显式
+    if override:
+        return str(override), "explicit"
+    req = _REQ_KEY.get()
+    if req:
+        return req, "header"
+    env = (os.environ.get("VOD_JAVA_API_KEY") or "").strip()
+    if env:
+        return env, "env"
+    try:
+        val = rt._runtime_cfg().get("java_key")
+    except Exception as e:                  # noqa: BLE001  状态文件坏 → 按"未配置"继续
+        _trace.suppress("net.resolve_key", e)
+        val = None
+    if val:
+        return str(val), "runtime"
+    mirror = (rt._RT or {}).get("java_key")
+    if mirror:
+        return str(mirror), "mirror"
+    return "", "none"
+
+
+def _eff_key(explicit=None) -> str:
+    """当前生效的 key（优先级见 resolve_key 单点定义）。"""
+    return resolve_key(explicit)[0]
 
 
 _META_PATH = "/rest/developer/manager/hdvodmngservice/v1/external/meta"
@@ -153,8 +185,8 @@ def _load_meta(force: bool = False) -> dict:
         if token:
             try:
                 rt._runtime_update({"java_key": token, "token_tier": "anonymous"})
-            except Exception:
-                pass
+            except Exception as e:
+                _trace.suppress("net._load_meta", e)
             try:
                 out = _http("GET", _META_PATH, None, base=_java_base(), key=token, timeout=10)
                 data = out.get("data") or {}
@@ -164,8 +196,8 @@ def _load_meta(force: bool = False) -> dict:
                             "catalog": data.get("productCatalog") or [],
                             "dictVersion": data.get("dictVersion"),
                             "stale": False, "source": "meta-anon"}
-            except ToolError:
-                pass
+            except ToolError as e:
+                _trace.suppress("net._load_meta", e)
     # 快照不含分类白名单：collect._allowed_tags 取不到产品分类时 allowed 为空=不校验
     # （宁可放行也不误杀采集）
     return {"products": _META_SNAPSHOT["products"], "catalog": [],
@@ -173,19 +205,10 @@ def _load_meta(force: bool = False) -> dict:
             "stale": True, "source": "snapshot"}
 
 
-class ToolError(Exception):
-    """工具层错误。`code` 必须是 JSON-RPC 合法错误码（`-32xxx` 段）。
-
-    ARCH-ERR-03：**上游 HTTP 状态码不许进 `code`**——`429`/`500` 落在协议保留段之外，
-    宿主无法按 JSON-RPC 分类；也不该让 `explain 500` 落到"未分类"。
-    上游真实状态码放 `upstream_status`，供内部按码分流（如 collect 判 404）。
-    """
-
-    def __init__(self, message: str, code: int = -32000, *,
-                 upstream_status: int | None = None):
-        super().__init__(message)
-        self.code = code
-        self.upstream_status = upstream_status
+# ToolError 真源在 errors.py（ARCH-DEP-03）：net 只做别名导出，既有 `net.ToolError`
+# 调用点与 `isinstance(e, net.ToolError)` 判定继续有效。知识包等低层模块直接引 errors，
+# 不再为"一个异常类"反向依赖网络出口层。
+ToolError = errors.ToolError
 
 
 def _http_error_code(status: int) -> int:

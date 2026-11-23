@@ -302,3 +302,26 @@ def test_tools_call_without_arguments_is_accepted(remote):
     data = json.loads(body)
     assert "error" not in data, data
     assert data["result"].get("isError") is not True, data
+
+
+def test_sentinel_key_ignores_reused_object_addresses():
+    """ARCH-CALL-03 验收：哨兵登记不许靠 `id(manager)` 的地址语义。
+
+    真实故障形态：manager 被回收 → CPython 复用地址 → 新 manager 查表命中旧 sid →
+    首发 404「Session not found」。修法=一次性 mkey + 表内强引用 + is 复核。
+    """
+    from vod_mcp import transport_remote as tr
+
+    class M:
+        pass
+
+    a, b = M(), M()
+    ka = tr._manager_key(a)
+    # 模拟"地址复用"：直接把 b 的地址指到 a 的旧键上（等价于回收后 id 撞车）
+    with tr._SENTINEL_LOCK:
+        tr._MANAGER_KEYS[id(b)] = ka
+    kb = tr._manager_key(b)
+    assert kb != ka, "地址复用必须分配新键，不得继承旧 manager 的哨兵会话"
+    assert tr._MANAGER_KEYS[id(b)] == kb
+    assert tr._MANAGERS[kb] is b and tr._MANAGERS[ka] is a
+    assert tr._sentinel_peek(b) == {}, "新实例不得看到别人的哨兵登记"

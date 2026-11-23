@@ -29,6 +29,7 @@ from pathlib import Path
 from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import server_env, server_entry
+from vod_mcp import trace as _trace
 
 HOST = "officeace"
 SUPPORTS_REMOTE = False
@@ -171,8 +172,8 @@ def remove_rows(db_path: Path) -> int:
             try:
                 db.execute("DELETE FROM mcp_connector_tools WHERE connector_id IN "
                            "(SELECT id FROM mcp_connectors WHERE name = ?)", (NAME,))
-            except sqlite3.Error:
-                pass          # 最小安装可能缺该表；连接器行仍要删
+            except sqlite3.Error as e:
+                _trace.suppress("officeace.remove_rows", e)
         n = db.execute("DELETE FROM mcp_connectors WHERE name = ?", (NAME,)).rowcount
         db.commit()
         return max(n, 0)
@@ -209,8 +210,8 @@ def _prune_snapshots(db_path: Path, days: int = 7) -> None:
         try:
             if old.stat().st_mtime < cutoff:
                 old.unlink()
-        except OSError:
-            pass
+        except OSError as e:
+            _trace.suppress("officeace._prune_snapshots", e)
 
 
 def _restore(snapshot: Path, db_path: Path) -> None:

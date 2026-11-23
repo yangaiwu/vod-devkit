@@ -8,6 +8,7 @@ from pathlib import Path
 
 from vod_mcp import hosts as host_specs
 from vodkit_cli import common
+from vod_mcp import trace as _trace
 
 
 _SHARED_CONFIG_NAMES = {"config.toml", "config.yaml", "config.yml",
@@ -333,8 +334,8 @@ def cmd_uninstall(args=None):
             from vod_mcp import payload as _payload
             try:
                 _payload.marker_path().unlink(missing_ok=True)
-            except Exception:
-                pass
+            except Exception as e:
+                _trace.suppress("uninstall.cmd_uninstall", e)
         common.atomic_write_text(p, json.dumps(mf, ensure_ascii=False, indent=2))
         print(f"removed install row(s): {', '.join(r.get('target','?') for r in rows)}"
               f"（保留 {', '.join(r.get('target','?') for r in remaining)}）")
@@ -342,8 +343,8 @@ def cmd_uninstall(args=None):
         from vod_mcp import payload as _payload
         try:
             _payload.marker_path().unlink(missing_ok=True)
-        except Exception:
-            pass
+        except Exception as e:
+            _trace.suppress("uninstall.cmd_uninstall", e)
         p.unlink()
         print("removed:", p)
     if clean_global:

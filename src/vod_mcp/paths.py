@@ -26,9 +26,11 @@
 """
 import json
 import os
+import stat
 import tempfile
 import warnings
 from pathlib import Path
+from vod_mcp import trace as _trace
 
 # 物理包位置：本文件在 <root>/vod_mcp/ 下（仓内=src/、载荷/插件副本=各自根）
 _PKG_PARENT = Path(__file__).resolve().parent.parent
@@ -130,6 +132,23 @@ def machine_state_home() -> Path:
     return Path(os.path.expanduser("~")) / ".vod-devkit" / _STATE_DIRNAME
 
 
+def ensure_state_home() -> Path:
+    """确保机器级 state 目录存在且为 0700（ARCH-CFG-06）。
+
+    历史形态：只有"从旧位迁移"那条路会 chmod 0700，全新安装（或用户手工 mkdir 的）
+    目录可能停在 0755 —— 里面有 runtime.json（引擎 key），组/其他用户可枚举。
+    这里统一收紧：建目录时按 0700，已存在的宽权限只收紧不放宽（与 CFG-01 同口径）。
+    """
+    state = machine_state_home()
+    state.mkdir(parents=True, exist_ok=True)
+    try:
+        if stat.S_IMODE(os.stat(state).st_mode) & 0o077:
+            os.chmod(state, 0o700)
+    except OSError as e:
+        _trace.suppress("paths.ensure_state_home", e)
+    return state
+
+
 def legacy_runtime_json() -> Path:
     """旧位置（版本目录内）：只作兼容/迁移来源，不再作为日常真源。"""
     return DIST_ROOT / "vod_mcp" / "runtime.json"
@@ -171,8 +190,8 @@ def migrate_state_once() -> dict:
         os.chmod(target, 0o600)
         try:
             os.chmod(state, 0o700)
-        except OSError:
-            pass
+        except OSError as e:
+            _trace.suppress("paths.migrate_state_once", e)
         atomic_write_text(marker, json.dumps({"from": str(legacy), "migrated": True}) + "\n")
         return {"migrated": True, "from": str(legacy), "reason": None}
     except OSError:
@@ -256,6 +275,6 @@ def atomic_write_text(path: Path | str, text: str, mode: int | None = None) -> N
     except BaseException:
         try:
             os.unlink(tmp)
-        except OSError:
-            pass
+        except OSError as e:
+            _trace.suppress("paths.atomic_write_text", e)
         raise

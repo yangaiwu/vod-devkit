@@ -180,3 +180,43 @@ def test_http_error_carries_upstream_status_for_internal_branching():
     assert err.upstream_status == 429, err.upstream_status
     # 文案里仍保留原始状态码，便于人读排障
     assert "429" in str(err)
+
+
+def test_layer_is_stable_per_code():
+    """ARCH-ERR-06 验收：对每个已知码，文案换了（同义词/顺序颠倒）层不变。
+
+    历史缺陷：`远程面|探活|不可达|401` 在 RULES 里排在 `-32010|产品` 之前，
+    于是"产品未命中且探活失败 -32010"会被判成「网络」，只提产品时又判「配置」。
+    """
+    from vod_mcp import diagnose
+
+    codes = {k: v for k, v in diagnose._EXPLAIN_EXTRA.items() if k.startswith("-32")}
+    assert codes, "码表为空，用例失去意义"
+    for code, (layer, _cause, _action) in codes.items():
+        variants = [
+            f"远程面探活失败，工具返回 {code}（网络看起来不可达）",
+            f"{code}: 业务侧直接给出的错误码，没有其它关键词",
+            f"上游 401 与产品无关，纯粹是 {code} 这个码",
+        ]
+        got = {diagnose.classify(v)[0] for v in variants}
+        assert got == {layer}, f"{code} 归层随文案漂移：{got} ≠ {layer}"
+
+
+def test_explain_and_classify_agree_on_code():
+    """explain(text) 与 classify(text) 对同一码必须给同一层（消除双轨）。"""
+    from vod_mcp import diagnose
+
+    for code in [k for k in diagnose._EXPLAIN_EXTRA if k.startswith("-32")]:
+        text = f"任意措辞 {code} 尾巴"
+        assert diagnose.explain(text)["layer"] == diagnose.classify(text)[0]
+
+
+def test_group_never_keyerrors_on_unknown_layers():
+    """码表用到 LAYERS 之外的层（认证/传输/引擎/内部/上游）时，报告分组不得 KeyError。"""
+    from vod_mcp import diagnose
+
+    msgs = [f"某错误 {code}" for code in diagnose._EXPLAIN_EXTRA if code.startswith("-32")]
+    grouped = diagnose.group(msgs)
+    total = sum(len(v) for v in grouped.values())
+    assert total == len(msgs)
+    diagnose.render_problems(msgs)          # 渲染路径同样不许炸

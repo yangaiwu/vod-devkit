@@ -32,6 +32,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from vod_mcp import trace as _trace
 
 PENDING_DIRNAME = ".vod-devkit"
 PENDING_FILENAME = "pending-feedback.jsonl"
@@ -51,8 +52,8 @@ def _warn(msg: str) -> None:
     try:
         from vod_mcp import runtime_state as _rt
         _rt._log(f"warn pending: {msg}")
-    except Exception:      # noqa: BLE001  日志出口失败不许影响主链
-        pass
+    except Exception as e:      # noqa: BLE001  日志出口失败不许影响主链
+        _trace.suppress("pending._warn", e)
     print(f"[vod-devkit] warn: {msg}", file=sys.stderr)
 
 

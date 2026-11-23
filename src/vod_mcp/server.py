@@ -28,11 +28,12 @@ if sys.version_info < (3, 10):
         % sys.version_info[:2])
     sys.exit(2)
 
-from vod_mcp import (guardrails, instructions, packs, runtime_state, server_face,  # noqa: E402
+from vod_mcp import (guardrails, instructions, packs, protocol, runtime_state,  # noqa: E402
                     skills_registry, tools)
+from vod_mcp import trace as _trace
 
 # 协议版本从单一真源取（ARCH-CALL-05）：此前这里定义常量却无人引用，另三处各写裸字面量。
-_PROTOCOL_VERSION = server_face.PROTOCOL_VERSION
+_PROTOCOL_VERSION = protocol.PROTOCOL_VERSION
 _client_info = {}
 
 
@@ -95,7 +96,7 @@ def handle(message: dict, client_info: dict | None = None) -> dict | list | None
         except tools.ToolError as e:
             return _error(req_id, e.code, str(e))
     if req_id is not None:
-        return _error(req_id, -32601, f"未知方法: {method}")
+        return _error(req_id, protocol.UNKNOWN_METHOD, f"未知方法: {method}")
     return None
 
 
@@ -104,8 +105,8 @@ def _consume_payload_marker() -> None:
     try:
         from vod_mcp import payload as _payload
         _payload.consume_marker()
-    except Exception:
-        pass
+    except Exception as e:
+        _trace.suppress("server._consume_payload_marker", e)
 
 
 def main():
@@ -147,8 +148,8 @@ def main():
     # 启动自诊（排障：写 /tmp，宿主过滤环境变量时可观察实际 env）
     try:
         runtime_state._ensure_first_boot()  # D-key-guard-3①：首启标记+构建机残留清理（preset 兜底）
-    except Exception:
-        pass
+    except Exception as e:
+        _trace.suppress("server.main", e)
     runtime_state._log(f"started pid={os.getpid()} argv={sys.argv} "
                        f"VOD_PACKS={os.environ.get('VOD_PACKS')!r} "
                        f"distribution={runtime_state._distribution()} "
@@ -172,7 +173,7 @@ def main():
         try:
             message = json.loads(line)
         except json.JSONDecodeError:
-            resp = _error(None, -32700, "解析错误")
+            resp = _error(None, protocol.PARSE_ERROR, "解析错误")
         else:
             # ARCH-ERR-05：stdio 面也记请求级关联（tool/耗时/结果码），
             # 与远程面同一出口、同一字段集，排障时两面可统一检索。
@@ -186,11 +187,11 @@ def main():
                 # 不含 Exception 之外的 KeyboardInterrupt/SystemExit（那两个必须照常退出）
                 runtime_state._log(f"handle uncaught: {type(e).__name__}: {e}",
                                    level="error", event="stdio_call", req_id=_rid,
-                                   tool=_tool, code=-32603,
+                                   tool=_tool, code=protocol.INTERNAL_ERROR,
                                    duration_ms=round((time.monotonic() - _t0) * 1000, 1))
                 print(f"[vod-devkit] error: {type(e).__name__}: {e}", file=sys.stderr)
                 resp = _error(message.get("id") if isinstance(message, dict) else None,
-                              -32603, "内部错误（已记录日志）")
+                              protocol.INTERNAL_ERROR, "内部错误（已记录日志）")
             else:
                 _method = message.get("method") if isinstance(message, dict) else None
                 runtime_state._log("stdio 调用完成", event="stdio_call", req_id=_rid,

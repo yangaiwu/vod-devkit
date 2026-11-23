@@ -4,6 +4,7 @@ import os
 import sys
 
 from vod_mcp import paths, server_face
+from vod_mcp import trace as _trace
 
 
 def _expected_remote_tools() -> set:
@@ -190,14 +191,14 @@ def _write_catalog_cache(base: str, catalog: list) -> None:
         except OSError as e:  # noqa: BLE001  权限设不上要能看见（缓存里有产品名录，不算密钥）
             print(f"[vod-devkit] 产品名录缓存权限设置失败（{e}），继续使用", file=sys.stderr)
         os.replace(tmp, p)
-    except OSError:
-        pass                  # 缓存写不进不是安装的失败条件
+    except OSError as e:
+        _trace.suppress("remote._write_catalog_cache", e)
     finally:
         if tmp.exists():
             try:
                 tmp.unlink()
-            except OSError:
-                pass
+            except OSError as e:
+                _trace.suppress("remote._write_catalog_cache", e)
 
 
 def _validate_product_or_exit(product: str, base: str, refresh: bool = False) -> bool:

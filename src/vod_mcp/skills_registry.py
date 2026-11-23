@@ -63,8 +63,9 @@ def _skill_dirs() -> list:
 
 
 def _server_face() -> bool:
-    from vod_mcp import net
-    return bool(net._SERVER_FACE.get())
+    """远程面判定走零依赖真源（ARCH-DEP-03），不再为了一个布尔值 import 网络出口层。"""
+    from vod_mcp import server_face
+    return server_face.is_remote()
 
 
 def list_skills(params: dict) -> dict:

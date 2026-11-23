@@ -5,8 +5,10 @@
 """
 import os
 
+from vod_mcp import errors
 from vod_mcp import attribution as _attrib
 from vod_mcp import net, provenance
+from vod_mcp import trace as _trace
 
 
 def search_products(params: dict) -> dict:
@@ -25,8 +27,8 @@ def search_products(params: dict) -> dict:
     if not catalog:
         try:
             auth_ensure({})
-        except Exception:          # 领不到令牌不是本工具的错，下面照实报不可用
-            pass
+        except Exception as e:          # 领不到令牌不是本工具的错，下面照实报不可用
+            _trace.suppress("core.search_products", e)
         meta = net._load_meta(force=True)
         catalog = meta.get("catalog") or []
     if not catalog:
@@ -109,7 +111,7 @@ def packs_configure(params: dict, client_info: dict | None = None) -> dict:
     enable = _pack_ids(params.get("enable") or [])
     disable = _pack_ids(params.get("disable") or [])
     if not reset and not enable and not disable:
-        raise net.ToolError("参数为空：给 enable / disable（包 id）或 reset=true", code=-32602)
+        raise errors.ToolError("参数为空：给 enable / disable（包 id）或 reset=true", code=-32602)
     current = _packs.effective_packs()
     try:
         if reset:
@@ -118,10 +120,10 @@ def packs_configure(params: dict, client_info: dict | None = None) -> dict:
             want = [p for p in current if p not in set(disable)] + enable
             new = _packs.set_runtime_packs(want)
     except _packs.UnknownPack as e:
-        raise net.ToolError(str(e), code=-32602) from e
+        raise errors.ToolError(str(e), code=-32602) from e
     except _packs.PackRefused as e:
         # 安全门禁拒绝（熔断）：不是参数错，别让模型以为改个拼写就能开
-        raise net.ToolError(str(e), code=-32015) from e
+        raise errors.ToolError(str(e), code=-32015) from e
     added = [p for p in new if p not in current]
     removed = [p for p in current if p not in new]
     return {
@@ -148,6 +150,8 @@ def auth_status(params: dict, client_info: dict | None = None) -> dict:
     req_key = net._eff_key() if net._SERVER_FACE.get() else None
     out = {
         "javaKey": net._key_state(),
+        "keySource": net.resolve_key()[1],       # ARCH-CFG-05：档位单点定义，如实报来源
+
         "packs": sorted(__import__("vod_mcp.packs", fromlist=["effective_packs"]).effective_packs()),
     }
     if req_key:
@@ -242,7 +246,7 @@ def auth_ensure(params: dict, client_info: dict | None = None) -> dict:
     if not token:
         hint = ("；远程面若绑定非回环地址，代领默认关闭——请带 Authorization: Bearer <key>，"
                 "或服务端以 --allow-anon-mint 显式开启" if net.ANON_MINT_DISABLED else "")
-        raise net.ToolError(
+        raise errors.ToolError(
             "未配置接入 key 且匿名令牌端点不可用。引导："
             + "；".join(str(g["label"]) for g in net._KEY_GUIDANCE) + hint, code=-32012)
     rt._runtime_update({"java_key": token, "token_tier": "anonymous"})

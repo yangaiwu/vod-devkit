@@ -12,6 +12,7 @@ from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp import paths as paths_mod
 from vodkit_cli import common, remote
+from vod_mcp import trace as _trace
 
 
 def cmd_status(args=None):
@@ -478,8 +479,8 @@ def cmd_doctor(args=None):
             if st.exists() and lg.exists():
                 print(f"[doctor] 注意：机器级 state 与旧位并存（旧位 {lg} 已不再写入、"
                       "未并入 state；确认无用后可手工清理）")
-        except Exception:  # noqa: BLE001  诊断不应因该项失败而中断
-            pass
+        except Exception as e:  # noqa: BLE001  诊断不应因该项失败而中断
+            _trace.suppress("doctor.cmd_doctor", e)
         # 载荷并存可见（0.5.12）：install 不删旧载荷——删错的后果是某个宿主配置里
         # 的 server.py 路径消失（白屏/工具全失），所以只报「谁在用哪份、哪份没人引用」，
         # 清理由人决定。真机实锤：机器上同时躺着 0.5.9/0.5.10/0.5.11 三份。
@@ -510,8 +511,8 @@ def cmd_doctor(args=None):
                       + (f"；可清理（安装行与 dsh 配置都未引用）{orphans}"
                          "（不自动删——doctor 与 prune 是同一判定，删前仍建议看一眼）"
                          if orphans else ""))
-        except Exception:  # noqa: BLE001  诊断项失败不阻断整体
-            pass
+        except Exception as e:  # noqa: BLE001  诊断项失败不阻断整体
+            _trace.suppress("doctor.cmd_doctor", e)
         if mf.get("transport") == "remote" and mf.get("mcpUrl"):
             url = mf["mcpUrl"]
             token = (os.environ.get("VOD_MCP_TOKEN")

@@ -16,6 +16,7 @@ from vod_mcp import hosts as host_specs
 
 # 分发根（manifest / build-info / 载荷入口相对它）；包根在 src/，由 paths 负责
 from vod_mcp import paths as _paths
+from vod_mcp import trace as _trace
 
 ROOT = _paths.DIST_ROOT
 
@@ -126,8 +127,8 @@ def _skill_installs(manifest_path: Path, extra_dirs) -> list:
                 # （fake-home 测试）不吞真实 HOME 的历史落点，卸载残留自动剪枝
                 if d.startswith(home) and Path(d).is_dir():
                     prev[(si["host"], d)] = si
-        except Exception:
-            pass
+        except Exception as e:
+            _trace.suppress("common._skill_installs", e)
     for h, d in [("hermes", HERMES_SKILLS_DIR)] + list(extra_dirs or []):
         if d is not None:
             prev[(h, str(d))] = {"host": h, "dir": str(d)}

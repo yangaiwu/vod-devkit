@@ -67,3 +67,26 @@ def test_s140_missing_runtime_falls_back_to_mirror(tmp_path, monkeypatch):
     monkeypatch.delenv("VOD_JAVA_API_KEY", raising=False)
     monkeypatch.setattr(rt, "_RT", {"java_key": "mirrored"})
     assert net.JAVA_KEY == "mirrored"
+
+def test_provenance_paths_are_live(tmp_path, monkeypatch):
+    """ARCH-DEP-06 验收：换根后 build-info/manifest 路径必须现读，不重启、不重新 import。"""
+    import json
+    from pathlib import Path
+
+    from vod_mcp import paths as paths_mod
+    from vod_mcp import payload as payload_mod
+    from vod_mcp import provenance
+
+    root_a = tmp_path / "rootA"
+    root_b = tmp_path / "rootB"
+    for root, ver in ((root_a, "9.9.9"), (root_b, "8.8.8")):
+        root.mkdir()
+        (root / "build-info.json").write_text(json.dumps({"version": ver}), encoding="utf-8")
+
+    monkeypatch.setattr(paths_mod, "ROOT", root_a)
+    assert provenance.read_build_info()["version"] == "9.9.9"
+    assert payload_mod._root() == Path(root_a)
+
+    monkeypatch.setattr(paths_mod, "ROOT", root_b)          # 同一进程内换根
+    assert provenance.read_build_info()["version"] == "8.8.8", "换根后仍读到旧根 = 路径被 import 期冻结"
+    assert payload_mod._root() == Path(root_b)

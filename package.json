@@ -54,6 +54,9 @@
     "src/vod_mcp/tools.py",
     "src/vod_mcp/transport_remote.py",
     "src/vod_mcp/update_check.py",
+    "src/vod_mcp/errors.py",
+    "src/vod_mcp/protocol.py",
+    "src/vod_mcp/trace.py",
     "src/vod_mcp/host_adapters/",
     "src/vod_mcp/packs/"
   ],

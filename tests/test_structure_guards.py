@@ -353,3 +353,46 @@ def test_all_protocol_version_uses_reference_the_constant():
         assert "PROTOCOL_VERSION" in text, f"{rel} 未引用协议版本常量（又写了裸字面量）"
     # 常量本身有值，且 initialize 回包用的是它
     assert server_face.PROTOCOL_VERSION == "2025-06-18"
+
+
+def test_packs_do_not_import_net_for_errors():
+    """ARCH-DEP-03 验收：pack 不许借 `net.ToolError` 当领域错误基类（只有出口层能 import net）。
+
+    历史形态：`packs/knowledge.py` 为了把 `SkillError` 转成 `net.ToolError` 反向依赖 net，
+    于是"纯知识、零依赖"的 pack 在没有出口层的上下文里 import 不了。
+    判据：① 任何 pack 里不许出现 `net.ToolError`；② knowledge.py 整文件不许 import net
+    （collect/core 真要发请求，import net 是本职，不在本条约束内）。
+    """
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent / "src" / "vod_mcp" / "packs"
+    bad = []
+    for f in sorted(root.rglob("*.py")):
+        text = f.read_text(encoding="utf-8")
+        tree = ast.parse(text)
+        imports_net = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                mod = node.module or ""
+                if mod == "vod_mcp" and any(a.name == "net" for a in node.names):
+                    imports_net = True
+                if mod.startswith("vod_mcp.net"):
+                    imports_net = True
+        uses_net_toolerror = any(
+            isinstance(n, ast.Attribute) and n.attr == "ToolError"
+            and isinstance(n.value, ast.Name) and n.value.id == "net"
+            for n in ast.walk(tree)
+        )
+        if uses_net_toolerror:
+            bad.append(f"{f.name}: 代码里仍调用 net.ToolError")
+        if f.name == "knowledge.py" and imports_net:
+            bad.append(f"{f.name}: 仍 import net（纯知识包必须零依赖出口层）")
+    assert not bad, "packs 错误口径仍依赖出口层：" + "; ".join(bad)
+
+
+def test_tool_error_truth_lives_in_errors_module():
+    """ToolError 真源在 errors，net 只做别名（否则有人会再用 net.ToolError 造反向依赖）。"""
+    from vod_mcp import errors, net
+    assert net.ToolError is errors.ToolError
+    assert net.ToolError.__module__ == "vod_mcp.errors"

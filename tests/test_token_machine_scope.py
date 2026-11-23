@@ -318,3 +318,34 @@ def test_s145_draft_is_owned_by_creating_client(monkeypatch):
     out = collect.commit_voices({"draftId": draft["draftId"],
                                  "approvalToken": draft["approvalToken"]}, a)
     assert out["twoPhase"] is True and submitted["by"] == "hermes"
+
+def test_state_dir_is_private_on_fresh_install(tmp_path, monkeypatch):
+    """ARCH-CFG-06 验收：全新安装（无迁移路径）也要把 state 目录收到 0700。
+
+    历史形态：只有"从旧位迁移"那条路 chmod 0700；手册式 mkdir 或老版本留下的目录
+    会停在 0755 —— 里面有 runtime.json（引擎 key），同机组/其他用户可枚举。
+    本用例只验权限不变量（不依赖 runtime 读写路径的内部实现），并用真实的原子写
+    再验一次"写完权限没被放宽"。
+    """
+    import os
+    import stat as stat_mod
+
+    from vod_mcp import paths
+
+    home = tmp_path / "state"
+    home.mkdir(mode=0o755)
+    os.chmod(home, 0o755)                      # 模拟"本来就宽"的历史目录
+    monkeypatch.setenv("VOD_DEVKIT_HOME", str(home))
+
+    paths.ensure_state_home()
+    assert stat_mod.S_IMODE(os.stat(home).st_mode) == 0o700, oct(os.stat(home).st_mode)
+
+    # 真实写入（原子写单源）后：目录仍是 0700，文件 0600
+    target = home / "runtime.json"
+    paths.atomic_write_text(target, '{"k": 1}', mode=0o600)
+    assert stat_mod.S_IMODE(os.stat(home).st_mode) == 0o700
+    assert stat_mod.S_IMODE(os.stat(target).st_mode) == 0o600
+
+    # 幂等：再调一次不许把权限放宽
+    paths.ensure_state_home()
+    assert stat_mod.S_IMODE(os.stat(home).st_mode) == 0o700

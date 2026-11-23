@@ -29,6 +29,7 @@ import threading
 from vod_mcp import net, paths, server_face
 from vod_mcp.remote_app import SIDELESS_MARK_HEADER
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from vod_mcp import trace as _trace
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9528
@@ -301,13 +302,32 @@ async def _ensure_session_for_sideless(manager, scope: dict):
     return new_scope
 
 
-# 哨兵会话登记（进程级）：按 manager 实例绑定 {id(manager): {"sid":..., "at":...}}
+# 哨兵会话登记（进程级）：按 **manager 实例的稳定标识** 绑定 {mkey: {"sid","at","manager"}}
+# ARCH-CALL-03：此前用 `id(manager)` 当键——id 只是对象地址，对象被回收后地址可被复用，
+# 新 manager 可能"继承"上一条已失效的 sid（表现为首发 404「Session not found」），
+# 而且这条耦合只存在于 CPython 的实现细节里。现在改为：① 每个 manager 在登记表里
+# 分配一次性 mkey；② 表里同时**强引用** manager，用 `is` 校验同一性——地址复用不可能
+# 命中别人的记录，对象也不可能在登记期间被回收。
 # 🔴 必须按 manager 绑定，不能只存一份全局 sid：会话归属 manager 实例
 #    （它的 _server_instances），进程内新建一个 manager（重启/重建 runtime、
 #    多实例测试）后旧 sid 一律 404。本会话实测：只存全局 → 同进程第二个
 #    runtime 起来后第一发就吃「Session not found」。
 _SENTINEL: dict = {}
 _SENTINEL_LOCK: threading.Lock = threading.Lock()
+_MANAGER_KEYS: dict = {}      # id(manager) -> mkey（仅用于找键，命中后仍用 is 复核）
+_MANAGERS: dict = {}          # mkey -> manager（强引用，防 id 复用与提前回收）
+
+
+def _manager_key(manager) -> str:
+    """取（必要时分配）manager 的稳定标识。地址复用不会串记录（is 复核）。"""
+    import uuid
+    with _SENTINEL_LOCK:
+        k = _MANAGER_KEYS.get(id(manager))
+        if k is None or _MANAGERS.get(k) is not manager:
+            k = uuid.uuid4().hex
+            _MANAGER_KEYS[id(manager)] = k
+            _MANAGERS[k] = manager
+        return k
 # 与 SDK 的 session_idle_timeout 同源（SCOPE_TTL_SEC）。留一半余量：
 # 哨兵在"半个 TTL 内没被用过"就先自己重建，避免拿着一条已被回收的 sid
 # 让客户端吃 404「Session not found」。
@@ -337,9 +357,12 @@ def _reset_sideless_state(keep_sid: str | None = None, manager=None) -> None:
             if keep_sid:
                 _SENTINEL["__global__"] = {"sid": keep_sid, "at": -1e12}
         else:
-            _SENTINEL.pop(id(manager), None)
+            k = _MANAGER_KEYS.get(id(manager))
+            if k is None or _MANAGERS.get(k) is not manager:
+                return
+            _SENTINEL.pop(k, None)
             if keep_sid:
-                _SENTINEL[id(manager)] = {"sid": keep_sid, "at": -1e12}
+                _SENTINEL[k] = {"sid": keep_sid, "at": -1e12, "manager": manager}
 
 
 def _sentinel_peek(manager=None) -> dict:
@@ -347,7 +370,12 @@ def _sentinel_peek(manager=None) -> dict:
     with _SENTINEL_LOCK:
         if manager is None:
             return dict(_SENTINEL.get("__global__") or {})
-        return dict(_SENTINEL.get(id(manager)) or {})
+        k = _MANAGER_KEYS.get(id(manager))
+        if k is None or _MANAGERS.get(k) is not manager:
+            return {}
+        rec = dict(_SENTINEL.get(k) or {})
+        rec.pop("manager", None)
+        return rec
 
 
 async def _sentinel_session(manager, scope: dict) -> str:
@@ -360,20 +388,22 @@ async def _sentinel_session(manager, scope: dict) -> str:
     import time as _time
 
     ttl = _sentinel_ttl()
-    key = id(manager)
+    key = _manager_key(manager)
     with _SENTINEL_LOCK:
         rec = _SENTINEL.get(key) or {}
+        if rec.get("manager") is not manager:      # 同一 mkey 只属于同一个实例
+            rec = {}
         sid = str(rec.get("sid") or "")
         at = float(rec.get("at") or 0)
         if sid and (_time.monotonic() - at) < ttl:
-            _SENTINEL[key] = {"sid": sid, "at": _time.monotonic()}
+            _SENTINEL[key] = {"sid": sid, "at": _time.monotonic(), "manager": manager}
             return sid
 
     sid = await _handshake_once(manager, scope)
     if not sid:
         return ""
     with _SENTINEL_LOCK:
-        _SENTINEL[key] = {"sid": sid, "at": _time.monotonic()}
+        _SENTINEL[key] = {"sid": sid, "at": _time.monotonic(), "manager": manager}
     sys.stderr.write("[vod-devkit] 兼容模式：已建立/复用兜底会话（compat-sideless）\n")
     return sid
 
@@ -661,8 +691,8 @@ def serve(host: str, port: int, allow_anon_mint: bool = False,
     print(f"vod-devkit MCP server (remote) listening on {host}:{real_port}", file=sys.stderr)
     try:
         httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
+    except KeyboardInterrupt as e:
+        _trace.suppress("transport_remote.serve", e)
     finally:
         httpd.server_close()
     return 0

@@ -134,3 +134,51 @@ def test_draft_uses_same_whitelist(monkeypatch):
     assert out["invalidTags"] == [{"index": 0, "tags": ["problem_type:瞎写的类"]}]
     draft = (saved.get("drafts") or {}).get(out["draftId"]) or {}
     assert draft["payload"]["voices"][0]["tags"] == ["problem_type:产品缺陷"]
+
+def test_free_text_fields_are_explicit():
+    """ARCH-CFG-07 验收：用户自由文本字段靠**显式白名单**剔除，不靠"新字段记得加"。
+
+    历史缺陷：`guard_scope` 只硬编码 `data` 与 `voices[].content` 两处，
+    新增一个装用户原话的字段（reproSteps/expectedBehavior/echo…）就默认进扫描面，
+    "反馈内容里引用了凭据"会被判成凭据读取意图。白名单还在，但要**被用例钉住**。
+    """
+    import json
+    import pathlib
+
+    from vod_mcp import policy
+
+    params = {
+        "product": "CodeArts",
+        "voices": [{"content": "我的 AK/SK 是 AKIA…，帮我看看", "reproSteps": "复现步骤",
+                    "expectedBehavior": "期望表现", "tags": ["problem_type:产品缺陷"]}],
+        "data": [{"raw": "x"}],
+        "originalLines": ["原话"],
+        "echo": {"contents": [{"content": "原话"}]},
+        "summary": "总结",
+        "query": "CodeArts",
+    }
+    scope = policy.guard_scope(params)
+    dumped = json.dumps(scope, ensure_ascii=False)
+    for key in policy.USER_TEXT_KEYS:
+        assert f'"{key}"' not in dumped, f"用户原话字段 {key} 仍进扫描面：{dumped}"
+    assert scope["product"] == "CodeArts" and scope["query"] == "CodeArts", "结构性字段必须保留"
+    assert scope["voices"][0]["tags"] == ["problem_type:产品缺陷"], "非原话字段必须保留"
+    assert scope["data"] == ["<%d records>" % 1] or scope["data"] == "<1 records>"
+
+    # 契约里声明的用户原话字段必须都在白名单表里（新增字段漏登记 → 这条红）
+    schema = json.loads((pathlib.Path(__file__).resolve().parent.parent
+                         / "assets" / "contract" / "tools.schema.json").read_text(encoding="utf-8"))
+
+    def props(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "properties" and isinstance(v, dict):
+                    yield from v.keys()
+                yield from props(v)
+        elif isinstance(node, list):
+            for item in node:
+                yield from props(item)
+
+    userish = {"content", "reproSteps", "expectedBehavior", "originalLines", "echo", "summary"}
+    leak = sorted(n for n in set(props(schema)) if n in userish and n not in policy.USER_TEXT_KEYS)
+    assert not leak, f"契约里有用户原话字段没登记进白名单：{leak}"

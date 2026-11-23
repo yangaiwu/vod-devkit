@@ -99,3 +99,56 @@ def test_policy_013_is_explained():
     from vod_mcp import diagnose
     got = diagnose.explain("-32017")
     assert got["known"] and got["cause"] and got["action"], got
+
+def test_policy_read_is_cached_until_mtime_changes(tmp_path, monkeypatch):
+    """ARCH-ERR-02 验收：同指纹下 open() 只发生一次；文件一改立刻重读（指纹而非 TTL）。"""
+    import builtins
+    import time
+    import json as _json
+
+    p = tmp_path / "policy.json"
+    p.write_text(_json.dumps({"rules": [{"id": "t1", "severity": "deny", "message": "m",
+                                        "match": {"tool": "vod_submit_voices", "equals": "x"}}]}),
+                 encoding="utf-8")
+    monkeypatch.setattr(policy, "_POLICY_PATH", p)
+    monkeypatch.setattr(policy, "_CACHE", {"sig": None, "policy": None, "regex": {}})
+
+    opened = []
+    real_open = builtins.open
+
+    def counting_open(path, *a, **kw):
+        if str(path) == str(p):
+            opened.append(str(path))
+        return real_open(path, *a, **kw)
+
+    monkeypatch.setattr(builtins, "open", counting_open)
+    policy.try_load_policy()
+    policy.try_load_policy()
+    policy.try_load_policy()
+    assert len(opened) == 1, f"同指纹下应只读盘一次，实际 {len(opened)} 次"
+
+    # 改内容 + 明确推进 mtime（同秒写入在很多文件系统上 mtime_ns 也会变，但这里不赌）
+    time.sleep(0.01)
+    p.write_text(_json.dumps({"rules": [{"id": "t2", "severity": "deny", "message": "m2",
+                                        "match": {"tool": "vod_submit_voices", "equals": "y"}}]}),
+                 encoding="utf-8")
+    pol = policy.try_load_policy()
+    assert pol["rules"][0]["id"] == "t2", "文件变更后必须立刻重读（缓存不得粘住旧规则）"
+    assert len(opened) == 2, f"变更后应再读一次，实际 {len(opened)} 次"
+
+
+def test_regex_is_compiled_at_load(tmp_path, monkeypatch):
+    """正则只在装载期编译一次：消费点取到的是已编译对象，且多次取回同一对象。"""
+    import json as _json
+
+    p = tmp_path / "policy.json"
+    p.write_text(_json.dumps({"rules": [{"id": "text1", "severity": "deny", "message": "m",
+                                        "match": {"field": "text", "regex": "secret\\s+key"}}]}),
+                 encoding="utf-8")
+    monkeypatch.setattr(policy, "_POLICY_PATH", p)
+    monkeypatch.setattr(policy, "_CACHE", {"sig": None, "policy": None, "regex": {}})
+    policy.try_load_policy()
+    got = policy._regex_for("text1")
+    assert got is not None, "装载期应已编译并缓存该规则正则"
+    assert got.pattern == "secret\\s+key"
+    assert policy._regex_for("text1") is got, "重复取用不得重新编译"

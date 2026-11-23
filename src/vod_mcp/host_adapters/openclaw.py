@@ -23,6 +23,7 @@ from pathlib import Path
 from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import server_env, server_entry
+from vod_mcp import trace as _trace
 
 HOST = "openclaw"
 SUPPORTS_REMOTE = True
@@ -187,8 +188,8 @@ def _entry_present(cli: str) -> bool:
                            capture_output=True, text=True, timeout=60)
         if r.returncode == 0:
             return True
-    except (OSError, subprocess.SubprocessError):
-        pass
+    except (OSError, subprocess.SubprocessError) as e:
+        _trace.suppress("openclaw._entry_present", e)
     try:
         return f'"{NAME}"' in _config_path().read_text(encoding="utf-8", errors="replace")
     except OSError:

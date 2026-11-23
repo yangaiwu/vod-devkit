@@ -48,8 +48,21 @@ IGNORE_PATTERNS = ("__pycache__", "runtime.json", "*.pyc", "*.log")
 BUILD_INFO = ("plugins/vod-devkit/build-info.json", "build-info.json")
 
 
+_VERSION_RE = re.compile(
+    r"""^__version__\s*(?::\s*[\w\[\]\., ]+)?\s*=\s*['"]([^'"]+)['"]""", re.M)
+
+
 def _version_from_init(path: Path) -> str:
-    return path.read_text(encoding="utf-8").split('__version__ = "')[1].split('"')[0]
+    """解析 `__version__`（ARCH-BLD-07）。
+
+    历史形态是字符串切分 `split('__version__ = "')[1]`：只要有人写成
+    `__version__: str = "0.5.48"`（类型注解）或换成单引号，切分就抛 IndexError 或
+    取到空串——而用例当时用桩绕过了这条路径，发版时才炸。
+    """
+    m = _VERSION_RE.search(path.read_text(encoding="utf-8"))
+    if not m:
+        raise SystemExit(f"FAIL: {path} 里找不到可解析的 __version__（需形如 __version__ = \"x.y.z\"）")
+    return m.group(1)
 
 
 def _git(args: list[str], root: Path) -> str:

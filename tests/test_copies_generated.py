@@ -141,3 +141,34 @@ def test_S105_gate_is_single_entry_shared_by_ci_hook_and_release():
 def test_S103_each_copy_dir_is_ignored(dst):
     """S103（逐目录）：四个目录各自被忽略——漏一个就漏一个漂移面。"""
     assert dst + "/" in (ROOT / ".gitignore").read_text(encoding="utf-8")
+
+def test_version_parser_handles_annotated_form(tmp_path):
+    """ARCH-BLD-07 验收：`__version__` 解析必须吃得住类型注解/单引号，且坏文件要显式失败。
+
+    历史形态：`split('__version__ = "')[1]` —— 写成 `__version__: str = "0.5.48"`
+    就 IndexError；改成单引号就取到空串。而用例用桩绕过了这条路径，发版时才炸。
+    """
+    import importlib.util
+    import pathlib as _p
+
+    root = _p.Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("vdk_sync_plugin", root / "scripts" / "sync_plugin.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    cases = {
+        '__version__ = "1.2.3"\n': "1.2.3",
+        '__version__: str = "1.2.4"\n': "1.2.4",
+        "__version__ = '1.2.5'\n": "1.2.5",
+        '__version__ : str = "1.2.6"  # 行尾注释\n': "1.2.6",
+    }
+    for i, (text, want) in enumerate(cases.items()):
+        f = tmp_path / f"init_{i}.py"
+        f.write_text(text, encoding="utf-8")
+        assert mod._version_from_init(f) == want, (text, want)
+
+    bad = tmp_path / "bad.py"
+    bad.write_text("VERSION = '1.0.0'\n", encoding="utf-8")
+    import pytest
+    with pytest.raises(SystemExit):
+        mod._version_from_init(bad)

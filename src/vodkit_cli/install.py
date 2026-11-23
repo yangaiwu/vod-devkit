@@ -20,6 +20,7 @@ def _codex_home():
 from vod_mcp.host_adapters import generic as generic_host
 from vod_mcp import paths
 from vodkit_cli import common, remote
+from vod_mcp import trace as _trace
 
 # 可显式指定（含 generic）的目标清单：交互输入按它校验，不随 HOST_ADAPTERS 的
 # 运行期替换而变（测试与"适配器被裁剪"场景都不该让提示变成骗人的选项）
@@ -277,8 +278,8 @@ def cmd_install(args):
     _atomic_write_text(rt, json.dumps(cfg, ensure_ascii=False, indent=2))
     try:                      # 含 key/锚点：立刻收紧（与运行期写盘同口径）
         os.chmod(rt, 0o600)
-    except OSError:
-        pass
+    except OSError as e:
+        _trace.suppress("install.cmd_install", e)
 
     # ── 远程 attach / skills-only（D-attach-1）───────────────────────────
     # 形态：MCP 单独部署一个远程端点，宿主只把 MCP 配置指向它（+ 本地技能）。

@@ -19,6 +19,7 @@ from pathlib import Path
 from vod_mcp import attribution as _attrib
 from vod_mcp import paths
 from vod_mcp import server_face
+from vod_mcp import trace as _trace
 
 
 _RT_LOCK = threading.RLock()
@@ -154,6 +155,7 @@ def _write_cfg_unlocked(p: Path, cfg: dict) -> None:
     同一个仓存在两套原子写语义，用户 chmod 444 的意图在 runtime.json 上不被尊重。
     "写后回验权限"仍由 `_verify_perms` 负责（它验的是效果）。
     """
+    paths.ensure_state_home()                     # ARCH-CFG-06：目录权限先收紧到 0700
     paths.atomic_write_text(p, json.dumps(cfg, ensure_ascii=False, indent=2), mode=0o600)
 
 
@@ -698,3 +700,14 @@ def _drafts_load() -> dict:
 def _sha256(s: str) -> str:
     import hashlib
     return hashlib.sha256(s.encode()).hexdigest()
+
+
+def _trace_log(msg: str, **fields) -> None:
+    """trace.suppress 的落盘实现（注入用）。
+
+    这里**按名字调 _log**：测试 monkeypatch `rt._log` 之后仍生效（不能存函数引用）。
+    """
+    _log(msg, **fields)
+
+
+_trace.set_logger(_trace_log)
