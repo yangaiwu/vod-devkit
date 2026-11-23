@@ -95,6 +95,30 @@ store.write_text(json.dumps(state))
 '''
 
 
+# add 成功分支的假 CLI：把 argv 原样记账，并按真 CLI 的形态落 mcp.servers 条目
+ACCEPTING_ADD_CLI = '''#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+store = Path(sys.argv[0]).with_name("store2.json")
+state = json.loads(store.read_text()) if store.exists() else {"calls": [], "server": None}
+argv = sys.argv[1:]
+state["calls"].append(argv)
+if argv[:2] == ["mcp", "add"]:
+    def val(flag):
+        return argv[argv.index(flag) + 1]
+    args = [argv[i + 1] for i, a in enumerate(argv) if a == "--arg"]
+    env = {kv.split("=", 1)[0]: kv.split("=", 1)[1]
+           for i, a in enumerate(argv) if a == "--env" for kv in [argv[i + 1]]}
+    state["server"] = {"command": val("--command"), "args": args, "env": env}
+    print("Saved")
+elif argv[:2] == ["mcp", "show"]:
+    print(json.dumps(state["server"] or {}))
+else:
+    print("{}")
+store.write_text(json.dumps(state))
+'''
+
+
 def _fake_openclaw(tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / ".openclaw").mkdir(parents=True)
@@ -122,6 +146,34 @@ def test_openclaw_install_goes_through_cli_and_keeps_config_bytes(tmp_path, monk
     assert st["server"] and st["server"]["env"].get("VOD_PACKS") == "core,collect"
     assert conf.read_text(encoding="utf-8") == original, (
         "安装器直改 openclaw.json → JSON5 注释会被吃掉")
+
+
+def test_openclaw_add_argv_carries_every_arg_and_connect_timeout(tmp_path, monkeypatch):
+    """0.5.59 实锤（矩阵新增）：适配器只转 `payload["args"][0]`。
+
+    launcher 形态从 python（单 arg）切到 npx（`-y -p vod-devkit@<ver> vod-devkit-mcp`）后，
+    `mcp add` 收到的 argv 被截成 `npx -y` → openclaw 的 add 探活（默认 5s 内必须完成
+    initialize）必然超时 → 新机装 OpenClaw 直接 rc=2。读回自证同样只查 args[0]，让残缺
+    条目假绿。此处锁两件事：全部 arg 都转、读回按全 argv 比对。
+    """
+    home, conf, original, store = _fake_openclaw(tmp_path, monkeypatch)
+    cli = tmp_path / "bin" / "openclaw"
+    cli.write_text(ACCEPTING_ADD_CLI, encoding="utf-8")
+    cli.chmod(0o755)
+    payload = {"command": "npx",
+               "args": ["-y", "-p", "vod-devkit@0.5.59", "vod-devkit-mcp"],
+               "env": {"VOD_PACKS": "core"}}
+    monkeypatch.setattr(openclaw, "_definition", lambda a, p: payload)
+    openclaw.install(_spec(None), "core")
+    st = json.loads((tmp_path / "bin" / "store2.json").read_text())
+    add = next(c for c in st["calls"] if c[:2] == ["mcp", "add"])
+    assert add.count("--arg") == len(payload["args"]), add
+    assert "--connect-timeout" in add, add
+    saved = json.dumps(st["server"], ensure_ascii=False)
+    for a in [payload["command"], *payload["args"]]:
+        assert a in saved, f"注册表条目缺 {a}：{saved}"
+    assert st["server"]["env"].get("VOD_PACKS") == "core", (
+        "env 键没落盘：读回自证按 env 键比对，缺键必须能被抓出来")
 
 
 def test_openclaw_uninstall_only_unsets_own_entry(tmp_path, monkeypatch):

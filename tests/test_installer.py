@@ -483,6 +483,7 @@ def test_doctor_verify_golden(env):
                           # 引擎桩端口每次随机（出站可达行会打印它）
                           (str(env["engine"]["base"]).rstrip("/"), "<ENGINE>")):
         actual = actual.replace(volatile, tag)
+    actual = _strip_provenance_lines(actual)     # 状态相关行不进 golden（同 _norm_golden）
     golden = Path(__file__).parent / "golden" / "doctor_verify.txt"
     if os.environ.get("UPDATE_GOLDEN") == "1":
         golden.parent.mkdir(parents=True, exist_ok=True)
@@ -939,6 +940,16 @@ def test_upsert_dsh_patch_clears_empty_array_placeholder(tmp_path):
 
 # ---- golden 三态（借鉴 devkit doctor-golden 三 fixture：空态/装后/降级态）----
 
+def _strip_provenance_lines(text: str) -> str:
+    """去掉 D-provenance-1 那两行（状态相关，不是口径）。
+
+    golden 跑的 fake home 是把**真实仓 copytree 过去**：作者机干净时报 ok、脏时报 dirty，
+    留着就会变成"只在作者机当前状态下绿"的假门禁（同 snapshot 那条归一）。
+    """
+    return re.sub(r"^\[doctor\] (载荷 provenance：|警告：载荷含未提交改动).*\n",
+                  "", text, flags=re.M)
+
+
 def _norm_golden(env, text, mf=None):
     """易变段归一化（路径/SHA/时间戳），非易变文案一律不归一。"""
     subs = [(str(env["home"]), "<HOME>"), (str(env["repo"]), "<REPO>"),
@@ -958,8 +969,11 @@ def _norm_golden(env, text, mf=None):
     # `snapshot` 的归一放在替换**之后**：它枚举的是字段值本身，不涉及路径/SHA，
     # 放在前面会被 subs 里的同串替换打乱（本机 worktree / 发版机 released 都要归一，
     # 否则 golden 只在作者机当前状态下绿——假门禁）。
-    return re.sub(r'"snapshot": "(released|worktree|unknown)"',
+    text = re.sub(r'"snapshot": "(released|worktree|unknown)"',
                   '"snapshot": "<SNAPSHOT>"', text)
+    # D-provenance-1：provenance 那两行取决于「装机载荷是否等于当前提交」，属状态而非口径，
+    # 归一掉（否则 golden 只在作者机当前状态下绿——同 snapshot 那条）。
+    return _strip_provenance_lines(text)
 
 
 def test_golden_doctor_without_manifest(env):
