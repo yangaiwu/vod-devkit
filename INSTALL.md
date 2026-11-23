@@ -31,6 +31,32 @@ npx --yes vod-devkit install --target opencode --product codearts
 
 安装器做三件事：写宿主 MCP 配置段（无损合并，只动 vod-devkit 自己的键）、按 packs 拷贝技能、写 install-manifest.json（commitSHA 来源主键）。
 
+## 装完文件落在哪（MCP / 技能 / 载荷 三者分开）
+
+```
+MCP 条目     宿主自己的配置文件里一条 command/args/env —— 技能不在这里
+技能文件     拷到"宿主会扫描的技能目录"（SKILL.md 文件夹，agent 直接读）
+载荷         ~/.vod-devkit/payloads/<版本>/ 一份，所有宿主共用，MCP 条目用绝对路径指它
+```
+
+| 宿主 | MCP 条目 | 技能目录 |
+|---|---|---|
+| hermes | `~/.hermes/config.yaml` | `~/.hermes/skills/devops/vod-devkit` |
+| opencode | `~/.config/opencode/opencode.json` | `~/.config/opencode/skills` |
+| codex | `~/.codex/config.toml` + 插件缓存 | `~/.codex/skills` |
+| codex-desktop | `~/.agents/plugins/marketplace.json` | `~/plugins/vod-devkit/skills` |
+| atomcode | `~/.atomcode/mcp.json` | `~/.atomcode/skills` |
+| codeartsdoer | `~/.codeartsdoer/codearts_cli.json` | `~/.codeartsdoer/skills` |
+| codeartswork | `~/.codeartswork/mcp/mcp_settings.json` | `~/.codeartswork/skills` |
+| openclaw | `~/.openclaw/openclaw.json`（经 CLI） | `~/.agents/skills` |
+| workbuddy | `~/.workbuddy/mcp.json` | `~/.workbuddy/skills` |
+| dsh | `~/.dsh/profiles/<profile>/cordis.patch.yml` | `~/.dsh/skills` |
+| officeace | 桌面端注册表（Windows/macOS） | `~/.office-claw/skills` |
+| generic | `--mcp-config` 指定的文件 | 不拷技能 |
+
+Windows 把 `~/` 换 `%USERPROFILE%\`。细节（packs 过滤、市场装法、远程模式的技能拷贝）见
+[README.md](README.md) 的「装完之后，文件到底在哪」一节。
+
 ## 远程部署（MCP 单独服务多 agent）
 
 ```bash

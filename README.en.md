@@ -260,6 +260,42 @@ The 11 gates: `lint` / `copies` (byte-identical mirrors) / `secret` / `roster` /
 The pre-push hook runs pytest + pyflakes + mirror check + secret scan locally;
 local green never replaces CI green. Counts are never hand-written into docs.
 
+## Where the files land after install
+
+Three separate things — do not look for skills inside the MCP config:
+
+1. **MCP entry** (how the host launches the server): one record in the host's own config
+   (`command` + `args` + `env`). Skills are **not** here.
+2. **Skills** (`SKILL.md`, the wording discipline): copied as plain folders into the host's
+   skill-scan directory; the agent reads them from disk.
+3. **Payload** (server code + assets): machine-wide, shared by every host
+   (`~/.vod-devkit/payloads/<version>/`); the MCP entry points at it with an absolute path.
+
+| Host | MCP entry | Skills copied to |
+|---|---|---|
+| hermes | `~/.hermes/config.yaml` (+ `~/.hermes/mcp/vod-devkit.json`) | `~/.hermes/skills/devops/vod-devkit` |
+| opencode | `~/.config/opencode/opencode.json` | `~/.config/opencode/skills` |
+| codex | `~/.codex/config.toml` + plugin `~/.codex/plugins/{marketplaces,cache}/vod-local` | `~/.codex/skills` |
+| codex-desktop | `~/.agents/plugins/marketplace.json` | `~/plugins/vod-devkit/skills` |
+| atomcode | `~/.atomcode/mcp.json` | `~/.atomcode/skills` |
+| codeartsdoer | `~/.codeartsdoer/codearts_cli.json` | `~/.codeartsdoer/skills` |
+| codeartswork | `~/.codeartswork/mcp/mcp_settings.json` | `~/.codeartswork/skills` |
+| openclaw | `~/.openclaw/openclaw.json` (only via `openclaw mcp` commands) | `~/.agents/skills` |
+| workbuddy | `~/.workbuddy/mcp.json` | `~/.workbuddy/skills` |
+| dsh | `~/.dsh/profiles/<profile>/cordis.patch.yml` | `~/.dsh/skills` |
+| officeace | desktop registry (Windows/macOS only) | `~/.office-claw/skills` |
+| generic | the file you pass to `--mcp-config` | none (MCP entry only) |
+
+On Windows replace `~/` with `%USERPROFILE%\\`. Three differences worth knowing:
+
+- Skill count follows `--packs`: default `core,collect` → 4 skills; `--packs core` skips
+  `vod-feedback-collect`; without `core` there is no `vod-core`; the two rule skills always copy.
+- Marketplace installs (`/plugin marketplace add`, `codex plugin add`) keep skills **inside the
+  plugin package**, not in the table above.
+- Remote mode (`--mcp-url`) writes no payload and runs no local server, but still copies skills
+  to the host (`--skills-only` copies skills only). Agents that only have the URL fetch rule text
+  via `vod_list_skills` / `vod_retrieve_skill` (requires the `knowledge` pack).
+
 ## Docs
 
 docs/proposal.md · docs/design.md · docs/scheme-overview.md ·

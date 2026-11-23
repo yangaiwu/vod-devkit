@@ -600,6 +600,49 @@ vod-feedback-collect、vod-problem-classification-rules、vod-scoring-rules）�
 根目录条目受**预算**约束（`tests/test_structure_guards.py::test_s129_*`）：新增顶层目录/文件
 必须先改 [docs/architecture.md](docs/architecture.md)（结构契约与迁移分阶）。
 
+## 装完之后，文件到底在哪（一眼对照）
+
+插件装完会写三类东西，别混在一起找：
+
+1. **MCP 条目**：告诉宿主"怎么拉起 server"。在宿主自己的配置文件里，只有一条
+   （`command` + `args` + `env`），**技能不在这里**。
+2. **技能（SKILL.md）**：话术纪律（同意口径、逐字回显、追问判定…）。以**普通文件夹**形式
+   拷进宿主会扫描的"技能目录"，agent 直接读文件。
+3. **载荷**：server 代码 + 资产，机器级一份，所有宿主共用
+   （`~/.vod-devkit/payloads/<版本>/`），MCP 条目用绝对路径指向它。
+
+| 宿主 | MCP 条目写在哪 | 技能拷到哪 |
+|---|---|---|
+| hermes | `~/.hermes/config.yaml`（`hermes mcp add` 写入，另存 `~/.hermes/mcp/vod-devkit.json`） | `~/.hermes/skills/devops/vod-devkit` |
+| opencode | `~/.config/opencode/opencode.json` | `~/.config/opencode/skills` |
+| codex | `~/.codex/config.toml` + 原生插件 `~/.codex/plugins/{marketplaces,cache}/vod-local` | `~/.codex/skills` |
+| codex-desktop | `~/.agents/plugins/marketplace.json` | `~/plugins/vod-devkit/skills` |
+| atomcode | `~/.atomcode/mcp.json` | `~/.atomcode/skills` |
+| codeartsdoer | `~/.codeartsdoer/codearts_cli.json` | `~/.codeartsdoer/skills` |
+| codeartswork | `~/.codeartswork/mcp/mcp_settings.json` | `~/.codeartswork/skills` |
+| openclaw | `~/.openclaw/openclaw.json`（只经 `openclaw mcp` 命令改，不直接编辑 JSON5） | `~/.agents/skills` |
+| workbuddy | `~/.workbuddy/mcp.json` | `~/.workbuddy/skills` |
+| dsh | `~/.dsh/profiles/<profile>/cordis.patch.yml` | `~/.dsh/skills`（两个 profile 共用） |
+| officeace | 桌面端注册表（仅 Windows/macOS） | `~/.office-claw/skills` |
+| generic | 你用 `--mcp-config` 指定的那个文件 | **不拷技能**（只写 MCP 条目） |
+
+Windows 上把 `~/` 换成 `%USERPROFILE%\`（例如 `%USERPROFILE%\.workbuddy\mcp.json`）。
+
+三条容易踩的差别：
+
+- **技能数量跟 packs 走**：默认 `core,collect` → 4 个（`vod-core`、`vod-feedback-collect`、
+  两个规则技能）。`--packs core` 不拷 `vod-feedback-collect`；不含 `core` 不拷 `vod-core`；
+  两个规则技能总是拷。
+- **插件市场装法**（WorkBuddy 的 `/plugin marketplace add`、codex 的 `plugin add`）：技能
+  随**插件包**放在插件目录里，不会出现在上表的技能目录——两种装法落点不同，别互相找。
+- **远程模式（`--mcp-url`）**：不落载荷、不在本机起 server；技能**仍然拷到宿主技能目录**
+  （`--skills-only` 则只拷技能、不写 MCP 条目）。只拿到 URL 的第三方 agent 没有技能文件，
+  靠 `vod_list_skills` / `vod_retrieve_skill` 取规则全文（需开 `knowledge` 包）。
+
+装完怎么确认技能真的被 agent 看到了：hermes/opencode 等新会话的技能列表里会出现这 4 个
+`vod-*`；openclaw 用 `openclaw skills list`（应 4 个 ready）；账本
+`install-manifest.json` 的 `skillInstalls` 逐行记着每个宿主的技能目录。
+
 ## 文档
 
 - 结构契约：[docs/architecture.md](docs/architecture.md) ｜ 需求 / 设计：[docs/proposal.md](docs/proposal.md) · [docs/design.md](docs/design.md)
