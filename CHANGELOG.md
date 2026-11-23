@@ -821,3 +821,9 @@
 
 - c240e17 fix(payload): never prune a payload a live process still holds; doctor names it
 
+
+## v0.5.57（2026-11-23）
+
+- dbfc8c3 fix(install): warn when the interpreter lives in a prunable dir; doctor names it
+- f1be5e0 docs(readme): 升级后必须重启宿主——旧进程持有已删载荷会让每次调用被 deny
+
