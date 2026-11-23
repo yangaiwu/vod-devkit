@@ -835,3 +835,8 @@
 - 360a0bc test(matrix): skip the npx-form matrix check until the published version ships the bin
 - 962966d feat(install): npx launcher form for host configs (D-interpreter-1)
 
+
+## v0.5.59（2026-11-24）
+
+- fff8ed2 fix(launcher): survive narrow host PATH; keep the probes off the repo cwd
+
