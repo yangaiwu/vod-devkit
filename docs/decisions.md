@@ -2971,3 +2971,17 @@ runtime 后第一发就 404「Session not found」（会话归属 manager 的 `_
   （**不能**用 build-info 的 snapshot=worktree——release.sh 在 worktree 打包，发布物同样写 worktree）。
 - 本轮仍走 python 的三处（后续再切）：`dsh`（patch yml 里 argv 形态另算）、
   `officeace`（sqlite 连接器行）、`codex`（插件缓存 .mcp.json 的静态形态）。
+
+### D-interpreter-1 实施补记（0.5.58 → 0.5.59，真机灰度暴露的三件事）
+
+1. **npx 冷/热缓存与 cwd**：若 cwd 里存在 `vod-devkit` 的 package.json（例如就在本仓跑巡检），
+   npx 按"本地包"解析，找不到 `node_modules/.bin` 就退回 shell 执行 → `command not found`。
+   处置：`probe_tools.py` / `host_matrix.py` 的子进程一律跑在中性临时 cwd；同时缓存被这种
+   解析污染后需要 `rm -rf ~/.npm/_npx` 再预热。
+2. **宿主给子进程的 PATH 可能很窄**：openclaw 实测只带 node 的 bin，`python3` 落到系统 3.9
+   （低于 ≥3.10 门槛）→ 启动器报"找不到 Python"、宿主侧表现是 `Connection closed`。
+   处置：启动器候选顺序改为 显式覆盖 → **稳定落点**（`~/.vod-devkit/venv`、`/opt/vod-python`）
+   → PATH 命令名 → 其他绝对落点；绝对落点只在"存在"时才用，不把配置绑死。
+   （顺带发现 `/usr/bin/python3.12` 在本机也是软链到 hermes tools，因此"稳定落点"必须排在 PATH 前。）
+3. **矩阵/探针的假红要归因**：同一份配置在仓内 cwd 红、在 /tmp 绿 → 属于验证环境，不是产品缺陷；
+   先把工具挪到中性 cwd，再谈真实失败。

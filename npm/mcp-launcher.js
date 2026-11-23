@@ -30,6 +30,26 @@ const PKG_VERSION = (() => {
 })();
 
 const PY_CANDIDATES = ['python3', 'python3.13', 'python3.12', 'python3.11', 'python3.10', 'python'];
+
+// 兜底绝对路径：有些宿主给子进程的 PATH 很窄（实测 openclaw 只带 node 的 bin，
+// python3 落到系统 3.9 → 低于门槛）。PATH 找不到时再按这些常见落点试一遍，
+// 全部**存在才用**，不存在直接跳过，不会把配置绑死在某条路径上。
+function absPythonCandidates() {
+  const home = os.homedir();
+  return [
+    process.env.VOD_DEVKIT_PYTHON_VENV || join(home, '.vod-devkit', 'venv', 'bin', 'python'),
+    '/opt/vod-python/bin/python3.14',
+    '/opt/vod-python/bin/python3',
+    '/usr/local/bin/python3.13',
+    '/usr/local/bin/python3.12',
+    '/usr/local/bin/python3.11',
+    '/usr/local/bin/python3.10',
+    '/usr/bin/python3.13',
+    '/usr/bin/python3.12',
+    '/usr/bin/python3.11',
+    '/usr/bin/python3.10',
+  ].filter((x) => existsSync(x));
+}
 const MIN_MINOR = 10;
 
 function fail(msg, code = 78) {
@@ -92,7 +112,12 @@ function probePython(name) {
 
 async function main() {
   const payload = resolvePayload();
-  const candidates = [process.env.VOD_PYTHON, ...PY_CANDIDATES].filter(Boolean);
+  // 顺序：显式覆盖 → **稳定落点**（本项目 venv / /opt）→ PATH 上的命令名 → 其他绝对落点。
+  // 稳定落点排在 PATH 前面：PATH 上的 python3 可能又是别的工具链软链（本机实测
+  // /usr/bin/python3.12 → /root/.hermes/tools/...，同样会被清理）。
+  const stable = absPythonCandidates().slice(0, 3);
+  const rest = absPythonCandidates().slice(3);
+  const candidates = [process.env.VOD_PYTHON, ...stable, ...PY_CANDIDATES, ...rest].filter(Boolean);
   let picked = null;
   for (const c of candidates) {
     if (!picked) picked = await probePython(c);
