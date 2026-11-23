@@ -827,3 +827,11 @@
 - dbfc8c3 fix(install): warn when the interpreter lives in a prunable dir; doctor names it
 - f1be5e0 docs(readme): 升级后必须重启宿主——旧进程持有已删载荷会让每次调用被 deny
 
+
+## v0.5.58（2026-11-24）
+
+- a5ffe2d test(install): set the registry-check escape before the install call, not after
+- bedf502 test(install): decouple launcher-form assertions from registry state
+- 360a0bc test(matrix): skip the npx-form matrix check until the published version ships the bin
+- 962966d feat(install): npx launcher form for host configs (D-interpreter-1)
+
