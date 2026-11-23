@@ -840,3 +840,14 @@
 
 - fff8ed2 fix(launcher): survive narrow host PATH; keep the probes off the repo cwd
 
+
+## v0.5.60（2026-11-24）
+
+- c933611 test(golden): 重录去掉 provenance 行（与 97fa0c1 逐字一致）
+- 7e04b7c test(golden): provenance 两行归一化掉，golden 回到发版前基线
+- 77f6d04 fix(openclaw): 读回未自证 fail-closed；_show 走中性 cwd；中性目录用 mkdtemp
+- 91be30a feat(provenance): 载荷↔commitSha 逐文件比对 + 脏装留痕（D-provenance-1）
+- 97fa0c1 fix(openclaw): forward every arg and probe from a neutral cwd
+- 5ab62cb docs(decisions): close out D-interpreter-1 with the 11-surface real-machine result
+- 506be97 fix(host_matrix): openclaw 注册表 probe 走中性 cwd，启动失败归 DRIFT
+
