@@ -227,19 +227,21 @@ misfired (quoting vs reading are different acts).
 
 ## Quality
 
+Gates have **one entry point** (`ARCH-BLD-01`: both CI definitions call it, so the
+list can no longer drift between them):
+
 ```bash
-python3 -m pytest tests/ -q        # full: unit + guardrails + packs + installer matrix + real-HTTP + stdio
-python3 -m pyflakes src/vod_mcp src/vodkit_cli integrations/hermes/hooks tests
-python3 -m mypy                    # scope in pyproject [tool.mypy]
-python3 scripts/secret_scan.py
-python3 scripts/sync_case_roster.py --check
-python3 scripts/rules_provenance.py
+python3 scripts/gate_all.py --list    # 11 gate names
+python3 scripts/gate_all.py --all     # same set CI runs; any failure exits non-zero
 ```
 
-Gates: pre-push hook (pytest + pyflakes + secret_scan) + GitHub Actions on the
-mirror + byte-identical package mirrors + description budget + install-manifest
-roster checks + outward-doc claim checks. Counts are never hand-written into
-docs; measure them.
+The 11 gates: `lint` / `copies` (byte-identical mirrors) / `secret` / `roster` /
+`rules` (skill provenance, SKIP-not-green without an engine) / `mypy` / `registry`
+(repo version vs npm) / `tests` (full pytest) / `dsh` (node --test) / `packaging`
+(npm pack content) / `hostmatrix` (real install + probe per host).
+
+The pre-push hook runs pytest + pyflakes + mirror check + secret scan locally;
+local green never replaces CI green. Counts are never hand-written into docs.
 
 ## Docs
 

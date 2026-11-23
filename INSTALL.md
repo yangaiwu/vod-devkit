@@ -94,6 +94,10 @@ npx --yes vod-devkit status      # install-manifest：版本/来源/宿主/packs
 npx --yes vod-devkit doctor      # 健康自检（含 key 探针 keyCheck 三态）
 npx --yes vod-devkit verify      # commitSHA 到 origin 比对（来源对账）
 npx --yes vod-devkit update      # fetch + ff 拉取 + 重烧 build-info
+npx --yes vod-devkit packs status            # 生效 packs（core/collect/knowledge）
+npx --yes vod-devkit packs enable collect    # dry-run；加 --apply 才写宿主配置
+npx --yes vod-devkit prune --payloads        # 旧载荷清理（dry-run，清单+大小）
+npx --yes vod-devkit prune --payloads --apply --yes   # 真删；--keep N 额外保留
 npx --yes vod-devkit uninstall
 ```
 

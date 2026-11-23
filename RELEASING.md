@@ -3,20 +3,40 @@
 ## 一键发版
 
 ```bash
-scripts/release.sh              # bump 从提交历史推导（feat→minor，破坏性→major）
-scripts/release.sh minor        # 显式指定
-scripts/release.sh auto --dry-run
+scripts/release.sh patch --publish   # 一次到位：门禁 → bump → tag → push → 打包断言 → npm 两包 → publish_verify
+scripts/release.sh patch             # 只到 tag/push，npm 手动发（不传 --publish）
+scripts/release.sh minor             # 显式指定 bump（缺省 auto：feat→minor，破坏性→major，否则 patch）
 ```
 
-流程：质量门（pyflakes+pytest）→ 版本落点表驱动 bump + 硬断言 → 插件包同步
-（sync_plugin.py）→ CHANGELOG → 提交+tag+推 GitCode/GitHub。
+实际流程（`scripts/release.sh` 的顺序，照这个排障）：
 
-发版后手动执行（npm 凭据在发布人机器上）：
+```
+质量门  pyflakes + mypy + pytest + 旧解释器语法门（py_compile，抓 ≤3.11 的语法错）
+bump    落点表驱动改版本 + 逐点硬断言（漏一点就 FAIL）
+同步    sync_plugin.py → 副本零提交；verify_copies 复验
+提交    release: v<ver>（显式清单，不含 src/、tests/）；随后断言工作区无未提交业务文件
+tag     git tag v<ver>，push **当前分支** + --tags（不硬编码 main）
+镜像    配了 github remote 才推；失败只 WARN
+打包    build-info 钉成 tag 内容并标 snapshot=released → npm pack → 断言包内 commitSha ∈ {tag^, tag}
+dsh     packages/dsh 同版 pack，断言 lib/index.js 与工作区一致
+发布    --publish 时：npm publish 两包 → publish_verify 终态断言（未上线/内容不符即 exit 1）
+```
+
+npm 凭据（发布人机器）：三个坑位按错误码判定 ——
+`Two-factor authentication or granular access token with bypass 2fa enabled is required`
+= 令牌没有 bypass 2FA（可读不可发）；`E_STAGE_REQUIRED … only publish to a staging area`
+= 只能发 staging（需 `npm stage publish` + approve）；只有直接回 `+ pkg@version` 的令牌能发 latest。
+
+**push 被 pre-push 拦（`No module named pyflakes`）**：钩子按 `仓内 .venv → ./venv → PATH 上的
+python3` 选解释器。不要往解释器里装包、也不要跳钩子，用钩子自带的库路径入口：
 
 ```bash
-python3 scripts/pack_verify.py   # 包内容校验（必含/危险项）
-npm publish --access public      # registry 分发约 1-3 分钟
+DEVKIT_PREPUSH_LIBS=<含 pyflakes/pytest 的 site-packages> git push origin <分支> --tags
 ```
+
+**push 失败时脚本已经 bump + 打 tag 了**：不要重跑 `release.sh`（会再 bump 一版）。
+补推成功后单独执行后半段（`git checkout v<ver> -- build-info.json` → 标 `snapshot=released`
+→ npm pack 指纹断言 → dsh pack → publish 两包 → `publish_verify.py`）。
 
 ## 版本落点
 

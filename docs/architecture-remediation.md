@@ -5,6 +5,19 @@
 > 基线：`dev` @ `ba48d9d`（v0.5.44；随台账修订统一重钉）。本文只给方案，不在本 Issue 改代码——**每项按 P 级另开工单**，
 > 工单号建议见第六节。
 
+## 零之一、实施偏差（方案 ≠ 落地形态，查代码前先读这一节）
+
+本文件是**方案稿**，落地时有三处按实现约束改了形态（全部在 `D-arch-remediation-1/2` 有记录）：
+
+| 方案里的写法 | 实际落地 | 原因 |
+|---|---|---|
+| `scripts/install_hooks.sh` | `scripts/install_hooks.py` | 仓内脚本统一 Python（承 `__version__`/路径解析逻辑），shell 只留 `.githooks/pre-push` |
+| 新建 `src/vod_mcp/dispatch.py`（`CALL` 批） | 未新建；两面共用逻辑留在 `guards`/`tools` 既有入口 | 实测两面差异只在承载位置（协议强制），拆文件换不来能力 |
+| `tests/test_error_codes.py`（`ERR-03` 验收） | 并入 `tests/test_protocol_codes.py` | 错误码常量表与协议保留段同源，合并后一处维护 |
+| `src/vod_mcp/packs/collect.py`（单文件） | `src/vod_mcp/packs/collect/`（五模块 + 门面） | `ARCH-CALL-04` 拆包；调用面与私有符号经 `__init__` 再导出保持不变 |
+
+其余编号（`ARCH-RM-*`）的验收用例名与本文件、缺陷台账一致，可直接照名检索。
+
 ## 零、整改前置纪律（先读，不然会返工）
 
 1. **先决策再改码**：任何改变既有 `D-*` 结论的整改（例如"更新比较哪个分支""远程面是否

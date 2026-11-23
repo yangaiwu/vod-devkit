@@ -94,7 +94,7 @@ npx -y vod-devkit@latest packs enable collect --apply   # 真写：只改受管�
 npx -y vod-devkit@latest install --target all           # 所有探测到的宿主一步装全（缺 CLI 的跳过）
 npx -y vod-devkit@latest uninstall --target codex       # 只摘这一个宿主，其它安装行保留
 npx -y vod-devkit@latest uninstall --target codex --clean-global   # 并清载荷残留与 npx 缓存
-npx -y vod-devkit@latest auth status                     # 引擎地址 + 凭据指纹 + 档位（key / 匿名令牌）
+npx -y vod-devkit@latest auth status                     # 引擎地址 + 凭据指纹 + 档位（key / 匿名令牌）+ keySource（凭据取自哪一档）
 npx -y vod-devkit@latest auth init --key <k>             # 校验并显示指纹（缺省不写盘）
 npx -y vod-devkit@latest auth init --key <k> --apply     # 写 runtime.json（唯一入口，0600）
 npx -y vod-devkit@latest prune --payloads                # 列出可清旧载荷（默认 dry-run，不删）
@@ -496,18 +496,20 @@ python -m vod_mcp.server --transport remote --port 9528 --host 127.0.0.1
 
 ## 质量与可验证性
 
+门禁**只有一个入口**（`ARCH-BLD-01`：两份 CI 定义都只调这一条，清单不再各写一份）：
+
 ```bash
-python3 -m pytest tests/ -q        # 全量（单元 + 护栏 + packs + 安装器矩阵 + 协议级真 HTTP + stdio 回环）
-python3 -m pyflakes src/vod_mcp src/vodkit_cli integrations/hermes/hooks tests
-python3 -m mypy                    # 作用域见 pyproject [tool.mypy]（新增纯逻辑模块）
-python3 scripts/secret_scan.py
-python3 scripts/sync_case_roster.py --check   # docs 与花名册对账
-python3 scripts/rules_provenance.py           # 技能与引擎真源对账（无引擎检出时 SKIP）
+python3 scripts/gate_all.py --list    # 列出 11 道门禁名
+python3 scripts/gate_all.py --all     # CI 同口径全跑（任一门禁失败即非零退出）
 ```
 
-门禁清单：pre-push 钩子（pytest + pyflakes + secret_scan）+ GitHub Actions（镜像仓）+
-双副本一致性（`vod_mcp` / `skills` 与插件副本逐字节）+ description 截断预算 +
-install-manifest 名册对账（doctor 逐落点）+ 声明计数对账（对外文档不手写用例或工具数）。
+11 道分别是：`lint` / `copies`（双副本逐字节一致）/ `secret` / `roster`（docs 与花名册对账）/
+`rules`（技能与引擎真源对账，无引擎时 SKIP 且不判绿）/ `mypy` / `registry`（仓内版本 vs npm）/
+`tests`（全量 pytest：单元 + 护栏 + packs + 安装器矩阵 + 协议级真 HTTP + stdio 回环）/
+`dsh`（壳的 node --test）/ `packaging`（npm pack 内容断言）/ `hostmatrix`（逐宿主真装 + 探活）。
+
+pre-push 钩子在 push 时同跑一遍（pytest + pyflakes + 副本一致性 + secret_scan），
+**本地绿不替代 CI 绿，CI 红也不否定本地结论**——定责到机制。
 
 本文档不放用例数/工具数——手写计数必然漂移；数字一律现场测量。
 
@@ -571,6 +573,8 @@ hermes hooks test pre_llm_call --payload-file payload.json
 - 远程面**不内置鉴权**：默认只绑回环，对外必须自建 TLS 反代与身份校验；身份优先取请求头
   Bearer，没有时按整机匿名令牌（同一台机器上的多 agent 共用一份，多租户场景请各带 Bearer）。
 - 不允许把 key 写进宿主 MCP 配置的 `env`（明文且随配置进 git）——用 `auth init`。
+- 机器级 state 目录（`~/.vod-devkit/state/`）**全新安装即 0700**，`runtime.json` 0600；
+  已存在的宽权限目录只收紧不放宽（`paths.ensure_state_home()`，ARCH-CFG-06）。
 
 ## 目录结构（摘要）
 
