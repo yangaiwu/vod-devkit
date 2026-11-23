@@ -1,6 +1,5 @@
 $ vod-devkit doctor
 [doctor] 载荷：在用 0.5.59(hermes)
-[doctor] 警告：载荷含未提交改动（build-info.dirtySources 已标注）——要收口就按该 tag 重装或发版后再装
 [doctor] 载荷已换（<HOME>/.vod-devkit/payloads/0.5.59）——重启宿主会话生效
 [doctor] 出站代理：未设（出站直连；urllib 会读 env，无需另配）
 [doctor] 引擎可达：HTTP 200 <ENGINE>/rest/developer/manager/hdvodmngservice/v1/external/meta
