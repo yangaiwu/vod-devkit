@@ -18,6 +18,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from vod_mcp import msgs
@@ -30,6 +31,8 @@ HOST = "openclaw"
 SUPPORTS_REMOTE = True
 NAME = "vod-devkit"
 TIMEOUT = 180
+# add 的探活 deadline（秒）：openclaw 默认 5s，npx 冷缓存实测 4.8s，贴边会假红。
+CONNECT_TIMEOUT_SECONDS = 30
 
 
 def _spec() -> dict:
@@ -52,8 +55,22 @@ def _cli() -> str:
     return exe
 
 
+def _neutral_cwd() -> str:
+    """探活的子进程 cwd 必须是中性目录（不在仓根）。
+
+    实测（2026-11-24 矩阵）：`openclaw mcp add` 会在 CLI 的 cwd 里起 server 探活；
+    在仓根跑时 npm 先命中的是仓内 package.json（`/root/vod-devkit/.npmrc` 也被读），
+    拿到的不是 npm 上的 vod-devkit → 载荷找不到 → 子进程立刻退出，
+    add 报 `MCP error -32000: Connection closed`。巡检探针早已按同一口径改中性 cwd。
+    """
+    d = Path(tempfile.gettempdir()) / "vod-devkit-openclaw-probe"
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d)
+
+
 def _run(argv, what: str):
-    r = subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT)
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT,
+                       cwd=_neutral_cwd())
     if r.returncode != 0:
         print(f"[vod-devkit] openclaw {what} 失败（rc={r.returncode}）："
               f"{(r.stderr or r.stdout or '').strip()[-300:]}", file=sys.stderr)
@@ -83,10 +100,18 @@ def install(args, packs):
     payload = _definition(args, packs)
     # 先 add（新装 + 探活）；已存在会被拒 → 退到 set（等价于更新，仍带同一定义）
     add = [cli, "mcp", "add", NAME, "--command", payload["command"]]
-    add += ["--arg", payload["args"][0]]
+    # 全部 arg 都要给（0.5.59 实测：老代码只转 args[0]，npx launcher 形态
+    # ["-y","-p","vod-devkit@<ver>","vod-devkit-mcp"] 被截成 `npx -y` →
+    # add 探活必然超时 → 新机装 OpenClaw 直接 rc=2）
+    for a in payload["args"]:
+        add += ["--arg", a]
     for k, v in payload["env"].items():
         add += ["--env", f"{k}={v}"]
-    r = subprocess.run(add, capture_output=True, text=True, timeout=TIMEOUT)
+    # add 会先探活，默认 5s 内必须完成 initialize。npm 冷缓存下 npx 形态实测 4.8s
+    # （npm 取包 + node 启动 + 载荷 import），贴边即超时 → 给足余量。
+    add += ["--connect-timeout", str(CONNECT_TIMEOUT_SECONDS)]
+    r = subprocess.run(add, capture_output=True, text=True, timeout=TIMEOUT,
+                       cwd=_neutral_cwd())
     if r.returncode != 0:
         msg = ((r.stderr or "") + (r.stdout or "")).lower()
         # 只有"已存在"才退 set；其它错误（参数/schema/网关占用）必须当场报，不许糊成"更新成功"
@@ -99,12 +124,25 @@ def install(args, packs):
         verb = "更新"
     else:
         verb = "写入"
-    # 读回自证：注册表里的 command/args 必须与我们要写的一致（防"rc=0 但没落盘"）
+    # 读回自证：注册表里的 command/args/env 键必须与我们要写的一致（防"rc=0 但没落盘"；
+    # 只查 args[0] 曾让 `npx -y` 的残缺条目假绿——多 arg 形态必须全查）。
+    # env 只比键不比值：value 里可能有 VOD_JAVA_API_KEY（真凭据），不能进日志/比对证据。
     got = _show(cli)
-    if got is not None:
+    if got is None:
+        # 读回拿不到 ≠ 没落盘，但也不能静默放过：明说"未自证"，让现场能分辨两种局面。
+        print(f"[vod-devkit] openclaw 读回未自证（`mcp show {NAME} --json` 无输出/不可解析）："
+              f"已{verb or '写入'}但未比对注册表内容，请手工 `openclaw mcp list` 确认",
+              file=sys.stderr)
+    else:
         text = json.dumps(got, ensure_ascii=False)
-        if payload["args"][0] not in text or payload["command"] not in text:
-            print(f"[vod-devkit] openclaw 读回与期望不一致：{text[:300]}", file=sys.stderr)
+        missing = [x for x in [payload["command"], *payload["args"]] if x not in text]
+        want_env = set((payload.get("env") or {}))
+        got_env = set(((got.get("env") or got.get("environment") or {}) if isinstance(got, dict)
+                       else {}) or {})
+        lost_env = sorted(want_env - got_env)
+        if missing or lost_env:
+            print(f"[vod-devkit] openclaw 读回与期望不一致（缺 arg/command {missing}；"
+                  f"缺 env 键 {lost_env}）：{text[:300]}", file=sys.stderr)
             sys.exit(2)
     print(f"已{verb} OpenClaw MCP 注册表：{NAME}（{conf}，mcp.servers 键；"
           f"{msgs.effective_unit('OpenClaw 会话/网关', tight=True)}）")
