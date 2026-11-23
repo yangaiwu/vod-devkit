@@ -636,11 +636,21 @@ def _openclaw_entry(home: Path | None = None) -> tuple:
     if not cli:
         return None, "无 openclaw CLI"
     try:
+        # cwd 必须中性：openclaw CLI 内部用 npx 起 server，在仓目录里跑巡检时
+        # npx 会把仓内 package.json 当"本地包" → 拿不到 .bin → Connection closed，
+        # 表现为"注册表里没有 vod-devkit"（假 NOT_INSTALLED，与 _probe 同一条坑）。
         r = subprocess.run([cli, "mcp", "probe", "vod-devkit", "--json"],
-                           capture_output=True, text=True, timeout=90)
+                           capture_output=True, text=True, timeout=90,
+                           cwd=_neutral_cwd())
     except Exception as e:                      # noqa: BLE001
         return None, f"probe 失败：{e}"
     if r.returncode != 0:
+        # rc≠0 有两种含义：①注册表里真没这条；②有条目但拉不起来（载荷/解释器坏了）。
+        # 后者是 DRIFT 不是 NOT_INSTALLED——把"装坏了"报成"没装"会掩盖真故障。
+        err = r.stderr or ""
+        if "failed to start" in err or "Connection closed" in err:
+            last = [x for x in err.strip().splitlines() if x.strip()]
+            return None, f"注册表里有条目但拉不起来：{last[-1][:200] if last else '未知'}"
         return None, "注册表里没有 vod-devkit"
     raw = r.stdout or ""
     try:
