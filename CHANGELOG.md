@@ -776,3 +776,10 @@
 
 - 6f832fc fix(skill): collect answers technical questions first, asks feedback once
 
+
+## v0.5.49（2026-11-23）
+
+- 034afb0 docs(arch): mark all 13 remaining defects fixed and record the batch decision
+- 4e7534b refactor(packs): split the collect pack into five modules (CALL-04)
+- de0cfa0 fix(arch): close out the remaining P2 remediation batch
+
