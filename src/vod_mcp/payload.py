@@ -20,6 +20,7 @@ import json
 import re
 import os
 import shutil
+import subprocess
 import datetime
 from pathlib import Path
 
@@ -174,6 +175,80 @@ def verify(payload: Path) -> list:
         elif _sha256(f) != sha:
             problems.append(f"载荷文件被改：{rel}")
     return problems
+
+
+# 载荷内容 ↔ build-info.commitSha 的 git 树（D-provenance-1，2026-11-24）
+#
+# 为什么需要它：`verify()` 只比 payload.json 的逐文件 sha256，而那份指纹是 install
+# 当场自洽重建的 —— 「带着未提交补丁从 tag 重装」会得到*内容带补丁、build-info 却写
+# tag sha* 的载荷，verify() 全绿、provenance 谎报（当晚实锤两次）。唯一抓得住的判据：
+# 用那个 sha 从 git 里取出目录树，与载荷逐文件比字节。
+_PROVENANCE_TREES = (
+    ("vod_mcp", "src/vod_mcp"),                    # 载荷 <sub>/<rel> ↔ 仓内 <src>/<rel>
+    ("hooks", "integrations/hermes/hooks"),
+)
+
+
+def _git_blob(repo: Path, sha: str, rel: str) -> bytes | None:
+    r = subprocess.run(["git", "show", f"{sha}:{rel}"], cwd=str(repo),
+                       capture_output=True)
+    return r.stdout if r.returncode == 0 else None
+
+
+def provenance_gap(payload: Path, repo: Path | None = None) -> dict:
+    """载荷内容是否等于 build-info.commitSha 那一提交的树（只读，不发网络）。
+
+    返回 {"status": "ok|mismatch|skip", "reason": str, "commitSha": sha,
+          "files": [相对载荷根的差异文件]}
+    skip 的两种常见原因：安装根没有 .git（npx/tarball 形态）、或本仓没有该 commit。
+    """
+    bi = payload / "build-info.json"
+    if not bi.exists():
+        return {"status": "skip", "reason": "载荷缺 build-info.json",
+                "commitSha": None, "files": []}
+    try:
+        bi_data = json.loads(bi.read_text(encoding="utf-8"))
+        sha = str(bi_data.get("commitSha") or "")
+        dirty_sources = list(bi_data.get("dirtySources") or [])
+    except Exception as e:                       # noqa: BLE001
+        _trace.suppress("payload.provenance_gap.read", e)
+        return {"status": "skip", "reason": "build-info.json 不可解析",
+                "commitSha": None, "files": []}
+    if dirty_sources:
+        # 诚实标注的脏装：内容≠commitSha 是**已知事实**，不算谎报（谎报=没标还声称干净）。
+        return {"status": "dirty",
+                "reason": f"载荷含未提交改动 {len(dirty_sources)} 项（build-info 已标注）",
+                "commitSha": sha or None, "files": dirty_sources}
+    if not sha:
+        return {"status": "skip", "reason": "build-info 没有 commitSha",
+                "commitSha": None, "files": []}
+    repo = Path(repo) if repo else _root()
+    if not (repo / ".git").exists():
+        return {"status": "skip", "reason": f"安装根无 .git（{repo}）",
+                "commitSha": sha, "files": []}
+    head = subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=str(repo),
+                          capture_output=True)
+    if head.returncode != 0:
+        return {"status": "skip", "reason": f"本仓没有 {sha[:7]} 这个提交",
+                "commitSha": sha, "files": []}
+    bad: list = []
+    for sub, src in _PROVENANCE_TREES:
+        base = payload / sub
+        if not base.is_dir():
+            continue
+        for f in sorted(base.rglob("*")):
+            if not f.is_file() or "__pycache__" in f.parts or f.suffix == ".pyc":
+                continue
+            rel = f.relative_to(payload).as_posix()
+            want = _git_blob(repo, sha, f"{src}/{f.relative_to(base).as_posix()}")
+            if want is None or hashlib.sha256(want).hexdigest() != _sha256(f):
+                bad.append(rel)
+    if bad:
+        return {"status": "mismatch",
+                "reason": f"载荷内容 ≠ {sha[:7]} 的树",
+                "commitSha": sha, "files": bad}
+    return {"status": "ok", "reason": f"与 {sha[:7]} 的树逐文件一致",
+            "commitSha": sha, "files": []}
 
 
 def residue() -> list:

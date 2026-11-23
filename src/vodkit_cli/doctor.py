@@ -414,6 +414,38 @@ def cmd_detect(args):
     print("摘要：" + detect_framework.summary_line(info))
 
 
+def _check_payload_provenance(problems: list, pd: Path) -> None:
+    """载荷内容 ↔ build-info.commitSha 的 git 树（D-provenance-1）。
+
+    `_payload.verify()` 只比 payload.json 的指纹，而那份指纹是 install 当场重建的：
+    「带着未提交补丁从 tag 重装」得到的载荷*内容带补丁、build-info 却写 tag sha*，
+    verify 全绿。这条是唯一能抓住那种局面的判据（2026-11-24 实锤两次）。
+    没有 .git / 该 commit 不在本仓时只提示、不判红（npx 形态本来无从比对）。
+    """
+    try:
+        from vod_mcp import payload as _payload
+        from vodkit_cli import common as _c
+        gap = _payload.provenance_gap(pd, _c.ROOT)
+    except Exception as e:                        # noqa: BLE001 — 比对失败不阻断 doctor
+        print(f"[doctor] 载荷 provenance 比对不可用（{e.__class__.__name__}）：{e}")
+        return
+    st = gap.get("status")
+    if st == "ok":
+        print(f"[doctor] 载荷 provenance：{gap.get('reason')}")
+    elif st == "dirty":
+        # 诚实标注的脏装：明确警告，但不判红（内容≠commitSha 已是公开事实）。
+        # 文案里不写条数/短 sha —— golden 用例要求逐字稳定（条数随开发态漂移）。
+        print("[doctor] 警告：载荷含未提交改动（build-info.dirtySources 已标注）"
+              "——要收口就按该 tag 重装或发版后再装")
+    elif st == "skip":
+        print(f"[doctor] 载荷 provenance 未比对：{gap.get('reason')}（不判绿，只报告）")
+    else:
+        files = "；".join(gap.get("files") or [])
+        problems.append(
+            f"载荷内容与 build-info.commitSha 不一致（{gap.get('reason')}）：{files}"
+            "——按该 tag 重装，或发版后再装（否则会把未发版代码当正式版）")
+
+
 def _check_live_payloads(problems: list) -> None:
     """报告仍在跑旧载荷（或跑着已被删载荷）的宿主子进程。
 
@@ -642,6 +674,7 @@ def cmd_doctor(args=None):
                 bad = _payload.verify(Path(pd))
                 if bad:
                     problems.append("载荷被改动：" + "；".join(bad[:5]))
+                _check_payload_provenance(problems, Path(pd))
                 if _payload.marker_path().exists():
                     print(f"[doctor] 载荷已换（{pd}）——{msgs.effective()}")
         else:

@@ -128,6 +128,16 @@ def cmd_install(args):
         # 优先级：--java-api-base > env VOD_JAVA_API_BASE > DEFAULT_JAVA_BASE
         #（env 与插件运行时同键，安装器跟随同链；测试/CI 用 env 指桩引擎零外呼）
         args.java_api_base = os.environ.get("VOD_JAVA_API_BASE") or DEFAULT_JAVA_BASE
+    dirty = common.source_dirty_paths()
+    if dirty:
+        # D-provenance-1：install 用工作树内容物化载荷，build-info 记的是 HEAD ——
+        # 脏装就等于"把未发版代码装成正式版"（2026-11-24 实锤两次）。这里不拦（测试与
+        # 灰度本来就在脏树上装），但**必须**把脏源写进 build-info，让 doctor 能把
+        # "标签说干净、内容不符"（撒谎=事故）与"诚实标注的脏装"（警告）分开。
+        print("[vod-devkit] 注意：源里有未提交改动，本次载荷含未发版内容（已记入 build-info.dirtySources）：\n  "
+              + "\n  ".join(dirty[:6])
+              + "\n  要得到与 tag 一致的装机面：git 干净后 scripts/reinstall_from_tag.sh <tag>",
+              file=sys.stderr)
     common.write_build_info(strict=False)
     target = args.target
     if target == "all":

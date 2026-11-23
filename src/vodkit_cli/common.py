@@ -51,6 +51,24 @@ def _safe_remote(url: str) -> str:
     return _re.sub(r"(https?://)([^@/]+@)", r"\1", url)
 
 
+def source_dirty_paths(root: Path | None = None) -> list:
+    """会随载荷/宿主配置一起发出去的源路径里，有没有未提交改动（D-provenance-1）。
+
+    为什么必须挡在 install 前面：install 会用**工作树**内容物化载荷，而 build-info 记的是
+    HEAD → 未提交补丁被装成"正式版"（2026-11-24 实锤两次：一次自带脏树重装、一次别人并行改）。
+    只扫真源（src/assets/npm/integrations/打包元数据），构建产物（build-info.json、
+    plugins/ 副本、__pycache__）不算——它们本来每次 install 都会变。
+    """
+    root = Path(root) if root else ROOT
+    if not (root / ".git").exists():
+        return []                     # npx/tarball 形态没有 .git，无从判断
+    r = subprocess.run(["git", "status", "--porcelain", "--",
+                        "src", "assets", "npm", "integrations",
+                        "package.json", "pyproject.toml", "packages"],
+                       cwd=str(root), capture_output=True, text=True)
+    return [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+
+
 def build_info(strict: bool = False) -> dict:
     from vod_mcp import __version__
     remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=ROOT,
@@ -62,13 +80,19 @@ def build_info(strict: bool = False) -> dict:
     # "tracked 快照本就停在 v^ 属正常"（台账实锤：0.5.44 快照落后 HEAD 三个提交，
     # 却被 install / provenance 当权威，运维按它对账会对到错的提交）。
     snapshot = "worktree" if sha and head and sha == head else "released"
-    return {
+    info: dict = {
         "version": __version__,
         "commitSha": sha,
         "builtAt": datetime.datetime.now().isoformat(timespec="seconds"),
         "sourceRemote": _safe_remote(remote) if remote else None,
         "snapshot": snapshot,
     }
+    # D-provenance-1：源脏时**必须**留下痕迹（内容≠commitSha 是事实，藏起来就成了谎报）。
+    # 只在非空时写，保持干净装的 build-info 与旧版逐字相同（golden 用例依赖这一点）。
+    dirty = source_dirty_paths()
+    if dirty:
+        info["dirtySources"] = dirty
+    return info
 
 
 def write_build_info(strict: bool):
