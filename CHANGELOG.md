@@ -794,3 +794,8 @@
 
 - 48f811c docs(overview): point the gate line at gate_all.py --all (11 gates)
 
+
+## v0.5.52（2026-11-23）
+
+- ccd8ee6 docs(workbuddy): real-machine verified — trust switch is required
+
