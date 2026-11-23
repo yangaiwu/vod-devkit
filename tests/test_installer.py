@@ -315,10 +315,10 @@ def test_serve_runtime_breaker_downgrades_collect(monkeypatch, tmp_path):
 # ---- hermes：官方 mcp add 通道 + 配置片段落盘 ----
 
 def test_install_hermes_official_cli_and_conf(env):
+    env["env"]["VOD_DEVKIT_SKIP_REGISTRY_CHECK"] = "1"   # 形态断言与 registry 状态解耦
     r = cli(env, "install", "--target", "hermes", "--preset", "collect", "--product", "CodeArts")
     assert r.returncode == 0, r.stderr
     calls = env["hermes_calls"].read_text().strip().splitlines()
-    env["env"]["VOD_DEVKIT_SKIP_REGISTRY_CHECK"] = "1"   # 形态断言与 registry 状态解耦
     assert calls and calls[0].startswith("mcp add vod-devkit --command")
     conf = json.loads((env["home"] / ".hermes/mcp/vod-devkit.json").read_text())
     # D-interpreter-1：默认 npx 形态（配置里没有机器专属解释器路径）
