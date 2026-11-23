@@ -661,6 +661,24 @@ Windows 上把 `~/` 换成 `%USERPROFILE%\`（例如 `%USERPROFILE%\.workbuddy\m
 
 MIT（见 LICENSE.txt）。第三方素材见 NOTICE。
 
+## 升级后必须重启宿主（否则调用会失败）
+
+`install`/`npm i -g` 只换磁盘上的载荷与配置，**不会重启已经跑起来的宿主进程**。旧进程可能仍按
+旧载荷路径运行；如果那份载荷随后被清掉，它就读不到 `safety/policy.json`，护栏会 fail-closed，
+于是**每一次工具调用都被拒绝**（`[guard:deny] 护栏规则不可载入 … FileNotFoundError`），
+而 `doctor` 看起来完全正常。
+
+处置与自查：
+
+```bash
+ps -eo pid,etime,cmd | grep 'payloads/.*/vod_mcp/server.py'   # 看进程实际在跑哪个版本
+vod-devkit doctor                                             # 会点名"有进程仍在加载旧载荷 X（pid …）"
+# 重启宿主（Claude Code/Codex/WorkBuddy/dsh 等）→ 新会话即加载当前载荷
+```
+
+`prune` 从 0.5.56 起不会删除被活进程持有的载荷；旧版本仍建议先确认没有运行中的进程再清理。
+远程部署的同类处置见 [docs/remote-deploy.md](docs/remote-deploy.md) 的「升级后必做」。
+
 ## 诊断与识别（0.5.4 起）
 
 ```bash
