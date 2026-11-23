@@ -804,3 +804,8 @@
 
 - f148070 docs: add a "where the files land" table (MCP entry vs skills vs payload)
 
+
+## v0.5.54（2026-11-23）
+
+- 7872a6b docs: add the remote / multi-agent deployment handbook
+
