@@ -65,3 +65,37 @@ def test_doctor_warns_about_stale_live_payload(fake_proc, tmp_path, monkeypatch,
     out = capsys.readouterr().out
     assert "0.5.45" in out and "777" in out
     assert problems == [], "旧进程只报告，不得让 doctor 退出非零（避免门禁误红）"
+
+
+def test_volatile_interpreter_markers():
+    from vodkit_cli.common import volatile_interpreter as v
+
+    assert v("/root/.hermes/cache/scratch/x/bin/python")
+    assert v("/tmp/v/bin/python3")
+    assert not v("/root/.vod-devkit/venv/bin/python")
+    assert not v("/opt/vod-python/bin/python3.14")
+    assert not v("/usr/bin/python3")
+
+
+def test_doctor_reports_volatile_interpreter(tmp_path, monkeypatch, capsys):
+    import json as _json
+
+    from vodkit_cli import common as C
+    from vodkit_cli import doctor as D
+
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text(_json.dumps({"mcpServers": {"vod-devkit": {
+        "command": "/root/.hermes/cache/scratch/vdk-venv/bin/python",
+        "args": ["/root/.vod-devkit/payloads/0.5.56/vod_mcp/server.py"]}}}))
+
+    class P:
+        def exists(self):
+            return True
+
+        def read_text(self, encoding="utf-8"):
+            return _json.dumps({"installs": [{"target": "hermes", "mcpConfig": str(cfg)}]})
+
+    monkeypatch.setattr(C, "manifest_path", lambda: P())
+    D._check_volatile_interpreter()
+    out = capsys.readouterr().out
+    assert "会被清理的目录" in out and "scratch" in out
