@@ -783,3 +783,9 @@
 - 4e7534b refactor(packs): split the collect pack into five modules (CALL-04)
 - de0cfa0 fix(arch): close out the remaining P2 remediation batch
 
+
+## v0.5.50（2026-11-23）
+
+- ffd5d54 docs: safety model error-code table and real-host snapshot note
+- 408d2c3 docs: align README/INSTALL/RELEASING with the shipped implementation
+
