@@ -300,6 +300,7 @@ On Windows replace `~/` with `%USERPROFILE%\\`. Three differences worth knowing:
 
 docs/proposal.md · docs/design.md · docs/scheme-overview.md ·
 docs/safety-model.md · docs/decisions.md · docs/rules-provenance.json ·
+docs/remote-deploy.md (remote / multi-agent deployment handbook) ·
 QUICKSTART.md · INSTALL.md · CONTRIBUTING.md · SECURITY.md
 
 ## Troubleshooting: product catalog cache
