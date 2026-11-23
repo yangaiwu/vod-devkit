@@ -20,6 +20,7 @@ from pathlib import Path
 from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import merge_json_mcp, server_env, server_entry
+from vod_mcp.host_adapters import base
 
 HOST = "codeartsdoer"
 SUPPORTS_REMOTE = True
@@ -62,8 +63,7 @@ def install(args, packs):
 
 def install_remote(args, url, token):
     conf = Path(_spec()["configPath"])
-    entry = {"type": "remote", "url": url, "enabled": True,
-             "headers": {"Authorization": f"Bearer {token}"}}
+    entry = {"type": "remote", "enabled": True, **base.remote_entry(url, token)}
     action = merge_json_mcp(conf, entry)
     print(f"已写入 CodeArts Agent 远程 MCP（{action}）：{conf}（token 明文，注意文件权限）")
     return conf

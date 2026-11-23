@@ -106,3 +106,25 @@ def test_install_remote_writes_bearer_header(tmp_path, monkeypatch):
     data = json.loads(cfg.read_text(encoding="utf-8"))
     assert data["mcpServers"]["vod-devkit"]["url"] == "https://x/mcp"
     assert data["mcpServers"]["vod-devkit"]["headers"]["Authorization"] == "Bearer tok"
+
+def test_remote_entry_without_token_omits_auth_header(tmp_path):
+    """不带 --mcp-token 时不许写 `Authorization: "Bearer "` 空头。
+
+    2026-11-23 实测缺陷：空 Bearer 会被反代/引擎当作非法凭据，本意是"不带头、
+    走服务端匿名令牌"。现在有 token 才带头，没有就整个省掉。
+    """
+    from types import SimpleNamespace
+
+    from vod_mcp.host_adapters import generic
+
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text('{"mcpServers": {}}', encoding="utf-8")
+    args = SimpleNamespace(mcp_config=str(cfg))
+    generic.install_remote(args, "http://127.0.0.1:9528/mcp", "")
+    entry = __import__("json").loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["vod-devkit"]
+    assert entry["url"] == "http://127.0.0.1:9528/mcp"
+    assert "headers" not in entry, f"空 token 不许写空 Bearer：{entry}"
+
+    generic.install_remote(args, "http://127.0.0.1:9528/mcp", "real-key")
+    entry = __import__("json").loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["vod-devkit"]
+    assert entry["headers"]["Authorization"] == "Bearer real-key"

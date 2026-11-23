@@ -75,3 +75,17 @@ def merge_json_mcp(path: Path, entry: dict, section: str = "mcp",
     path.parent.mkdir(parents=True, exist_ok=True)
     paths.atomic_write_text(path, json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
     return action
+
+def remote_entry(url: str, token: str, *, header_key: str = "headers") -> dict:
+    """远程 attach 的 MCP 条目（ARCH：空 token 不许写 `Bearer ` 空头）。
+
+    历史缺陷（2026-11-23 实测）：不带 --mcp-token 时也会写
+    `headers.Authorization = "Bearer "`——空 Bearer 会被反代/引擎当作非法凭据，
+    本意是"不带头、走服务端匿名令牌"。现在：有 token 才写头，没有就整个省掉。
+    `header_key` 供个别宿主用 `environment` 承载头的形态。
+    """
+    token = (token or "").strip()
+    entry: dict = {"url": url}
+    if token:
+        entry[header_key] = {"Authorization": f"Bearer {token}"}
+    return entry

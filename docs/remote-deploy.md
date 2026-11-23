@@ -147,6 +147,9 @@ npx -y vod-devkit@latest install --target hermes \
      --mcp-url https://mcp-codearts.example.com/mcp
 ```
 
+> 不传 token 时 条目里**不会写 `headers`**（不是写一个空 `Bearer `）；这样服务端才会
+> 正常走匿名令牌。给了 token 才写 `Authorization: Bearer <key>`，并原样透传到引擎。
+
 落点与注意事项：
 
 - 宿主配置里只写 `{url, headers}`；**不落载荷、不起本地 server**。

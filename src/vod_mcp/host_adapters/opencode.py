@@ -5,6 +5,7 @@ from pathlib import Path
 from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import merge_json_mcp, server_env, server_entry
+from vod_mcp.host_adapters import base
 
 HOST = "opencode"
 SUPPORTS_REMOTE = True
@@ -62,8 +63,7 @@ def install_remote(args, url, token):
     """
     conf = Path(_SPEC["configPath"])
     entry = {"type": "remote", "url": url, "enabled": True}
-    if token:
-        entry["headers"] = {"Authorization": f"Bearer {token}"}
+    entry.update({k: v for k, v in base.remote_entry(url, token).items() if k != "url"})
     action = merge_json_mcp(conf, entry)
     suffix = "（token 随配置存放，注意文件权限）" if token else "（未带 token：走服务端匿名令牌）"
     print(f"已写入 OpenCode 远程 MCP 配置（{action}）：{conf}{suffix}")
