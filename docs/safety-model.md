@@ -7,7 +7,8 @@
 ## 默认拦截什么
 
 - 未经用户同意就写库：`vod_submit_voices` 缺 `confirmed=true` → `[guard:confirm] -32011`。
-- 单批超量：`voices` 条数 > `maxVoicesPerSubmit`（50）→ `[guard:deny] -32010`。
+- 单批超量：`voices` 条数 > `maxVoicesPerSubmit`（50）→ `[guard:deny] -32024`（category=write 越界；
+  护栏侧**不再产出** `-32010`，该码语义 owner 在 collect 归因链路）。
 - 数据库直连意图（`mysql` / `jdbc` / `t_vod_` / `select ... from`）→ deny。
 - 凭据读取意图（access_key / secret_key / x-auth-token / password / private_key
   后接 `:` `=` `值` `发` `读` `取`）→ deny。
@@ -29,9 +30,20 @@
 | 远程面工具面 | `src/vod_mcp/packs/__init__.py`（REMOTE_WITHHELD） | 只摘 `vod_packs_configure`（进程内开关）；draft/commit/ledger 与本地一致，草稿落 `owner` 按宿主隔离（D-token-machine-1，2026-11-16） |
 | 远程面身份 | `src/vod_mcp/tools.py`（请求头优先 + 机器级令牌） | 请求头 Bearer 优先、逐请求生效；无 Bearer 时与本地同链：领/复用机器级匿名令牌（D-token-machine-1；旧"不代签身份"口径已废除） |
 
-错误码约定（宿主/模型可据此分流）：`-32010` deny、`-32011` confirm/草稿令牌不符、
-`-32012` 认证（缺 key 且令牌不可得）、`-32014` 传输（非回环 http）、`-32015` 上游拒绝
-（引擎 4xx/契约漂移）、**`-32017` 护栏规则不可载入（fail-closed，ARCH-ERR-01）**。
+错误码约定（宿主/模型可据此分流，真源=`diagnose._EXPLAIN_EXTRA`）：
+
+| 码 | 语义 | 处置 |
+|---|---|---|
+| `-32010` | 缺产品归属（collect 归因链路，**护栏侧不产出**） | 先给候选问用户一次 |
+| `-32011` | confirm 闸 / 草稿与令牌不符 | 用户确认后重提；令牌不符就重取草稿 |
+| `-32012` | 认证（缺 key 且匿名令牌不可得） | `auth status` 看档位；必要时 `auth init` |
+| `-32014` | 传输（非回环明文 http） | 换 https 或回环地址 |
+| `-32015` | 能力包被熔断/安全门禁拒绝 | 显式 `--ack-suspension` 恢复，别改拼写 |
+| `-32016` | 囤积端点未上线（404） | 等引擎部署；**不要回落老链** |
+| `-32017` | 护栏规则不可载入（fail-closed） | 修 policy.json 后重启宿主 |
+| `-32018` / `-32019` / `-32020` | 上游 429 / 5xx / 其余 4xx（原始状态码在 `upstream_status`） | 稍后重试 / 引擎故障 / 修请求 |
+| `-32023` / `-32024` | 护栏 deny：凭据读取意图（exfil）/ 越权超范围（write） | 删敏感信息 / 收敛范围后重提 |
+| `-32600…-32700` | JSON-RPC 协议保留段（结构/方法/参数/内部/解析） | 客户端侧问题，按回执修请求 |
 归因不走错误码：`-32013` 已废除，改为运行期引导
 （无证据就先问一次，不猜）。查表用 `vod-devkit explain <码>`——表由用例锁住与代码 raise 点同步。
 
