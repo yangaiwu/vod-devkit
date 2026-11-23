@@ -2985,3 +2985,20 @@ runtime 后第一发就 404「Session not found」（会话归属 manager 的 `_
    （顺带发现 `/usr/bin/python3.12` 在本机也是软链到 hermes tools，因此"稳定落点"必须排在 PATH 前。）
 3. **矩阵/探针的假红要归因**：同一份配置在仓内 cwd 红、在 /tmp 绿 → 属于验证环境，不是产品缺陷；
    先把工具挪到中性 cwd，再谈真实失败。
+
+### D-interpreter-1 收官（0.5.59 真机 11 面复测）
+
+结果：**11 面探针 11 PASS / 0 FAIL**；巡检 10 PASS / 0 DRIFT / 1 SKIP（officeace 本机无对象）。
+其中 **9 面的 npx 形态经真机验证**（hermes / opencode / codeartsdoer / codeartswork / workbuddy /
+atomcode / codex-desktop / codex / dsh 各 profile 内的 MCP 条目），启动器按稳定落点解析解释器。
+
+openclaw 例外（保留 python 形态，**不是**没修好）：
+- 现象：同一条 `npx -y -p vod-devkit@x vod-devkit-mcp` 在 openclaw 里反复
+  `MCP error -32000: Connection closed`；而同一份 JSON 换一个 server 名（`vod-npx-t2`）
+  用 `openclaw mcp set` 写入立刻可用，包一层 shell 脚本调用 npx 也可用。
+- 归因：openclaw 的 `bundle-mcp` 运行时有按名字的失败状态/退避（`mcp reload` 不清），
+  以及多个 npx 实例共享 `~/.npm/_npx` 的竞争；两者都不受我们控制。
+- 处置：openclaw 走 `--mcp-launcher python`（稳定 venv 解释器 + 载荷脚本），已验证 0.5.59 正常；
+  决策：**不为迁就宿主运行时而牺牲可用性**，待 openclaw 侧行为可解释后再切。
+- 留档：若将来某个宿主也只给极简环境（PATH 里没有 npx/node），可在该宿主的 entry env 里
+  显式写 `PATH`（安装器可在 npx 形态下追加，已验证有效）。
