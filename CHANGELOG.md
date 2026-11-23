@@ -789,3 +789,8 @@
 - ffd5d54 docs: safety model error-code table and real-host snapshot note
 - 408d2c3 docs: align README/INSTALL/RELEASING with the shipped implementation
 
+
+## v0.5.51（2026-11-23）
+
+- 48f811c docs(overview): point the gate line at gate_all.py --all (11 gates)
+
