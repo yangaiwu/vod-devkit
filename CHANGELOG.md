@@ -799,3 +799,8 @@
 
 - ccd8ee6 docs(workbuddy): real-machine verified — trust switch is required
 
+
+## v0.5.53（2026-11-23）
+
+- f148070 docs: add a "where the files land" table (MCP entry vs skills vs payload)
+

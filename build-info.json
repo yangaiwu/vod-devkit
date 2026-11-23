@@ -1,7 +1,7 @@
 {
-  "version": "0.5.52",
-  "commitSha": "ccd8ee6d48b197ff89fcea037abf5732312a27ca",
-  "builtAt": "2026-11-23T19:54:44",
+  "version": "0.5.53",
+  "commitSha": "f148070986128385727dfb96d22b7780228d8f18",
+  "builtAt": "2026-11-23T20:19:15",
   "sourceRemote": "https://gitcode.com/xiaowu2119/vod-devkit.git",
   "snapshot": "worktree"
 }
