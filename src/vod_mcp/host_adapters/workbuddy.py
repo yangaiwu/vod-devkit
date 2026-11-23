@@ -14,6 +14,7 @@ from pathlib import Path
 from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import server_env, server_entry
+from vod_mcp.host_adapters import base
 from vod_mcp.host_adapters.generic import merge_mcp_servers
 
 HOST = "workbuddy"
@@ -53,7 +54,7 @@ def install(args, packs):
 
 def install_remote(args, url, token):
     conf = Path(_spec()["configPath"])
-    entry = {"url": url, "headers": {"Authorization": f"Bearer {token}"}}
+    entry = base.remote_entry(url, token)
     action = merge_mcp_servers(conf, entry)
     print(f"已{_VERB[action]} WorkBuddy 远程 MCP：{conf}（token 明文，注意文件权限）")
     return conf

@@ -19,6 +19,7 @@ from pathlib import Path
 from vod_mcp import msgs
 from vod_mcp import paths as _paths
 from vod_mcp.host_adapters.base import server_env, server_entry
+from vod_mcp.host_adapters import base
 
 HOST = "generic"
 SUPPORTS_REMOTE = True
@@ -122,7 +123,7 @@ def install_remote(args, url, token):
               file=sys.stderr)
         sys.exit(2)
     path = _expand(cfg_path)
-    entry = {"url": url, "headers": {"Authorization": f"Bearer {token}"}}
+    entry = base.remote_entry(url, token)
     action = merge_mcp_servers(path, entry)
     print(f"已写入通用远程 MCP 条目（{action}）：{path}（token 明文，注意文件权限）")
     return path

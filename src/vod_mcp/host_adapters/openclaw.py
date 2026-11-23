@@ -23,6 +23,7 @@ from pathlib import Path
 from vod_mcp import msgs
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import server_env, server_entry
+from vod_mcp.host_adapters import base
 from vod_mcp import trace as _trace
 
 HOST = "openclaw"
@@ -113,8 +114,7 @@ def install(args, packs):
 def install_remote(args, url, token):
     cli = _cli()
     entry = {"transport": "streamable-http", "url": url}
-    if token:
-        entry["headers"] = {"Authorization": f"Bearer {token}"}
+    entry.update({k: v for k, v in base.remote_entry(url, token).items() if k != "url"})
     _run([cli, "mcp", "set", NAME, json.dumps(entry, ensure_ascii=False)], "mcp set")
     print(f"已更新 OpenClaw 远程 MCP：{NAME} → {url}"
           + ("（token 由 OpenClaw 保存，注意权限）" if token else ""))

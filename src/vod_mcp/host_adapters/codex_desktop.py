@@ -21,6 +21,7 @@ from vod_mcp import msgs
 from vod_mcp import paths as _paths
 from vod_mcp import hosts as host_specs
 from vod_mcp.host_adapters.base import server_env, server_entry
+from vod_mcp.host_adapters import base
 
 HOST = "codex-desktop"
 SUPPORTS_REMOTE = True
@@ -127,8 +128,7 @@ def install(args, packs):
 
 def install_remote(args, url, token):
     pdir = plugin_dir()
-    mcp_file = _write_mcp_entry({"url": url,
-                                 "headers": {"Authorization": f"Bearer {token}"}})
+    mcp_file = _write_mcp_entry(base.remote_entry(url, token))
     _register_plugin(pdir)
     print(f"已写入 Codex Desktop 远程 MCP：{mcp_file}（token 明文，注意文件权限）")
     return mcp_file

@@ -82,6 +82,7 @@ _USAGE_DOCS = [
     "docs/architecture.md", "docs/design.md", "docs/hooks.md", "docs/safety-model.md",
     "docs/scheme-overview.md", "docs/host-realverify.md", "docs/dsh-plugin-install.md",
     "docs/dsh-ui-collect.md", "docs/hermes-router.md",
+    "docs/remote-deploy.md",
 ]
 _REF = re.compile(r"`((?:src|scripts|tests|assets|integrations|packages|npm)/[A-Za-z0-9_./\-]+)`")
 # 明确标注"不在本仓 / 反例 / 当时 / 历史"的行豁免（对比引用与迁移记录）

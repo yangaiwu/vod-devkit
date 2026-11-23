@@ -445,6 +445,9 @@ python -m vod_mcp.server --transport remote --port 9528 --host 127.0.0.1
 - **没有** `兼容模式` 那行 → 标准客户端，隔离完全生效 ✅
 - **有**那行 → 客户端不标准，走兜底（可用、不串味、但记忆不跨请求）
 
+> 部署手册（nginx/systemd 模板、多产品实例隔离、限流、验收脚本、故障对照）见
+> [docs/remote-deploy.md](docs/remote-deploy.md)。
+
 ### 远程面的通用约束（模式 ②③）
 
 - **工具面 = stdio 减去 `vod_packs_configure`**（该工具是进程内开关，远端所有会话共用一个
@@ -649,6 +652,7 @@ Windows 上把 `~/` 换成 `%USERPROFILE%\`（例如 `%USERPROFILE%\.workbuddy\m
 - 钩子规则：[docs/hooks.md](docs/hooks.md) ｜ 安全边界：[docs/safety-model.md](docs/safety-model.md)
 - 一页纸：[docs/scheme-overview.md](docs/scheme-overview.md) ｜ 安全边界：[docs/safety-model.md](docs/safety-model.md)
 - 决策台账：[docs/decisions.md](docs/decisions.md) ｜ 规则真源：[docs/rules-provenance.json](docs/rules-provenance.json)
+- 远程/多 agent 部署手册（反代、多实例、限流、验收与故障对照）：[docs/remote-deploy.md](docs/remote-deploy.md)
 - 架构缺陷台账（五维走查）：[docs/architecture-defects.md](docs/architecture-defects.md) ｜ 整改方案：[docs/architecture-remediation.md](docs/architecture-remediation.md)
 - 手动配置与排障：[QUICKSTART.md](QUICKSTART.md) ｜ 分宿主细节：[INSTALL.md](INSTALL.md)
 - 贡献：[CONTRIBUTING.md](CONTRIBUTING.md) ｜ 安全策略：[SECURITY.md](SECURITY.md) ｜ 行为准则：[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)

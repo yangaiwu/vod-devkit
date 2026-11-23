@@ -804,3 +804,15 @@
 
 - f148070 docs: add a "where the files land" table (MCP entry vs skills vs payload)
 
+
+## v0.5.54（2026-11-23）
+
+- 7872a6b docs: add the remote / multi-agent deployment handbook
+
+
+## v0.5.55（2026-11-23）
+
+- d963567 fix(remote): never write an empty Bearer header; keep host-specific fields on merge
+- 0e29469 release: v0.5.54
+- 7872a6b docs: add the remote / multi-agent deployment handbook
+

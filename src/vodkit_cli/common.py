@@ -400,8 +400,14 @@ def _write_install_manifest(args, target, packs, bound_product, mcp_conf,
     if missing and transport == "stdio":
         print(f"提示：{missing} 未配置——首次提交将自动申请零字段匿名令牌（无需配置）")
     elif transport == "remote":
-        print("远程形态提示：身份随请求头走（token 已由宿主配置承载）；"
-              "本机 runtime.json 的匿名链不参与远程提交")
+        _tok = (getattr(args, "mcp_token", "") or os.environ.get("VOD_MCP_TOKEN") or "").strip()
+        if _tok:
+            print("远程形态提示：身份随请求头走（token 已由宿主配置承载）；"
+                  "本机 runtime.json 的匿名链不参与远程提交")
+        else:
+            print("远程形态提示：未带 token —— 服务端按**该实例的机器级匿名令牌**代提交"
+                  "（同一实例上的 agent 共用一份身份与额度；要按 agent 隔离请带 --mcp-token，"
+                  "或按产品/团队分实例）")
 
 
 def _runtime_cfg_read() -> dict:
